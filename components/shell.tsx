@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState, Fragment } from 'react';
+import Link from 'next/link';
 import { Icon, Pglyph } from './icons';
 
 type Page = 'dashboard' | 'compose' | 'agent' | 'calendar' | 'onboarding';
@@ -58,10 +59,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ page, onNav, showTTS = true })
 
   return (
     <aside className="sidebar">
-      <div className="brand">
+      <Link href="/" className="brand" style={{ textDecoration: 'none', color: 'inherit' }}>
         <div className="brand-mark">S</div>
         <span className="brand-name">sociafy<span className="dot">.</span></span>
-      </div>
+      </Link>
 
       <div className="nav-section">
         <div className="nav-label">Workspace</div>
