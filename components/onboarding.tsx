@@ -1,20 +1,23 @@
 'use client';
 
-import React, { Fragment, useState } from 'react';
+import React, { Fragment, useEffect, useState } from 'react';
 import { Icon, Pglyph } from './icons';
+import { apiPatch, useApi } from '../lib/ui/fetcher';
+import { PLATFORM_TO_SHORT, SHORT_TO_PLATFORM } from '../lib/ui/platforms';
+import type { Platform } from '../lib/db/schema';
 
-const ONBOARD_PLATFORMS = [
-  { id: 'x', name: 'X (Twitter)', handle: '@jordanmae' },
-  { id: 'li', name: 'LinkedIn', handle: 'in/jordanmae' },
-  { id: 'ig', name: 'Instagram', handle: '@jordan.mae' },
-  { id: 'fb', name: 'Facebook', handle: 'Jordan Mae' },
-  { id: 'tt', name: 'TikTok', handle: '@jordan.mae' },
-  { id: 'yt', name: 'YouTube', handle: 'Jordan Mae' },
+const ONBOARD_PLATFORMS: { id: Platform; short: string; name: string }[] = [
+  { id: 'x', short: 'x', name: 'X (Twitter)' },
+  { id: 'linkedin', short: 'li', name: 'LinkedIn' },
+  { id: 'instagram', short: 'ig', name: 'Instagram' },
+  { id: 'facebook', short: 'fb', name: 'Facebook' },
+  { id: 'tiktok', short: 'tt', name: 'TikTok' },
+  { id: 'youtube', short: 'yt', name: 'YouTube' },
 ];
 
 const TOPICS = [
   { id: 'saas', label: 'Solo SaaS', sub: 'founders, indie' },
-  { id: 'creator', label: 'Creator economy', sub: 'newsletters, audience' },
+  { id: 'creator-economy', label: 'Creator economy', sub: 'newsletters, audience' },
   { id: 'marketing', label: 'Indie marketing', sub: 'growth, GTM' },
   { id: 'ai', label: 'AI tooling', sub: 'agents, LLM ops' },
   { id: 'design', label: 'Design', sub: 'product, brand' },
@@ -24,44 +27,92 @@ const TOPICS = [
   { id: 'community', label: 'Community', sub: 'cohorts, events' },
 ];
 
-const VOICES = [
-  { id: 'me', name: 'Sound like me', desc: 'Train on 20+ of my recent posts. Best fidelity to my actual voice.' },
+const VOICES: { id: 'me' | 'punchy' | 'thoughtful' | 'data-led'; name: string; desc: string }[] = [
+  { id: 'me', name: 'Adapt to my voice', desc: "Agent infers tone from your prompts and edits as you go. No retraining required." },
   { id: 'punchy', name: 'Punchy', desc: 'Short sentences, declarative, hook-first. Great for X.' },
   { id: 'thoughtful', name: 'Thoughtful', desc: 'Story-led, paragraph-y, takes time to land. LinkedIn-friendly.' },
-  { id: 'data', name: 'Data-led', desc: 'Numbers and citations up front. Newsletter recap energy.' },
+  { id: 'data-led', name: 'Data-led', desc: 'Numbers and citations up front. Newsletter recap energy.' },
 ];
 
 interface OnboardingProps {
   onDone: () => void;
 }
 
+type Account = {
+  id: string;
+  platform: Platform;
+  handle: string | null;
+  isStub: boolean;
+};
+
 const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
   const [step, setStep] = useState(0);
-  const [connected, setConnected] = useState(['x', 'li']);
-  const [connecting, setConnecting] = useState<string | null>(null);
-  const [topics, setTopics] = useState(['saas', 'creator']);
-  const [voice, setVoice] = useState('me');
+  const [topics, setTopics] = useState<string[]>([]);
+  const [voice, setVoice] = useState<'me' | 'punchy' | 'thoughtful' | 'data-led'>('me');
+  const [savingTopics, setSavingTopics] = useState(false);
+  const [savingVoice, setSavingVoice] = useState(false);
+  const [enabling, setEnabling] = useState(false);
 
-  const toggleConnect = (id: string) => {
-    if (connected.includes(id)) {
-      setConnected(connected.filter((x) => x !== id));
-    } else {
-      setConnecting(id);
-      setTimeout(() => {
-        setConnected((prev) => [...prev, id]);
-        setConnecting(null);
-      }, 700);
-    }
+  const { data: accounts, mutate: refetchAccounts, unauth } = useApi<Account[]>('/api/accounts');
+  const { data: settings, mutate: refetchSettings } = useApi<{ niches: string[]; voiceTemplate: 'me' | 'punchy' | 'thoughtful' | 'data-led' }>('/api/agent/settings');
+
+  useEffect(() => {
+    if (settings?.niches?.length) setTopics(settings.niches);
+    if (settings?.voiceTemplate) setVoice(settings.voiceTemplate);
+  }, [settings]);
+
+  const connectedShorts = (accounts ?? []).map((a) => PLATFORM_TO_SHORT[a.platform]);
+
+  const startConnect = (platform: Platform) => {
+    window.location.href = `/api/oauth/${platform}/start?next=/onboarding`;
   };
 
   const toggleTopic = (id: string) => {
-    setTopics((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+    setTopics((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const saveTopicsAndContinue = async () => {
+    setSavingTopics(true);
+    try {
+      await apiPatch('/api/agent/settings', { niches: topics });
+      await refetchSettings();
+      setStep(2);
+    } catch {
+      // ignore — keep them in flow
+      setStep(2);
+    } finally {
+      setSavingTopics(false);
+    }
+  };
+
+  const saveVoiceAndContinue = async () => {
+    setSavingVoice(true);
+    try {
+      await apiPatch('/api/agent/settings', { voiceTemplate: voice });
+      await refetchSettings();
+      setStep(3);
+    } catch {
+      setStep(3);
+    } finally {
+      setSavingVoice(false);
+    }
+  };
+
+  const finish = async () => {
+    setEnabling(true);
+    try {
+      await apiPatch('/api/agent/settings', { enabled: true });
+    } catch {
+      // continue regardless
+    }
+    setEnabling(false);
+    onDone();
   };
 
   const steps = [
     { num: 1, label: 'Connect' },
     { num: 2, label: 'Niches' },
-    { num: 3, label: 'Voice' },
+    { num: 3, label: 'Style' },
     { num: 4, label: 'Ready' },
   ];
 
@@ -85,31 +136,38 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
           ))}
         </div>
 
+        {unauth && (
+          <div style={{ padding: 12, background: 'rgba(124,77,255,0.05)', border: '1px solid rgba(124,77,255,0.2)', borderRadius: 10, fontSize: 13, marginBottom: 18 }}>
+            You aren&apos;t signed in. <a href="/sign-in?next=/onboarding" style={{ textDecoration: 'underline', color: 'var(--ink)' }}>Sign in</a> to connect your accounts.
+          </div>
+        )}
+
         {step === 0 && (
           <>
             <h1>Connect the channels.<br />I&apos;ll handle the <em>rest</em>.</h1>
             <p className="lede">
-              Sociafy needs read &amp; publish access so it can read your last 90 days of posts, learn your voice, and schedule on your behalf. You can revoke any time.
+              Sociafy needs publish access so it can schedule on your behalf. You can revoke any time. If a platform isn&apos;t configured yet, we&apos;ll connect a stub account so you can keep exploring.
             </p>
             <div className="connect-grid">
               {ONBOARD_PLATFORMS.map((p) => {
-                const isConnected = connected.includes(p.id);
-                const isConnecting = connecting === p.id;
+                const isConnected = connectedShorts.includes(p.short);
+                const acct = accounts?.find((a) => a.platform === p.id);
                 return (
                   <div
                     key={p.id}
-                    className={`connect-tile ${isConnected ? 'connected' : ''} ${isConnecting ? 'connecting' : ''}`}
-                    onClick={() => !isConnecting && toggleConnect(p.id)}
+                    className={`connect-tile ${isConnected ? 'connected' : ''}`}
+                    onClick={() => !isConnected && startConnect(p.id)}
                   >
-                    <Pglyph p={p.id} size="xl" />
+                    <Pglyph p={p.short} size="xl" />
                     <div className="connect-tile-meta">
                       <div className="connect-tile-name">{p.name}</div>
-                      <div className="connect-tile-handle">{isConnected ? p.handle : 'Not connected'}</div>
+                      <div className="connect-tile-handle">
+                        {isConnected ? (acct?.handle ? `@${acct.handle}` : 'Connected') : 'Not connected'}
+                        {acct?.isStub && <span className="chip ghost mono" style={{ marginLeft: 6 }}>stub</span>}
+                      </div>
                     </div>
                     <div className="connect-tile-action">
-                      {isConnected ? <><Icon name="check" size={12} /> Connected</> :
-                        isConnecting ? <>Connecting…</> :
-                          <>Connect <Icon name="arrow_right" size={12} /></>}
+                      {isConnected ? <><Icon name="check" size={12} /> Connected</> : <>Connect <Icon name="arrow_right" size={12} /></>}
                     </div>
                   </div>
                 );
@@ -122,7 +180,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
           <>
             <h1>What should I <em>watch</em> for you?</h1>
             <p className="lede">
-              Pick the niches that matter to your audience. I&apos;ll pull trends, news, and competitor signals from these so every draft is timely. You can change this anytime.
+              Pick the niches that matter to your audience. I&apos;ll pull trends and surface only the strongest signals. You can change this anytime.
             </p>
             <div className="topic-grid">
               {TOPICS.map((t) => (
@@ -138,16 +196,16 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
             </div>
             <div style={{ padding: 14, background: 'var(--bg-elev)', border: '1px solid var(--line)', borderRadius: 10, fontSize: 12.5, color: 'var(--ink-3)', display: 'flex', gap: 10, alignItems: 'center', marginBottom: 32 }}>
               <Icon name="bolt" size={14} style={{ color: 'var(--accent)', flexShrink: 0 }} />
-              <span>I&apos;ll fetch <strong style={{ color: 'var(--ink)' }}>~80 sources / day</strong> across your {topics.length} niches and surface only the top 5%.</span>
+              <span>I&apos;ll pull from RSS feeds and rank items by recency + signal across your <strong style={{ color: 'var(--ink)' }}>{topics.length || '0'}</strong> niches.</span>
             </div>
           </>
         )}
 
         {step === 2 && (
           <>
-            <h1>Pick a starting <em>voice</em>.</h1>
+            <h1>Pick a starting <em>style</em>.</h1>
             <p className="lede">
-              I&apos;ll fine-tune from here as you edit and approve drafts. The fastest path to &quot;feels like me&quot; is letting me train on your real posts — but you can always start from a template.
+              I&apos;ll adapt as you edit. This is just a starting prompt — change it anytime in agent settings.
             </p>
             <div className="voice-grid">
               {VOICES.map((v) => (
@@ -161,10 +219,6 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
                 </div>
               ))}
             </div>
-            <div style={{ padding: 14, background: 'var(--bg-elev)', border: '1px dashed var(--line-2)', borderRadius: 10, fontSize: 12.5, color: 'var(--ink-3)', display: 'flex', gap: 10, alignItems: 'center', marginBottom: 32 }}>
-              <span className="chip ghost mono" style={{ background: 'var(--ink)', color: 'var(--bg)', borderColor: 'var(--ink)' }}>Soon</span>
-              <span>Voice posts — turn any draft into a podcast clip with our TTS engine. We&apos;ll let you know when it ships.</span>
-            </div>
           </>
         )}
 
@@ -172,14 +226,14 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
           <>
             <h1>You&apos;re <em>ready</em>.</h1>
             <p className="lede">
-              I&apos;ll spend the next ~5 minutes reading your last 90 days of posts, fetching today&apos;s trends, and drafting your first 3 posts. Want me to schedule them automatically once they&apos;re ready?
+              I&apos;ll start watching trends across your niches and drafting on the cadence you set. Hit &quot;Enter Sociafy&quot; to enable autopilot — or skip and stay in co-pilot mode.
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 32 }}>
               {[
-                { label: '✓ Reading 47 of your recent posts', sub: 'Building voice profile v1' },
-                { label: `✓ Connected ${connected.length} platforms`, sub: connected.map((c) => ONBOARD_PLATFORMS.find((p) => p.id === c)?.name).join(' · ') },
-                { label: `✓ Watching ${topics.length} niches`, sub: `~${topics.length * 25} sources / day` },
-                { label: '→ Drafting your first 3 posts', sub: 'Ready in ~4 min' },
+                { label: `✓ Connected ${connectedShorts.length} platforms`, sub: connectedShorts.length ? connectedShorts.map((c) => ONBOARD_PLATFORMS.find((p) => p.short === c)?.name).join(' · ') : 'No accounts connected yet' },
+                { label: `✓ Watching ${topics.length} niches`, sub: topics.join(' · ') || 'None selected' },
+                { label: `✓ Style: ${VOICES.find((v) => v.id === voice)?.name ?? 'Custom'}`, sub: 'Tunable from the autopilot page' },
+                { label: '→ Drafting cadence: 4 / week', sub: 'Adjustable in autopilot settings' },
               ].map((row, i) => (
                 <div key={i} style={{ padding: '14px 16px', background: 'var(--bg-elev)', border: '1px solid var(--line)', borderRadius: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
@@ -200,8 +254,19 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
             <Icon name="chevron_left" size={12} /> Back
           </button>
           <span className="onboard-skip mono">{step + 1} / 4</span>
-          <button className="btn primary" onClick={() => step < 3 ? setStep(step + 1) : onDone()}>
-            {step === 3 ? 'Enter Sociafy' : 'Continue'} <Icon name="arrow_right" size={12} />
+          <button
+            className="btn primary"
+            onClick={async () => {
+              if (step === 0) { await refetchAccounts(); setStep(1); }
+              else if (step === 1) await saveTopicsAndContinue();
+              else if (step === 2) await saveVoiceAndContinue();
+              else await finish();
+            }}
+            disabled={savingTopics || savingVoice || enabling}
+          >
+            {step === 3 ? (enabling ? 'Enabling…' : 'Enter Sociafy') :
+              savingTopics || savingVoice ? 'Saving…' :
+              'Continue'} <Icon name="arrow_right" size={12} />
           </button>
         </div>
       </div>
@@ -210,3 +275,6 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
 };
 
 export default Onboarding;
+
+// Keep the platform map exposed for sibling imports
+export { SHORT_TO_PLATFORM };

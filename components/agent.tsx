@@ -1,62 +1,125 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Icon } from './icons';
+import { apiPatch, useApi } from '../lib/ui/fetcher';
+import type { Niche } from '../lib/db/schema';
 
-const AGENT_FEED = [
-  {
-    id: 1,
-    when: '2 min ago',
-    kind: 'trend',
-    title: 'Spotted a 312% spike in "agentic content" mentions',
-    body: 'Marketing twitter is debating whether agent-driven posting is the new SEO. Your last 3 posts on adjacent topics averaged 2.1k impressions — well above your baseline.',
-    actions: ['Draft a take', 'Mute topic', 'Schedule for peak window'],
-    artifact: null,
-  },
-  {
-    id: 2,
-    when: '14 min ago',
-    kind: 'queue',
-    title: 'Drafted 3 posts based on your newsletter #47',
-    body: "I pulled three angles from your \"compounding content\" essay. Variant B scored highest against your last 90 days of voice. Ready when you are.",
-    actions: ['Review drafts', 'Auto-approve B', 'Skip this round'],
-    artifact: { kind: 'posts', count: 3 },
-  },
-  {
-    id: 3,
-    when: '1 hr ago',
-    kind: 'risk',
-    title: 'Held a draft — tone mismatch',
-    body: 'A scheduled LinkedIn post used "game-changing" twice. Your voice profile flags that phrase. Rewrote it and queued for your approval.',
-    actions: ['See diff', 'Approve rewrite', 'Post original'],
-    artifact: null,
-  },
-  {
-    id: 4,
-    when: '3 hr ago',
-    kind: 'insight',
-    title: "Reels at 6:30 PM are outperforming your 12:00 slot",
-    body: "I shifted Wednesday's reel to 18:30 based on the last 4 weeks. Want me to do this automatically going forward?",
-    actions: ['Yes, automate', 'Just this once', 'Show data'],
-    artifact: null,
-  },
-];
+type AgentSettings = {
+  enabled: boolean;
+  instructions: string;
+  cadencePerWeek: number;
+  autoPublishThreshold: number;
+  brandSafetyStrict: boolean;
+  niches: Niche[];
+  voiceTemplate: 'me' | 'punchy' | 'thoughtful' | 'data-led';
+  quietHours: { start: string; end: string };
+  lastRunAt: string | null;
+};
 
-const RULES = [
-  { label: 'Post cadence', value: '4–5 / week', editable: true },
-  { label: 'Auto-publish if score', value: '≥ 90 / 100', editable: true },
-  { label: 'Brand-safe filter', value: 'Strict', editable: true },
-  { label: 'Voice match', value: 'Trained on 47 posts', editable: false },
-  { label: 'Quiet hours', value: '22:00 – 07:00', editable: true },
-  { label: 'Topics to avoid', value: '3 keywords', editable: true },
+type Activity = {
+  id: string;
+  kind: string;
+  title: string;
+  body: string | null;
+  meta: Record<string, unknown> | null;
+  createdAt: string;
+};
+
+const NICHE_LABELS: Record<Niche, string> = {
+  saas: 'Solo SaaS founders',
+  'creator-economy': 'Creator economy',
+  marketing: 'Indie marketing',
+  ai: 'AI tooling',
+  design: 'Design',
+  devtools: 'Dev tools',
+  fintech: 'Fintech',
+  media: 'Media',
+  community: 'Community',
+};
+
+function relTime(iso: string): string {
+  const t = new Date(iso).getTime();
+  const diff = Date.now() - t;
+  if (diff < 60_000) return 'just now';
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} min ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} hr ago`;
+  return `${Math.floor(diff / 86_400_000)}d ago`;
+}
+
+const KIND_LABEL: Record<string, { label: string; tone: 'accent' | 'warn' | '' }> = {
+  trend_spotted: { label: 'Trend', tone: 'accent' },
+  agent_drafted: { label: 'Drafted', tone: '' },
+  auto_publish: { label: 'Scheduled', tone: 'accent' },
+  agent_held: { label: 'Held', tone: 'warn' },
+  publish_failed: { label: 'Failed', tone: 'warn' },
+  manual_publish: { label: 'Posted', tone: '' },
+  platform_connected: { label: 'Connected', tone: '' },
+  platform_disconnected: { label: 'Disconnected', tone: '' },
+  draft_created: { label: 'Drafted', tone: '' },
+  draft_scheduled: { label: 'Scheduled', tone: '' },
+  agent_enabled: { label: 'Enabled', tone: '' },
+  agent_disabled: { label: 'Paused', tone: '' },
+  onboarded: { label: 'Onboarded', tone: '' },
+};
+
+const DEMO_FEED: Activity[] = [
+  { id: 'demo-1', kind: 'trend_spotted', title: 'Spotted "agentic content" mentions', body: 'Adjacent niche signal up 312%. Drafting your angle.', meta: null, createdAt: new Date(Date.now() - 2 * 60_000).toISOString() },
+  { id: 'demo-2', kind: 'agent_drafted', title: 'Drafted 3 posts from your latest newsletter', body: 'Variant B scored highest against your style guide.', meta: null, createdAt: new Date(Date.now() - 14 * 60_000).toISOString() },
+  { id: 'demo-3', kind: 'agent_held', title: 'Held a draft — tone mismatch', body: 'Used "game-changing" twice. Rewriting and re-queuing.', meta: null, createdAt: new Date(Date.now() - 60 * 60_000).toISOString() },
 ];
 
 const AgentPage: React.FC = () => {
-  const [autopilot, setAutopilot] = useState(true);
+  const { data: settings, mutate: refetchSettings, unauth } = useApi<AgentSettings>('/api/agent/settings');
+  const { data: activity } = useApi<Activity[]>('/api/activity?limit=30');
+
+  const [autopilot, setAutopilot] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [instructions, setInstructions] = useState(
-    'Lean into solo-founder and indie-marketing angles. Avoid hot takes on politics or layoffs. Prefer story-led posts on LinkedIn, punchy threads on X. Pull from my newsletter when possible. Never use "game-changing" or "synergy".'
-  );
+  const [instructions, setInstructions] = useState('');
+  const [cadence, setCadence] = useState(4);
+  const [threshold, setThreshold] = useState(90);
+  const [strict, setStrict] = useState(true);
+  const [savingInstr, setSavingInstr] = useState(false);
+
+  useEffect(() => {
+    if (!settings) return;
+    setAutopilot(settings.enabled);
+    setInstructions(settings.instructions);
+    setCadence(settings.cadencePerWeek);
+    setThreshold(settings.autoPublishThreshold);
+    setStrict(settings.brandSafetyStrict);
+  }, [settings]);
+
+  const saveAutopilot = async (next: boolean) => {
+    setAutopilot(next);
+    try {
+      await apiPatch('/api/agent/settings', { enabled: next });
+      await refetchSettings();
+    } catch {
+      setAutopilot(!next);
+    }
+  };
+
+  const saveInstructions = async () => {
+    setSavingInstr(true);
+    try {
+      await apiPatch('/api/agent/settings', { instructions });
+      await refetchSettings();
+      setEditing(false);
+    } finally {
+      setSavingInstr(false);
+    }
+  };
+
+  const updateField = async (patch: Partial<AgentSettings>) => {
+    try {
+      await apiPatch('/api/agent/settings', patch);
+      await refetchSettings();
+    } catch {/* ignore */}
+  };
+
+  const niches = settings?.niches ?? [];
+  const feed = activity && activity.length > 0 ? activity : DEMO_FEED;
 
   return (
     <div className="two-col">
@@ -73,15 +136,21 @@ const AgentPage: React.FC = () => {
               </div>
               <div style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>
                 {autopilot
-                  ? "I'm monitoring 4 niches, drafting daily, and posting within your guardrails."
+                  ? `Monitoring ${niches.length} niches, drafting on a ${cadence}/week cadence, auto-publishing posts scoring ≥ ${threshold}.`
                   : "I'll keep watching but won't draft or post without you."}
               </div>
             </div>
-            <button className={`btn ${autopilot ? '' : 'primary'}`} onClick={() => setAutopilot(!autopilot)}>
+            <button className={`btn ${autopilot ? '' : 'primary'}`} onClick={() => saveAutopilot(!autopilot)} disabled={unauth}>
               {autopilot ? <><Icon name="pause" size={12} /> Pause</> : <><Icon name="play" size={12} /> Resume</>}
             </button>
           </div>
         </div>
+
+        {unauth && (
+          <div style={{ padding: 12, background: 'rgba(124,77,255,0.06)', border: '1px solid rgba(124,77,255,0.2)', borderRadius: 10, fontSize: 13 }}>
+            Demo mode. <a href="/sign-in?next=/dashboard" style={{ textDecoration: 'underline', color: 'var(--ink)' }}>Sign in</a> to configure a real autopilot.
+          </div>
+        )}
 
         <div className="card">
           <div className="card-head">
@@ -90,8 +159,8 @@ const AgentPage: React.FC = () => {
               Agent instructions
               <span className="chip accent"><span className="dot" />Steers every draft</span>
             </h3>
-            <button className="btn sm" onClick={() => setEditing(!editing)}>
-              <Icon name={editing ? 'check' : 'edit'} size={11} /> {editing ? 'Save' : 'Edit'}
+            <button className="btn sm" onClick={() => editing ? saveInstructions() : setEditing(true)} disabled={savingInstr || unauth}>
+              <Icon name={editing ? 'check' : 'edit'} size={11} /> {editing ? (savingInstr ? 'Saving…' : 'Save') : 'Edit'}
             </button>
           </div>
           <div className="card-body">
@@ -112,12 +181,14 @@ const AgentPage: React.FC = () => {
               </>
             ) : (
               <div style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--ink-2)', padding: 12, background: 'var(--bg-sunk)', borderRadius: 8, borderLeft: '2px solid var(--accent)' }}>
-                {instructions}
+                {instructions || 'No instructions yet. Click Edit to write a style guide for the agent.'}
               </div>
             )}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, fontSize: 11.5, color: 'var(--ink-3)' }}>
-              <span className="mono">Last updated 2 days ago · {instructions.length} chars</span>
-              <button className="btn sm ghost"><Icon name="refresh" size={11} /> Re-run on queue</button>
+              <span className="mono">{instructions.length} chars</span>
+              {settings?.lastRunAt && (
+                <span className="mono">Last run: {relTime(settings.lastRunAt)}</span>
+              )}
             </div>
           </div>
         </div>
@@ -132,39 +203,27 @@ const AgentPage: React.FC = () => {
             <span className="meta">Last 24 hours</span>
           </div>
           <div className="card-body" style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {AGENT_FEED.map((a) => (
-              <div className="agent-card" key={a.id}>
-                <div className="agent-mark">A</div>
-                <div>
-                  <div className="agent-meta">
-                    <span>Agent</span>
-                    <span style={{ color: 'var(--ink-4)' }}>·</span>
-                    <span>{a.when}</span>
-                    <span className={`chip ${a.kind === 'risk' ? 'warn' : a.kind === 'trend' ? 'accent' : ''}`}>
-                      <span className="dot" />
-                      {a.kind === 'queue' ? 'Drafted' : a.kind === 'risk' ? 'Held' : a.kind === 'trend' ? 'Trend' : 'Insight'}
-                    </span>
-                  </div>
-                  <div className="agent-title">{a.title}</div>
-                  <div className="agent-body">{a.body}</div>
-                  {a.artifact && (
-                    <div style={{ marginTop: 10, display: 'flex', gap: 6 }}>
-                      {[1, 2, 3].map((i) => (
-                        <div key={i} style={{ flex: 1, padding: 8, fontSize: 11, color: 'var(--ink-3)', background: 'var(--bg-sunk)', border: '1px dashed var(--line-2)', borderRadius: 6, fontFamily: 'var(--mono)' }}>
-                          Variant {String.fromCharCode(64 + i)} · {[88, 92, 79][i - 1]}
-                        </div>
-                      ))}
+            {feed.map((a) => {
+              const meta = KIND_LABEL[a.kind] ?? { label: a.kind, tone: '' as const };
+              return (
+                <div className="agent-card" key={a.id}>
+                  <div className="agent-mark">A</div>
+                  <div>
+                    <div className="agent-meta">
+                      <span>Agent</span>
+                      <span style={{ color: 'var(--ink-4)' }}>·</span>
+                      <span>{relTime(a.createdAt)}</span>
+                      <span className={`chip ${meta.tone}`}><span className="dot" />{meta.label}</span>
                     </div>
-                  )}
-                  <div className="agent-actions">
-                    {a.actions.map((act, i) => (
-                      <button key={act} className={`btn sm ${i === 0 ? 'primary' : ''}`}>{act}</button>
-                    ))}
+                    <div className="agent-title">{a.title}</div>
+                    {a.body && <div className="agent-body">{a.body}</div>}
                   </div>
                 </div>
-                <button className="icon-btn"><Icon name="x" size={12} /></button>
-              </div>
-            ))}
+              );
+            })}
+            {feed.length === 0 && (
+              <div style={{ padding: 14, fontSize: 13, color: 'var(--ink-3)' }}>No activity yet. Enable autopilot to start drafting.</div>
+            )}
           </div>
         </div>
       </div>
@@ -173,59 +232,61 @@ const AgentPage: React.FC = () => {
         <div className="card">
           <div className="card-head">
             <h3><Icon name="settings" size={14} /> Guardrails</h3>
-            <button className="btn sm ghost"><Icon name="edit" size={11} /></button>
           </div>
           <div className="card-body flush">
-            {RULES.map((r) => (
-              <div key={r.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid var(--line)' }}>
-                <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>{r.label}</span>
-                <span className="mono" style={{ fontSize: 11.5, color: 'var(--ink)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  {r.value}
-                  {r.editable && <Icon name="chevron_right" size={11} style={{ color: 'var(--ink-4)' }} />}
-                </span>
+            {[
+              { label: 'Post cadence', value: `${cadence} / week`, key: 'cadence' as const, options: [2, 3, 4, 5, 7] },
+              { label: 'Auto-publish if score', value: `≥ ${threshold} / 100`, key: 'threshold' as const, options: [80, 85, 90, 95] },
+              { label: 'Brand-safe filter', value: strict ? 'Strict' : 'Standard', key: 'strict' as const, options: [true, false] },
+            ].map((row) => (
+              <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid var(--line)' }}>
+                <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>{row.label}</span>
+                <select
+                  value={String(row.key === 'cadence' ? cadence : row.key === 'threshold' ? threshold : strict)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (row.key === 'cadence') { setCadence(parseInt(v)); updateField({ cadencePerWeek: parseInt(v) }); }
+                    else if (row.key === 'threshold') { setThreshold(parseInt(v)); updateField({ autoPublishThreshold: parseInt(v) }); }
+                    else { const b = v === 'true'; setStrict(b); updateField({ brandSafetyStrict: b }); }
+                  }}
+                  style={{ fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--ink)', background: 'transparent', border: 'none', textAlign: 'right' }}
+                  disabled={unauth}
+                >
+                  {row.options.map((o) => (
+                    <option key={String(o)} value={String(o)}>
+                      {row.key === 'cadence' ? `${o} / week` : row.key === 'threshold' ? `≥ ${o}` : (o ? 'Strict' : 'Standard')}
+                    </option>
+                  ))}
+                </select>
               </div>
             ))}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px' }}>
+              <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>Quiet hours</span>
+              <span className="mono" style={{ fontSize: 11.5, color: 'var(--ink)' }}>
+                {settings?.quietHours?.start ?? '22:00'} – {settings?.quietHours?.end ?? '07:00'}
+              </span>
+            </div>
           </div>
         </div>
 
         <div className="card">
           <div className="card-head">
             <h3><Icon name="globe" size={14} /> Niches I&apos;m watching</h3>
-            <button className="btn sm"><Icon name="plus" size={11} /></button>
           </div>
           <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {[
-              { name: 'Solo SaaS founders', signal: 'Strong', count: 412, peak: true },
-              { name: 'Creator economy', signal: 'Strong', count: 287, peak: false },
-              { name: 'Indie marketing', signal: 'Mid', count: 154, peak: false },
-              { name: 'AI tooling', signal: 'Mid', count: 98, peak: false },
-            ].map((n) => (
-              <div key={n.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', borderRadius: 8, background: 'var(--bg-sunk)' }}>
+            {niches.length === 0 && (
+              <div style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>
+                No niches selected yet. Set them in <a href="/onboarding" style={{ textDecoration: 'underline', color: 'var(--ink)' }}>onboarding</a>.
+              </div>
+            )}
+            {niches.map((n) => (
+              <div key={n} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', borderRadius: 8, background: 'var(--bg-sunk)' }}>
                 <div>
-                  <div style={{ fontSize: 12.5, fontWeight: 500 }}>{n.name}</div>
-                  <div className="mono" style={{ fontSize: 10.5, color: 'var(--ink-3)' }}>{n.count} sources · {n.signal} signal</div>
+                  <div style={{ fontSize: 12.5, fontWeight: 500 }}>{NICHE_LABELS[n]}</div>
+                  <div className="mono" style={{ fontSize: 10.5, color: 'var(--ink-3)' }}>RSS + community signals</div>
                 </div>
-                {n.peak && <span className="chip accent"><span className="dot" />Spiking</span>}
               </div>
             ))}
-          </div>
-        </div>
-
-        <div className="card">
-          <div className="card-head">
-            <h3><Icon name="waveform" size={14} /> Voice training</h3>
-            <span className="meta mono">v3 · 47 posts</span>
-          </div>
-          <div className="card-body">
-            <div style={{ fontSize: 12.5, color: 'var(--ink-2)', lineHeight: 1.5, marginBottom: 12 }}>
-              I match your tone with <strong>92% confidence</strong>. Add 8 more reference posts to push past 95%.
-            </div>
-            <div className="meter-bar" style={{ background: 'var(--bg-sunk)', height: 6 }}>
-              <div className="fill" style={{ width: '92%', background: 'var(--accent)' }} />
-            </div>
-            <button className="btn sm" style={{ marginTop: 12 }}>
-              <Icon name="upload" size={11} /> Import more posts
-            </button>
           </div>
         </div>
       </div>

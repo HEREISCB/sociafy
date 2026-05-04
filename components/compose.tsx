@@ -1,59 +1,41 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Icon, Pglyph } from './icons';
+import { apiPost, useApi } from '../lib/ui/fetcher';
+import { PLATFORM_TO_SHORT, SHORT_TO_PLATFORM } from '../lib/ui/platforms';
+import type { Platform } from '../lib/db/schema';
 
 const COMPOSE_PRESETS = [
   { id: 'thread', label: 'Thread' },
-  { id: 'announce', label: 'Announcement' },
+  { id: 'announcement', label: 'Announcement' },
   { id: 'recap', label: 'Recap' },
-  { id: 'hot_take', label: 'Hot take' },
+  { id: 'hot-take', label: 'Hot take' },
   { id: 'lesson', label: 'Lesson' },
   { id: 'reel', label: 'Reel script' },
 ];
 
-const VARIANTS = [
-  {
-    id: 'A',
-    name: 'Variant A · Conversational',
-    score: 88,
-    text: "Most founders I know are spending 6+ hours a week on social — and most of it is invisible work that doesn't compound.\n\nWe built Sociafy because the cost of being absent is finally higher than the cost of being mediocre.\n\nThree things changed our approach this quarter:",
-  },
-  {
-    id: 'B',
-    name: 'Variant B · Punchy',
-    score: 92,
-    text: "Stop posting. Start compounding.\n\n6 hours a week → 30 minutes.\nGuesswork → signal.\nSilence → conversations.\n\nSociafy isn't a scheduler. It's the agent that runs your content brain while you build the thing.",
-  },
-  {
-    id: 'C',
-    name: 'Variant C · Story-led',
-    score: 84,
-    text: "Last March I missed a launch window because I forgot to schedule three posts.\n\n€48k of pipeline, gone. Not because the product wasn't ready — because I wasn't.\n\nThat's why we're shipping Sociafy. Here's what changed:",
-  },
-  {
-    id: 'D',
-    name: 'Variant D · Data-led',
-    score: 79,
-    text: "Founders who post 4+ times/week grow 3.2x faster than those who don't.\n\nThe problem: nobody can sustain that without burning out.\n\nWe trained an agent on 12k creator workflows to fix exactly this. Sociafy is now in private beta.",
-  },
+type Variant = { id: string; name: string; score: number; text: string; rationale?: string };
+
+const DEFAULT_VARIANTS: Variant[] = [
+  { id: 'A', name: 'Variant A · Conversational', score: 88, text: "Most founders I know are spending 6+ hours a week on social — and most of it is invisible work that doesn't compound.\n\nWe built Sociafy because the cost of being absent is finally higher than the cost of being mediocre.\n\nThree things changed our approach this quarter:" },
+  { id: 'B', name: 'Variant B · Punchy', score: 92, text: "Stop posting. Start compounding.\n\n6 hours a week → 30 minutes.\nGuesswork → signal.\nSilence → conversations.\n\nSociafy isn't a scheduler. It's the agent that runs your content brain while you build the thing." },
+  { id: 'C', name: 'Variant C · Story-led', score: 84, text: "Last March I missed a launch window because I forgot to schedule three posts.\n\n€48k of pipeline, gone. Not because the product wasn't ready — because I wasn't.\n\nThat's why we're shipping Sociafy. Here's what changed:" },
+  { id: 'D', name: 'Variant D · Data-led', score: 79, text: "Founders who post 4+ times/week grow 3.2x faster than those who don't.\n\nThe problem: nobody can sustain that without burning out.\n\nWe trained an agent on 12k creator workflows to fix exactly this. Sociafy is now in private beta." },
 ];
 
-const PLATFORM_LIST = [
-  { id: 'x', label: 'X', limit: 280 },
-  { id: 'li', label: 'LinkedIn', limit: 3000 },
-  { id: 'ig', label: 'Instagram', limit: 2200 },
-  { id: 'fb', label: 'Facebook', limit: 5000 },
-  { id: 'tt', label: 'TikTok', limit: 2200 },
+const PLATFORM_LIST: { id: string; label: string; limit: number; full: Platform }[] = [
+  { id: 'x', label: 'X', limit: 280, full: 'x' },
+  { id: 'li', label: 'LinkedIn', limit: 3000, full: 'linkedin' },
+  { id: 'ig', label: 'Instagram', limit: 2200, full: 'instagram' },
+  { id: 'fb', label: 'Facebook', limit: 5000, full: 'facebook' },
+  { id: 'tt', label: 'TikTok', limit: 2200, full: 'tiktok' },
 ];
 
 type MediaKind = 'image' | 'carousel' | 'video';
 
-interface MediaItem {
-  kind: string;
-  label: string;
-  tag: string;
-}
+interface MediaItem { kind: string; label: string; tag: string }
 
 const MediaPlaceholder: React.FC<{ kind: string; ratio?: string; count?: number }> = ({ kind, ratio = '16/9', count = 1 }) => {
   if (kind === 'video') {
@@ -80,7 +62,7 @@ const PostX: React.FC<{ text: string; mediaKind: string }> = ({ text, mediaKind 
       <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'linear-gradient(135deg, var(--accent), oklch(0.62 0.18 30))', flexShrink: 0 }} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 13, fontWeight: 600, display: 'flex', gap: 4, alignItems: 'center' }}>
-          Jordan Mae <span style={{ color: 'var(--ink-4)', fontWeight: 400 }}>@jordanmae · now</span>
+          You <span style={{ color: 'var(--ink-4)', fontWeight: 400 }}>· now</span>
         </div>
         <div style={{ fontSize: 13.5, lineHeight: 1.4, marginTop: 4, whiteSpace: 'pre-wrap', color: 'var(--ink)' }}>{text}</div>
         {mediaKind && (
@@ -101,8 +83,8 @@ const PostLI: React.FC<{ text: string; mediaKind: string }> = ({ text, mediaKind
     <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
       <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'linear-gradient(135deg, var(--li), #003B82)', flexShrink: 0 }} />
       <div>
-        <div style={{ fontSize: 12.5, fontWeight: 600 }}>Jordan Mae</div>
-        <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>Founder, Sociafy</div>
+        <div style={{ fontSize: 12.5, fontWeight: 600 }}>You</div>
+        <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>Founder</div>
         <div style={{ fontSize: 10, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>now · 🌐</div>
       </div>
     </div>
@@ -118,7 +100,7 @@ const PostIG: React.FC<{ text: string; mediaKind: string; mediaCount: number }> 
   <div>
     <div style={{ padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 8, borderBottom: '1px solid var(--line)' }}>
       <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'linear-gradient(135deg, var(--ig), #FCAF45)', flexShrink: 0 }} />
-      <span style={{ fontSize: 12, fontWeight: 600 }}>jordan.mae</span>
+      <span style={{ fontSize: 12, fontWeight: 600 }}>you</span>
       <span style={{ marginLeft: 'auto', color: 'var(--ink-4)' }}>•••</span>
     </div>
     <MediaPlaceholder kind={mediaKind || 'image'} ratio="1/1" count={mediaKind === 'carousel' ? mediaCount : 1} />
@@ -127,7 +109,7 @@ const PostIG: React.FC<{ text: string; mediaKind: string; mediaCount: number }> 
       <span style={{ marginLeft: 'auto' }}>⊟</span>
     </div>
     <div style={{ padding: '0 12px 12px', fontSize: 11.5, lineHeight: 1.4, color: 'var(--ink-2)' }}>
-      <strong style={{ fontWeight: 600 }}>jordan.mae</strong> {text.slice(0, 110)}…
+      <strong style={{ fontWeight: 600 }}>you</strong> {text.slice(0, 110)}…
     </div>
   </div>
 );
@@ -137,7 +119,7 @@ const PostFB: React.FC<{ text: string; mediaKind: string }> = ({ text, mediaKind
     <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
       <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'var(--fb)', flexShrink: 0 }} />
       <div>
-        <div style={{ fontSize: 12.5, fontWeight: 600 }}>Jordan Mae</div>
+        <div style={{ fontSize: 12.5, fontWeight: 600 }}>You</div>
         <div style={{ fontSize: 10.5, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>Just now · 🌐</div>
       </div>
     </div>
@@ -152,7 +134,7 @@ const PostTT: React.FC<{ text: string }> = ({ text }) => (
       [ vertical video ]
     </div>
     <div style={{ position: 'absolute', bottom: 60, left: 12, right: 70, color: '#fff' }}>
-      <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 6 }}>@jordan.mae</div>
+      <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 6 }}>you</div>
       <div style={{ fontSize: 11.5, lineHeight: 1.4, whiteSpace: 'pre-wrap', opacity: 0.95 }}>{text.slice(0, 90)}…</div>
     </div>
   </div>
@@ -174,31 +156,133 @@ const PhonePreview: React.FC<{ platform: string; text: string; mediaKind: string
   </div>
 );
 
+type Account = { id: string; platform: Platform };
+
 const Compose: React.FC = () => {
+  const router = useRouter();
   const [prompt, setPrompt] = useState('Announcement post for Sociafy private beta — talk about agentic content workflow, voice friendly, hopeful but grounded.');
-  const [preset, setPreset] = useState('announce');
+  const [preset, setPreset] = useState('announcement');
   const [active, setActive] = useState('B');
-  const [platforms, setPlatforms] = useState(['x', 'li', 'ig']);
+  const [platforms, setPlatforms] = useState<string[]>(['x', 'li']);
   const [previewPlat, setPreviewPlat] = useState('x');
   const [generating, setGenerating] = useState(false);
+  const [variants, setVariants] = useState<Variant[]>(DEFAULT_VARIANTS);
+  const [perPlatform, setPerPlatform] = useState<Partial<Record<Platform, string>>>({});
   const [mediaKind, setMediaKind] = useState<MediaKind>('image');
   const [media, setMedia] = useState<MediaItem[]>([
     { kind: 'image', label: 'Hero shot', tag: 'Generated' },
     { kind: 'image', label: 'Product detail', tag: 'Upload' },
     { kind: 'image', label: 'Behind the scenes', tag: 'Upload' },
   ]);
+  const [busy, setBusy] = useState<null | 'schedule' | 'post'>(null);
+  const [toast, setToast] = useState<string | null>(null);
 
-  const variant = VARIANTS.find((v) => v.id === active)!;
-  const charCount = variant.text.length;
-  const limit = PLATFORM_LIST.find((p) => p.id === previewPlat)!.limit;
+  const { data: accounts, unauth } = useApi<Account[]>('/api/accounts');
+  const connectedShorts = useMemo(
+    () => (accounts ?? []).map((a) => PLATFORM_TO_SHORT[a.platform]),
+    [accounts],
+  );
 
-  const generate = () => {
+  // Default platform selection to whatever the user has connected (cap at 3)
+  useEffect(() => {
+    if (accounts && accounts.length > 0) {
+      const initial = accounts.slice(0, 3).map((a) => PLATFORM_TO_SHORT[a.platform]);
+      setPlatforms((cur) => (cur.length === 0 || cur.every((p) => !connectedShorts.includes(p)) ? initial : cur));
+      setPreviewPlat((cur) => (initial.includes(cur) ? cur : initial[0] ?? 'x'));
+    }
+  }, [accounts, connectedShorts]);
+
+  const variant = variants.find((v) => v.id === active) ?? variants[0];
+  const charCount = variant?.text.length ?? 0;
+  const limit = PLATFORM_LIST.find((p) => p.id === previewPlat)?.limit ?? 3000;
+
+  const generate = async () => {
     setGenerating(true);
-    setTimeout(() => setGenerating(false), 1100);
+    setToast(null);
+    try {
+      const fullPlatforms = platforms.map((s) => SHORT_TO_PLATFORM[s]).filter(Boolean) as Platform[];
+      const r = await apiPost<{ variants: Variant[]; perPlatform: Partial<Record<Platform, string>>; stub?: boolean }>(
+        '/api/compose/variants',
+        { prompt, preset, platforms: fullPlatforms },
+      );
+      const incoming = (r.variants ?? []).map((v, i) => ({
+        id: v.id || (['A', 'B', 'C', 'D'][i] ?? `V${i + 1}`),
+        name: v.id ? `Variant ${v.id}` : `Variant ${['A', 'B', 'C', 'D'][i] ?? i + 1}`,
+        score: typeof v.score === 'number' ? v.score : 80,
+        text: v.text,
+        rationale: v.rationale,
+      }));
+      if (incoming.length > 0) {
+        setVariants(incoming);
+        setActive(incoming[0].id);
+      }
+      setPerPlatform(r.perPlatform ?? {});
+      if (r.stub) setToast('Generated in stub mode — set ANTHROPIC_API_KEY for real variants.');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.startsWith('401') || msg.startsWith('503')) {
+        setToast('Sign in and connect Supabase to generate with Claude.');
+      } else {
+        setToast(`Generate failed: ${msg}`);
+      }
+    } finally {
+      setGenerating(false);
+    }
   };
 
   const togglePlat = (p: string) => {
-    setPlatforms((prev) => prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p]);
+    setPlatforms((prev) => (prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p]));
+  };
+
+  const createDraft = async (status: 'draft' | 'scheduled') => {
+    const fullPlatforms = platforms.map((s) => SHORT_TO_PLATFORM[s]).filter(Boolean) as Platform[];
+    const draft = await apiPost<{ id: string }>('/api/drafts', {
+      prompt,
+      body: variant.text,
+      variants: variants.map((v) => ({ label: v.id, text: v.text, score: v.score, rationale: v.rationale })),
+      selectedVariantLabel: variant.id,
+      targetPlatforms: fullPlatforms,
+      perPlatformText: perPlatform,
+      preset,
+    });
+    if (status === 'draft') return draft;
+    return draft;
+  };
+
+  const schedule = async (whenIso: string) => {
+    setBusy('schedule');
+    setToast(null);
+    try {
+      const draft = await createDraft('scheduled');
+      const fullPlatforms = platforms.map((s) => SHORT_TO_PLATFORM[s]).filter(Boolean) as Platform[];
+      const r = await apiPost<{ scheduled: Array<{ platform: string }> }>('/api/schedule', {
+        draftId: draft.id,
+        scheduledAt: whenIso,
+        platforms: fullPlatforms,
+      });
+      if (!r.scheduled?.length) {
+        setToast('No connected accounts for the selected platforms — connect on Onboarding.');
+      } else {
+        setToast(`Scheduled to ${r.scheduled.map((s) => s.platform).join(', ')}.`);
+        setTimeout(() => router.push('/dashboard'), 800);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.startsWith('401') || msg.startsWith('503')) setToast('Sign in to schedule.');
+      else setToast(`Schedule failed: ${msg}`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const postNow = async () => {
+    // Schedule for "now" — the cron picks it up on next tick. For dev, the cron must be hit manually or via Vercel Cron.
+    await schedule(new Date().toISOString());
+  };
+
+  const scheduleIn30 = async () => {
+    const t = new Date(Date.now() + 30 * 60 * 1000);
+    await schedule(t.toISOString());
   };
 
   return (
@@ -208,7 +292,7 @@ const Compose: React.FC = () => {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
             <Icon name="sparkle" size={14} style={{ color: 'var(--accent)' }} />
             <span style={{ fontSize: 12, fontWeight: 550, letterSpacing: '-0.005em' }}>Tell me what to write</span>
-            <span className="chip ghost mono" style={{ marginLeft: 'auto' }}>Voice: yours · trained on 47 posts</span>
+            <span className="chip ghost mono" style={{ marginLeft: 'auto' }}>Style: from your settings</span>
           </div>
           <textarea
             value={prompt}
@@ -228,7 +312,7 @@ const Compose: React.FC = () => {
               ))}
             </div>
             <div className="prompt-spacer" />
-            <button className="btn accent" onClick={generate}>
+            <button className="btn accent" onClick={generate} disabled={generating}>
               {generating
                 ? <><Icon name="refresh" size={12} /> Generating</>
                 : <><Icon name="sparkle" size={12} /> Generate 4 variants</>}
@@ -236,21 +320,31 @@ const Compose: React.FC = () => {
           </div>
         </div>
 
+        {toast && (
+          <div style={{ padding: 12, fontSize: 12.5, background: 'rgba(124,77,255,0.06)', border: '1px solid rgba(124,77,255,0.2)', borderRadius: 10, marginBottom: 12 }}>
+            {toast}
+          </div>
+        )}
+        {unauth && (
+          <div style={{ padding: 12, fontSize: 12.5, background: 'var(--bg-elev)', border: '1px solid var(--line)', borderRadius: 10, marginBottom: 12 }}>
+            <strong>Demo mode.</strong> <a href="/sign-in?next=/dashboard" style={{ textDecoration: 'underline', color: 'var(--ink)' }}>Sign in</a> to generate, draft, and schedule for real.
+          </div>
+        )}
+
         <div className="card">
           <div className="card-head">
             <h3>
               <Icon name="fork" size={14} />
               Variants
-              <span className="chip ghost mono">4 generated</span>
+              <span className="chip ghost mono">{variants.length} {variants.length === 1 ? 'variant' : 'variants'}</span>
             </h3>
             <div style={{ display: 'flex', gap: 6 }}>
-              <button className="btn sm ghost"><Icon name="refresh" size={12} /> Regenerate</button>
-              <button className="btn sm ghost"><Icon name="bolt" size={12} /> A/B test</button>
+              <button className="btn sm ghost" onClick={generate} disabled={generating}><Icon name="refresh" size={12} /> Regenerate</button>
             </div>
           </div>
           <div className="card-body">
             <div className="variants">
-              {VARIANTS.map((v) => (
+              {variants.map((v) => (
                 <div
                   key={v.id}
                   className={`variant ${active === v.id ? 'active' : ''}`}
@@ -263,9 +357,11 @@ const Compose: React.FC = () => {
                     </span>
                   </div>
                   <div className="variant-text">{v.text}</div>
+                  {v.rationale && (
+                    <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 4, fontStyle: 'italic' }}>{v.rationale}</div>
+                  )}
                   <div style={{ display: 'flex', gap: 4 }}>
-                    <button className="btn sm" onClick={(e) => e.stopPropagation()}><Icon name="edit" size={11} /> Refine</button>
-                    <button className="btn sm" onClick={(e) => e.stopPropagation()}><Icon name="check" size={11} /> Use</button>
+                    <button className="btn sm" onClick={(e) => { e.stopPropagation(); setActive(v.id); }}><Icon name="check" size={11} /> Use</button>
                   </div>
                 </div>
               ))}
@@ -342,18 +438,27 @@ const Compose: React.FC = () => {
             <span className="meta">{platforms.length} platforms · adapts per channel</span>
           </div>
           <div className="card-body" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {PLATFORM_LIST.map((p) => (
-              <span
-                key={p.id}
-                className={`prompt-chip ${platforms.includes(p.id) ? 'active' : ''}`}
-                onClick={() => togglePlat(p.id)}
-              >
-                <Pglyph p={p.id} /> {p.label}
-              </span>
-            ))}
+            {PLATFORM_LIST.map((p) => {
+              const isConnected = connectedShorts.includes(p.id);
+              return (
+                <span
+                  key={p.id}
+                  className={`prompt-chip ${platforms.includes(p.id) ? 'active' : ''}`}
+                  onClick={() => togglePlat(p.id)}
+                  style={{ opacity: isConnected ? 1 : 0.55 }}
+                  title={isConnected ? 'Connected' : 'Not connected'}
+                >
+                  <Pglyph p={p.id} /> {p.label}{!isConnected && ' ·'}
+                </span>
+              );
+            })}
             <div style={{ flex: 1 }} />
-            <button className="btn sm"><Icon name="clock" size={12} /> Schedule for 14:30</button>
-            <button className="btn sm primary"><Icon name="send" size={12} /> Post now</button>
+            <button className="btn sm" disabled={busy !== null} onClick={scheduleIn30}>
+              <Icon name="clock" size={12} /> {busy === 'schedule' ? 'Scheduling…' : 'Schedule (+30m)'}
+            </button>
+            <button className="btn sm primary" disabled={busy !== null} onClick={postNow}>
+              <Icon name="send" size={12} /> {busy === 'post' ? 'Posting…' : 'Post now'}
+            </button>
           </div>
         </div>
       </div>
@@ -376,7 +481,7 @@ const Compose: React.FC = () => {
                 </div>
               ))}
             </div>
-            <PhonePreview platform={previewPlat} text={variant.text} mediaKind={mediaKind} mediaCount={media.length} />
+            <PhonePreview platform={previewPlat} text={variant?.text ?? ''} mediaKind={mediaKind} mediaCount={media.length} />
           </div>
         </div>
       </div>
