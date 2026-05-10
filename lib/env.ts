@@ -8,15 +8,25 @@ export const env = {
   internalSecret: process.env.INTERNAL_API_SECRET || 'dev-secret-change-me',
   cronSecret: process.env.CRON_SECRET || 'dev-cron-secret-change-me',
 
-  supabase: {
-    url: required('NEXT_PUBLIC_SUPABASE_URL'),
-    anonKey: required('NEXT_PUBLIC_SUPABASE_ANON_KEY'),
-    serviceRoleKey: required('SUPABASE_SERVICE_ROLE_KEY'),
-    databaseUrl: required('DATABASE_URL'),
+  clerk: {
+    publishableKey: required('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY'),
+    secretKey: required('CLERK_SECRET_KEY'),
+  },
+
+  database: {
+    url: required('DATABASE_URL'),
   },
 
   anthropic: {
     apiKey: required('ANTHROPIC_API_KEY'),
+  },
+
+  r2: {
+    accountId: required('R2_ACCOUNT_ID'),
+    accessKeyId: required('R2_ACCESS_KEY_ID'),
+    secretAccessKey: required('R2_SECRET_ACCESS_KEY'),
+    bucket: required('R2_BUCKET_NAME'),
+    publicBase: process.env.NEXT_PUBLIC_R2_PUBLIC_URL_BASE || '',
   },
 
   platforms: {
@@ -44,9 +54,10 @@ export const env = {
 } as const;
 
 export const isStubMode = {
-  supabase: () => !env.supabase.url || !env.supabase.anonKey,
-  database: () => !env.supabase.databaseUrl,
+  clerk: () => !env.clerk.publishableKey || !env.clerk.secretKey,
+  database: () => !env.database.url,
   ai: () => !env.anthropic.apiKey,
+  r2: () => !env.r2.accountId || !env.r2.bucket,
   platform: (p: 'x' | 'linkedin' | 'instagram' | 'facebook' | 'tiktok' | 'youtube'): boolean => {
     switch (p) {
       case 'x': return !env.platforms.x.clientId;

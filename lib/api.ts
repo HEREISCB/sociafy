@@ -1,13 +1,17 @@
 import { NextResponse } from 'next/server';
-import { getSessionUser } from './supabase/server';
+import { auth, currentUser } from '@clerk/nextjs/server';
 import { isStubMode } from './env';
+import { db } from './db';
+import { profiles } from './db/schema';
+import { eq } from 'drizzle-orm';
 
 export type ApiUser = { id: string; email?: string | null };
 
 export async function authedUser(): Promise<ApiUser | null> {
-  const user = await getSessionUser();
-  if (!user) return null;
-  return { id: user.id, email: user.email ?? null };
+  if (isStubMode.clerk()) return null;
+  const { userId } = await auth();
+  if (!userId) return null;
+  return { id: userId, email: null };
 }
 
 export function jsonError(message: string, status = 400, extra?: Record<string, unknown>) {
@@ -18,15 +22,42 @@ export function jsonOk<T>(data: T, init?: ResponseInit) {
   return NextResponse.json(data, init);
 }
 
+// Ensure a profile row exists for the current Clerk user. Idempotent. Best-effort metadata sync.
+async function ensureProfile(userId: string) {
+  if (isStubMode.database()) return;
+  const existing = await db().select({ id: profiles.id }).from(profiles).where(eq(profiles.id, userId)).limit(1);
+  if (existing.length > 0) return;
+  let meta: { displayName?: string; email?: string; avatarUrl?: string } = {};
+  try {
+    const u = await currentUser();
+    if (u) {
+      meta = {
+        displayName: [u.firstName, u.lastName].filter(Boolean).join(' ') || u.username || null as unknown as string,
+        email: u.emailAddresses?.[0]?.emailAddress ?? null as unknown as string,
+        avatarUrl: u.imageUrl ?? null as unknown as string,
+      };
+    }
+  } catch {
+    // currentUser() can fail outside of authenticated request contexts — that's OK
+  }
+  await db().insert(profiles).values({
+    id: userId,
+    displayName: meta.displayName ?? null,
+    email: meta.email ?? null,
+    avatarUrl: meta.avatarUrl ?? null,
+  }).onConflictDoNothing();
+}
+
 export async function withUser<T>(
   handler: (user: ApiUser) => Promise<T> | T,
 ): Promise<NextResponse> {
-  if (isStubMode.supabase()) {
-    return jsonError('supabase_not_configured', 503);
+  if (isStubMode.clerk()) {
+    return jsonError('clerk_not_configured', 503);
   }
   const user = await authedUser();
   if (!user) return jsonError('unauthorized', 401);
   try {
+    await ensureProfile(user.id);
     const result = await handler(user);
     if (result instanceof NextResponse) return result;
     return NextResponse.json(result);

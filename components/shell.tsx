@@ -2,7 +2,8 @@
 
 import React, { useEffect, useRef, useState, Fragment } from 'react';
 import Link from 'next/link';
-import { Icon, Pglyph } from './icons';
+import { UserButton, useUser } from '@clerk/nextjs';
+import { Icon } from './icons';
 
 type Page = 'dashboard' | 'compose' | 'agent' | 'calendar' | 'onboarding';
 type Mode = 'manual' | 'auto';
@@ -106,16 +107,37 @@ export const Sidebar: React.FC<SidebarProps> = ({ page, onNav, showTTS = true })
             </div>
           </div>
         )}
-        <div className="user-card">
-          <div className="user-avatar">JM</div>
-          <div className="user-meta">
-            <span className="user-name">Jordan Mae</span>
-            <span className="user-plan">Studio · sociafy.app</span>
-          </div>
-          <Icon name="chevron_down" size={14} style={{ marginLeft: 'auto', color: 'var(--ink-4)' }} />
-        </div>
+        <UserCard />
       </div>
     </aside>
+  );
+};
+
+const UserCard: React.FC = () => {
+  const { user, isSignedIn } = useUser();
+  if (!isSignedIn) {
+    return (
+      <Link href="/sign-in" className="user-card" style={{ textDecoration: 'none' }}>
+        <div className="user-avatar">?</div>
+        <div className="user-meta">
+          <span className="user-name">Sign in</span>
+          <span className="user-plan">to wire up your workspace</span>
+        </div>
+      </Link>
+    );
+  }
+  const name = user?.fullName || user?.username || user?.primaryEmailAddress?.emailAddress || 'You';
+  const plan = user?.primaryEmailAddress?.emailAddress?.split('@')[1] || 'sociafy.app';
+  return (
+    <div className="user-card">
+      <UserButton
+        appearance={{ elements: { userButtonAvatarBox: { width: 32, height: 32 } } }}
+      />
+      <div className="user-meta" style={{ marginLeft: 4 }}>
+        <span className="user-name">{name}</span>
+        <span className="user-plan">Studio · {plan}</span>
+      </div>
+    </div>
   );
 };
 

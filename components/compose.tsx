@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Icon, Pglyph } from './icons';
 import { apiPost, useApi } from '../lib/ui/fetcher';
@@ -35,7 +35,15 @@ const PLATFORM_LIST: { id: string; label: string; limit: number; full: Platform 
 
 type MediaKind = 'image' | 'carousel' | 'video';
 
-interface MediaItem { kind: string; label: string; tag: string }
+interface MediaItem {
+  kind: string;
+  label: string;
+  tag: string;
+  id?: string;
+  url?: string;
+  mimeType?: string;
+  uploading?: boolean;
+}
 
 const MediaPlaceholder: React.FC<{ kind: string; ratio?: string; count?: number }> = ({ kind, ratio = '16/9', count = 1 }) => {
   if (kind === 'video') {
@@ -176,6 +184,42 @@ const Compose: React.FC = () => {
   ]);
   const [busy, setBusy] = useState<null | 'schedule' | 'post'>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const onPickFile = () => fileInputRef.current?.click();
+  const onFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = ''; // allow re-uploading the same file
+    const tempId = `tmp-${Date.now()}`;
+    setMedia((m) => [...m, { kind: file.type.startsWith('video/') ? 'video' : 'image', label: file.name, tag: 'Uploading', uploading: true, id: tempId }]);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('label', file.name);
+      const r = await fetch('/api/media/upload', { method: 'POST', body: fd, credentials: 'include' });
+      if (!r.ok) {
+        const detail = await r.text().catch(() => '');
+        setMedia((m) => m.filter((it) => it.id !== tempId));
+        if (r.status === 503) setToast('R2 not configured yet — set the R2 env vars in SETUP.md.');
+        else if (r.status === 401) setToast('Sign in to upload media.');
+        else setToast(`Upload failed: ${detail || r.status}`);
+        return;
+      }
+      const row = await r.json();
+      setMedia((m) =>
+        m.map((it) =>
+          it.id === tempId
+            ? { kind: row.mimeType.startsWith('video/') ? 'video' : 'image', label: row.label || file.name, tag: 'Uploaded', id: row.id, url: row.publicUrl, mimeType: row.mimeType }
+            : it,
+        ),
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setMedia((m) => m.filter((it) => it.id !== tempId));
+      setToast(`Upload failed: ${msg}`);
+    }
+  };
 
   const { data: accounts, unauth } = useApi<Account[]>('/api/accounts');
   const connectedShorts = useMemo(
@@ -234,26 +278,28 @@ const Compose: React.FC = () => {
     setPlatforms((prev) => (prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p]));
   };
 
-  const createDraft = async (status: 'draft' | 'scheduled') => {
+  const createDraft = async () => {
     const fullPlatforms = platforms.map((s) => SHORT_TO_PLATFORM[s]).filter(Boolean) as Platform[];
-    const draft = await apiPost<{ id: string }>('/api/drafts', {
+    const uploadedMedia = media
+      .filter((m) => m.url && m.mimeType && m.id && !m.uploading)
+      .map((m) => ({ id: m.id!, url: m.url!, mimeType: m.mimeType! }));
+    return apiPost<{ id: string }>('/api/drafts', {
       prompt,
       body: variant.text,
       variants: variants.map((v) => ({ label: v.id, text: v.text, score: v.score, rationale: v.rationale })),
       selectedVariantLabel: variant.id,
       targetPlatforms: fullPlatforms,
       perPlatformText: perPlatform,
+      media: uploadedMedia,
       preset,
     });
-    if (status === 'draft') return draft;
-    return draft;
   };
 
   const schedule = async (whenIso: string) => {
     setBusy('schedule');
     setToast(null);
     try {
-      const draft = await createDraft('scheduled');
+      const draft = await createDraft();
       const fullPlatforms = platforms.map((s) => SHORT_TO_PLATFORM[s]).filter(Boolean) as Platform[];
       const r = await apiPost<{ scheduled: Array<{ platform: string }> }>('/api/schedule', {
         draftId: draft.id,
@@ -398,10 +444,11 @@ const Compose: React.FC = () => {
                     <span style={{ fontSize: 10, fontFamily: 'var(--mono)', textAlign: 'center', padding: '0 6px', lineHeight: 1.3 }}>{m.label}</span>
                   </div>
                 ))}
-                <button style={{ aspectRatio: '1/1', borderRadius: 10, border: '1px dashed var(--line-2)', background: 'var(--bg-sunk)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, color: 'var(--ink-3)', fontSize: 11, fontFamily: 'var(--mono)' }} onClick={() => setMedia([...media, { kind: 'image', label: 'Untitled', tag: 'Upload' }])}>
+                <button style={{ aspectRatio: '1/1', borderRadius: 10, border: '1px dashed var(--line-2)', background: 'var(--bg-sunk)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, color: 'var(--ink-3)', fontSize: 11, fontFamily: 'var(--mono)' }} onClick={onPickFile}>
                   <Icon name="plus" size={16} />
                   <span>Upload</span>
                 </button>
+                <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm,video/quicktime" hidden onChange={onFileChange} />
                 <button style={{ aspectRatio: '1/1', borderRadius: 10, border: '1px dashed oklch(0.86 0.08 70)', background: 'var(--accent-soft)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, color: 'var(--accent-ink)', fontSize: 11, fontFamily: 'var(--mono)' }} onClick={() => setMedia([...media, { kind: 'image', label: 'AI image', tag: 'Generated' }])}>
                   <Icon name="sparkle" size={16} />
                   <span>Generate</span>

@@ -1,113 +1,148 @@
 # Sociafy — setup
 
-This is the playbook for taking the app from "deployed scaffolding" to "fully wired with real OAuth + Claude + cron." Read it top to bottom; the order matters.
+End-to-end playbook: take the deployed scaffolding to a working demo with real OAuth + Claude + media uploads + cron.
 
-## What's already built
+## Stack
 
-| Layer | What you get |
+| Layer | Provider |
 |---|---|
-| Frontend | `/` landing, `/sign-in`, `/sign-up`, `/onboarding`, `/dashboard` SPA (compose / autopilot / calendar / dashboard) |
-| Auth | Supabase email + OAuth (Google, GitHub). Session refresh in `proxy.ts`. |
-| DB | Drizzle schema in `lib/db/schema.ts`. Initial SQL in `drizzle/0000_init.sql`. RLS-enabled. |
-| API | `/api/accounts`, `/api/drafts`, `/api/schedule`, `/api/agent/settings`, `/api/activity`, `/api/trends`, `/api/compose/variants`, `/api/oauth/[platform]/{start,callback}`, `/api/cron/{publish,agent,trends}` |
-| Platform adapters | X, LinkedIn, Instagram, Facebook, TikTok, YouTube — real OAuth + posting code paths. Stub fallback when credentials are missing. |
-| Cron | Vercel Cron config in `vercel.json`. Publish every 5 min, agent every 2 hr, trends hourly. |
+| Auth | **Clerk** |
+| Database | **Postgres** (any host — Supabase pooler URL, Neon, Railway, etc.) |
+| Storage | **Cloudflare R2** (S3-compatible) |
+| AI | **Anthropic** (Claude Haiku for variants, Sonnet for the agent) |
+| Cron | Vercel Cron (Pro) or any external HTTP cron (Hobby) |
+| Hosting | **Vercel** |
 
-**Stub mode:** Without credentials, every layer falls back to safe stubs so the UI is interactive. As you add env vars, each subsystem flips to real behavior.
+**Stub mode:** Without credentials, every layer falls back to canned data so the UI is interactive. As you fill env vars, each subsystem flips to real behavior.
 
----
+## Step 1 — Clerk (auth)
 
-## Step 1 — Supabase
+1. Sign up at [clerk.com](https://clerk.com) → create an application.
+2. **API Keys** → copy the publishable key + secret key.
+3. **Paths** (User & authentication → Settings → Paths): leave defaults — `/sign-in`, `/sign-up`. Sociafy already exposes those routes.
+4. (Optional) **Social Connections**: enable Google, GitHub, etc. — Clerk handles the OAuth dance.
+5. **Authorized URLs**: add your Vercel domain + `http://localhost:3000`.
 
-1. Create a project at [supabase.com](https://supabase.com).
-2. **Project Settings → API**: copy `URL`, `anon public`, `service_role`.
-3. **Project Settings → Database → Connection string → URI**: copy the **Transaction pooler** URL (pooler.supabase.com). You'll use this as `DATABASE_URL`.
-4. **SQL Editor → New query**: paste `drizzle/0000_init.sql` and run. Re-runnable; it's idempotent.
-5. **Authentication → URL Configuration**: set `Site URL` = your deployed URL, add `https://<your-app>.vercel.app/auth/callback` to allowed redirects (and `http://localhost:3000/auth/callback` for local dev).
-6. **Authentication → Providers**: enable Google + GitHub if you want OAuth sign-in (optional).
-7. **Storage → New bucket**: name it `media`, public. (Used later when media uploads land.)
-
-Set in `.env.local`:
-
+Set:
 ```
-NEXT_PUBLIC_SUPABASE_URL=...
-NEXT_PUBLIC_SUPABASE_ANON_KEY=...
-SUPABASE_SERVICE_ROLE_KEY=...
-DATABASE_URL=postgresql://postgres.<ref>:<password>@aws-0-...pooler.supabase.com:6543/postgres
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
+CLERK_SECRET_KEY=sk_test_...
+NEXT_PUBLIC_CLERK_SIGN_IN_FORCE_REDIRECT_URL=/dashboard
+NEXT_PUBLIC_CLERK_SIGN_UP_FORCE_REDIRECT_URL=/onboarding
 ```
 
-> Tip: instead of pasting the SQL, you can run `npx drizzle-kit push` once `DATABASE_URL` is set.
+## Step 2 — Postgres
 
-## Step 2 — Anthropic
+Anywhere — Supabase, Neon, Railway, your own. You only need a connection string.
 
-1. Get a key at [console.anthropic.com](https://console.anthropic.com).
-2. `ANTHROPIC_API_KEY=sk-ant-...`
+1. Create a Postgres database.
+2. Run `drizzle/0000_init.sql` in the SQL editor (idempotent — safe to re-run).
+3. Set `DATABASE_URL=postgresql://...`. Use a **pooler URL** for serverless — e.g. Supabase's transaction pooler (`...pooler.supabase.com:6543`) or Neon's pooled connection string.
 
-That's it — compose variants and the autopilot agent will start using Claude.
+> Tip: instead of pasting the SQL, run `npx drizzle-kit push` once `DATABASE_URL` is set.
 
-## Step 3 — Cron secret
+## Step 3 — Cloudflare R2 (media uploads)
 
-Generate a random string and set:
+1. Cloudflare dashboard → **R2** → Create bucket. Call it `sociafy-media` (or whatever).
+2. **Settings → Public access**: enable "Allow Access" via the public r2.dev URL, or attach a custom domain. Copy the public base URL.
+3. **Manage R2 API Tokens** → Create API Token → permissions: **Object Read & Write** for that bucket. Copy the access key + secret.
+4. Bucket → Settings → CORS policy: paste:
+   ```json
+   [
+     {
+       "AllowedOrigins": ["https://your-domain.com", "http://localhost:3000"],
+       "AllowedMethods": ["GET", "PUT", "POST", "HEAD"],
+       "AllowedHeaders": ["*"],
+       "MaxAgeSeconds": 3600
+     }
+   ]
+   ```
+   (Add your Vercel domain.)
+
+Set:
+```
+R2_ACCOUNT_ID=...                          # Found at dashboard top-right
+R2_ACCESS_KEY_ID=...
+R2_SECRET_ACCESS_KEY=...
+R2_BUCKET_NAME=sociafy-media
+NEXT_PUBLIC_R2_PUBLIC_URL_BASE=https://pub-<hash>.r2.dev
+```
+
+## Step 4 — Anthropic
+
+[console.anthropic.com](https://console.anthropic.com) → API Keys.
+```
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+## Step 5 — Cron secret
 
 ```
 CRON_SECRET=<32+ char random string>
 INTERNAL_API_SECRET=<another random string>
 ```
 
-`CRON_SECRET` gates `/api/cron/*` routes. Vercel Cron sends it automatically as `Authorization: Bearer $CRON_SECRET` if you configure the env var on Vercel.
+`CRON_SECRET` gates `/api/cron/*`. Vercel Cron sends it as `Authorization: Bearer $CRON_SECRET`.
 
-If you're on Vercel **Hobby**, the per-minute crons in `vercel.json` won't fire. Use [cron-job.org](https://cron-job.org) (free) and point it at:
-
+**Vercel Hobby:** the per-minute crons in `vercel.json` won't fire. Use [cron-job.org](https://cron-job.org) (free) and POST to:
 ```
-POST https://<your-app>.vercel.app/api/cron/publish
-Authorization: Bearer <CRON_SECRET>
+https://<your-app>.vercel.app/api/cron/publish    every 5 min
+https://<your-app>.vercel.app/api/cron/agent      every 2 hr
+https://<your-app>.vercel.app/api/cron/trends     hourly
 ```
+With header: `Authorization: Bearer <CRON_SECRET>`.
 
-…every 5 minutes. Same for `/api/cron/agent` (every 2hr) and `/api/cron/trends` (hourly).
-
-## Step 4 — Social platforms
+## Step 6 — Social platforms
 
 Each adapter activates when its env vars are set. Until then, "Connect" creates a stub account so the rest of the UI is usable.
 
-Set the redirect URI for each platform to:
-
+Set redirect URI for each platform to:
 ```
 https://<your-app>.vercel.app/api/oauth/<platform>/callback
 ```
-
 Replace `<platform>` with: `x`, `linkedin`, `instagram`, `facebook`, `tiktok`, `youtube`.
 
+### Meta (Instagram + Facebook) — for the demo
+
+1. [developers.facebook.com](https://developers.facebook.com) → My Apps → Create App → Type **Business**.
+2. Add products: **Facebook Login for Business** + **Instagram Graph API**.
+3. **Settings → Basic**: copy App ID + App Secret → `META_APP_ID`, `META_APP_SECRET`.
+4. **Facebook Login → Settings → Valid OAuth Redirect URIs**:
+   - `https://<your-app>.vercel.app/api/oauth/facebook/callback`
+   - `https://<your-app>.vercel.app/api/oauth/instagram/callback`
+5. **App Roles → Roles → Add People**: yourself, co-founder, investor as **Administrators** or **Testers**. They each accept from their FB account. Test users skip App Review.
+6. The account that posts needs:
+   - A Facebook **Page** (create one in 2 min if needed).
+   - An **Instagram Business or Creator** account (IG → Settings → Account type).
+   - **Linked**: FB Page → Settings → Linked Accounts → Instagram.
+7. Permissions our adapter requests (all available to test users with no review):
+   `pages_show_list`, `pages_manage_posts`, `pages_read_engagement`, `instagram_basic`, `instagram_content_publish`, `public_profile`.
+
+**App Review** is only required for non-test users. Don't bother for the demo.
+
 ### X (Twitter)
-- [developer.x.com](https://developer.x.com) → Project → User authentication settings → OAuth 2.0 → confidential client
-- Scopes: `tweet.read tweet.write users.read offline.access`
-- Set: `X_CLIENT_ID`, `X_CLIENT_SECRET`
+[developer.x.com](https://developer.x.com) → Project → User authentication settings → OAuth 2.0 → confidential client.
+Scopes: `tweet.read tweet.write users.read offline.access`.
+Set: `X_CLIENT_ID`, `X_CLIENT_SECRET`.
 
 ### LinkedIn
-- [developer.linkedin.com](https://developer.linkedin.com) → My apps → Create app → Products: **Sign In with LinkedIn (OIDC)** + **Share on LinkedIn** (or **Marketing Developer Platform** for page posts)
-- Scopes: `openid profile w_member_social`
-- Set: `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET`
-
-### Meta (Instagram + Facebook)
-- [developers.facebook.com](https://developers.facebook.com) → Create app → **Business** type
-- Add products: **Facebook Login**, **Instagram Graph API**
-- Permissions: `pages_show_list`, `pages_manage_posts`, `pages_read_engagement`, `instagram_basic`, `instagram_content_publish`
-- The user you're testing with must have a Facebook Page; for Instagram, the IG account must be **Business** linked to that page.
-- Set: `META_APP_ID`, `META_APP_SECRET`
+[developer.linkedin.com](https://developer.linkedin.com) → Create app → Products: **Sign In with LinkedIn (OIDC)** + **Share on LinkedIn**.
+Scopes: `openid profile w_member_social`.
+Set: `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET`.
 
 ### TikTok
-- [developers.tiktok.com](https://developers.tiktok.com) → Apps → Add app → enable **Login Kit** + **Content Posting API**
-- Scopes: `user.info.basic video.upload video.publish`
-- TikTok requires a publicly hosted video URL for posts. For the MVP, the adapter uses `PULL_FROM_URL`; the video must be reachable from TikTok's servers.
-- Set: `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`
+[developers.tiktok.com](https://developers.tiktok.com) → Apps → enable **Login Kit** + **Content Posting API**.
+Scopes: `user.info.basic video.upload video.publish`.
+Posting requires a publicly hosted video URL (PULL_FROM_URL). Upload your video to R2 first, then schedule.
+Set: `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`.
 
 ### Google (YouTube)
-- [console.cloud.google.com](https://console.cloud.google.com) → APIs & Services → Enable: **YouTube Data API v3**
-- Credentials → OAuth 2.0 client (Web)
-- Scopes: `https://www.googleapis.com/auth/youtube.upload` + `youtube.readonly`
-- Posting requires resumable upload — the current adapter performs OAuth + channel discovery only. A worker that uploads from `media_assets` is the next step.
-- Set: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
+[console.cloud.google.com](https://console.cloud.google.com) → enable **YouTube Data API v3** → OAuth client (Web).
+Scopes: `https://www.googleapis.com/auth/youtube.upload` + `youtube.readonly`.
+Current adapter does OAuth + channel discovery. Resumable video upload is the next step.
+Set: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`.
 
-## Step 5 — Run
+## Step 7 — Run
 
 ```bash
 cp .env.example .env.local
@@ -116,37 +151,36 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3000.
-
-For production: push to GitHub, import in Vercel, paste the env vars, deploy.
+For production: push to GitHub, import in Vercel, paste env vars, deploy.
 
 ## Architecture notes
 
-- **Schema:** Drizzle in `lib/db/schema.ts`. SQL bootstrap in `drizzle/0000_init.sql` (idempotent, RLS on every table).
-- **Server clients:** `lib/supabase/server.ts` for route handlers (cookie-aware), `lib/supabase/admin.ts` for service-role calls, `lib/supabase/client.ts` for the browser.
-- **Auth gates:** `proxy.ts` redirects `/dashboard` and `/onboarding` to `/sign-in` when no session. (Next.js 16 renamed `middleware` → `proxy`.)
-- **Platform registry:** `lib/platforms/registry.ts` maps `Platform` → adapter. Adapters expose `buildAuthorizeUrl`, `exchangeCode`, `publishText`. Adding a platform = drop a new adapter file + register.
-- **Stub mode:** every adapter returns canned data when its credentials are absent. The `is_stub` flag on `connected_accounts` tracks fake connections so you can see them in the UI.
-- **Cron:** `Authorization: Bearer $CRON_SECRET`. The `publish` job picks up `scheduled_posts WHERE status='pending' AND scheduled_at <= now()` (limit 50/run, idempotent via attempts counter).
+- **Clerk middleware** lives in `proxy.ts` (Next.js 16 renamed `middleware` → `proxy`). It protects `/dashboard`, `/onboarding`, and gates the API surface.
+- **DB security:** every API route filters by `auth().userId`. No row-level security at the DB layer — the API is the only access path. If you want defense in depth later, you can layer Postgres RLS using Clerk JWT claims.
+- **Profile sync:** on the first authenticated API call, `lib/api.ts/withUser` upserts a row into `profiles` with the user's name, email, and avatar from Clerk. No webhooks needed for MVP.
+- **Storage:** `lib/storage/r2.ts` uses the AWS S3 SDK pointed at R2's S3-compatible endpoint. Server-side multipart upload at `/api/media/upload` (50MB cap). `media_assets` row holds the R2 object key + the public URL.
+- **Platform registry:** `lib/platforms/registry.ts` maps `Platform` → adapter. Adding a platform = drop a new adapter file + register.
+- **Cron:** `Authorization: Bearer $CRON_SECRET`. The publish job picks up `scheduled_posts WHERE status='pending' AND scheduled_at <= now()` (limit 50/run, idempotent via attempts counter).
 - **Agent:** `/api/cron/agent` per-user — consumes new trends, calls Claude (Sonnet) to draft, schedules posts that score ≥ `auto_publish_threshold`, holds the rest as drafts.
-- **Trends:** `/api/cron/trends` ingests RSS from Hacker News + niche subreddits, persists per-user with a random base score; you can replace the source list in `lib/trends/sources.ts`.
 
-## What's intentionally *not* built
+## Demo smoke test (after credentials are in)
 
-- **Voice profile / TTS:** out of scope for this first cut. The `voice_template` field is just a tone hint; it doesn't analyze past posts.
-- **Media uploads to Supabase Storage:** the schema and `media_assets` table are ready; the upload flow + per-platform variant generation is the next thing to wire.
-- **Analytics ingestion:** post engagement is captured to `scheduled_posts.engagement` jsonb but no fetcher cron is wired yet (per-platform metric APIs are a future job).
-- **Notifications:** the activity log feeds the UI; push/email is not built.
-
-## Quick smoke test (after credentials are in)
-
-1. `npm run dev`, visit `/sign-up`, create an account.
-2. Land in `/onboarding`. Click each platform — real OAuth dialogs should fire.
+1. `npm run dev`, visit `/sign-up`, create a Clerk account.
+2. Land in `/onboarding`. Click each platform — real OAuth dialogs fire (or stubs if missing keys).
 3. Pick niches, pick a style, hit Continue → "Enter Sociafy."
-4. Land in `/dashboard`. Click Compose → write a prompt → Generate. Real Claude variants should populate.
-5. Click "Schedule (+30m)." Check the Calendar → your post should appear.
-6. Trigger the cron manually:
+4. Land in `/dashboard`. Click Compose → write a prompt → Generate. Real Claude variants populate.
+5. Click "Upload" in Media — pick an image. It lands in R2 and the public URL appears in the draft.
+6. Click "Schedule (+30m)." Check the Calendar → your post appears in the right slot.
+7. Trigger the cron manually:
+   ```bash
+   curl -X POST https://<your-app>.vercel.app/api/cron/publish \
+     -H "Authorization: Bearer $CRON_SECRET"
    ```
-   curl -X POST https://<your-app>.vercel.app/api/cron/publish -H "Authorization: Bearer $CRON_SECRET"
-   ```
-7. Check the actual platform — your post should be live.
+8. Check the actual platform — your post is live.
+
+## What's intentionally not built
+
+- **Voice profile / TTS** — out of scope for the first cut. `voice_template` is just a tone hint.
+- **YouTube resumable upload** — OAuth + channel discovery only.
+- **Analytics ingestion** — `engagement` jsonb field exists; the fetcher cron is the next job.
+- **Notifications** — activity log feeds the UI; push/email is not built.

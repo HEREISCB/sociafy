@@ -8,9 +8,7 @@ import {
   jsonb,
   numeric,
   index,
-  pgSchema,
 } from 'drizzle-orm/pg-core';
-import { sql } from 'drizzle-orm';
 
 export const PLATFORMS = ['x', 'linkedin', 'instagram', 'facebook', 'tiktok', 'youtube'] as const;
 export type Platform = (typeof PLATFORMS)[number];
@@ -31,22 +29,15 @@ export type Niche = (typeof NICHES)[number];
 export const VOICE_TEMPLATES = ['me', 'punchy', 'thoughtful', 'data-led'] as const;
 export type VoiceTemplate = (typeof VOICE_TEMPLATES)[number];
 
-// Mirror of Supabase auth.users so we can FK to it without owning it.
-const authSchema = pgSchema('auth');
-export const authUsers = authSchema.table('users', {
-  id: uuid('id').primaryKey(),
-});
-
 // =====================================================
-// profiles — per-user app data, 1:1 with auth.users
+// profiles — keyed by Clerk userId (text, e.g. "user_2abc...")
 // =====================================================
 export const profiles = pgTable('profiles', {
-  id: uuid('id')
-    .primaryKey()
-    .references(() => authUsers.id, { onDelete: 'cascade' }),
+  id: text('id').primaryKey(), // Clerk userId
   displayName: text('display_name'),
   handle: text('handle'),
   avatarUrl: text('avatar_url'),
+  email: text('email'),
   onboardedAt: timestamp('onboarded_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -59,9 +50,7 @@ export const connectedAccounts = pgTable(
   'connected_accounts',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    userId: uuid('user_id')
-      .notNull()
-      .references(() => authUsers.id, { onDelete: 'cascade' }),
+    userId: text('user_id').notNull(),
     platform: text('platform').notNull().$type<Platform>(),
     platformUserId: text('platform_user_id').notNull(),
     handle: text('handle'),
@@ -83,17 +72,17 @@ export const connectedAccounts = pgTable(
 );
 
 // =====================================================
-// drafts — text, variants, media. One row per piece of content.
+// drafts
 // =====================================================
 export type DraftVariant = {
-  label: string; // 'A' | 'B' | 'C' | 'D' or custom
+  label: string;
   text: string;
   score?: number;
   rationale?: string;
 };
 
 export type DraftMedia = {
-  id: string; // media_assets.id
+  id: string;
   url: string;
   mimeType: string;
   width?: number;
@@ -106,9 +95,7 @@ export const drafts = pgTable(
   'drafts',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    userId: uuid('user_id')
-      .notNull()
-      .references(() => authUsers.id, { onDelete: 'cascade' }),
+    userId: text('user_id').notNull(),
     title: text('title'),
     prompt: text('prompt'),
     body: text('body').notNull().default(''),
@@ -119,7 +106,7 @@ export const drafts = pgTable(
     perPlatformText: jsonb('per_platform_text').$type<Partial<Record<Platform, string>>>().default({}),
     preset: text('preset'),
     status: text('status').notNull().$type<DraftStatus>().default('draft'),
-    source: text('source').notNull().default('user'), // 'user' | 'agent'
+    source: text('source').notNull().default('user'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -130,7 +117,7 @@ export const drafts = pgTable(
 );
 
 // =====================================================
-// scheduled_posts — one row per (draft, platform) once scheduled
+// scheduled_posts
 // =====================================================
 export type ScheduledStatus = 'pending' | 'publishing' | 'published' | 'failed' | 'canceled';
 
@@ -138,9 +125,7 @@ export const scheduledPosts = pgTable(
   'scheduled_posts',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    userId: uuid('user_id')
-      .notNull()
-      .references(() => authUsers.id, { onDelete: 'cascade' }),
+    userId: text('user_id').notNull(),
     draftId: uuid('draft_id')
       .notNull()
       .references(() => drafts.id, { onDelete: 'cascade' }),
@@ -175,14 +160,12 @@ export const scheduledPosts = pgTable(
 );
 
 // =====================================================
-// agent_settings — per-user autopilot config
+// agent_settings
 // =====================================================
-export type QuietHours = { start: string; end: string }; // "22:00", "07:00"
+export type QuietHours = { start: string; end: string };
 
 export const agentSettings = pgTable('agent_settings', {
-  userId: uuid('user_id')
-    .primaryKey()
-    .references(() => authUsers.id, { onDelete: 'cascade' }),
+  userId: text('user_id').primaryKey(),
   enabled: boolean('enabled').notNull().default(false),
   instructions: text('instructions').notNull().default(''),
   cadencePerWeek: integer('cadence_per_week').notNull().default(4),
@@ -198,7 +181,7 @@ export const agentSettings = pgTable('agent_settings', {
 });
 
 // =====================================================
-// activity_log — agent + platform activity feed
+// activity_log
 // =====================================================
 export type ActivityKind =
   | 'platform_connected'
@@ -220,9 +203,7 @@ export const activityLog = pgTable(
   'activity_log',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    userId: uuid('user_id')
-      .notNull()
-      .references(() => authUsers.id, { onDelete: 'cascade' }),
+    userId: text('user_id').notNull(),
     kind: text('kind').notNull().$type<ActivityKind>(),
     title: text('title').notNull(),
     body: text('body'),
@@ -236,7 +217,7 @@ export const activityLog = pgTable(
 );
 
 // =====================================================
-// trends — niche trend items, captured by trend monitor
+// trends
 // =====================================================
 export type TrendStatus = 'new' | 'used' | 'dismissed';
 
@@ -244,9 +225,7 @@ export const trends = pgTable(
   'trends',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    userId: uuid('user_id')
-      .notNull()
-      .references(() => authUsers.id, { onDelete: 'cascade' }),
+    userId: text('user_id').notNull(),
     niche: text('niche').notNull().$type<Niche>(),
     title: text('title').notNull(),
     summary: text('summary'),
@@ -266,26 +245,22 @@ export const trends = pgTable(
 );
 
 // =====================================================
-// media_assets — uploads
+// media_assets — uploads to R2
 // =====================================================
 export const mediaAssets = pgTable(
   'media_assets',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    userId: uuid('user_id')
-      .notNull()
-      .references(() => authUsers.id, { onDelete: 'cascade' }),
-    storagePath: text('storage_path').notNull(),
+    userId: text('user_id').notNull(),
+    storageKey: text('storage_key').notNull(),
     publicUrl: text('public_url').notNull(),
     mimeType: text('mime_type').notNull(),
     sizeBytes: integer('size_bytes'),
     width: integer('width'),
     height: integer('height'),
     durationS: numeric('duration_s'),
+    label: text('label'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [index('media_user_idx').on(t.userId)],
 );
-
-// Convenience: SQL fragment to bump updated_at.
-export const touchUpdatedAt = sql`(now())`;

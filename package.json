@@ -10,8 +10,9 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",
-    "@supabase/ssr": "^0.10.2",
-    "@supabase/supabase-js": "^2.105.3",
+    "@aws-sdk/client-s3": "^3.1045.0",
+    "@aws-sdk/s3-request-presigner": "^3.1045.0",
+    "@clerk/nextjs": "^7.3.3",
     "date-fns": "^4.1.0",
     "drizzle-orm": "^0.45.2",
     "nanoid": "^5.1.11",

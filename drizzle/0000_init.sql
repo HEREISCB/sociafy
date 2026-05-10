@@ -1,45 +1,30 @@
--- Sociafy initial schema. Paste into the Supabase SQL Editor (or run via drizzle-kit push).
+-- Sociafy initial schema. Paste into the Postgres SQL Editor (Supabase, Neon, etc.) or run via drizzle-kit push.
 -- Idempotent: safe to re-run.
+--
+-- Auth is handled by Clerk — user_id columns store Clerk user IDs as text (e.g. "user_2abc...").
+-- Storage is handled by Cloudflare R2 — media_assets stores R2 object keys + public URLs.
+-- The DB has no FK to an auth table; security is enforced at the API layer (every route filters by user_id).
 
 -- =====================================================
 -- profiles
 -- =====================================================
 CREATE TABLE IF NOT EXISTS public.profiles (
-  id            uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  id            text PRIMARY KEY,            -- Clerk userId
   display_name  text,
   handle        text,
   avatar_url    text,
+  email         text,
   onboarded_at  timestamptz,
   created_at    timestamptz NOT NULL DEFAULT now(),
   updated_at    timestamptz NOT NULL DEFAULT now()
 );
-ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "self select" ON public.profiles;
-CREATE POLICY "self select" ON public.profiles FOR SELECT USING (auth.uid() = id);
-DROP POLICY IF EXISTS "self update" ON public.profiles;
-CREATE POLICY "self update" ON public.profiles FOR UPDATE USING (auth.uid() = id);
-DROP POLICY IF EXISTS "self insert" ON public.profiles;
-CREATE POLICY "self insert" ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
-
--- Auto-create a profile when a new auth user signs up
-CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER AS $$
-BEGIN
-  INSERT INTO public.profiles (id, display_name)
-  VALUES (NEW.id, COALESCE(NEW.raw_user_meta_data->>'display_name', NEW.email));
-  RETURN NEW;
-END $$;
-DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
-CREATE TRIGGER on_auth_user_created
-  AFTER INSERT ON auth.users
-  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
 -- =====================================================
 -- connected_accounts
 -- =====================================================
 CREATE TABLE IF NOT EXISTS public.connected_accounts (
   id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id             uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  user_id             text NOT NULL,
   platform            text NOT NULL,
   platform_user_id    text NOT NULL,
   handle              text,
@@ -56,16 +41,13 @@ CREATE TABLE IF NOT EXISTS public.connected_accounts (
 );
 CREATE INDEX IF NOT EXISTS connected_accounts_user_idx ON public.connected_accounts (user_id);
 CREATE INDEX IF NOT EXISTS connected_accounts_user_platform_idx ON public.connected_accounts (user_id, platform);
-ALTER TABLE public.connected_accounts ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "self all" ON public.connected_accounts;
-CREATE POLICY "self all" ON public.connected_accounts FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
 -- =====================================================
 -- drafts
 -- =====================================================
 CREATE TABLE IF NOT EXISTS public.drafts (
   id                       uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id                  uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  user_id                  text NOT NULL,
   title                    text,
   prompt                   text,
   body                     text NOT NULL DEFAULT '',
@@ -82,16 +64,13 @@ CREATE TABLE IF NOT EXISTS public.drafts (
 );
 CREATE INDEX IF NOT EXISTS drafts_user_idx ON public.drafts (user_id);
 CREATE INDEX IF NOT EXISTS drafts_status_idx ON public.drafts (status);
-ALTER TABLE public.drafts ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "self all" ON public.drafts;
-CREATE POLICY "self all" ON public.drafts FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
 -- =====================================================
 -- scheduled_posts
 -- =====================================================
 CREATE TABLE IF NOT EXISTS public.scheduled_posts (
   id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id             uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  user_id             text NOT NULL,
   draft_id            uuid NOT NULL REFERENCES public.drafts(id) ON DELETE CASCADE,
   account_id          uuid NOT NULL REFERENCES public.connected_accounts(id) ON DELETE CASCADE,
   platform            text NOT NULL,
@@ -111,15 +90,12 @@ CREATE TABLE IF NOT EXISTS public.scheduled_posts (
 CREATE INDEX IF NOT EXISTS scheduled_user_idx ON public.scheduled_posts (user_id);
 CREATE INDEX IF NOT EXISTS scheduled_status_due_idx ON public.scheduled_posts (status, scheduled_at);
 CREATE INDEX IF NOT EXISTS scheduled_draft_idx ON public.scheduled_posts (draft_id);
-ALTER TABLE public.scheduled_posts ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "self all" ON public.scheduled_posts;
-CREATE POLICY "self all" ON public.scheduled_posts FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
 -- =====================================================
 -- agent_settings
 -- =====================================================
 CREATE TABLE IF NOT EXISTS public.agent_settings (
-  user_id                  uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  user_id                  text PRIMARY KEY,
   enabled                  boolean NOT NULL DEFAULT false,
   instructions             text NOT NULL DEFAULT '',
   cadence_per_week         int NOT NULL DEFAULT 4,
@@ -133,16 +109,13 @@ CREATE TABLE IF NOT EXISTS public.agent_settings (
   created_at               timestamptz NOT NULL DEFAULT now(),
   updated_at               timestamptz NOT NULL DEFAULT now()
 );
-ALTER TABLE public.agent_settings ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "self all" ON public.agent_settings;
-CREATE POLICY "self all" ON public.agent_settings FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
 -- =====================================================
 -- activity_log
 -- =====================================================
 CREATE TABLE IF NOT EXISTS public.activity_log (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id       uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  user_id       text NOT NULL,
   kind          text NOT NULL,
   title         text NOT NULL,
   body          text,
@@ -151,18 +124,13 @@ CREATE TABLE IF NOT EXISTS public.activity_log (
 );
 CREATE INDEX IF NOT EXISTS activity_user_created_idx ON public.activity_log (user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS activity_kind_idx ON public.activity_log (kind);
-ALTER TABLE public.activity_log ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "self select" ON public.activity_log;
-CREATE POLICY "self select" ON public.activity_log FOR SELECT USING (auth.uid() = user_id);
-DROP POLICY IF EXISTS "self insert" ON public.activity_log;
-CREATE POLICY "self insert" ON public.activity_log FOR INSERT WITH CHECK (auth.uid() = user_id);
 
 -- =====================================================
 -- trends
 -- =====================================================
 CREATE TABLE IF NOT EXISTS public.trends (
   id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id            uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  user_id            text NOT NULL,
   niche              text NOT NULL,
   title              text NOT NULL,
   summary            text,
@@ -177,29 +145,21 @@ CREATE TABLE IF NOT EXISTS public.trends (
 );
 CREATE INDEX IF NOT EXISTS trends_user_status_idx ON public.trends (user_id, status);
 CREATE INDEX IF NOT EXISTS trends_niche_idx ON public.trends (niche);
-ALTER TABLE public.trends ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "self all" ON public.trends;
-CREATE POLICY "self all" ON public.trends FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
 -- =====================================================
--- media_assets
+-- media_assets — Cloudflare R2 objects
 -- =====================================================
 CREATE TABLE IF NOT EXISTS public.media_assets (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id         uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  storage_path    text NOT NULL,
+  user_id         text NOT NULL,
+  storage_key     text NOT NULL,
   public_url      text NOT NULL,
   mime_type       text NOT NULL,
   size_bytes      int,
   width           int,
   height          int,
   duration_s      numeric,
+  label           text,
   created_at      timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS media_user_idx ON public.media_assets (user_id);
-ALTER TABLE public.media_assets ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "self all" ON public.media_assets;
-CREATE POLICY "self all" ON public.media_assets FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
-
--- A storage bucket for media uploads (run separately if your bucket name differs)
--- INSERT INTO storage.buckets (id, name, public) VALUES ('media', 'media', true) ON CONFLICT DO NOTHING;

@@ -10,7 +10,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ platform: s
   if (!(PLATFORMS as readonly string[]).includes(platform)) {
     return NextResponse.json({ error: 'invalid_platform' }, { status: 400 });
   }
-  if (isStubMode.supabase()) {
+  if (isStubMode.clerk()) {
     return NextResponse.redirect(new URL('/sign-in', req.url));
   }
   const user = await authedUser();

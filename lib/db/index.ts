@@ -7,12 +7,10 @@ let _db: ReturnType<typeof drizzle> | null = null;
 
 export const db = () => {
   if (_db) return _db;
-  if (!env.supabase.databaseUrl) {
-    throw new Error(
-      'DATABASE_URL is not set. The DB layer is unavailable until Supabase is configured.',
-    );
+  if (!env.database.url) {
+    throw new Error('DATABASE_URL is not set. The DB layer is unavailable until configured.');
   }
-  const client = postgres(env.supabase.databaseUrl, {
+  const client = postgres(env.database.url, {
     prepare: false,
     max: 5,
   });
