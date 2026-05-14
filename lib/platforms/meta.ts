@@ -19,6 +19,25 @@ function metaConfigured() {
   return !!env.platforms.meta.appId && !!env.platforms.meta.appSecret;
 }
 
+function buildMetaAuthorizeUrl(redirectUri: string, state: string): string {
+  const params = new URLSearchParams({
+    client_id: env.platforms.meta.appId!,
+    redirect_uri: redirectUri,
+    state,
+    response_type: 'code',
+  });
+  if (env.platforms.meta.configId) {
+    // Facebook Login for Business — Configuration bundles permissions & assets.
+    // override_default_response_type forces "code" even if the configuration defaults differently.
+    params.set('config_id', env.platforms.meta.configId);
+    params.set('override_default_response_type', 'true');
+  } else {
+    // Classic Facebook Login fallback — request scopes directly.
+    params.set('scope', FB_SCOPES.join(','));
+  }
+  return `${AUTH_URL}?${params.toString()}`;
+}
+
 async function exchangeMetaCode(code: string, redirectUri: string) {
   const params = new URLSearchParams({
     client_id: env.platforms.meta.appId!,
@@ -59,14 +78,7 @@ export const facebookAdapter: PlatformAdapter = {
   isConfigured: metaConfigured,
   buildAuthorizeUrl({ redirectUri, state }) {
     if (!metaConfigured()) return `/oauth/facebook/callback?stub=1&state=${state}`;
-    const params = new URLSearchParams({
-      client_id: env.platforms.meta.appId!,
-      redirect_uri: redirectUri,
-      state,
-      scope: FB_SCOPES.join(','),
-      response_type: 'code',
-    });
-    return `${AUTH_URL}?${params.toString()}`;
+    return buildMetaAuthorizeUrl(redirectUri, state);
   },
   async exchangeCode({ code, redirectUri }) {
     if (!metaConfigured()) return stubProfile('facebook', 'unknown');
@@ -123,14 +135,7 @@ export const instagramAdapter: PlatformAdapter = {
   isConfigured: metaConfigured,
   buildAuthorizeUrl({ redirectUri, state }) {
     if (!metaConfigured()) return `/oauth/instagram/callback?stub=1&state=${state}`;
-    const params = new URLSearchParams({
-      client_id: env.platforms.meta.appId!,
-      redirect_uri: redirectUri,
-      state,
-      scope: FB_SCOPES.join(','),
-      response_type: 'code',
-    });
-    return `${AUTH_URL}?${params.toString()}`;
+    return buildMetaAuthorizeUrl(redirectUri, state);
   },
   async exchangeCode({ code, redirectUri }) {
     if (!metaConfigured()) return stubProfile('instagram', 'unknown');

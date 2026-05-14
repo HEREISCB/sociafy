@@ -41,6 +41,9 @@ export const env = {
     meta: {
       appId: required('META_APP_ID'),
       appSecret: required('META_APP_SECRET'),
+      // Facebook Login for Business: a Configuration ID bundles permissions + assets.
+      // When set, OAuth uses config_id instead of scope=...
+      configId: required('META_CONFIG_ID'),
     },
     tiktok: {
       clientKey: required('TIKTOK_CLIENT_KEY'),
