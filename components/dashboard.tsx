@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { Icon, Pglyph, Spark } from './icons';
-import { useApi } from '../lib/ui/fetcher';
+import { apiPost, useApi } from '../lib/ui/fetcher';
 import { PLATFORM_TO_SHORT } from '../lib/ui/platforms';
 import type { Platform } from '../lib/db/schema';
 
@@ -40,6 +40,13 @@ type AccountRow = {
   avatarUrl: string | null;
   isStub: boolean;
   meta: { pageName?: string; pageId?: string } | null;
+};
+type ActivityRow = {
+  id: string;
+  kind: string;
+  title: string;
+  body: string | null;
+  createdAt: string;
 };
 type FacebookMe = {
   stub: boolean;
@@ -81,6 +88,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose }) => {
   const { data: drafts } = useApi<DraftRow[]>('/api/drafts');
   const { data: trends } = useApi<TrendRow[]>('/api/trends?limit=5');
   const { data: accounts } = useApi<AccountRow[]>('/api/accounts');
+  const { data: activity } = useApi<ActivityRow[]>('/api/activity?limit=8');
   const fbConnected = !!accounts?.find((a) => a.platform === 'facebook' && !a.isStub);
   const { data: facebookMe } = useApi<FacebookMe>(fbConnected ? '/api/platforms/facebook/me' : null);
 
@@ -236,6 +244,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose }) => {
         <FacebookPageCard data={facebookMe} />
       )}
 
+      {fbConnected && (
+        <QuickPost platform="facebook" pageName={facebookMe?.page.name} />
+      )}
+
       <div className="two-col">
         <div className="card">
           <div className="card-head">
@@ -333,6 +345,31 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose }) => {
             </div>
           </div>
 
+          {activity && activity.length > 0 && (
+            <div className="card">
+              <div className="card-head">
+                <h3><Icon name="chat" size={14} /> Recent activity</h3>
+                <span className="chip live"><span className="dot" />Live</span>
+              </div>
+              <div className="card-body flush">
+                {activity.slice(0, 6).map((a) => (
+                  <div key={a.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 14px', borderBottom: '1px solid var(--line)' }}>
+                    <span className={`chip ${activityTone(a.kind)}`} style={{ marginTop: 2, flexShrink: 0 }}>
+                      <span className="dot" />{activityLabel(a.kind)}
+                    </span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 500, lineHeight: 1.4 }}>{a.title}</div>
+                      {a.body && (
+                        <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginTop: 2, lineHeight: 1.4, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{a.body}</div>
+                      )}
+                      <div className="mono" style={{ fontSize: 10.5, color: 'var(--ink-4)', marginTop: 4 }}>{relTime(a.createdAt)}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {accounts && accounts.length > 0 && (
             <div className="card">
               <div className="card-head">
@@ -363,6 +400,80 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose }) => {
         </div>
       </div>
     </>
+  );
+};
+
+const QuickPost: React.FC<{ platform: Platform; pageName?: string }> = ({ platform, pageName }) => {
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; url?: string | null; error?: string } | null>(null);
+
+  const send = async () => {
+    if (!text.trim()) return;
+    setBusy(true);
+    setResult(null);
+    try {
+      const draft = await apiPost<{ id: string }>('/api/drafts', {
+        body: text,
+        targetPlatforms: [platform],
+        source: 'user',
+      });
+      const r = await apiPost<{ results: Array<{ platform: string; ok: boolean; url?: string | null; error?: string }> }>(
+        '/api/publish',
+        { draftId: draft.id, platforms: [platform] },
+      );
+      const out = r.results[0];
+      setResult(out);
+      if (out?.ok) setText('');
+    } catch (e) {
+      setResult({ ok: false, error: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="card-head">
+        <h3>
+          <Icon name="sparkle" size={14} />
+          Quick post {pageName ? <span className="meta">→ {pageName}</span> : null}
+        </h3>
+        <span className="chip ghost mono">{text.length} chars</span>
+      </div>
+      <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="Type a post and hit Publish — it goes live to your Facebook Page in seconds."
+          rows={3}
+          style={{
+            width: '100%',
+            padding: 12,
+            border: '1px solid var(--line-2)',
+            borderRadius: 10,
+            fontSize: 14,
+            background: 'var(--bg)',
+            color: 'var(--ink)',
+            fontFamily: 'inherit',
+            resize: 'vertical',
+            outline: 'none',
+            lineHeight: 1.5,
+          }}
+        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {result && (
+            result.ok
+              ? <span className="chip" style={{ color: 'var(--good)' }}><span className="dot" style={{ background: 'var(--good)' }} />Published{result.url ? <> · <a href={result.url} target="_blank" rel="noreferrer" style={{ color: 'var(--ink)', textDecoration: 'underline' }}>View on Facebook</a></> : null}</span>
+              : <span className="chip warn"><span className="dot" />{result.error}</span>
+          )}
+          <div style={{ flex: 1 }} />
+          <button className="btn primary" onClick={send} disabled={busy || !text.trim()}>
+            {busy ? <><Icon name="refresh" size={12} /> Publishing</> : <><Icon name="send" size={12} /> Publish now</>}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 };
 
@@ -418,6 +529,38 @@ const FacebookPageCard: React.FC<{ data: FacebookMe }> = ({ data }) => (
     </div>
   </div>
 );
+
+function relTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  if (diff < 60_000) return 'just now';
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} min ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} hr ago`;
+  return `${Math.floor(diff / 86_400_000)} d ago`;
+}
+
+function activityLabel(kind: string): string {
+  switch (kind) {
+    case 'platform_connected': return 'Connected';
+    case 'platform_disconnected': return 'Disconnected';
+    case 'draft_created': return 'Draft';
+    case 'draft_scheduled': return 'Scheduled';
+    case 'manual_publish': return 'Published';
+    case 'auto_publish': return 'Auto-publish';
+    case 'publish_failed': return 'Failed';
+    case 'agent_drafted': return 'Agent draft';
+    case 'agent_held': return 'Held';
+    case 'agent_enabled': return 'Agent on';
+    case 'agent_disabled': return 'Agent off';
+    case 'trend_spotted': return 'Trend';
+    default: return kind;
+  }
+}
+
+function activityTone(kind: string): 'accent' | 'warn' | '' {
+  if (kind === 'publish_failed' || kind === 'agent_held') return 'warn';
+  if (kind === 'manual_publish' || kind === 'auto_publish' || kind === 'platform_connected') return 'accent';
+  return '';
+}
 
 function relWhen(iso: string): string {
   const d = new Date(iso);

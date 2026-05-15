@@ -427,12 +427,32 @@ const Compose: React.FC = () => {
                       <Icon name={v.score >= 85 ? 'fire' : 'chart'} size={11} style={{ verticalAlign: -1 }} /> {v.score}
                     </span>
                   </div>
-                  <div className="variant-text">{v.text}</div>
+                  {active === v.id ? (
+                    <textarea
+                      className="variant-text"
+                      value={v.text}
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        setVariants((cur) => cur.map((x) => x.id === v.id ? { ...x, text: next } : x));
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      style={{
+                        width: '100%', minHeight: 90, padding: 8, fontSize: 13.5,
+                        background: 'var(--bg)', border: '1px solid var(--line-2)', borderRadius: 6,
+                        outline: 'none', color: 'var(--ink)', fontFamily: 'inherit', resize: 'vertical',
+                        lineHeight: 1.5,
+                      }}
+                    />
+                  ) : (
+                    <div className="variant-text">{v.text}</div>
+                  )}
                   {v.rationale && (
                     <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 4, fontStyle: 'italic' }}>{v.rationale}</div>
                   )}
                   <div style={{ display: 'flex', gap: 4 }}>
-                    <button className="btn sm" onClick={(e) => { e.stopPropagation(); setActive(v.id); }}><Icon name="check" size={11} /> Use</button>
+                    <button className="btn sm" onClick={(e) => { e.stopPropagation(); setActive(v.id); }}>
+                      <Icon name="check" size={11} /> {active === v.id ? 'Selected' : 'Use'}
+                    </button>
                   </div>
                 </div>
               ))}
