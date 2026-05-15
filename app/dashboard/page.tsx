@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useUser } from '@clerk/nextjs';
+import { useSWRConfig } from 'swr';
 import { Sidebar, Topbar } from '../../components/shell';
 import Dashboard from '../../components/dashboard';
 import Compose from '../../components/compose';
@@ -68,7 +69,18 @@ const SparkleIcon = () => (
 export default function Home() {
   const [page, setPage] = useState<Page>('dashboard');
   const [mode, setMode] = useState<Mode>('manual');
+  const [refreshing, setRefreshing] = useState(false);
   const { user } = useUser();
+  const { mutate } = useSWRConfig();
+
+  const refreshAll = async () => {
+    setRefreshing(true);
+    try {
+      await mutate(() => true, undefined, { revalidate: true });
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -108,7 +120,9 @@ export default function Home() {
             <div className="page-head-actions">
               {page === 'dashboard' && (
                 <>
-                  <button className="btn"><RefreshIcon /> Refresh briefing</button>
+                  <button className="btn" onClick={refreshAll} disabled={refreshing}>
+                    <RefreshIcon /> {refreshing ? 'Refreshing…' : 'Refresh briefing'}
+                  </button>
                   <button className="btn"><UploadIcon /> Export</button>
                 </>
               )}

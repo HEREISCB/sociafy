@@ -184,6 +184,7 @@ const Compose: React.FC = () => {
   ]);
   const [busy, setBusy] = useState<null | 'schedule' | 'post'>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [customSchedule, setCustomSchedule] = useState('');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const onPickFile = () => fileInputRef.current?.click();
@@ -545,8 +546,28 @@ const Compose: React.FC = () => {
               );
             })}
             <div style={{ flex: 1 }} />
-            <button className="btn sm" disabled={busy !== null} onClick={scheduleIn30}>
-              <Icon name="clock" size={12} /> {busy === 'schedule' ? 'Scheduling…' : 'Schedule (+30m)'}
+            <input
+              type="datetime-local"
+              value={customSchedule}
+              min={minDateTimeLocal()}
+              onChange={(e) => setCustomSchedule(e.target.value)}
+              style={{
+                padding: '6px 8px',
+                border: '1px solid var(--line-2)',
+                borderRadius: 6,
+                fontFamily: 'var(--mono)',
+                fontSize: 11.5,
+                background: 'var(--bg-elev)',
+                color: 'var(--ink)',
+              }}
+              title="Pick a date and time to schedule"
+            />
+            <button
+              className="btn sm"
+              disabled={busy !== null}
+              onClick={() => customSchedule ? schedule(new Date(customSchedule).toISOString()) : scheduleIn30()}
+            >
+              <Icon name="clock" size={12} /> {busy === 'schedule' ? 'Scheduling…' : customSchedule ? 'Schedule' : 'Schedule (+30m)'}
             </button>
             <button className="btn sm primary" disabled={busy !== null} onClick={postNow}>
               <Icon name="send" size={12} /> {busy === 'post' ? 'Posting…' : 'Post now'}
@@ -580,5 +601,11 @@ const Compose: React.FC = () => {
     </div>
   );
 };
+
+function minDateTimeLocal(): string {
+  const d = new Date(Date.now() + 60 * 1000); // can't pick the past
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 export default Compose;
