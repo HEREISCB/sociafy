@@ -8,10 +8,15 @@ import { eq } from 'drizzle-orm';
 export type ApiUser = { id: string; email?: string | null };
 
 export async function authedUser(): Promise<ApiUser | null> {
-  if (isStubMode.clerk()) return null;
-  const { userId } = await auth();
-  if (!userId) return null;
-  return { id: userId, email: null };
+  // Clerk v7 supports keyless mode when no env keys are set — it auto-mounts a temp dev instance.
+  // We trust whatever Clerk's auth() returns. No stub short-circuit.
+  try {
+    const { userId } = await auth();
+    if (!userId) return null;
+    return { id: userId, email: null };
+  } catch {
+    return null;
+  }
 }
 
 export function jsonError(message: string, status = 400, extra?: Record<string, unknown>) {
@@ -51,9 +56,6 @@ async function ensureProfile(userId: string) {
 export async function withUser<T>(
   handler: (user: ApiUser) => Promise<T> | T,
 ): Promise<NextResponse> {
-  if (isStubMode.clerk()) {
-    return jsonError('clerk_not_configured', 503);
-  }
   const user = await authedUser();
   if (!user) return jsonError('unauthorized', 401);
   try {

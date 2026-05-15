@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authedUser } from '../../../../../lib/api';
-import { isStubMode } from '../../../../../lib/env';
 import { PLATFORMS, type Platform } from '../../../../../lib/db/schema';
 import { getAdapter } from '../../../../../lib/platforms/registry';
 import { signState, makeCodeVerifier } from '../../../../../lib/oauth/state';
@@ -10,9 +9,6 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ platform: s
   const { platform } = await ctx.params;
   if (!(PLATFORMS as readonly string[]).includes(platform)) {
     return NextResponse.json({ error: 'invalid_platform' }, { status: 400 });
-  }
-  if (isStubMode.clerk()) {
-    return NextResponse.redirect(absoluteUrl(req, '/sign-in'));
   }
   const user = await authedUser();
   if (!user) {
