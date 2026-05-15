@@ -12,6 +12,7 @@ type ScheduledRow = {
   scheduledAt: string;
   status: 'pending' | 'publishing' | 'published' | 'failed' | 'canceled';
   text: string;
+  platformPostUrl?: string | null;
 };
 type DraftRow = {
   id: string;
@@ -31,11 +32,35 @@ type TrendRow = {
   score: number;
   capturedAt: string;
 };
+type AccountRow = {
+  id: string;
+  platform: Platform;
+  handle: string | null;
+  displayName: string | null;
+  avatarUrl: string | null;
+  isStub: boolean;
+  meta: { pageName?: string; pageId?: string } | null;
+};
+type FacebookMe = {
+  stub: boolean;
+  page: { id: string; name: string; username: string | null; avatarUrl: string | null; link: string | null; about: string | null; category: string | null };
+  followerCount: number;
+  recentPosts: Array<{
+    id: string;
+    message: string;
+    createdAt: string;
+    url: string | null;
+    image: string | null;
+    likes: number;
+    comments: number;
+    shares: number;
+  }>;
+};
 
 const DEMO_QUEUE = [
   { id: 'demo-1', when: 'Today', time: '14:30', text: "The 3 metrics every solo founder should ignore (and the one you can't). A thread →", platforms: ['x', 'li'], status: 'scheduled', score: 92 },
   { id: 'demo-2', when: 'Today', time: '18:00', text: 'Behind the scenes of our new studio setup.', platforms: ['ig', 'fb'], status: 'ai', score: 88 },
-  { id: 'demo-3', when: 'Tomorrow', time: '09:15', text: "Hot take: most personal branding advice is just polished gatekeeping.", platforms: ['li', 'x'], status: 'draft', score: 76 },
+  { id: 'demo-3', when: 'Tomorrow', time: '09:15', text: 'Hot take: most personal branding advice is just polished gatekeeping.', platforms: ['li', 'x'], status: 'draft', score: 76 },
 ];
 
 const DEMO_TRENDS = [
@@ -55,6 +80,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose }) => {
   const { data: scheduled, unauth } = useApi<ScheduledRow[]>('/api/schedule');
   const { data: drafts } = useApi<DraftRow[]>('/api/drafts');
   const { data: trends } = useApi<TrendRow[]>('/api/trends?limit=5');
+  const { data: accounts } = useApi<AccountRow[]>('/api/accounts');
+  const fbConnected = !!accounts?.find((a) => a.platform === 'facebook' && !a.isStub);
+  const { data: facebookMe } = useApi<FacebookMe>(fbConnected ? '/api/platforms/facebook/me' : null);
 
   const queueRows = useMemo(() => {
     if (!scheduled || !drafts) return null;
@@ -71,6 +99,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose }) => {
           platforms: [PLATFORM_TO_SHORT[s.platform]],
           status: 'scheduled' as const,
           score: 0,
+          url: null as string | null,
         }));
     }
     if (tab === 'drafts') {
@@ -85,6 +114,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose }) => {
           platforms: d.targetPlatforms.map((p) => PLATFORM_TO_SHORT[p]),
           status: d.source === 'agent' ? ('ai' as const) : ('draft' as const),
           score: d.variants?.[0]?.score ?? 0,
+          url: null,
         }));
     }
     return (scheduled ?? [])
@@ -99,25 +129,55 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose }) => {
         platforms: [PLATFORM_TO_SHORT[s.platform]],
         status: 'scheduled' as const,
         score: 0,
+        url: s.platformPostUrl ?? null,
       }));
   }, [scheduled, drafts, tab]);
 
-  const showQueue = queueRows && queueRows.length > 0 ? queueRows : DEMO_QUEUE;
+  const showQueue = queueRows && queueRows.length > 0 ? queueRows : DEMO_QUEUE.map((q) => ({ ...q, url: null as string | null }));
+  const usingDemoQueue = !queueRows || queueRows.length === 0;
   const showTrends = (trends && trends.length > 0)
     ? trends.slice(0, 5).map((t, i) => ({
         rank: i + 1,
         title: t.title,
         vol: t.score ? `${t.score}` : '—',
-        delta: '+rank',
+        delta: t.source ?? 'fresh',
         niche: t.niche,
       }))
     : DEMO_TRENDS;
+  const usingDemoTrends = !trends || trends.length === 0;
+
+  const realConnected = (accounts ?? []).filter((a) => !a.isStub).length;
+  const totalConnected = (accounts ?? []).length;
 
   const stats = [
-    { label: 'Scheduled this week', value: String((scheduled ?? []).filter((s) => s.status === 'pending').length || 14), delta: 'live', up: true, spark: [4, 6, 5, 8, 7, 9, 11, 12, 14] },
-    { label: 'Drafts in queue', value: String((drafts ?? []).filter((d) => d.status === 'draft').length || 8), delta: 'live', up: true, spark: [3, 4, 3, 6, 5, 7, 6, 9, 8] },
-    { label: 'Trends watching', value: String((trends ?? []).length || 5), delta: 'live', up: true, spark: [80, 90, 85, 110, 105, 125, 120, 135, 142] },
-    { label: 'Connected platforms', value: '—', delta: '', up: true, spark: [40, 45, 50, 55, 52, 58, 60, 62, 64] },
+    {
+      label: 'Scheduled this week',
+      value: String((scheduled ?? []).filter((s) => s.status === 'pending').length),
+      delta: 'live',
+      up: true,
+      spark: [4, 6, 5, 8, 7, 9, 11, 12, 14],
+    },
+    {
+      label: 'Drafts in queue',
+      value: String((drafts ?? []).filter((d) => d.status === 'draft').length),
+      delta: 'live',
+      up: true,
+      spark: [3, 4, 3, 6, 5, 7, 6, 9, 8],
+    },
+    {
+      label: 'Trends watching',
+      value: String((trends ?? []).length),
+      delta: 'live',
+      up: true,
+      spark: [80, 90, 85, 110, 105, 125, 120, 135, 142],
+    },
+    {
+      label: 'Connected platforms',
+      value: `${realConnected}${totalConnected > realConnected ? ` (+${totalConnected - realConnected} stub)` : ''}`,
+      delta: 'live',
+      up: true,
+      spark: [40, 45, 50, 55, 52, 58, 60, 62, 64],
+    },
   ];
 
   return (
@@ -129,9 +189,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose }) => {
             Morning briefing · {new Date().toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
           </div>
           <h2>
-            {trends && trends.length > 0
-              ? <>I&apos;m watching {trends.length} trends in your niche. <em>Open compose to draft an angle.</em></>
-              : <>Two trends in your niche are spiking this morning. <em>I drafted three posts for you to review.</em></>}
+            {(scheduled ?? []).filter((s) => s.status === 'pending').length > 0
+              ? <><strong>{(scheduled ?? []).filter((s) => s.status === 'pending').length}</strong> posts queued for the coming days. <em>Open compose to draft another angle.</em></>
+              : trends && trends.length > 0
+                ? <>I&apos;m watching <strong>{trends.length}</strong> trends in your niches. <em>Open compose to draft an angle.</em></>
+                : <>Nothing queued yet. <em>Open compose to write your first post.</em></>}
           </h2>
           <p>
             {unauth
@@ -142,15 +204,12 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose }) => {
             <button className="btn accent" onClick={onCompose}>
               <Icon name="sparkle" size={13} /> Compose
             </button>
-            <a className="btn" href="/dashboard" onClick={(e) => { e.preventDefault(); }}>
-              <Icon name="trend" size={13} /> See trends
-            </a>
           </div>
         </div>
         <div className="briefing-meter">
           <div className="meter-tiny">Today&apos;s posting plan</div>
-          <div className="meter-row"><span>Posts queued</span><strong>{(scheduled ?? []).filter((s) => s.status === 'pending').length || 4} / {7}</strong></div>
-          <div className="meter-bar"><div className="fill" style={{ width: `${Math.min(100, (((scheduled ?? []).filter((s) => s.status === 'pending').length || 4) / 7) * 100)}%` }} /></div>
+          <div className="meter-row"><span>Posts queued</span><strong>{(scheduled ?? []).filter((s) => s.status === 'pending').length} / 7</strong></div>
+          <div className="meter-bar"><div className="fill" style={{ width: `${Math.min(100, (((scheduled ?? []).filter((s) => s.status === 'pending').length) / 7) * 100)}%` }} /></div>
           <div className="meter-divider" />
           <div className="meter-tiny">Best windows today</div>
           <div className="meter-row mono"><span>X · 09:15</span><span>+34%</span></div>
@@ -173,6 +232,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose }) => {
         ))}
       </div>
 
+      {facebookMe && !facebookMe.stub && (
+        <FacebookPageCard data={facebookMe} />
+      )}
+
       <div className="two-col">
         <div className="card">
           <div className="card-head">
@@ -180,6 +243,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose }) => {
               <Icon name="clock" size={14} />
               Posting queue
               <span className="chip live"><span className="dot" />Live</span>
+              {usingDemoQueue && <span className="chip ghost mono">demo</span>}
             </h3>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               <div className="mode-switch" style={{ padding: 2 }}>
@@ -214,6 +278,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose }) => {
                     {q.status === 'scheduled' && <span className="chip"><span className="dot" style={{ background: 'var(--good)' }} />Scheduled</span>}
                     {q.status === 'draft' && <span className="chip"><span className="dot" />Draft</span>}
                     {q.score > 0 && <span className="chip ghost mono">Score {q.score}</span>}
+                    {q.url && (
+                      <a className="chip ghost mono" href={q.url} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
+                        <Icon name="arrow_right" size={10} /> View
+                      </a>
+                    )}
                   </div>
                 </div>
                 <div className="queue-actions">
@@ -234,7 +303,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose }) => {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div className="card">
             <div className="card-head">
-              <h3><Icon name="fire" size={14} /> Trending in your niche</h3>
+              <h3>
+                <Icon name="fire" size={14} /> Trending in your niche
+                {usingDemoTrends && <span className="chip ghost mono">demo</span>}
+              </h3>
               <span className="meta">Hourly</span>
             </div>
             <div className="card-body flush">
@@ -260,11 +332,92 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose }) => {
               )}
             </div>
           </div>
+
+          {accounts && accounts.length > 0 && (
+            <div className="card">
+              <div className="card-head">
+                <h3><Icon name="globe" size={14} /> Connected accounts</h3>
+                <span className="meta">{realConnected} live</span>
+              </div>
+              <div className="card-body flush">
+                {accounts.map((a) => (
+                  <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', borderBottom: '1px solid var(--line)' }}>
+                    <Pglyph p={PLATFORM_TO_SHORT[a.platform]} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 500 }}>
+                        {a.displayName || a.meta?.pageName || a.handle || a.platform}
+                      </div>
+                      <div className="mono" style={{ fontSize: 11, color: 'var(--ink-3)' }}>
+                        {a.handle ? `@${a.handle}` : a.platform}
+                        {a.isStub && <> · stub</>}
+                      </div>
+                    </div>
+                    {a.isStub
+                      ? <span className="chip ghost mono">stub</span>
+                      : <span className="chip"><span className="dot" style={{ background: 'var(--good)' }} />Live</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </>
   );
 };
+
+const FacebookPageCard: React.FC<{ data: FacebookMe }> = ({ data }) => (
+  <div className="card" style={{ marginBottom: 16 }}>
+    <div className="card-head">
+      <h3>
+        <Pglyph p="fb" />
+        {data.page.name}
+        {data.page.category && <span className="chip ghost mono">{data.page.category}</span>}
+      </h3>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <span className="meta mono">{data.followerCount.toLocaleString()} followers</span>
+        {data.page.link && (
+          <a className="btn sm ghost" href={data.page.link} target="_blank" rel="noreferrer">
+            <Icon name="arrow_right" size={11} /> Page
+          </a>
+        )}
+      </div>
+    </div>
+    <div className="card-body" style={{ display: 'grid', gridTemplateColumns: data.recentPosts.length > 0 ? '1fr 1fr 1fr' : '1fr', gap: 12 }}>
+      {data.recentPosts.length === 0 ? (
+        <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>
+          No posts on this Page yet. Use Compose → Post Now to publish your first.
+        </div>
+      ) : (
+        data.recentPosts.slice(0, 3).map((p) => (
+          <a
+            key={p.id}
+            href={p.url ?? '#'}
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              display: 'flex', flexDirection: 'column', gap: 8, padding: 12,
+              border: '1px solid var(--line)', borderRadius: 10,
+              background: 'var(--bg-sunk)', textDecoration: 'none', color: 'inherit',
+            }}
+          >
+            <div style={{ fontSize: 11, color: 'var(--ink-3)' }} className="mono">
+              {new Date(p.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+            </div>
+            <div style={{ fontSize: 12.5, color: 'var(--ink-2)', lineHeight: 1.45, display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+              {p.message || '(no caption)'}
+            </div>
+            <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--ink-3)' }} className="mono">
+              <span>♡ {p.likes}</span>
+              <span>💬 {p.comments}</span>
+              <span>↻ {p.shares}</span>
+            </div>
+          </a>
+        ))
+      )}
+    </div>
+  </div>
+);
 
 function relWhen(iso: string): string {
   const d = new Date(iso);

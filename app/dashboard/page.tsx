@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useUser } from '@clerk/nextjs';
 import { Sidebar, Topbar } from '../../components/shell';
 import Dashboard from '../../components/dashboard';
 import Compose from '../../components/compose';
@@ -11,28 +12,40 @@ import Onboarding from '../../components/onboarding';
 type Page = 'dashboard' | 'compose' | 'agent' | 'calendar' | 'onboarding';
 type Mode = 'manual' | 'auto';
 
-const PAGE_META: Record<Exclude<Page, 'onboarding'>, { crumbs: string[]; h1: string; sub: string }> = {
-  dashboard: {
-    crumbs: ['Sociafy', 'Workspace', 'Dashboard'],
-    h1: 'Good morning, Jordan',
-    sub: "Here's what your agent did overnight, and what's queued for today.",
-  },
-  compose: {
-    crumbs: ['Sociafy', 'Workspace', 'Compose'],
-    h1: 'Compose',
-    sub: "Tell the agent what to write — it'll adapt for every platform.",
-  },
-  agent: {
-    crumbs: ['Sociafy', 'Workspace', 'Auto-pilot'],
-    h1: 'Auto-pilot',
-    sub: "Your agent's activity, guardrails, and what it's watching.",
-  },
-  calendar: {
-    crumbs: ['Sociafy', 'Workspace', 'Calendar'],
-    h1: 'Calendar',
-    sub: 'Drag, schedule, or let the agent fill the gaps.',
-  },
-};
+function greetingFor(name: string | null | undefined): string {
+  const hour = new Date().getHours();
+  const slot = hour < 5 ? 'evening' : hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening';
+  const first = (name || '').split(' ')[0] || 'there';
+  return `Good ${slot}, ${first}`;
+}
+
+function usePageMeta(page: Exclude<Page, 'onboarding'>, displayName: string | null | undefined) {
+  return useMemo(() => {
+    const base: Record<Exclude<Page, 'onboarding'>, { crumbs: string[]; h1: string; sub: string }> = {
+      dashboard: {
+        crumbs: ['Sociafy', 'Workspace', 'Dashboard'],
+        h1: greetingFor(displayName),
+        sub: "Here's what's queued for today and what your agent has been watching.",
+      },
+      compose: {
+        crumbs: ['Sociafy', 'Workspace', 'Compose'],
+        h1: 'Compose',
+        sub: "Tell the agent what to write — it'll adapt for every platform.",
+      },
+      agent: {
+        crumbs: ['Sociafy', 'Workspace', 'Auto-pilot'],
+        h1: 'Auto-pilot',
+        sub: "Your agent's activity, guardrails, and what it's watching.",
+      },
+      calendar: {
+        crumbs: ['Sociafy', 'Workspace', 'Calendar'],
+        h1: 'Calendar',
+        sub: 'Drag, schedule, or let the agent fill the gaps.',
+      },
+    };
+    return base[page];
+  }, [page, displayName]);
+}
 
 const RefreshIcon = () => (
   <svg width={13} height={13} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
@@ -55,6 +68,7 @@ const SparkleIcon = () => (
 export default function Home() {
   const [page, setPage] = useState<Page>('dashboard');
   const [mode, setMode] = useState<Mode>('manual');
+  const { user } = useUser();
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -69,11 +83,12 @@ export default function Home() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
+  const displayName = user?.firstName || user?.fullName || user?.username || null;
+  const meta = usePageMeta(page === 'onboarding' ? 'dashboard' : page, displayName);
+
   if (page === 'onboarding') {
     return <Onboarding onDone={() => setPage('dashboard')} />;
   }
-
-  const meta = PAGE_META[page];
 
   return (
     <div className="app">

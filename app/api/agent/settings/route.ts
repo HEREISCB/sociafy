@@ -35,7 +35,11 @@ export async function PATCH(req: NextRequest) {
     if (body?.quietHours) patch.quietHours = body.quietHours;
     if (typeof body?.brandSafetyStrict === 'boolean') patch.brandSafetyStrict = body.brandSafetyStrict;
     if (Array.isArray(body?.niches)) {
-      patch.niches = body.niches.filter((n: string) => (NICHES as readonly string[]).includes(n));
+      // Allow both predefined niches and user-defined custom niches (free text).
+      patch.niches = body.niches
+        .filter((n: unknown): n is string => typeof n === 'string')
+        .map((n: string) => n.trim().toLowerCase().replace(/\s+/g, '-').slice(0, 40))
+        .filter((n: string) => n.length > 0);
     }
     if (typeof body?.voiceTemplate === 'string' && (VOICE_TEMPLATES as readonly string[]).includes(body.voiceTemplate)) {
       patch.voiceTemplate = body.voiceTemplate;

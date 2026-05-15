@@ -279,14 +279,18 @@ const AgentPage: React.FC = () => {
                 No niches selected yet. Set them in <a href="/onboarding" style={{ textDecoration: 'underline', color: 'var(--ink)' }}>onboarding</a>.
               </div>
             )}
-            {niches.map((n) => (
-              <div key={n} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', borderRadius: 8, background: 'var(--bg-sunk)' }}>
-                <div>
-                  <div style={{ fontSize: 12.5, fontWeight: 500 }}>{NICHE_LABELS[n]}</div>
-                  <div className="mono" style={{ fontSize: 10.5, color: 'var(--ink-3)' }}>RSS + community signals</div>
+            {niches.map((n) => {
+              const label = NICHE_LABELS[n as keyof typeof NICHE_LABELS] ?? n.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+              const isCustom = !NICHE_LABELS[n as keyof typeof NICHE_LABELS];
+              return (
+                <div key={n} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', borderRadius: 8, background: 'var(--bg-sunk)' }}>
+                  <div>
+                    <div style={{ fontSize: 12.5, fontWeight: 500 }}>{label}</div>
+                    <div className="mono" style={{ fontSize: 10.5, color: 'var(--ink-3)' }}>{isCustom ? 'custom niche' : 'RSS + community signals'}</div>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>

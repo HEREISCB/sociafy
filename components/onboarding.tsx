@@ -48,10 +48,19 @@ type Account = {
 const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
   const [step, setStep] = useState(0);
   const [topics, setTopics] = useState<string[]>([]);
+  const [customNiche, setCustomNiche] = useState('');
   const [voice, setVoice] = useState<'me' | 'punchy' | 'thoughtful' | 'data-led'>('me');
   const [savingTopics, setSavingTopics] = useState(false);
   const [savingVoice, setSavingVoice] = useState(false);
   const [enabling, setEnabling] = useState(false);
+
+  const addCustomNiche = () => {
+    const v = customNiche.trim().toLowerCase().replace(/\s+/g, '-').slice(0, 40);
+    if (!v) return;
+    if (topics.includes(v)) { setCustomNiche(''); return; }
+    setTopics((prev) => [...prev, v]);
+    setCustomNiche('');
+  };
 
   const { data: accounts, mutate: refetchAccounts, unauth } = useApi<Account[]>('/api/accounts');
   const { data: settings, mutate: refetchSettings } = useApi<{ niches: string[]; voiceTemplate: 'me' | 'punchy' | 'thoughtful' | 'data-led' }>('/api/agent/settings');
@@ -193,6 +202,35 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
                   <span className="topic-sub">{t.sub}</span>
                 </div>
               ))}
+              {topics.filter((t) => !TOPICS.some((p) => p.id === t)).map((custom) => (
+                <div key={custom} className="topic active" onClick={() => toggleTopic(custom)}>
+                  <span className="topic-label">{custom}</span>
+                  <span className="topic-sub">custom</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+              <input
+                type="text"
+                value={customNiche}
+                onChange={(e) => setCustomNiche(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCustomNiche(); } }}
+                placeholder="Add your own niche — e.g. real estate, prompt engineering, climate tech…"
+                style={{
+                  flex: 1,
+                  padding: '10px 14px',
+                  border: '1px solid var(--line-2)',
+                  borderRadius: 10,
+                  fontSize: 13.5,
+                  background: 'var(--bg-elev)',
+                  color: 'var(--ink)',
+                  outline: 'none',
+                  fontFamily: 'inherit',
+                }}
+              />
+              <button className="btn" onClick={addCustomNiche} disabled={!customNiche.trim()}>
+                <Icon name="plus" size={12} /> Add
+              </button>
             </div>
             <div style={{ padding: 14, background: 'var(--bg-elev)', border: '1px solid var(--line)', borderRadius: 10, fontSize: 12.5, color: 'var(--ink-3)', display: 'flex', gap: 10, alignItems: 'center', marginBottom: 32 }}>
               <Icon name="bolt" size={14} style={{ color: 'var(--accent)', flexShrink: 0 }} />

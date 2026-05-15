@@ -322,8 +322,33 @@ const Compose: React.FC = () => {
   };
 
   const postNow = async () => {
-    // Schedule for "now" — the cron picks it up on next tick. For dev, the cron must be hit manually or via Vercel Cron.
-    await schedule(new Date().toISOString());
+    setBusy('post');
+    setToast(null);
+    try {
+      const draft = await createDraft();
+      const fullPlatforms = platforms.map((s) => SHORT_TO_PLATFORM[s]).filter(Boolean) as Platform[];
+      const r = await apiPost<{ results: Array<{ platform: string; ok: boolean; url?: string | null; error?: string }> }>(
+        '/api/publish',
+        { draftId: draft.id, platforms: fullPlatforms },
+      );
+      const ok = r.results.filter((res) => res.ok);
+      const failed = r.results.filter((res) => !res.ok);
+      if (ok.length > 0 && failed.length === 0) {
+        const urls = ok.filter((res) => res.url).map((res) => `${res.platform}: ${res.url}`).join('  ·  ');
+        setToast(`Published to ${ok.map((res) => res.platform).join(', ')}${urls ? ` — ${urls}` : ''}`);
+        setTimeout(() => router.push('/dashboard'), 1200);
+      } else if (ok.length > 0 && failed.length > 0) {
+        setToast(`Partial: published to ${ok.map((res) => res.platform).join(', ')}; failed on ${failed.map((res) => `${res.platform} (${res.error})`).join(', ')}`);
+      } else {
+        setToast(`Publish failed: ${failed.map((res) => `${res.platform}: ${res.error}`).join('; ')}`);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.startsWith('401') || msg.startsWith('503')) setToast('Sign in to publish.');
+      else setToast(`Publish failed: ${msg}`);
+    } finally {
+      setBusy(null);
+    }
   };
 
   const scheduleIn30 = async () => {
