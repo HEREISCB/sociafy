@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { UserButton, useUser } from '@clerk/nextjs';
 import { Icon } from './icons';
 
-type Page = 'dashboard' | 'compose' | 'agent' | 'calendar' | 'onboarding';
+type Page = 'dashboard' | 'compose' | 'agent' | 'calendar' | 'connections' | 'onboarding';
 type Mode = 'manual' | 'auto';
 
 interface ModeSwitchProps {
@@ -51,11 +51,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ page, onNav, showTTS = true })
     { id: 'compose' as Page, label: 'Compose', icon: 'sparkle' as const, kbd: '2', badge: 'AI', accent: true },
     { id: 'agent' as Page, label: 'Auto-pilot', icon: 'bolt' as const, kbd: '3' },
     { id: 'calendar' as Page, label: 'Calendar', icon: 'calendar' as const, kbd: '4' },
-  ];
-  const items2 = [
-    { id: 'inbox', label: 'Inbox', icon: 'inbox' as const, badge: '12' },
-    { id: 'analytics', label: 'Analytics', icon: 'chart' as const },
-    { id: 'library', label: 'Library', icon: 'folder' as const },
+    { id: 'connections' as Page, label: 'Connections', icon: 'globe' as const, kbd: '5' },
   ];
 
   return (
@@ -79,17 +75,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ page, onNav, showTTS = true })
               <span className={`badge ${it.accent ? 'accent' : ''}`}>{it.badge}</span>
             )}
             {!it.badge && <span className="kbd">⌘{it.kbd}</span>}
-          </div>
-        ))}
-      </div>
-
-      <div className="nav-section">
-        <div className="nav-label">Insights</div>
-        {items2.map((it) => (
-          <div key={it.id} className="nav-item">
-            <Icon name={it.icon} className="ic" />
-            {it.label}
-            {it.badge && <span className="badge">{it.badge}</span>}
           </div>
         ))}
       </div>

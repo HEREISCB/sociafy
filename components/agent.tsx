@@ -235,42 +235,62 @@ const AgentPage: React.FC = () => {
           <div className="card-body" style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
             {!trendsNew || trendsNew.length === 0 ? (
               <div style={{ fontSize: 13, color: 'var(--ink-3)', padding: 10 }}>
-                No fresh trends yet. Click <strong>Pull fresh trends</strong> above to ingest from your niches&apos; RSS feeds.
+                No fresh trends yet. Click <strong>Pull fresh trends</strong> above to ingest from your niches.
               </div>
             ) : (
-              trendsNew.map((t) => (
-                <div key={t.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: 12, background: 'var(--bg-sunk)', border: '1px solid var(--line)', borderRadius: 10 }}>
-                  <div style={{ minWidth: 40, fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 600, color: 'var(--accent)' }}>
-                    {t.score}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13.5, fontWeight: 500, lineHeight: 1.45 }}>
-                      {t.sourceUrl ? (
-                        <a href={t.sourceUrl} target="_blank" rel="noreferrer" style={{ color: 'inherit', textDecoration: 'none' }}>
-                          {t.title}
-                        </a>
-                      ) : (
-                        t.title
-                      )}
+              trendsNew.map((t) => {
+                const Tag: keyof React.JSX.IntrinsicElements = t.sourceUrl ? 'a' : 'div';
+                return (
+                  <Tag
+                    key={t.id}
+                    {...(t.sourceUrl ? { href: t.sourceUrl, target: '_blank', rel: 'noreferrer' } : {})}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 14,
+                      padding: 14,
+                      background: 'var(--bg-sunk)',
+                      border: '1px solid var(--line)',
+                      borderRadius: 10,
+                      textDecoration: 'none',
+                      color: 'inherit',
+                      cursor: t.sourceUrl ? 'pointer' : 'default',
+                      transition: 'background 120ms ease, border-color 120ms ease',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!t.sourceUrl) return;
+                      (e.currentTarget as HTMLElement).style.borderColor = 'var(--accent)';
+                      (e.currentTarget as HTMLElement).style.background = 'var(--bg-elev)';
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLElement).style.borderColor = 'var(--line)';
+                      (e.currentTarget as HTMLElement).style.background = 'var(--bg-sunk)';
+                    }}
+                  >
+                    <div style={{ minWidth: 44, fontFamily: 'var(--mono)', fontSize: 15, fontWeight: 600, color: 'var(--accent)', flexShrink: 0, textAlign: 'left' }}>
+                      {t.score}
                     </div>
-                    {t.summary && (
-                      <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 3, lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                        {t.summary}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 500, lineHeight: 1.4, color: 'var(--ink)' }}>
+                        {t.title}
                       </div>
-                    )}
-                    <div className="mono" style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 5, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                      <span className="chip">{t.niche}</span>
-                      {t.source && <span>{t.source}</span>}
-                      <span>· {relTime(t.capturedAt)}</span>
+                      {t.summary && (
+                        <div style={{ fontSize: 12.5, color: 'var(--ink-3)', marginTop: 5, lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                          {t.summary}
+                        </div>
+                      )}
+                      <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }} className="mono">
+                        <span className="chip">{t.niche}</span>
+                        {t.source && <span>{t.source}</span>}
+                        <span>· {relTime(t.capturedAt)}</span>
+                      </div>
                     </div>
-                  </div>
-                  {t.sourceUrl && (
-                    <a className="btn sm ghost" href={t.sourceUrl} target="_blank" rel="noreferrer">
-                      <Icon name="arrow_right" size={11} /> Open
-                    </a>
-                  )}
-                </div>
-              ))
+                    {t.sourceUrl && (
+                      <Icon name="arrow_right" size={14} style={{ color: 'var(--ink-3)', flexShrink: 0, marginTop: 4 }} />
+                    )}
+                  </Tag>
+                );
+              })
             )}
           </div>
         </div>

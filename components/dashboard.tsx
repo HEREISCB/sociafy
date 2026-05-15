@@ -64,18 +64,6 @@ type FacebookMe = {
   }>;
 };
 
-const DEMO_QUEUE = [
-  { id: 'demo-1', when: 'Today', time: '14:30', text: "The 3 metrics every solo founder should ignore (and the one you can't). A thread →", platforms: ['x', 'li'], status: 'scheduled', score: 92 },
-  { id: 'demo-2', when: 'Today', time: '18:00', text: 'Behind the scenes of our new studio setup.', platforms: ['ig', 'fb'], status: 'ai', score: 88 },
-  { id: 'demo-3', when: 'Tomorrow', time: '09:15', text: 'Hot take: most personal branding advice is just polished gatekeeping.', platforms: ['li', 'x'], status: 'draft', score: 76 },
-];
-
-const DEMO_TRENDS = [
-  { rank: 1, title: 'Rise of "agentic content" workflows', vol: '24.1k', delta: '+312%', niche: 'Marketing' },
-  { rank: 2, title: '#BuildInPublic resurgence on LinkedIn', vol: '18.7k', delta: '+148%', niche: 'Founders' },
-  { rank: 3, title: 'Vertical video gets a comeback on X', vol: '12.3k', delta: '+96%', niche: 'Creator' },
-];
-
 interface DashboardProps {
   mode: string;
   onCompose: () => void;
@@ -152,18 +140,15 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose }) => {
       }));
   }, [scheduled, drafts, tab]);
 
-  const showQueue = queueRows && queueRows.length > 0 ? queueRows : DEMO_QUEUE.map((q) => ({ ...q, url: null as string | null }));
-  const usingDemoQueue = !queueRows || queueRows.length === 0;
-  const showTrends = (trends && trends.length > 0)
-    ? trends.slice(0, 5).map((t, i) => ({
-        rank: i + 1,
-        title: t.title,
-        vol: t.score ? `${t.score}` : '—',
-        delta: t.source ?? 'fresh',
-        niche: t.niche,
-      }))
-    : DEMO_TRENDS;
-  const usingDemoTrends = !trends || trends.length === 0;
+  const showQueue = queueRows ?? [];
+  const showTrends = (trends ?? []).slice(0, 5).map((t, i) => ({
+    rank: i + 1,
+    title: t.title,
+    vol: t.score ? `${t.score}` : '—',
+    delta: t.source ?? 'fresh',
+    niche: t.niche,
+    sourceUrl: t.source,
+  }));
 
   const realConnected = (accounts ?? []).filter((a) => !a.isStub).length;
   const totalConnected = (accounts ?? []).length;
@@ -266,7 +251,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose }) => {
               <Icon name="clock" size={14} />
               Posting queue
               <span className="chip live"><span className="dot" />Live</span>
-              {usingDemoQueue && <span className="chip ghost mono">demo</span>}
             </h3>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               <div className="mode-switch" style={{ padding: 2 }}>
@@ -316,8 +300,16 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose }) => {
               </div>
             ))}
             {showQueue.length === 0 && (
-              <div style={{ padding: 24, fontSize: 13, color: 'var(--ink-3)', textAlign: 'center' }}>
-                Nothing in this tab yet. Try Compose →
+              <div style={{ padding: 28, fontSize: 13, color: 'var(--ink-3)', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+                <Icon name="clock" size={18} style={{ color: 'var(--ink-4)' }} />
+                <div style={{ maxWidth: 320, lineHeight: 1.5 }}>
+                  {tab === 'upcoming' && 'No scheduled posts yet. Use Compose to draft one, then Schedule.'}
+                  {tab === 'drafts' && 'No drafts yet. Compose a post or run the agent to auto-draft.'}
+                  {tab === 'posted' && "No published posts yet. Once you publish, they'll show up here."}
+                </div>
+                <button className="btn primary" onClick={onCompose}>
+                  <Icon name="sparkle" size={12} /> Open Compose
+                </button>
               </div>
             )}
           </div>
@@ -328,9 +320,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose }) => {
             <div className="card-head">
               <h3>
                 <Icon name="fire" size={14} /> Trending in your niche
-                {usingDemoTrends && <span className="chip ghost mono">demo</span>}
               </h3>
-              <span className="meta">Hourly</span>
+              <span className="meta">Live · HN + dev.to + Reddit</span>
             </div>
             <div className="card-body flush">
               {showTrends.map((t) => (
@@ -350,7 +341,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose }) => {
               ))}
               {showTrends.length === 0 && (
                 <div style={{ padding: 18, fontSize: 13, color: 'var(--ink-3)' }}>
-                  No trends yet — the trend monitor runs every hour.
+                  No trends yet. Auto-pilot → <strong>Pull fresh trends</strong>.
                 </div>
               )}
             </div>

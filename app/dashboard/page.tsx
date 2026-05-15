@@ -8,9 +8,10 @@ import Dashboard from '../../components/dashboard';
 import Compose from '../../components/compose';
 import AgentPage from '../../components/agent';
 import CalendarPage from '../../components/calendar';
+import ConnectionsPage from '../../components/connections';
 import Onboarding from '../../components/onboarding';
 
-type Page = 'dashboard' | 'compose' | 'agent' | 'calendar' | 'onboarding';
+type Page = 'dashboard' | 'compose' | 'agent' | 'calendar' | 'connections' | 'onboarding';
 type Mode = 'manual' | 'auto';
 
 function greetingFor(name: string | null | undefined): string {
@@ -42,6 +43,11 @@ function usePageMeta(page: Exclude<Page, 'onboarding'>, displayName: string | nu
         crumbs: ['Sociafy', 'Workspace', 'Calendar'],
         h1: 'Calendar',
         sub: 'Drag, schedule, or let the agent fill the gaps.',
+      },
+      connections: {
+        crumbs: ['Sociafy', 'Workspace', 'Connections'],
+        h1: 'Connections',
+        sub: 'Connect, reconnect, or disconnect every platform Sociafy posts to.',
       },
     };
     return base[page];
@@ -89,6 +95,7 @@ export default function Home() {
         if (e.key === '2') { e.preventDefault(); setPage('compose'); }
         if (e.key === '3') { e.preventDefault(); setPage('agent'); }
         if (e.key === '4') { e.preventDefault(); setPage('calendar'); }
+        if (e.key === '5') { e.preventDefault(); setPage('connections'); }
       }
     };
     window.addEventListener('keydown', handler);
@@ -133,6 +140,7 @@ export default function Home() {
           {page === 'compose' && <Compose />}
           {page === 'agent' && <AgentPage />}
           {page === 'calendar' && <CalendarPage />}
+          {page === 'connections' && <ConnectionsPage />}
         </div>
       </div>
     </div>
