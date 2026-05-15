@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Icon } from './icons';
-import { apiPatch, useApi } from '../lib/ui/fetcher';
+import { apiPatch, apiPost, useApi } from '../lib/ui/fetcher';
 import type { Niche } from '../lib/db/schema';
 
 type AgentSettings = {
@@ -71,7 +71,7 @@ const DEMO_FEED: Activity[] = [
 
 const AgentPage: React.FC = () => {
   const { data: settings, mutate: refetchSettings, unauth } = useApi<AgentSettings>('/api/agent/settings');
-  const { data: activity } = useApi<Activity[]>('/api/activity?limit=30');
+  const { data: activity, mutate: refetchActivity } = useApi<Activity[]>('/api/activity?limit=30');
 
   const [autopilot, setAutopilot] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -80,6 +80,46 @@ const AgentPage: React.FC = () => {
   const [threshold, setThreshold] = useState(90);
   const [strict, setStrict] = useState(true);
   const [savingInstr, setSavingInstr] = useState(false);
+  const [running, setRunning] = useState<'agent' | 'trends' | null>(null);
+  const [runMsg, setRunMsg] = useState<string | null>(null);
+
+  const runAgentNow = async () => {
+    setRunning('agent');
+    setRunMsg(null);
+    try {
+      const r = await apiPost<{ drafted: number; published: number; held: number; reason?: string }>(
+        '/api/agent/run',
+        {},
+      );
+      if (r.reason) {
+        setRunMsg(`Skipped: ${r.reason.replace(/_/g, ' ')}`);
+      } else {
+        setRunMsg(`Drafted ${r.drafted} · scheduled ${r.published} · held ${r.held}`);
+      }
+      await refetchActivity();
+      await refetchSettings();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setRunMsg(`Failed: ${msg}`);
+    } finally {
+      setRunning(null);
+    }
+  };
+
+  const refreshTrends = async () => {
+    setRunning('trends');
+    setRunMsg(null);
+    try {
+      const r = await apiPost<{ inserted: number; reason?: string }>('/api/trends/refresh', {});
+      if (r.reason) setRunMsg(`Skipped: ${r.reason.replace(/_/g, ' ')}`);
+      else setRunMsg(`Pulled ${r.inserted} trends from your niches`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setRunMsg(`Failed: ${msg}`);
+    } finally {
+      setRunning(null);
+    }
+  };
 
   useEffect(() => {
     if (!settings) return;
@@ -143,6 +183,25 @@ const AgentPage: React.FC = () => {
             <button className={`btn ${autopilot ? '' : 'primary'}`} onClick={() => saveAutopilot(!autopilot)} disabled={unauth}>
               {autopilot ? <><Icon name="pause" size={12} /> Pause</> : <><Icon name="play" size={12} /> Resume</>}
             </button>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-head">
+            <h3><Icon name="bolt" size={14} /> Manual triggers</h3>
+            {runMsg && <span className="chip ghost mono">{runMsg}</span>}
+          </div>
+          <div className="card-body" style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <button className="btn primary" onClick={refreshTrends} disabled={running !== null || unauth}>
+              <Icon name="refresh" size={12} /> {running === 'trends' ? 'Refreshing…' : 'Pull fresh trends'}
+            </button>
+            <button className="btn accent" onClick={runAgentNow} disabled={running !== null || unauth}>
+              <Icon name="sparkle" size={12} /> {running === 'agent' ? 'Drafting…' : 'Run agent now'}
+            </button>
+            <div style={{ flex: 1 }} />
+            <span style={{ fontSize: 11.5, color: 'var(--ink-3)', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Icon name="bolt" size={11} /> Bypasses the weekly cadence cap. Demo + testing.
+            </span>
           </div>
         </div>
 

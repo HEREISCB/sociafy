@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { Icon, Pglyph, Spark } from './icons';
-import { apiPost, useApi } from '../lib/ui/fetcher';
+import { apiDelete, apiPost, useApi } from '../lib/ui/fetcher';
 import { PLATFORM_TO_SHORT } from '../lib/ui/platforms';
 import type { Platform } from '../lib/db/schema';
 
@@ -87,7 +87,18 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose }) => {
   const { data: scheduled, unauth } = useApi<ScheduledRow[]>('/api/schedule');
   const { data: drafts } = useApi<DraftRow[]>('/api/drafts');
   const { data: trends } = useApi<TrendRow[]>('/api/trends?limit=5');
-  const { data: accounts } = useApi<AccountRow[]>('/api/accounts');
+  const { data: accounts, mutate: refetchAccounts } = useApi<AccountRow[]>('/api/accounts');
+  const [disconnecting, setDisconnecting] = useState<string | null>(null);
+  const disconnect = async (id: string) => {
+    if (!confirm('Disconnect this account? You can reconnect anytime.')) return;
+    setDisconnecting(id);
+    try {
+      await apiDelete(`/api/accounts/${id}`);
+      await refetchAccounts();
+    } finally {
+      setDisconnecting(null);
+    }
+  };
   const { data: activity } = useApi<ActivityRow[]>('/api/activity?limit=8');
   const fbConnected = !!accounts?.find((a) => a.platform === 'facebook' && !a.isStub);
   const { data: facebookMe } = useApi<FacebookMe>(fbConnected ? '/api/platforms/facebook/me' : null);
@@ -392,6 +403,15 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose }) => {
                     {a.isStub
                       ? <span className="chip ghost mono">stub</span>
                       : <span className="chip"><span className="dot" style={{ background: 'var(--good)' }} />Live</span>}
+                    <button
+                      className="icon-btn"
+                      title="Disconnect"
+                      onClick={() => disconnect(a.id)}
+                      disabled={disconnecting === a.id}
+                      style={{ marginLeft: 4 }}
+                    >
+                      <Icon name="x" size={12} />
+                    </button>
                   </div>
                 ))}
               </div>

@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { Icon } from './icons';
-import { useApi } from '../lib/ui/fetcher';
+import { apiDelete, apiPatch, useApi } from '../lib/ui/fetcher';
 import { PLATFORM_TO_SHORT } from '../lib/ui/platforms';
 import type { Platform } from '../lib/db/schema';
 
@@ -14,6 +14,7 @@ type ScheduledRow = {
   scheduledAt: string;
   status: 'pending' | 'publishing' | 'published' | 'failed' | 'canceled';
   text: string;
+  platformPostUrl?: string | null;
 };
 
 type CalEvent = {
@@ -65,7 +66,31 @@ const CalendarPage: React.FC = () => {
   });
 
   const url = `/api/schedule?from=${weekStart.toISOString()}&to=${weekEnd.toISOString()}`;
-  const { data, unauth } = useApi<ScheduledRow[]>(url);
+  const { data, unauth, mutate } = useApi<ScheduledRow[]>(url);
+  const [selected, setSelected] = useState<ScheduledRow | null>(null);
+  const [savingId, setSavingId] = useState<string | null>(null);
+
+  const cancelScheduled = async (id: string) => {
+    if (!confirm('Cancel this scheduled post? It will not be published.')) return;
+    setSavingId(id);
+    try {
+      await apiDelete(`/api/schedule/${id}`);
+      await mutate();
+      setSelected(null);
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const rescheduleScheduled = async (id: string, whenIso: string) => {
+    setSavingId(id);
+    try {
+      await apiPatch(`/api/schedule/${id}`, { scheduledAt: whenIso });
+      await mutate();
+    } finally {
+      setSavingId(null);
+    }
+  };
 
   const events: CalEvent[] = useMemo(() => {
     if (!data) return [];
@@ -157,31 +182,101 @@ const CalendarPage: React.FC = () => {
           {days.map((_, dayIdx) => (
             <div key={dayIdx} className="cal-day-col">
               {HOURS.map((_, hi) => <div key={hi} className="cal-slot" />)}
-              {all.filter((e) => e.day === dayIdx).map((e) => (
-                <div
-                  key={e.id}
-                  className={`cal-event ${e.type}`}
-                  style={{ top: e.start * slotH + 2, height: e.span * slotH - 6 }}
-                >
-                  <div className="ev-time">{e.time}</div>
-                  <div className="ev-title">{e.title}</div>
-                  <div style={{ display: 'flex', gap: 2, marginTop: 3 }}>
-                    {e.plats.map((p) => (
-                      <span key={p} className={`pglyph ${p}`} style={{ width: 12, height: 12, fontSize: 8, borderRadius: 3 }}>
-                        {platGlyphs[p]}
-                      </span>
-                    ))}
+              {all.filter((e) => e.day === dayIdx).map((e) => {
+                const real = data?.find((s) => s.id === e.id) ?? null;
+                return (
+                  <div
+                    key={e.id}
+                    className={`cal-event ${e.type}`}
+                    style={{
+                      top: e.start * slotH + 2,
+                      height: e.span * slotH - 6,
+                      cursor: real ? 'pointer' : 'default',
+                      opacity: savingId === e.id ? 0.5 : 1,
+                    }}
+                    onClick={() => real && setSelected(real)}
+                  >
+                    <div className="ev-time">{e.time}</div>
+                    <div className="ev-title">{e.title}</div>
+                    <div style={{ display: 'flex', gap: 2, marginTop: 3 }}>
+                      {e.plats.map((p) => (
+                        <span key={p} className={`pglyph ${p}`} style={{ width: 12, height: 12, fontSize: 8, borderRadius: 3 }}>
+                          {platGlyphs[p]}
+                        </span>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
               {dayIdx === todayIdx && sameWeek(today, weekStart) && <div className="cal-now" style={{ top: nowOffset }} />}
             </div>
           ))}
         </div>
       </div>
+
+      {selected && (
+        <div
+          onClick={() => setSelected(null)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(10,10,10,0.4)',
+            display: 'grid', placeItems: 'center', zIndex: 50,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'var(--bg-elev)', border: '1px solid var(--line)',
+              borderRadius: 16, padding: 24, width: 'min(520px, 90vw)',
+              boxShadow: '0 24px 60px -24px rgba(0,0,0,0.3)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+              <span className={`pglyph ${PLATFORM_TO_SHORT[selected.platform]}`} style={{ width: 22, height: 22 }}>
+                {platGlyphs[PLATFORM_TO_SHORT[selected.platform]]}
+              </span>
+              <h3 style={{ margin: 0, fontSize: 16, letterSpacing: '-0.01em' }}>
+                {selected.platform} · {new Date(selected.scheduledAt).toLocaleString()}
+              </h3>
+              <button className="icon-btn" style={{ marginLeft: 'auto' }} onClick={() => setSelected(null)}>
+                <Icon name="x" size={14} />
+              </button>
+            </div>
+            <div style={{ fontSize: 13.5, lineHeight: 1.55, whiteSpace: 'pre-wrap', padding: 14, background: 'var(--bg-sunk)', borderRadius: 10, marginBottom: 14, color: 'var(--ink-2)' }}>
+              {selected.text}
+            </div>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              <label style={{ fontSize: 12, color: 'var(--ink-3)' }}>Reschedule</label>
+              <input
+                type="datetime-local"
+                defaultValue={toLocalInputValue(selected.scheduledAt)}
+                onChange={(e) => {
+                  const v = new Date(e.target.value);
+                  if (!Number.isNaN(v.getTime())) rescheduleScheduled(selected.id, v.toISOString());
+                }}
+                style={{ padding: '6px 8px', border: '1px solid var(--line-2)', borderRadius: 6, fontFamily: 'var(--mono)', fontSize: 12 }}
+              />
+              <div style={{ flex: 1 }} />
+              {selected.platformPostUrl && (
+                <a className="btn sm ghost" href={selected.platformPostUrl} target="_blank" rel="noreferrer">
+                  <Icon name="arrow_right" size={11} /> View
+                </a>
+              )}
+              <button className="btn sm" onClick={() => cancelScheduled(selected.id)} disabled={savingId === selected.id}>
+                <Icon name="x" size={11} /> Cancel post
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 };
+
+function toLocalInputValue(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 function sameWeek(a: Date, weekStart: Date) {
   const ws = startOfWeek(a).getTime();
