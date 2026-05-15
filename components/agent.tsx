@@ -81,7 +81,11 @@ const DEMO_FEED: Activity[] = [
   { id: 'demo-3', kind: 'agent_held', title: 'Held a draft — tone mismatch', body: 'Used "game-changing" twice. Rewriting and re-queuing.', meta: null, createdAt: new Date(Date.now() - 60 * 60_000).toISOString() },
 ];
 
-const AgentPage: React.FC = () => {
+interface AgentPageProps {
+  onEditDraft?: (id: string) => void;
+}
+
+const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
   const { data: settings, mutate: refetchSettings, unauth } = useApi<AgentSettings>('/api/agent/settings');
   const { data: activity, mutate: refetchActivity } = useApi<Activity[]>('/api/activity?limit=30');
   const { data: trendsNew, mutate: refetchTrends } = useApi<Trend[]>('/api/trends?status=new&limit=20');

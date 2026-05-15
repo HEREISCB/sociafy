@@ -1,9 +1,8 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { Icon, Pglyph } from './icons';
-import { apiPost, useApi } from '../lib/ui/fetcher';
+import { apiPatch, apiPost, useApi } from '../lib/ui/fetcher';
 import { PLATFORM_TO_SHORT, SHORT_TO_PLATFORM } from '../lib/ui/platforms';
 import type { Platform } from '../lib/db/schema';
 
@@ -14,6 +13,16 @@ const COMPOSE_PRESETS = [
   { id: 'hot-take', label: 'Hot take' },
   { id: 'lesson', label: 'Lesson' },
   { id: 'reel', label: 'Reel script' },
+];
+
+// Quick-fill templates — click to drop a starter prompt + preset into the box.
+const PROMPT_TEMPLATES: Array<{ label: string; prompt: string; preset: string }> = [
+  { label: '🚀 Product update', prompt: 'A product update post for [feature name]. Share what changed, who it helps, and what to do next. Keep it warm and concrete.', preset: 'announcement' },
+  { label: '🧵 Thread idea', prompt: 'A 6-tweet thread about [topic]. Hook in tweet 1, 4 specific tactics in tweets 2-5, a strong close in tweet 6.', preset: 'thread' },
+  { label: '📊 Weekly recap', prompt: 'A recap of what shipped this week: 3 wins, 1 lesson, what\'s next. Numbers where I have them.', preset: 'recap' },
+  { label: '🔥 Hot take', prompt: 'A pointed take that [conventional wisdom] is wrong because [my angle]. Stake the claim in line 1, back it with one example, end with a question.', preset: 'hot-take' },
+  { label: '🎓 Lesson learned', prompt: 'Something I learned the hard way about [topic]. What I expected, what actually happened, what I\'d tell past-me.', preset: 'lesson' },
+  { label: '🎬 Reel script', prompt: 'A 30-second reel script. Hook in the first 2 seconds, payoff with 3 quick beats, call back to the hook at the end.', preset: 'reel' },
 ];
 
 type Variant = { id: string; name: string; score: number; text: string; rationale?: string };
@@ -166,12 +175,18 @@ const PhonePreview: React.FC<{ platform: string; text: string; mediaKind: string
 
 type Account = { id: string; platform: Platform };
 
-const Compose: React.FC = () => {
-  const router = useRouter();
+interface ComposeProps {
+  draftId?: string | null;
+  onDone?: () => void;
+}
+
+const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
   const [prompt, setPrompt] = useState('Announcement post for Sociafy private beta — talk about agentic content workflow, voice friendly, hopeful but grounded.');
   const [preset, setPreset] = useState('announcement');
   const [active, setActive] = useState('B');
   const [platforms, setPlatforms] = useState<string[]>(['x', 'li']);
+  const [loadedDraftId, setLoadedDraftId] = useState<string | null>(null);
+  const [draftSource, setDraftSource] = useState<'user' | 'agent'>('user');
   const [previewPlat, setPreviewPlat] = useState('x');
   const [generating, setGenerating] = useState(false);
   const [variants, setVariants] = useState<Variant[]>(DEFAULT_VARIANTS);
@@ -228,6 +243,70 @@ const Compose: React.FC = () => {
     [accounts],
   );
 
+  // Load existing draft when editing
+  useEffect(() => {
+    if (!draftId) {
+      setLoadedDraftId(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(`/api/drafts/${draftId}`, { credentials: 'include' });
+        if (!r.ok) {
+          if (!cancelled) setToast(`Couldn't load draft (${r.status})`);
+          return;
+        }
+        const d = (await r.json()) as {
+          id: string;
+          prompt: string | null;
+          body: string;
+          variants: Array<{ label?: string; text: string; score?: number; rationale?: string }>;
+          selectedVariantLabel: string | null;
+          targetPlatforms: Platform[];
+          perPlatformText: Partial<Record<Platform, string>>;
+          preset: string | null;
+          source: 'user' | 'agent';
+          media: { id: string; url: string; mimeType: string }[];
+        };
+        if (cancelled) return;
+        setLoadedDraftId(d.id);
+        setDraftSource(d.source);
+        if (d.prompt) setPrompt(d.prompt);
+        if (d.preset) setPreset(d.preset);
+        if (d.variants && d.variants.length > 0) {
+          const incoming = d.variants.map((v, i) => ({
+            id: v.label || (['A', 'B', 'C', 'D'][i] ?? `V${i + 1}`),
+            name: v.label ? `Variant ${v.label}` : `Variant ${['A', 'B', 'C', 'D'][i] ?? i + 1}`,
+            score: typeof v.score === 'number' ? v.score : 80,
+            text: v.text,
+            rationale: v.rationale,
+          }));
+          setVariants(incoming);
+          setActive(d.selectedVariantLabel ?? incoming[0].id);
+        } else if (d.body) {
+          setVariants([{ id: 'A', name: 'Variant A', score: 80, text: d.body }]);
+          setActive('A');
+        }
+        setPerPlatform(d.perPlatformText ?? {});
+        setPlatforms(d.targetPlatforms.map((p) => PLATFORM_TO_SHORT[p]).filter(Boolean));
+        if (d.media && d.media.length > 0) {
+          setMedia(d.media.map((m) => ({
+            id: m.id, url: m.url, mimeType: m.mimeType,
+            kind: m.mimeType.startsWith('video/') ? 'video' : 'image',
+            label: m.url.split('/').pop() || 'asset',
+            tag: 'Uploaded',
+          })));
+        }
+        setToast(`Loaded ${d.source === 'agent' ? 'agent' : 'your'} draft`);
+        setTimeout(() => setToast(null), 2200);
+      } catch (e) {
+        if (!cancelled) setToast(`Couldn't load draft: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [draftId]);
+
   // Default platform selection to whatever the user has connected (cap at 3)
   useEffect(() => {
     if (accounts && accounts.length > 0) {
@@ -279,12 +358,12 @@ const Compose: React.FC = () => {
     setPlatforms((prev) => (prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p]));
   };
 
-  const createDraft = async () => {
+  const persistDraft = async () => {
     const fullPlatforms = platforms.map((s) => SHORT_TO_PLATFORM[s]).filter(Boolean) as Platform[];
     const uploadedMedia = media
       .filter((m) => m.url && m.mimeType && m.id && !m.uploading)
       .map((m) => ({ id: m.id!, url: m.url!, mimeType: m.mimeType! }));
-    return apiPost<{ id: string }>('/api/drafts', {
+    const payload = {
       prompt,
       body: variant.text,
       variants: variants.map((v) => ({ label: v.id, text: v.text, score: v.score, rationale: v.rationale })),
@@ -293,14 +372,18 @@ const Compose: React.FC = () => {
       perPlatformText: perPlatform,
       media: uploadedMedia,
       preset,
-    });
+    };
+    if (loadedDraftId) {
+      return apiPatch<{ id: string }>(`/api/drafts/${loadedDraftId}`, payload);
+    }
+    return apiPost<{ id: string }>('/api/drafts', payload);
   };
 
   const schedule = async (whenIso: string) => {
     setBusy('schedule');
     setToast(null);
     try {
-      const draft = await createDraft();
+      const draft = await persistDraft();
       const fullPlatforms = platforms.map((s) => SHORT_TO_PLATFORM[s]).filter(Boolean) as Platform[];
       const r = await apiPost<{ scheduled: Array<{ platform: string }> }>('/api/schedule', {
         draftId: draft.id,
@@ -311,7 +394,7 @@ const Compose: React.FC = () => {
         setToast('No connected accounts for the selected platforms — connect on Onboarding.');
       } else {
         setToast(`Scheduled to ${r.scheduled.map((s) => s.platform).join(', ')}.`);
-        setTimeout(() => router.push('/dashboard'), 800);
+        setTimeout(() => onDone?.(), 800);
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -326,7 +409,7 @@ const Compose: React.FC = () => {
     setBusy('post');
     setToast(null);
     try {
-      const draft = await createDraft();
+      const draft = await persistDraft();
       const fullPlatforms = platforms.map((s) => SHORT_TO_PLATFORM[s]).filter(Boolean) as Platform[];
       const r = await apiPost<{ results: Array<{ platform: string; ok: boolean; url?: string | null; error?: string }> }>(
         '/api/publish',
@@ -337,7 +420,7 @@ const Compose: React.FC = () => {
       if (ok.length > 0 && failed.length === 0) {
         const urls = ok.filter((res) => res.url).map((res) => `${res.platform}: ${res.url}`).join('  ·  ');
         setToast(`Published to ${ok.map((res) => res.platform).join(', ')}${urls ? ` — ${urls}` : ''}`);
-        setTimeout(() => router.push('/dashboard'), 1200);
+        setTimeout(() => onDone?.(), 1200);
       } else if (ok.length > 0 && failed.length > 0) {
         setToast(`Partial: published to ${ok.map((res) => res.platform).join(', ')}; failed on ${failed.map((res) => `${res.platform} (${res.error})`).join(', ')}`);
       } else {
@@ -360,12 +443,49 @@ const Compose: React.FC = () => {
   return (
     <div className="composer">
       <div className="composer-left">
+        {loadedDraftId && (
+          <div style={{
+            padding: '10px 14px',
+            background: 'var(--accent-soft)',
+            border: '1px solid oklch(0.86 0.08 70)',
+            borderRadius: 10,
+            marginBottom: 12,
+            display: 'flex', alignItems: 'center', gap: 10,
+            fontSize: 12.5,
+            color: 'var(--accent-ink)',
+          }}>
+            <Icon name="edit" size={13} />
+            <span>
+              Editing {draftSource === 'agent' ? 'an agent draft' : 'your draft'} · changes save when you schedule or publish.
+            </span>
+            <div style={{ flex: 1 }} />
+            <button className="btn sm ghost" onClick={onDone}>
+              <Icon name="x" size={11} /> Close
+            </button>
+          </div>
+        )}
+
         <div className="prompt-box">
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
             <Icon name="sparkle" size={14} style={{ color: 'var(--accent)' }} />
-            <span style={{ fontSize: 12, fontWeight: 550, letterSpacing: '-0.005em' }}>Tell me what to write</span>
+            <span style={{ fontSize: 12, fontWeight: 550, letterSpacing: '-0.005em' }}>{loadedDraftId ? 'Edit prompt' : 'Tell me what to write'}</span>
             <span className="chip ghost mono" style={{ marginLeft: 'auto' }}>Style: from your settings</span>
           </div>
+          {!loadedDraftId && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+              {PROMPT_TEMPLATES.map((t) => (
+                <button
+                  key={t.label}
+                  className="btn sm ghost"
+                  style={{ fontSize: 11.5, padding: '4px 10px' }}
+                  onClick={() => { setPrompt(t.prompt); setPreset(t.preset); }}
+                  title={`Sets preset: ${t.preset}`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          )}
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}

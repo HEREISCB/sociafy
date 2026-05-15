@@ -63,13 +63,22 @@ type FacebookMe = {
     shares: number;
   }>;
 };
+type PublishedPost = {
+  id: string;
+  platformPostId: string | null;
+  url: string | null;
+  text: string;
+  publishedAt: string | null;
+  engagement: { likes?: number; comments?: number; shares?: number; lastSyncedAt?: string };
+};
 
 interface DashboardProps {
   mode: string;
   onCompose: () => void;
+  onEditDraft?: (id: string) => void;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ onCompose }) => {
+const Dashboard: React.FC<DashboardProps> = ({ onCompose, onEditDraft }) => {
   const [tab, setTab] = useState<'upcoming' | 'drafts' | 'posted'>('upcoming');
 
   const { data: scheduled, unauth } = useApi<ScheduledRow[]>('/api/schedule');
@@ -90,6 +99,19 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose }) => {
   const { data: activity } = useApi<ActivityRow[]>('/api/activity?limit=8');
   const fbConnected = !!accounts?.find((a) => a.platform === 'facebook' && !a.isStub);
   const { data: facebookMe } = useApi<FacebookMe>(fbConnected ? '/api/platforms/facebook/me' : null);
+  const { data: insightsData, mutate: refetchInsights } = useApi<{ posts: PublishedPost[] }>(
+    fbConnected ? '/api/platforms/facebook/insights' : null,
+  );
+  const [syncingInsights, setSyncingInsights] = useState(false);
+  const syncInsights = async () => {
+    setSyncingInsights(true);
+    try {
+      await apiPost('/api/platforms/facebook/insights', {});
+      await refetchInsights();
+    } finally {
+      setSyncingInsights(false);
+    }
+  };
 
   const queueRows = useMemo(() => {
     if (!scheduled || !drafts) return null;
@@ -244,6 +266,45 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose }) => {
         <QuickPost platform="facebook" pageName={facebookMe?.page.name} />
       )}
 
+      {fbConnected && insightsData && insightsData.posts.length > 0 && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="card-head">
+            <h3>
+              <Icon name="chart" size={14} /> Your post performance
+              <span className="chip ghost mono">{insightsData.posts.length}</span>
+            </h3>
+            <button className="btn sm" onClick={syncInsights} disabled={syncingInsights}>
+              <Icon name="refresh" size={11} /> {syncingInsights ? 'Syncing…' : 'Sync from Facebook'}
+            </button>
+          </div>
+          <div className="card-body flush">
+            {insightsData.posts.slice(0, 8).map((p) => (
+              <div key={p.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 14, padding: '12px 16px', borderBottom: '1px solid var(--line)' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, lineHeight: 1.45, color: 'var(--ink-2)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                    {p.text || '(no caption)'}
+                  </div>
+                  <div className="mono" style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 4 }}>
+                    {p.publishedAt && new Date(p.publishedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    {p.engagement.lastSyncedAt && <> · synced {relTime(p.engagement.lastSyncedAt)}</>}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 14, fontSize: 12, color: 'var(--ink-2)', flexShrink: 0 }} className="mono">
+                  <span>♡ {p.engagement.likes ?? 0}</span>
+                  <span>💬 {p.engagement.comments ?? 0}</span>
+                  <span>↻ {p.engagement.shares ?? 0}</span>
+                </div>
+                {p.url && (
+                  <a className="btn sm ghost" href={p.url} target="_blank" rel="noreferrer" style={{ flexShrink: 0 }}>
+                    <Icon name="arrow_right" size={11} /> View
+                  </a>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="two-col">
         <div className="card">
           <div className="card-head">
@@ -269,8 +330,15 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose }) => {
             </div>
           </div>
           <div className="card-body flush">
-            {showQueue.map((q) => (
-              <div className="queue-item" key={q.id}>
+            {showQueue.map((q) => {
+              const editable = tab === 'drafts' && !!onEditDraft;
+              return (
+              <div
+                className="queue-item"
+                key={q.id}
+                style={editable ? { cursor: 'pointer' } : undefined}
+                onClick={editable ? () => onEditDraft!(q.id) : undefined}
+              >
                 <div className="queue-time">
                   <strong>{q.when}</strong>
                   {q.time}
@@ -286,19 +354,23 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose }) => {
                     {q.status === 'draft' && <span className="chip"><span className="dot" />Draft</span>}
                     {q.score > 0 && <span className="chip ghost mono">Score {q.score}</span>}
                     {q.url && (
-                      <a className="chip ghost mono" href={q.url} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
+                      <a className="chip ghost mono" href={q.url} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }} onClick={(e) => e.stopPropagation()}>
                         <Icon name="arrow_right" size={10} /> View
                       </a>
                     )}
                   </div>
                 </div>
-                <div className="queue-actions">
-                  <button className="icon-btn" title="Edit"><Icon name="edit" size={13} /></button>
+                <div className="queue-actions" onClick={(e) => e.stopPropagation()}>
+                  {editable && (
+                    <button className="icon-btn" title="Edit" onClick={() => onEditDraft!(q.id)}><Icon name="edit" size={13} /></button>
+                  )}
+                  {!editable && <button className="icon-btn" title="Edit"><Icon name="edit" size={13} /></button>}
                   <button className="icon-btn" title="Reschedule"><Icon name="clock" size={13} /></button>
                   <button className="icon-btn" title="More"><Icon name="more" size={13} /></button>
                 </div>
               </div>
-            ))}
+            );
+            })}
             {showQueue.length === 0 && (
               <div style={{ padding: 28, fontSize: 13, color: 'var(--ink-3)', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
                 <Icon name="clock" size={18} style={{ color: 'var(--ink-4)' }} />

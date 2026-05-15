@@ -76,8 +76,19 @@ export default function Home() {
   const [page, setPage] = useState<Page>('dashboard');
   const [mode, setMode] = useState<Mode>('manual');
   const [refreshing, setRefreshing] = useState(false);
+  const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
   const { user } = useUser();
   const { mutate } = useSWRConfig();
+
+  const goCompose = (draftId?: string | null) => {
+    setEditingDraftId(draftId ?? null);
+    setPage('compose');
+  };
+
+  const goDashboard = () => {
+    setEditingDraftId(null);
+    setPage('dashboard');
+  };
 
   const refreshAll = async () => {
     setRefreshing(true);
@@ -136,9 +147,9 @@ export default function Home() {
             </div>
           </div>
 
-          {page === 'dashboard' && <Dashboard mode={mode} onCompose={() => setPage('compose')} />}
-          {page === 'compose' && <Compose />}
-          {page === 'agent' && <AgentPage />}
+          {page === 'dashboard' && <Dashboard mode={mode} onCompose={() => goCompose()} onEditDraft={(id) => goCompose(id)} />}
+          {page === 'compose' && <Compose draftId={editingDraftId} onDone={goDashboard} />}
+          {page === 'agent' && <AgentPage onEditDraft={(id) => goCompose(id)} />}
           {page === 'calendar' && <CalendarPage />}
           {page === 'connections' && <ConnectionsPage />}
         </div>
