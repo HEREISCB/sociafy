@@ -4,6 +4,7 @@ import { isStubMode } from '../../../../../lib/env';
 import { PLATFORMS, type Platform } from '../../../../../lib/db/schema';
 import { getAdapter } from '../../../../../lib/platforms/registry';
 import { signState, makeCodeVerifier } from '../../../../../lib/oauth/state';
+import { absoluteUrl } from '../../../../../lib/url';
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ platform: string }> }) {
   const { platform } = await ctx.params;
@@ -11,22 +12,21 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ platform: s
     return NextResponse.json({ error: 'invalid_platform' }, { status: 400 });
   }
   if (isStubMode.clerk()) {
-    return NextResponse.redirect(new URL('/sign-in', req.url));
+    return NextResponse.redirect(absoluteUrl(req, '/sign-in'));
   }
   const user = await authedUser();
   if (!user) {
-    return NextResponse.redirect(new URL('/sign-in', req.url));
+    return NextResponse.redirect(absoluteUrl(req, '/sign-in'));
   }
 
   const adapter = getAdapter(platform as Platform);
   const next = req.nextUrl.searchParams.get('next') || '/onboarding';
   const codeVerifier = platform === 'x' ? makeCodeVerifier() : undefined;
   const state = signState({ uid: user.id, platform, next, cv: codeVerifier });
-  const redirectUri = new URL(`/api/oauth/${platform}/callback`, req.url).toString();
+  const redirectUri = absoluteUrl(req, `/api/oauth/${platform}/callback`);
 
   if (!adapter.isConfigured()) {
-    // Stub mode: fast-path to callback with stub flag. Keeps onboarding interactive.
-    const stubUrl = new URL(`/api/oauth/${platform}/callback`, req.url);
+    const stubUrl = new URL(absoluteUrl(req, `/api/oauth/${platform}/callback`));
     stubUrl.searchParams.set('state', state);
     stubUrl.searchParams.set('stub', '1');
     return NextResponse.redirect(stubUrl);

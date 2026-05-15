@@ -5,6 +5,7 @@ import { connectedAccounts, activityLog, PLATFORMS, type Platform } from '../../
 import { getAdapter } from '../../../../../lib/platforms/registry';
 import { stubProfile } from '../../../../../lib/platforms/stub';
 import { verifyState } from '../../../../../lib/oauth/state';
+import { absoluteUrl } from '../../../../../lib/url';
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ platform: string }> }) {
   const { platform } = await ctx.params;
@@ -16,14 +17,14 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ platform: s
   const code = url.searchParams.get('code');
   const isStub = url.searchParams.get('stub') === '1';
 
-  if (!stateParam) return NextResponse.redirect(new URL('/onboarding?error=oauth_state', req.url));
+  if (!stateParam) return NextResponse.redirect(absoluteUrl(req, '/onboarding?error=oauth_state'));
   const state = verifyState(stateParam);
   if (!state || state.platform !== platform) {
-    return NextResponse.redirect(new URL('/onboarding?error=oauth_state', req.url));
+    return NextResponse.redirect(absoluteUrl(req, '/onboarding?error=oauth_state'));
   }
 
   const adapter = getAdapter(platform as Platform);
-  const redirectUri = new URL(`/api/oauth/${platform}/callback`, req.url).toString();
+  const redirectUri = absoluteUrl(req, `/api/oauth/${platform}/callback`);
   let result;
   try {
     if (isStub || !adapter.isConfigured() || !code) {
@@ -33,7 +34,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ platform: s
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    return NextResponse.redirect(new URL(`/onboarding?error=oauth_failed&platform=${platform}&detail=${encodeURIComponent(msg)}`, req.url));
+    return NextResponse.redirect(absoluteUrl(req, `/onboarding?error=oauth_failed&platform=${platform}&detail=${encodeURIComponent(msg)}`));
   }
 
   // Upsert: if user already connected this platform, update tokens.
@@ -85,5 +86,5 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ platform: s
   });
 
   const back = state.next || '/onboarding';
-  return NextResponse.redirect(new URL(back, req.url));
+  return NextResponse.redirect(absoluteUrl(req, back));
 }
