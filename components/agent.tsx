@@ -26,6 +26,18 @@ type Activity = {
   createdAt: string;
 };
 
+type Trend = {
+  id: string;
+  niche: string;
+  title: string;
+  summary: string | null;
+  source: string | null;
+  sourceUrl: string | null;
+  score: number;
+  status: 'new' | 'used' | 'dismissed';
+  capturedAt: string;
+};
+
 const NICHE_LABELS: Record<Niche, string> = {
   saas: 'Solo SaaS founders',
   'creator-economy': 'Creator economy',
@@ -72,6 +84,8 @@ const DEMO_FEED: Activity[] = [
 const AgentPage: React.FC = () => {
   const { data: settings, mutate: refetchSettings, unauth } = useApi<AgentSettings>('/api/agent/settings');
   const { data: activity, mutate: refetchActivity } = useApi<Activity[]>('/api/activity?limit=30');
+  const { data: trendsNew, mutate: refetchTrends } = useApi<Trend[]>('/api/trends?status=new&limit=20');
+  const { data: trendsUsed } = useApi<Trend[]>('/api/trends?status=used&limit=10');
 
   const [autopilot, setAutopilot] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -98,6 +112,7 @@ const AgentPage: React.FC = () => {
       }
       await refetchActivity();
       await refetchSettings();
+      await refetchTrends();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setRunMsg(`Failed: ${msg}`);
@@ -113,6 +128,7 @@ const AgentPage: React.FC = () => {
       const r = await apiPost<{ inserted: number; reason?: string }>('/api/trends/refresh', {});
       if (r.reason) setRunMsg(`Skipped: ${r.reason.replace(/_/g, ' ')}`);
       else setRunMsg(`Pulled ${r.inserted} trends from your niches`);
+      await refetchTrends();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setRunMsg(`Failed: ${msg}`);
@@ -120,6 +136,7 @@ const AgentPage: React.FC = () => {
       setRunning(null);
     }
   };
+
 
   useEffect(() => {
     if (!settings) return;
@@ -202,6 +219,59 @@ const AgentPage: React.FC = () => {
             <span style={{ fontSize: 11.5, color: 'var(--ink-3)', display: 'flex', alignItems: 'center', gap: 6 }}>
               <Icon name="bolt" size={11} /> Bypasses the weekly cadence cap. Demo + testing.
             </span>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-head">
+            <h3>
+              <Icon name="fire" size={14} />
+              Trends ready to draft
+              <span className="chip ghost mono">{trendsNew?.length ?? 0} new</span>
+              {trendsUsed && trendsUsed.length > 0 && <span className="chip ghost mono">{trendsUsed.length} used</span>}
+            </h3>
+            <span className="meta">Sorted by score</span>
+          </div>
+          <div className="card-body" style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {!trendsNew || trendsNew.length === 0 ? (
+              <div style={{ fontSize: 13, color: 'var(--ink-3)', padding: 10 }}>
+                No fresh trends yet. Click <strong>Pull fresh trends</strong> above to ingest from your niches&apos; RSS feeds.
+              </div>
+            ) : (
+              trendsNew.map((t) => (
+                <div key={t.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: 12, background: 'var(--bg-sunk)', border: '1px solid var(--line)', borderRadius: 10 }}>
+                  <div style={{ minWidth: 40, fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 600, color: 'var(--accent)' }}>
+                    {t.score}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 500, lineHeight: 1.45 }}>
+                      {t.sourceUrl ? (
+                        <a href={t.sourceUrl} target="_blank" rel="noreferrer" style={{ color: 'inherit', textDecoration: 'none' }}>
+                          {t.title}
+                        </a>
+                      ) : (
+                        t.title
+                      )}
+                    </div>
+                    {t.summary && (
+                      <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 3, lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                        {t.summary}
+                      </div>
+                    )}
+                    <div className="mono" style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 5, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <span className="chip">{t.niche}</span>
+                      {t.source && <span>{t.source}</span>}
+                      <span>· {relTime(t.capturedAt)}</span>
+                    </div>
+                  </div>
+                  {t.sourceUrl && (
+                    <a className="btn sm ghost" href={t.sourceUrl} target="_blank" rel="noreferrer">
+                      <Icon name="arrow_right" size={11} /> Open
+                    </a>
+                  )}
+                </div>
+              ))
+            )}
           </div>
         </div>
 
