@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { db } from '../../../../lib/db';
 import { activityLog, connectedAccounts } from '../../../../lib/db/schema';
 import { env } from '../../../../lib/env';
@@ -25,9 +25,15 @@ type TikTokEvent = {
   content?: unknown;
 };
 
+// 5 minute window — anything older is a replay attempt.
+const REPLAY_WINDOW_S = 300;
+
 function verifySignature(rawBody: string, timestamp: string | null, signature: string | null): boolean {
   if (!env.platforms.tiktok.clientSecret) return false;
   if (!timestamp || !signature) return false;
+  // Reject stale timestamps to defeat replays of captured signed events.
+  const ts = Number(timestamp);
+  if (!Number.isFinite(ts) || Math.abs(Date.now() / 1000 - ts) > REPLAY_WINDOW_S) return false;
   const mac = crypto
     .createHmac('sha256', env.platforms.tiktok.clientSecret)
     .update(`${timestamp}${rawBody}`)
@@ -45,24 +51,28 @@ export async function POST(req: NextRequest) {
   const signature = req.headers.get('tt-signature');
   const verified = verifySignature(rawBody, timestamp, signature);
 
-  console.log('[tiktok-webhook]', {
-    verified,
-    ts: timestamp,
-    bodyLen: rawBody.length,
-  });
+  console.log('[tiktok-webhook]', { verified, ts: timestamp, bodyLen: rawBody.length });
+
+  // Reject unverified bodies — never read or persist them.
+  // In dev with no client secret configured, accept (verified=false is acceptable)
+  // so platform-setup pings work, but skip the DB insert.
+  if (!verified && env.platforms.tiktok.clientSecret) {
+    return NextResponse.json({ ok: false, error: 'invalid_signature' }, { status: 401 });
+  }
 
   let payload: TikTokEvent = {};
   try {
     payload = JSON.parse(rawBody) as TikTokEvent;
   } catch {
-    // Body was not JSON — still ack with 200 so TikTok doesn't retry, but log.
     return NextResponse.json({ ok: true, parsed: false });
   }
 
   const eventName = payload.event ?? 'unknown';
   const openId = payload.user_openid;
 
-  // Map event back to a Sociafy user via the connected_accounts row.
+  // Build a stable idempotency key so retries don't double-insert.
+  const eventId = makeEventId(rawBody);
+
   let userId: string | null = null;
   if (openId) {
     const rows = await db()
@@ -78,23 +88,46 @@ export async function POST(req: NextRequest) {
     userId = rows[0]?.userId ?? null;
   }
 
-  if (userId) {
-    await db().insert(activityLog).values({
-      userId,
-      kind: 'webhook_event',
-      title: `TikTok · ${prettyEvent(eventName)}`,
-      body: summarize(payload),
-      meta: {
-        platform: 'tiktok',
-        event: eventName,
-        verified,
-        openId,
-        content: payload.content ?? null,
-      },
-    });
+  if (userId && verified) {
+    const already = await alreadyLogged(userId, eventId);
+    if (!already) {
+      await db().insert(activityLog).values({
+        userId,
+        kind: 'webhook_event',
+        title: `TikTok · ${prettyEvent(eventName)}`,
+        body: summarize(payload),
+        meta: {
+          platform: 'tiktok',
+          event: eventName,
+          verified,
+          openId,
+          eventId,
+          content: payload.content ?? null,
+        },
+      });
+    }
   }
 
   return NextResponse.json({ ok: true, verified, event: eventName, mapped: !!userId });
+}
+
+function makeEventId(rawBody: string): string {
+  return crypto.createHash('sha256').update(rawBody).digest('hex').slice(0, 32);
+}
+
+async function alreadyLogged(userId: string, eventId: string): Promise<boolean> {
+  // Cheap dedup: scan recent webhook_event rows for this user, compare eventId in meta.
+  // Keeps things simple without an extra index; activity_log already has (user_id, created_at).
+  const recent = await db()
+    .select({ id: activityLog.id, meta: activityLog.meta })
+    .from(activityLog)
+    .where(and(eq(activityLog.userId, userId), eq(activityLog.kind, 'webhook_event')))
+    .orderBy(desc(activityLog.createdAt))
+    .limit(50);
+  return recent.some((r) => {
+    const m = r.meta as { eventId?: unknown } | null;
+    return m && typeof m.eventId === 'string' && m.eventId === eventId;
+  });
 }
 
 function prettyEvent(name: string): string {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { db } from '../../../../lib/db';
 import { activityLog, connectedAccounts, type Platform } from '../../../../lib/db/schema';
 import { env } from '../../../../lib/env';
@@ -66,6 +66,7 @@ export async function POST(req: NextRequest) {
 
   const entries = payload.entry ?? [];
   const platformKey: Platform = payload.object === 'instagram' ? 'instagram' : 'facebook';
+  const eventId = crypto.createHash('sha256').update(rawBody).digest('hex').slice(0, 32);
   let logged = 0;
   for (const entry of entries) {
     const rows = await db()
@@ -80,12 +81,26 @@ export async function POST(req: NextRequest) {
       .limit(1);
     const userId = rows[0]?.userId;
     if (!userId) continue;
+
+    // Idempotency: dedup retries by hash of raw body.
+    const recent = await db()
+      .select({ id: activityLog.id, meta: activityLog.meta })
+      .from(activityLog)
+      .where(and(eq(activityLog.userId, userId), eq(activityLog.kind, 'webhook_event')))
+      .orderBy(desc(activityLog.createdAt))
+      .limit(50);
+    const dup = recent.some((r) => {
+      const m = r.meta as { eventId?: unknown } | null;
+      return m && typeof m.eventId === 'string' && m.eventId === eventId;
+    });
+    if (dup) continue;
+
     const fields = (entry.changes ?? []).map((c) => c.field).join(', ') || 'event';
     await db().insert(activityLog).values({
       userId,
       kind: 'webhook_event',
       title: `${platformKey === 'instagram' ? 'Instagram' : 'Facebook'} · ${fields}`,
-      meta: { platform: platformKey, entry, verified: true },
+      meta: { platform: platformKey, entry, verified: true, eventId },
     });
     logged += 1;
   }
