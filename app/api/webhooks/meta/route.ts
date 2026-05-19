@@ -4,6 +4,7 @@ import { and, desc, eq } from 'drizzle-orm';
 import { db } from '../../../../lib/db';
 import { activityLog, connectedAccounts, type Platform } from '../../../../lib/db/schema';
 import { env } from '../../../../lib/env';
+import { rateLimit, requestIp } from '../../../../lib/rate-limit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -47,6 +48,10 @@ type MetaEvent = {
 };
 
 export async function POST(req: NextRequest) {
+  const rl = rateLimit('webhook', `meta:${requestIp(req.headers)}`);
+  if (!rl.ok) {
+    return new NextResponse('rate_limited', { status: 429, headers: { 'retry-after': String(rl.retryAfterSec) } });
+  }
   const rawBody = await req.text();
   const signature = req.headers.get('x-hub-signature-256');
   const verified = verifySignature(rawBody, signature);

@@ -4,6 +4,7 @@ import { and, desc, eq } from 'drizzle-orm';
 import { db } from '../../../../lib/db';
 import { activityLog, connectedAccounts } from '../../../../lib/db/schema';
 import { env } from '../../../../lib/env';
+import { rateLimit, requestIp } from '../../../../lib/rate-limit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -46,6 +47,10 @@ function verifySignature(rawBody: string, timestamp: string | null, signature: s
 }
 
 export async function POST(req: NextRequest) {
+  const rl = rateLimit('webhook', `tiktok:${requestIp(req.headers)}`);
+  if (!rl.ok) {
+    return new NextResponse('rate_limited', { status: 429, headers: { 'retry-after': String(rl.retryAfterSec) } });
+  }
   const rawBody = await req.text();
   const timestamp = req.headers.get('tt-timestamp');
   const signature = req.headers.get('tt-signature');

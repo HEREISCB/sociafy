@@ -12,6 +12,7 @@ import {
 } from '../../../lib/db/schema';
 import { getAdapter } from '../../../lib/platforms/registry';
 import { ensureFreshToken } from '../../../lib/platforms/token';
+import { rateLimit } from '../../../lib/rate-limit';
 
 // POST /api/publish
 // Body: { draftId, platforms?: Platform[] }
@@ -19,6 +20,13 @@ import { ensureFreshToken } from '../../../lib/platforms/token';
 // has connected. Bypasses the cron — used by "Post Now" in compose.
 export async function POST(req: NextRequest) {
   return withUser(async (user) => {
+    const rl = rateLimit('publish', user.id);
+    if (!rl.ok) {
+      return new Response(
+        JSON.stringify({ error: 'rate_limited', retryAfterSec: rl.retryAfterSec }),
+        { status: 429, headers: { 'content-type': 'application/json', 'retry-after': String(rl.retryAfterSec) } },
+      );
+    }
     const body = await req.json().catch(() => ({}));
     const draftId = body?.draftId as string | undefined;
     if (!draftId) return jsonError('draftId_required');
