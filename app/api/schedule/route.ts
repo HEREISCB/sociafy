@@ -11,6 +11,7 @@ import {
   type Platform,
   type DraftMedia,
 } from '../../../lib/db/schema';
+import { scheduleCreateSchema, parseBody } from '../../../lib/validation';
 
 export async function GET(req: NextRequest) {
   return withUser(async (user) => {
@@ -34,13 +35,16 @@ export async function GET(req: NextRequest) {
 // If platforms omitted, schedules to draft.targetPlatforms.
 export async function POST(req: NextRequest) {
   return withUser(async (user) => {
-    const body = await req.json().catch(() => ({}));
-    const draftId = body?.draftId as string | undefined;
-    if (!draftId) return jsonError('draftId_required');
-    const scheduledAtRaw = body?.scheduledAt as string | undefined;
-    if (!scheduledAtRaw) return jsonError('scheduledAt_required');
+    const raw = await req.json().catch(() => ({}));
+    const parsed = parseBody(scheduleCreateSchema, raw);
+    if (!parsed.ok) return parsed.response;
+    const { draftId, scheduledAt: scheduledAtRaw, platforms } = parsed.data;
     const scheduledAt = new Date(scheduledAtRaw);
-    if (Number.isNaN(scheduledAt.getTime())) return jsonError('scheduledAt_invalid');
+    // Reject past schedules — cron picks them up immediately, which is almost
+    // never what the user meant (and confusing if a typo created the date).
+    if (scheduledAt.getTime() < Date.now() - 60_000) {
+      return jsonError('scheduledAt_in_past');
+    }
 
     const [draft] = await db()
       .select()
@@ -49,10 +53,10 @@ export async function POST(req: NextRequest) {
       .limit(1);
     if (!draft) return jsonError('draft_not_found', 404);
 
-    const requestedPlatforms: Platform[] = (Array.isArray(body?.platforms) && body.platforms.length
-      ? body.platforms
+    const requestedPlatforms: Platform[] = (platforms && platforms.length
+      ? platforms
       : draft.targetPlatforms ?? []
-    ).filter((p: string): p is Platform => (PLATFORMS as readonly string[]).includes(p));
+    ).filter((p): p is Platform => (PLATFORMS as readonly string[]).includes(p));
     if (requestedPlatforms.length === 0) return jsonError('no_platforms');
 
     const accounts = await db()
@@ -92,5 +96,5 @@ export async function POST(req: NextRequest) {
     }
 
     return { scheduled: inserted };
-  });
+  }, req);
 }

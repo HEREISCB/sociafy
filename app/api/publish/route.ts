@@ -13,6 +13,7 @@ import {
 import { getAdapter } from '../../../lib/platforms/registry';
 import { ensureFreshToken } from '../../../lib/platforms/token';
 import { rateLimit } from '../../../lib/rate-limit';
+import { publishSchema, parseBody } from '../../../lib/validation';
 
 // POST /api/publish
 // Body: { draftId, platforms?: Platform[] }
@@ -27,9 +28,10 @@ export async function POST(req: NextRequest) {
         { status: 429, headers: { 'content-type': 'application/json', 'retry-after': String(rl.retryAfterSec) } },
       );
     }
-    const body = await req.json().catch(() => ({}));
-    const draftId = body?.draftId as string | undefined;
-    if (!draftId) return jsonError('draftId_required');
+    const raw = await req.json().catch(() => ({}));
+    const parsed = parseBody(publishSchema, raw);
+    if (!parsed.ok) return parsed.response;
+    const { draftId, platforms } = parsed.data;
 
     const [draft] = await db()
       .select()
@@ -38,10 +40,10 @@ export async function POST(req: NextRequest) {
       .limit(1);
     if (!draft) return jsonError('draft_not_found', 404);
 
-    const requested: Platform[] = (Array.isArray(body?.platforms) && body.platforms.length
-      ? body.platforms
+    const requested: Platform[] = (platforms && platforms.length
+      ? platforms
       : draft.targetPlatforms ?? []
-    ).filter((p: string): p is Platform => (PLATFORMS as readonly string[]).includes(p));
+    ).filter((p): p is Platform => (PLATFORMS as readonly string[]).includes(p));
     if (requested.length === 0) return jsonError('no_platforms');
 
     const accounts = await db()
@@ -158,5 +160,5 @@ export async function POST(req: NextRequest) {
     }
 
     return { results };
-  });
+  }, req);
 }

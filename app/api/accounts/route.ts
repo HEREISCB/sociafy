@@ -1,9 +1,10 @@
 import { NextRequest } from 'next/server';
 import { eq, desc } from 'drizzle-orm';
-import { withUser, jsonError } from '../../../lib/api';
+import { withUser } from '../../../lib/api';
 import { db } from '../../../lib/db';
-import { connectedAccounts, PLATFORMS, type Platform } from '../../../lib/db/schema';
+import { connectedAccounts } from '../../../lib/db/schema';
 import { encryptToken } from '../../../lib/crypto/tokens';
+import { stubAccountCreateSchema, parseBody } from '../../../lib/validation';
 
 // Strip access/refresh tokens from API responses — the client never needs them.
 const PUBLIC_COLUMNS = {
@@ -37,12 +38,11 @@ export async function GET(req: NextRequest) {
 // Real OAuth flows live at /api/oauth/[platform]/start.
 export async function POST(req: NextRequest) {
   return withUser(async (user) => {
-    const body = await req.json();
-    const platform = body?.platform as Platform | undefined;
-    if (!platform || !PLATFORMS.includes(platform)) {
-      return jsonError('invalid_platform');
-    }
-    const handle = body?.handle || `you-on-${platform}`;
+    const raw = await req.json().catch(() => ({}));
+    const parsed = parseBody(stubAccountCreateSchema, raw);
+    if (!parsed.ok) return parsed.response;
+    const { platform } = parsed.data;
+    const handle = parsed.data.handle || `you-on-${platform}`;
     const [row] = await db()
       .insert(connectedAccounts)
       .values({

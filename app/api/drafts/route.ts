@@ -2,8 +2,8 @@ import { NextRequest } from 'next/server';
 import { eq, desc, and } from 'drizzle-orm';
 import { withUser } from '../../../lib/api';
 import { db } from '../../../lib/db';
-import { drafts, activityLog, type DraftVariant, type DraftMedia } from '../../../lib/db/schema';
-import { type Platform, PLATFORMS } from '../../../lib/db/schema';
+import { drafts, activityLog } from '../../../lib/db/schema';
+import { draftCreateSchema, parseBody } from '../../../lib/validation';
 
 export async function GET(req: NextRequest) {
   return withUser(async (user) => {
@@ -23,23 +23,24 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   return withUser(async (user) => {
-    const body = await req.json().catch(() => ({}));
-    const platforms = (Array.isArray(body?.targetPlatforms) ? body.targetPlatforms : [])
-      .filter((p: string): p is Platform => (PLATFORMS as readonly string[]).includes(p));
+    const raw = await req.json().catch(() => ({}));
+    const parsed = parseBody(draftCreateSchema, raw);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.data;
     const [row] = await db()
       .insert(drafts)
       .values({
         userId: user.id,
-        title: body?.title ?? null,
-        prompt: body?.prompt ?? null,
-        body: body?.body ?? '',
-        variants: (body?.variants as DraftVariant[]) ?? [],
-        selectedVariantLabel: body?.selectedVariantLabel ?? null,
-        media: (body?.media as DraftMedia[]) ?? [],
-        targetPlatforms: platforms,
-        perPlatformText: body?.perPlatformText ?? {},
-        preset: body?.preset ?? null,
-        source: body?.source === 'agent' ? 'agent' : 'user',
+        title: body.title ?? null,
+        prompt: body.prompt ?? null,
+        body: body.body ?? '',
+        variants: body.variants ?? [],
+        selectedVariantLabel: body.selectedVariantLabel ?? null,
+        media: body.media ?? [],
+        targetPlatforms: body.targetPlatforms ?? [],
+        perPlatformText: body.perPlatformText ?? {},
+        preset: body.preset ?? null,
+        source: (raw as { source?: string })?.source === 'agent' ? 'agent' : 'user',
       })
       .returning();
     await db().insert(activityLog).values({
@@ -49,5 +50,5 @@ export async function POST(req: NextRequest) {
       meta: { draftId: row.id, source: row.source },
     });
     return row;
-  });
+  }, req);
 }
