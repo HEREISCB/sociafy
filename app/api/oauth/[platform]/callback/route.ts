@@ -6,6 +6,7 @@ import { getAdapter } from '../../../../../lib/platforms/registry';
 import { stubProfile } from '../../../../../lib/platforms/stub';
 import { verifyState } from '../../../../../lib/oauth/state';
 import { absoluteUrl } from '../../../../../lib/url';
+import { safeNextPath } from '../../../../../lib/safe-next';
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ platform: string }> }) {
   const { platform } = await ctx.params;
@@ -34,7 +35,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ platform: s
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    const back = state.next || '/onboarding';
+    const back = safeNextPath(state.next, '/onboarding');
     const sep = back.includes('?') ? '&' : '?';
     return NextResponse.redirect(
       absoluteUrl(req, `${back}${sep}oauth_error=${encodeURIComponent(msg)}&platform=${platform}`),
@@ -89,7 +90,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ platform: s
     meta: { platform, handle: result.profile.handle, stub: isStub || !adapter.isConfigured() },
   });
 
-  const back = state.next || '/onboarding';
+  const back = safeNextPath(state.next, '/onboarding');
   const sep = back.includes('?') ? '&' : '?';
   const handle = result.profile.handle ? encodeURIComponent(result.profile.handle) : '';
   return NextResponse.redirect(

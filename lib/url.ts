@@ -8,10 +8,33 @@ import type { NextRequest } from 'next/server';
  * the real host via X-Forwarded-Host. Honor that so OAuth redirect_uri values
  * and back-to-app redirects use the public URL the user is actually on.
  */
+const IS_PROD = process.env.NODE_ENV === 'production';
+
+/**
+ * In prod, only honor X-Forwarded-Host if it matches an allowed host. This
+ * prevents host-header poisoning from misconfigured proxies redirecting
+ * OAuth flows or webhook URLs to attacker-controlled hostnames.
+ */
+function isAllowedForwardedHost(host: string): boolean {
+  if (!IS_PROD) return true;
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL;
+  if (!appUrl) return false;
+  try {
+    if (host === new URL(appUrl).host) return true;
+  } catch {
+    return false;
+  }
+  const extras = (process.env.TRUSTED_FORWARDED_HOSTS || '')
+    .split(',')
+    .map((h) => h.trim())
+    .filter(Boolean);
+  return extras.includes(host);
+}
+
 export function getOrigin(req: NextRequest): string {
   const forwardedHost = req.headers.get('x-forwarded-host');
   const forwardedProto = req.headers.get('x-forwarded-proto') ?? 'https';
-  if (forwardedHost) {
+  if (forwardedHost && isAllowedForwardedHost(forwardedHost)) {
     return `${forwardedProto}://${forwardedHost}`;
   }
   const host = req.headers.get('host');

@@ -1,6 +1,16 @@
 import crypto from 'crypto';
 
-const SECRET = process.env.INTERNAL_API_SECRET || 'dev-secret-change-me';
+const IS_PROD = process.env.NODE_ENV === 'production';
+const RAW_SECRET = process.env.INTERNAL_API_SECRET;
+
+if (IS_PROD && (!RAW_SECRET || RAW_SECRET.length < 32)) {
+  // Hard-fail at module load — better than silently signing with the dev fallback.
+  throw new Error(
+    'INTERNAL_API_SECRET must be set to a 32+ char random string in production.',
+  );
+}
+
+const SECRET = RAW_SECRET || 'dev-secret-change-me-only-for-local-development';
 
 export type StatePayload = {
   uid: string;
@@ -21,7 +31,13 @@ export function verifyState(state: string): StatePayload | null {
   const [json, sig] = state.split('.');
   if (!json || !sig) return null;
   const expected = crypto.createHmac('sha256', SECRET).update(json).digest('base64url');
-  if (sig !== expected) return null;
+  // Constant-time comparison so an attacker can't time-side-channel the signature.
+  if (sig.length !== expected.length) return null;
+  try {
+    if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
+  } catch {
+    return null;
+  }
   try {
     const payload = JSON.parse(Buffer.from(json, 'base64url').toString('utf8')) as StatePayload;
     if (Date.now() - payload.ts > 15 * 60 * 1000) return null; // 15 min expiry

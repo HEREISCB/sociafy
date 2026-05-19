@@ -4,6 +4,7 @@ import { PLATFORMS, type Platform } from '../../../../../lib/db/schema';
 import { getAdapter } from '../../../../../lib/platforms/registry';
 import { signState, makeCodeVerifier } from '../../../../../lib/oauth/state';
 import { absoluteUrl } from '../../../../../lib/url';
+import { safeNextPath } from '../../../../../lib/safe-next';
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ platform: string }> }) {
   const { platform } = await ctx.params;
@@ -16,7 +17,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ platform: s
   }
 
   const adapter = getAdapter(platform as Platform);
-  const next = req.nextUrl.searchParams.get('next') || '/onboarding';
+  const next = safeNextPath(req.nextUrl.searchParams.get('next'), '/onboarding');
   const codeVerifier = platform === 'x' ? makeCodeVerifier() : undefined;
   const state = signState({ uid: user.id, platform, next, cv: codeVerifier });
   const redirectUri = absoluteUrl(req, `/api/oauth/${platform}/callback`);
