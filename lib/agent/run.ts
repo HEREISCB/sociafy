@@ -60,6 +60,7 @@ export async function runAgentForUser(userId: string, opts?: { force?: boolean }
   }
 
   const drafted = await draftFromTrends({
+    userId,
     instructions: settings.instructions,
     voiceTemplate: (settings.voiceTemplate ?? 'me') as VoiceTemplate,
     niches: (settings.niches ?? []) as Niche[],

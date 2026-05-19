@@ -73,6 +73,8 @@ export const composeVariantsSchema = z.object({
   preset: z.string().max(80).nullable().optional(),
   voice: z.enum(VOICE_TEMPLATES).optional(),
   count: z.number().int().min(1).max(6).optional(),
+  // Opt-in: agent gets web search + url fetch + recent-posts tools.
+  withTools: z.boolean().optional(),
 });
 
 // Agent settings -------------------------------------------------------

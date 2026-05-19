@@ -1,5 +1,8 @@
 import { getAnthropic, MODELS } from './client';
 import { type Platform, type DraftVariant, type VoiceTemplate } from '../db/schema';
+import { runAgentLoop, webSearchTool } from './agent-loop';
+import { fetchUrlSkill } from './skills/fetch-url';
+import { readRecentPostsSkill } from './skills/posts';
 
 const VOICE_HINTS: Record<VoiceTemplate, string> = {
   me: 'Adapt to the writer\'s natural voice as inferred from their prompt. Conversational, with a clear point of view.',
@@ -35,12 +38,21 @@ export type ComposeArgs = {
   platforms?: Platform[];
   count?: number;
   agentInstructions?: string;
+  /**
+   * Opt-in. When true, give the model web_search + url fetch + read-past-posts
+   * tools. Use for "compose with research" — costs a couple cents extra per call.
+   */
+  withTools?: boolean;
+  /** Userid required when withTools=true to enable read_recent_posts. */
+  userId?: string;
 };
 
 export type ComposeResult = {
   variants: DraftVariant[];
   perPlatform: Partial<Record<Platform, string>>;
   stub: boolean;
+  /** Names of tools the agent invoked during this call. */
+  toolsUsed?: string[];
 };
 
 export async function generateCompose(args: ComposeArgs): Promise<ComposeResult> {
@@ -73,18 +85,48 @@ export async function generateCompose(args: ComposeArgs): Promise<ComposeResult>
 
   const user = `Write social posts about:\n\n"""${args.prompt}"""`;
 
-  const resp = await anthropic.messages.create({
-    model: MODELS.fast,
-    max_tokens: 1500,
-    system: sys,
-    messages: [{ role: 'user', content: user }],
-  });
+  // Default (no tools) uses the fast cheap path. With tools, switch to smart.
+  let text: string;
+  let toolsUsed: string[] | undefined;
 
-  const text = resp.content
-    .filter((b) => b.type === 'text')
-    .map((b) => (b as { type: 'text'; text: string }).text)
-    .join('')
-    .trim();
+  if (args.withTools) {
+    const sysWithTools = [
+      sys,
+      '',
+      'You may call tools BEFORE producing the JSON:',
+      ' - web_search: verify facts, find current angles or stats.',
+      ' - fetch_url: read the source if the user pasted a URL.',
+      args.userId ? ' - read_recent_posts: see what worked for THIS user before.' : '',
+    ].filter(Boolean).join('\n');
+    const tools = [
+      webSearchTool(2),
+      fetchUrlSkill,
+      ...(args.userId ? [readRecentPostsSkill(args.userId)] : []),
+    ];
+    const result = await runAgentLoop({
+      model: 'smart',
+      system: sysWithTools,
+      messages: [{ role: 'user', content: user }],
+      tools,
+      maxSteps: 5,
+      maxTokens: 2500,
+    });
+    if (!result) return stubResult(args.prompt, count, platforms);
+    text = result.text;
+    toolsUsed = result.toolsUsed;
+  } else {
+    const resp = await anthropic.messages.create({
+      model: MODELS.fast,
+      max_tokens: 1500,
+      system: sys,
+      messages: [{ role: 'user', content: user }],
+    });
+    text = resp.content
+      .filter((b) => b.type === 'text')
+      .map((b) => (b as { type: 'text'; text: string }).text)
+      .join('')
+      .trim();
+  }
 
   let parsed: { variants: DraftVariant[]; perPlatform: Partial<Record<Platform, string>> };
   try {
@@ -102,6 +144,7 @@ export async function generateCompose(args: ComposeArgs): Promise<ComposeResult>
     })),
     perPlatform: parsed.perPlatform ?? {},
     stub: false,
+    toolsUsed,
   };
 }
 

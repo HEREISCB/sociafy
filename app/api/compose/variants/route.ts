@@ -41,6 +41,8 @@ export async function POST(req: NextRequest) {
       voiceTemplate: body.voice ?? settings?.voiceTemplate ?? 'me',
       agentInstructions: settings?.instructions,
       count: body.count ?? 4,
+      withTools: body.withTools === true,
+      userId: user.id,
     });
 
     return result;
