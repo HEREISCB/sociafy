@@ -525,6 +525,56 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
 
         <div className="card">
           <div className="card-head">
+            <h3><Icon name="globe" size={14} /> Distribution</h3>
+            <span className="meta">{platforms.length} platforms · adapts per channel</span>
+          </div>
+          <div className="card-body" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            {PLATFORM_LIST.map((p) => {
+              const isConnected = connectedShorts.includes(p.id);
+              return (
+                <span
+                  key={p.id}
+                  className={`prompt-chip ${platforms.includes(p.id) ? 'active' : ''}`}
+                  onClick={() => togglePlat(p.id)}
+                  style={{ opacity: isConnected ? 1 : 0.55 }}
+                  title={isConnected ? 'Connected' : 'Not connected'}
+                >
+                  <Pglyph p={p.id} /> {p.label}{!isConnected && ' ·'}
+                </span>
+              );
+            })}
+            <div style={{ flex: 1 }} />
+            <input
+              type="datetime-local"
+              value={customSchedule}
+              min={minDateTimeLocal()}
+              onChange={(e) => setCustomSchedule(e.target.value)}
+              style={{
+                padding: '6px 8px',
+                border: '1px solid var(--line-2)',
+                borderRadius: 6,
+                fontFamily: 'var(--mono)',
+                fontSize: 11.5,
+                background: 'var(--bg-elev)',
+                color: 'var(--ink)',
+              }}
+              title="Pick a date and time to schedule"
+            />
+            <button
+              className="btn sm"
+              disabled={busy !== null}
+              onClick={() => customSchedule ? schedule(new Date(customSchedule).toISOString()) : scheduleIn30()}
+            >
+              <Icon name="clock" size={12} /> {busy === 'schedule' ? 'Scheduling…' : customSchedule ? 'Schedule' : 'Schedule (+30m)'}
+            </button>
+            <button className="btn sm primary" disabled={busy !== null} onClick={postNow}>
+              <Icon name="send" size={12} /> {busy === 'post' ? 'Posting…' : 'Post now'}
+            </button>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-head">
             <h3>
               <Icon name="fork" size={14} />
               Variants
@@ -645,55 +695,6 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
           </div>
         </div>
 
-        <div className="card">
-          <div className="card-head">
-            <h3><Icon name="globe" size={14} /> Distribution</h3>
-            <span className="meta">{platforms.length} platforms · adapts per channel</span>
-          </div>
-          <div className="card-body" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {PLATFORM_LIST.map((p) => {
-              const isConnected = connectedShorts.includes(p.id);
-              return (
-                <span
-                  key={p.id}
-                  className={`prompt-chip ${platforms.includes(p.id) ? 'active' : ''}`}
-                  onClick={() => togglePlat(p.id)}
-                  style={{ opacity: isConnected ? 1 : 0.55 }}
-                  title={isConnected ? 'Connected' : 'Not connected'}
-                >
-                  <Pglyph p={p.id} /> {p.label}{!isConnected && ' ·'}
-                </span>
-              );
-            })}
-            <div style={{ flex: 1 }} />
-            <input
-              type="datetime-local"
-              value={customSchedule}
-              min={minDateTimeLocal()}
-              onChange={(e) => setCustomSchedule(e.target.value)}
-              style={{
-                padding: '6px 8px',
-                border: '1px solid var(--line-2)',
-                borderRadius: 6,
-                fontFamily: 'var(--mono)',
-                fontSize: 11.5,
-                background: 'var(--bg-elev)',
-                color: 'var(--ink)',
-              }}
-              title="Pick a date and time to schedule"
-            />
-            <button
-              className="btn sm"
-              disabled={busy !== null}
-              onClick={() => customSchedule ? schedule(new Date(customSchedule).toISOString()) : scheduleIn30()}
-            >
-              <Icon name="clock" size={12} /> {busy === 'schedule' ? 'Scheduling…' : customSchedule ? 'Schedule' : 'Schedule (+30m)'}
-            </button>
-            <button className="btn sm primary" disabled={busy !== null} onClick={postNow}>
-              <Icon name="send" size={12} /> {busy === 'post' ? 'Posting…' : 'Post now'}
-            </button>
-          </div>
-        </div>
       </div>
 
       <div className="composer-right">

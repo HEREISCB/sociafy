@@ -34,7 +34,11 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ platform: s
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    return NextResponse.redirect(absoluteUrl(req, `/onboarding?error=oauth_failed&platform=${platform}&detail=${encodeURIComponent(msg)}`));
+    const back = state.next || '/onboarding';
+    const sep = back.includes('?') ? '&' : '?';
+    return NextResponse.redirect(
+      absoluteUrl(req, `${back}${sep}oauth_error=${encodeURIComponent(msg)}&platform=${platform}`),
+    );
   }
 
   // Upsert: if user already connected this platform, update tokens.
@@ -86,5 +90,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ platform: s
   });
 
   const back = state.next || '/onboarding';
-  return NextResponse.redirect(absoluteUrl(req, back));
+  const sep = back.includes('?') ? '&' : '?';
+  const handle = result.profile.handle ? encodeURIComponent(result.profile.handle) : '';
+  return NextResponse.redirect(
+    absoluteUrl(req, `${back}${sep}connected=${platform}${handle ? `&handle=${handle}` : ''}`),
+  );
 }

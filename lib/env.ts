@@ -44,6 +44,7 @@ export const env = {
       // Facebook Login for Business: a Configuration ID bundles permissions + assets.
       // When set, OAuth uses config_id instead of scope=...
       configId: required('META_CONFIG_ID'),
+      webhookVerifyToken: required('META_WEBHOOK_VERIFY_TOKEN'),
     },
     tiktok: {
       clientKey: required('TIKTOK_CLIENT_KEY'),

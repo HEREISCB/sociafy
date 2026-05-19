@@ -78,6 +78,32 @@ export const youtubeAdapter: PlatformAdapter = {
       },
     };
   },
+  async refresh(refreshToken) {
+    if (!this.isConfigured()) return { accessToken: 'stub', refreshToken };
+    const resp = await fetch(TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: env.platforms.google.clientId!,
+        client_secret: env.platforms.google.clientSecret!,
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+      }),
+    });
+    if (!resp.ok) throw new PlatformError('youtube_refresh_failed', resp.status, await resp.text());
+    const t = (await resp.json()) as {
+      access_token: string;
+      expires_in?: number;
+      scope?: string;
+    };
+    // Google's refresh response does NOT return a new refresh_token — keep the original.
+    return {
+      accessToken: t.access_token,
+      refreshToken,
+      expiresAt: t.expires_in ? new Date(Date.now() + t.expires_in * 1000) : null,
+      scope: t.scope ?? null,
+    };
+  },
   async publishText(input: PublishInput): Promise<PublishResult> {
     // YouTube needs a video upload via resumable upload protocol — not implemented.
     if (!this.isConfigured() || input.account.accessToken === 'stub') return stubPublish(input, 'youtube');

@@ -373,14 +373,20 @@ a { color: inherit; text-decoration: none; }
   font-weight: 600;
   flex: 0 0 18px;
 }
-.pglyph.ig { background: var(--ig); }
+.pglyph.ig { background: linear-gradient(135deg, #F58529 0%, #DD2A7B 50%, #8134AF 100%); }
 .pglyph.fb { background: var(--fb); }
 .pglyph.x  { background: var(--x); }
 .pglyph.li { background: var(--li); }
-.pglyph.tt { background: var(--tt); }
+.pglyph.tt { background: #000; }
 .pglyph.yt { background: var(--yt); }
-.pglyph.lg { width: 28px; height: 28px; border-radius: 6px; font-size: 13px; }
-.pglyph.xl { width: 40px; height: 40px; border-radius: 9px; font-size: 17px; }
+.pglyph.lg { width: 28px; height: 28px; border-radius: 6px; font-size: 13px; flex: 0 0 28px; }
+.pglyph.xl {
+  width: 44px; height: 44px;
+  border-radius: 10px;
+  font-size: 17px;
+  flex: 0 0 44px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.18), 0 1px 2px rgba(0,0,0,0.08);
+}
 
 /* Stat row */
 .stat-grid {
@@ -474,6 +480,10 @@ a { color: inherit; text-decoration: none; }
 @keyframes pulse {
   0% { transform: scale(1); opacity: 0.6; }
   100% { transform: scale(2.6); opacity: 0; }
+}
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 .briefing h2 {
   margin: 0 0 12px;

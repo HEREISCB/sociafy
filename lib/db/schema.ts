@@ -197,7 +197,8 @@ export type ActivityKind =
   | 'trend_spotted'
   | 'agent_enabled'
   | 'agent_disabled'
-  | 'onboarded';
+  | 'onboarded'
+  | 'webhook_event';
 
 export const activityLog = pgTable(
   'activity_log',

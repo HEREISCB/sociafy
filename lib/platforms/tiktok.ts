@@ -69,6 +69,32 @@ export const tiktokAdapter: PlatformAdapter = {
       },
     };
   },
+  async refresh(refreshToken) {
+    if (!this.isConfigured()) return { accessToken: 'stub', refreshToken };
+    const resp = await fetch(TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_key: env.platforms.tiktok.clientKey!,
+        client_secret: env.platforms.tiktok.clientSecret!,
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+      }),
+    });
+    if (!resp.ok) throw new PlatformError('tiktok_refresh_failed', resp.status, await resp.text());
+    const t = (await resp.json()) as {
+      access_token: string;
+      refresh_token?: string;
+      expires_in?: number;
+      scope?: string;
+    };
+    return {
+      accessToken: t.access_token,
+      refreshToken: t.refresh_token ?? refreshToken,
+      expiresAt: t.expires_in ? new Date(Date.now() + t.expires_in * 1000) : null,
+      scope: t.scope ?? null,
+    };
+  },
   async publishText(input: PublishInput): Promise<PublishResult> {
     if (!this.isConfigured() || input.account.accessToken === 'stub') return stubPublish(input, 'tiktok');
     if (!input.media || input.media.length === 0) {

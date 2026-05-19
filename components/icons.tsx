@@ -10,7 +10,7 @@ type IconName =
   | 'trend' | 'chat' | 'mic' | 'chevron_down' | 'chevron_right'
   | 'chevron_left' | 'more' | 'upload' | 'eye' | 'heart' | 'bookmark'
   | 'send' | 'fire' | 'globe' | 'lock' | 'waveform' | 'target'
-  | 'folder' | 'grid' | 'list' | 'filter' | 'link' | 'book' | 'fork';
+  | 'folder' | 'grid' | 'list' | 'filter' | 'link' | 'book' | 'fork' | 'alert';
 
 interface IconProps extends React.SVGProps<SVGSVGElement> {
   name: IconName;
@@ -67,6 +67,7 @@ export const Icon: React.FC<IconProps> = ({ name, size = 16, ...props }) => {
     link: <><path d="M6.5 9.5l3-3M5 11l-1 1a2.5 2.5 0 01-3.5-3.5l2.5-2.5a2.5 2.5 0 013.5 0M11 5l1-1a2.5 2.5 0 013.5 3.5l-2.5 2.5a2.5 2.5 0 01-3.5 0"/></>,
     book: <><path d="M2.5 3.5h5a2 2 0 012 2v8a2 2 0 00-2-2h-5v-8zM13.5 3.5h-5a2 2 0 00-2 2v8a2 2 0 012-2h5v-8z"/></>,
     fork: <><circle cx="4" cy="3" r="1.5"/><circle cx="12" cy="3" r="1.5"/><circle cx="8" cy="13" r="1.5"/><path d="M4 4.5v3a2 2 0 002 2h4a2 2 0 002-2v-3M8 9.5v2"/></>,
+    alert: <><path d="M8 2L1.5 13.5h13L8 2z"/><path d="M8 6.5v3.5M8 12v.5"/></>,
   };
 
   return (
@@ -92,11 +93,69 @@ interface PglyphProps {
   className?: string;
 }
 
+const PLATFORM_LOGOS: Record<string, (s: number) => React.ReactNode> = {
+  fb: (s) => (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="currentColor" aria-hidden style={{ display: 'block' }}>
+      <path transform="translate(-1.55 -1.55)" d="M15.12 21.99v-7.79h2.6l.39-3.02h-2.99V9.27c0-.87.24-1.47 1.5-1.47h1.6V5.11c-.28-.04-1.23-.12-2.34-.12-2.31 0-3.9 1.41-3.9 4v2.23H9.4v3.02h2.58v7.79h3.14z" />
+    </svg>
+  ),
+  ig: (s) => (
+    <svg
+      width={s}
+      height={s}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.9}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      style={{ display: 'block' }}
+    >
+      <rect x="3.5" y="3.5" width="17" height="17" rx="4.5" />
+      <circle cx="12" cy="12" r="3.7" />
+      <circle cx="17.2" cy="6.8" r="1.1" fill="currentColor" stroke="none" />
+    </svg>
+  ),
+  x: (s) => (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="currentColor" aria-hidden style={{ display: 'block' }}>
+      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231 5.451-6.231z" />
+    </svg>
+  ),
+  li: (s) => (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="currentColor" aria-hidden style={{ display: 'block' }}>
+      <path transform="translate(-1.3 1)" d="M6.5 9.2h2.95V19H6.5V9.2zm1.47-4.7a1.74 1.74 0 1 1 0 3.48 1.74 1.74 0 0 1 0-3.48zM11.1 9.2h2.83v1.34h.04c.4-.74 1.36-1.53 2.81-1.53 3 0 3.56 1.97 3.56 4.54V19h-2.95v-4.36c0-1.04-.02-2.38-1.45-2.38-1.45 0-1.68 1.13-1.68 2.3V19H11.1V9.2z" />
+    </svg>
+  ),
+  tt: (s) => (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="currentColor" aria-hidden style={{ display: 'block' }}>
+      <path transform="translate(-0.6 0)" d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64 2.93 2.93 0 0 1 .88.13V9.4a6.84 6.84 0 0 0-1-.06A6.33 6.33 0 0 0 5.8 20.1a6.34 6.34 0 0 0 10.86-4.43V8.7a8.16 8.16 0 0 0 4.77 1.52V6.81a4.85 4.85 0 0 1-1.84-.12z" />
+    </svg>
+  ),
+  yt: (s) => (
+    <svg
+      width={s}
+      height={s}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      fillRule="evenodd"
+      clipRule="evenodd"
+      aria-hidden
+      style={{ display: 'block' }}
+    >
+      <path d="M21.58 7.19c-.23-.86-.91-1.54-1.77-1.77C18.25 5 12 5 12 5s-6.25 0-7.81.42c-.86.23-1.54.91-1.77 1.77C2 8.75 2 12 2 12s0 3.25.42 4.81c.23.86.91 1.54 1.77 1.77 1.56.42 7.81.42 7.81.42s6.25 0 7.81-.42c.86-.23 1.54-.91 1.77-1.77C22 15.25 22 12 22 12s0-3.25-.42-4.81zM10 15V9l5.2 3L10 15z" />
+    </svg>
+  ),
+};
+
+const ICON_PX: Record<'sm' | 'lg' | 'xl', number> = { sm: 11, lg: 17, xl: 26 };
+
 export const Pglyph: React.FC<PglyphProps> = ({ p, size, className }) => {
-  const labels: Record<string, string> = { ig: 'Ig', fb: 'f', x: '𝕏', li: 'in', tt: 'T', yt: 'Yt' };
+  const key = size ?? 'sm';
+  const render = PLATFORM_LOGOS[p];
   return (
     <span className={`pglyph ${p}${size ? ' ' + size : ''}${className ? ' ' + className : ''}`}>
-      {labels[p]}
+      {render ? render(ICON_PX[key]) : null}
     </span>
   );
 };

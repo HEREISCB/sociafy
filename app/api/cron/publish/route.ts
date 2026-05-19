@@ -9,6 +9,7 @@ import {
   drafts,
 } from '../../../../lib/db/schema';
 import { getAdapter } from '../../../../lib/platforms/registry';
+import { ensureFreshToken } from '../../../../lib/platforms/token';
 import { isStubMode } from '../../../../lib/env';
 
 export const runtime = 'nodejs';
@@ -55,12 +56,13 @@ async function run(req: NextRequest) {
       .set({ status: 'publishing', attempts: (sp.attempts ?? 0) + 1, updatedAt: new Date() })
       .where(eq(scheduledPosts.id, sp.id));
 
-    const acct = accountById.get(sp.accountId);
-    if (!acct) {
+    const initialAcct = accountById.get(sp.accountId);
+    if (!initialAcct) {
       await markFailed(sp.id, 'no_account');
       results.push({ id: sp.id, platform: sp.platform, ok: false, error: 'no_account' });
       continue;
     }
+    const acct = await ensureFreshToken(initialAcct);
 
     const adapter = getAdapter(sp.platform);
 

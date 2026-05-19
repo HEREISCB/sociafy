@@ -72,8 +72,15 @@ const SparkleIcon = () => (
   </svg>
 );
 
+function initialPageFromUrl(): Page {
+  if (typeof window === 'undefined') return 'dashboard';
+  const tab = new URLSearchParams(window.location.search).get('tab');
+  const valid: Page[] = ['dashboard', 'compose', 'agent', 'calendar', 'connections', 'onboarding'];
+  return (valid as string[]).includes(tab ?? '') ? (tab as Page) : 'dashboard';
+}
+
 export default function Home() {
-  const [page, setPage] = useState<Page>('dashboard');
+  const [page, setPage] = useState<Page>(initialPageFromUrl);
   const [mode, setMode] = useState<Mode>('manual');
   const [refreshing, setRefreshing] = useState(false);
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null);

@@ -11,6 +11,7 @@ import {
   type Platform,
 } from '../../../lib/db/schema';
 import { getAdapter } from '../../../lib/platforms/registry';
+import { ensureFreshToken } from '../../../lib/platforms/token';
 
 // POST /api/publish
 // Body: { draftId, platforms?: Platform[] }
@@ -55,11 +56,12 @@ export async function POST(req: NextRequest) {
     }> = [];
 
     for (const platform of requested) {
-      const acct = byPlatform.get(platform);
-      if (!acct) {
+      const initialAcct = byPlatform.get(platform);
+      if (!initialAcct) {
         results.push({ platform, ok: false, error: 'account_not_connected' });
         continue;
       }
+      const acct = await ensureFreshToken(initialAcct);
 
       const text = (draft.perPlatformText as Record<string, string> | null)?.[platform] ?? draft.body;
       const media = (draft.media ?? []) as { id: string; url: string; mimeType: string }[];
