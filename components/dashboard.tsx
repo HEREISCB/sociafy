@@ -266,6 +266,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose, onEditDraft }) => {
         <QuickPost platform="facebook" pageName={facebookMe?.page.name} />
       )}
 
+      <BrandMonitor />
+
+
       {fbConnected && insightsData && insightsData.posts.length > 0 && (
         <div className="card" style={{ marginBottom: 16 }}>
           <div className="card-head">
@@ -483,6 +486,105 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose, onEditDraft }) => {
         </div>
       </div>
     </>
+  );
+};
+
+type BrandReport = {
+  summary: string;
+  mentions: Array<{ source: string; url: string; sentiment: 'positive' | 'neutral' | 'negative'; snippet: string }>;
+  competitorMoves: Array<{ competitor: string; what: string; url: string | null }>;
+  respondWith: Array<{ angle: string; draftText: string }>;
+};
+
+const BrandMonitor: React.FC = () => {
+  const [brand, setBrand] = useState('');
+  const [competitors, setCompetitors] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [report, setReport] = useState<BrandReport | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const run = async () => {
+    if (!brand.trim()) return;
+    setBusy(true);
+    setError(null);
+    setReport(null);
+    try {
+      const body = {
+        brand: brand.trim(),
+        competitors: competitors.split(',').map((s) => s.trim()).filter(Boolean).slice(0, 8),
+      };
+      const r = await apiPost<{ ok: boolean; report: BrandReport }>('/api/agent/brand-monitor', body);
+      setReport(r.report);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg.startsWith('429') ? 'Slow down — limit is 3 every 5 min.' : msg);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="card-head">
+        <h3>
+          <Icon name="search" size={14} /> Brand monitor
+          <span className="chip ghost mono">web search</span>
+        </h3>
+        <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>Agent searches recent public mentions and suggests replies.</span>
+      </div>
+      <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <input
+            type="text"
+            value={brand}
+            placeholder="Your brand (e.g. Sociafy)"
+            onChange={(e) => setBrand(e.target.value)}
+            style={{ flex: '2 1 220px', minWidth: 0, padding: '8px 12px', borderRadius: 8, border: '1px solid var(--line)', background: 'var(--bg)', fontSize: 13 }}
+          />
+          <input
+            type="text"
+            value={competitors}
+            placeholder="Competitors (comma-separated, optional)"
+            onChange={(e) => setCompetitors(e.target.value)}
+            style={{ flex: '2 1 240px', minWidth: 0, padding: '8px 12px', borderRadius: 8, border: '1px solid var(--line)', background: 'var(--bg)', fontSize: 13 }}
+          />
+          <button className="btn primary" onClick={run} disabled={busy || !brand.trim()}>
+            {busy ? <><Icon name="refresh" size={12} /> Searching</> : <><Icon name="globe" size={12} /> Scan</>}
+          </button>
+        </div>
+        {error && <div style={{ fontSize: 12, color: 'var(--bad)' }}>{error}</div>}
+        {report && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 4 }}>
+            <p style={{ margin: 0, fontSize: 13, lineHeight: 1.55, color: 'var(--ink)' }}>{report.summary}</p>
+            {report.mentions.length > 0 && (
+              <div>
+                <div className="mono" style={{ fontSize: 10.5, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 6 }}>Recent mentions</div>
+                <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, lineHeight: 1.5, color: 'var(--ink-2)' }}>
+                  {report.mentions.slice(0, 5).map((m, i) => (
+                    <li key={i} style={{ marginBottom: 4 }}>
+                      <span style={{ color: m.sentiment === 'positive' ? 'var(--good)' : m.sentiment === 'negative' ? 'var(--bad)' : 'var(--ink-3)', fontFamily: 'var(--mono)', fontSize: 10, marginRight: 6 }}>{m.sentiment}</span>
+                      <a href={m.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-ink)', textDecoration: 'underline' }}>{m.source}</a>
+                      <span style={{ color: 'var(--ink-3)' }}> — {m.snippet}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {report.respondWith.length > 0 && (
+              <div>
+                <div className="mono" style={{ fontSize: 10.5, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 6 }}>Suggested replies</div>
+                {report.respondWith.slice(0, 3).map((r, i) => (
+                  <div key={i} style={{ padding: 10, border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg-sunk)', marginBottom: 6 }}>
+                    <div className="mono" style={{ fontSize: 10.5, color: 'var(--ink-3)', marginBottom: 4 }}>{r.angle}</div>
+                    <div style={{ fontSize: 12.5, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{r.draftText}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
   );
 };
 

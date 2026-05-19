@@ -202,6 +202,44 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
   const [customSchedule, setCustomSchedule] = useState('');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  // Stock image picker state
+  const [stockOpen, setStockOpen] = useState(false);
+  const [stockQuery, setStockQuery] = useState('');
+  const [stockResults, setStockResults] = useState<Array<{ id: string; description: string | null; url: string; thumb: string; attribution: string | null; source: string }>>([]);
+  const [stockLoading, setStockLoading] = useState(false);
+
+  const runStockSearch = async (q: string) => {
+    if (!q.trim()) return;
+    setStockLoading(true);
+    try {
+      const r = await fetch(`/api/media/search?q=${encodeURIComponent(q)}&limit=8`, { credentials: 'include' });
+      if (!r.ok) {
+        setToast(r.status === 429 ? 'Slow down — too many image searches.' : `Image search failed: ${r.status}`);
+        setStockResults([]);
+        return;
+      }
+      const data = (await r.json()) as { results: typeof stockResults };
+      setStockResults(data.results);
+    } catch {
+      setToast('Image search failed.');
+    } finally {
+      setStockLoading(false);
+    }
+  };
+
+  const pickStockImage = (img: { url: string; thumb: string; description: string | null; source: string }) => {
+    setMedia((m) => [...m, {
+      kind: 'image',
+      label: img.description?.slice(0, 60) || 'Stock image',
+      tag: img.source,
+      url: img.url,
+      mimeType: 'image/jpeg',
+    }]);
+    setStockOpen(false);
+    setStockResults([]);
+    setStockQuery('');
+  };
+
   const onPickFile = () => fileInputRef.current?.click();
   const onFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -320,14 +358,14 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
   const charCount = variant?.text.length ?? 0;
   const limit = PLATFORM_LIST.find((p) => p.id === previewPlat)?.limit ?? 3000;
 
-  const generate = async () => {
+  const generate = async (opts?: { withTools?: boolean }) => {
     setGenerating(true);
     setToast(null);
     try {
       const fullPlatforms = platforms.map((s) => SHORT_TO_PLATFORM[s]).filter(Boolean) as Platform[];
-      const r = await apiPost<{ variants: Variant[]; perPlatform: Partial<Record<Platform, string>>; stub?: boolean }>(
+      const r = await apiPost<{ variants: Variant[]; perPlatform: Partial<Record<Platform, string>>; stub?: boolean; toolsUsed?: string[] }>(
         '/api/compose/variants',
-        { prompt, preset, platforms: fullPlatforms },
+        { prompt, preset, platforms: fullPlatforms, withTools: opts?.withTools === true },
       );
       const incoming = (r.variants ?? []).map((v, i) => ({
         id: v.id || (['A', 'B', 'C', 'D'][i] ?? `V${i + 1}`),
@@ -341,11 +379,17 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
         setActive(incoming[0].id);
       }
       setPerPlatform(r.perPlatform ?? {});
-      if (r.stub) setToast('Generated in stub mode — set ANTHROPIC_API_KEY for real variants.');
+      if (r.stub) {
+        setToast('Generated in stub mode — set ANTHROPIC_API_KEY for real variants.');
+      } else if (opts?.withTools && r.toolsUsed?.length) {
+        setToast(`Researched with ${r.toolsUsed.join(' + ')} before drafting.`);
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg.startsWith('401') || msg.startsWith('503')) {
         setToast('Sign in and connect Supabase to generate with Claude.');
+      } else if (msg.startsWith('429')) {
+        setToast('Slow down — too many compose requests. Try again in a minute.');
       } else {
         setToast(`Generate failed: ${msg}`);
       }
@@ -504,7 +548,18 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
               ))}
             </div>
             <div className="prompt-spacer" />
-            <button className="btn accent" onClick={generate} disabled={generating}>
+            <button
+              className="btn"
+              onClick={() => generate({ withTools: true })}
+              disabled={generating || !prompt.trim()}
+              title="Agent searches the web + reads your past posts before drafting. Slower, costs more, hugely better when writing about anything time-sensitive."
+              style={{ marginRight: 8 }}
+            >
+              {generating
+                ? <><Icon name="refresh" size={12} /> Researching</>
+                : <><Icon name="globe" size={12} /> Generate with research</>}
+            </button>
+            <button className="btn accent" onClick={() => generate()} disabled={generating || !prompt.trim()}>
               {generating
                 ? <><Icon name="refresh" size={12} /> Generating</>
                 : <><Icon name="sparkle" size={12} /> Generate 4 variants</>}
@@ -581,7 +636,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
               <span className="chip ghost mono">{variants.length} {variants.length === 1 ? 'variant' : 'variants'}</span>
             </h3>
             <div style={{ display: 'flex', gap: 6 }}>
-              <button className="btn sm ghost" onClick={generate} disabled={generating}><Icon name="refresh" size={12} /> Regenerate</button>
+              <button className="btn sm ghost" onClick={() => generate()} disabled={generating}><Icon name="refresh" size={12} /> Regenerate</button>
             </div>
           </div>
           <div className="card-body">
@@ -665,10 +720,51 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                   <span>Upload</span>
                 </button>
                 <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm,video/quicktime" hidden onChange={onFileChange} />
-                <button style={{ aspectRatio: '1/1', borderRadius: 10, border: '1px dashed oklch(0.86 0.08 70)', background: 'var(--accent-soft)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, color: 'var(--accent-ink)', fontSize: 11, fontFamily: 'var(--mono)' }} onClick={() => setMedia([...media, { kind: 'image', label: 'AI image', tag: 'Generated' }])}>
-                  <Icon name="sparkle" size={16} />
-                  <span>Generate</span>
+                <button style={{ aspectRatio: '1/1', borderRadius: 10, border: '1px dashed oklch(0.86 0.08 70)', background: 'var(--accent-soft)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, color: 'var(--accent-ink)', fontSize: 11, fontFamily: 'var(--mono)' }} onClick={() => { setStockOpen(true); if (prompt && !stockQuery) { setStockQuery(prompt.slice(0, 60)); runStockSearch(prompt.slice(0, 60)); } }}>
+                  <Icon name="search" size={16} />
+                  <span>Stock</span>
                 </button>
+              </div>
+            )}
+
+            {/* Stock image picker — collapsible */}
+            {stockOpen && mediaKind !== 'video' && (
+              <div style={{ marginTop: 12, padding: 12, border: '1px solid var(--line)', borderRadius: 10, background: 'var(--bg-sunk)' }}>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 10 }}>
+                  <Icon name="search" size={12} />
+                  <input
+                    type="text"
+                    value={stockQuery}
+                    placeholder="Search Unsplash / Pexels…"
+                    onChange={(e) => setStockQuery(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') runStockSearch(stockQuery); }}
+                    style={{ flex: 1, padding: '6px 10px', borderRadius: 8, border: '1px solid var(--line)', background: 'var(--bg)', fontSize: 12.5, color: 'var(--ink)' }}
+                  />
+                  <button className="btn sm" onClick={() => runStockSearch(stockQuery)} disabled={stockLoading || !stockQuery.trim()}>
+                    {stockLoading ? 'Searching…' : 'Search'}
+                  </button>
+                  <button className="btn sm ghost" onClick={() => { setStockOpen(false); setStockResults([]); }}>
+                    <Icon name="x" size={11} />
+                  </button>
+                </div>
+                {stockResults.length > 0 ? (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+                    {stockResults.map((r) => (
+                      <button
+                        key={r.id}
+                        onClick={() => pickStockImage(r)}
+                        title={`${r.description ?? ''}\n${r.attribution ?? ''}`}
+                        style={{ aspectRatio: '1/1', borderRadius: 8, border: '1px solid var(--line-2)', overflow: 'hidden', padding: 0, background: 'var(--bg)' }}
+                      >
+                        <img src={r.thumb} alt={r.description ?? ''} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                      </button>
+                    ))}
+                  </div>
+                ) : !stockLoading && (
+                  <div style={{ fontSize: 12, color: 'var(--ink-3)', padding: '8px 4px' }}>
+                    {stockQuery ? 'No results. Try a different query.' : 'Search for an image — Unsplash + Pexels under the hood. Set UNSPLASH_ACCESS_KEY for real results; otherwise picsum.photos stubs.'}
+                  </div>
+                )}
               </div>
             )}
             {mediaKind === 'video' && (
