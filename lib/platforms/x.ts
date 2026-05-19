@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { env } from '../env';
 import type { PlatformAdapter, PublishInput, PublishResult } from './types';
 import { PlatformError } from './types';
@@ -121,6 +122,5 @@ export const xAdapter: PlatformAdapter = {
 };
 
 function toS256(verifier: string): string {
-  const crypto = require('crypto') as typeof import('crypto');
   return crypto.createHash('sha256').update(verifier).digest('base64url');
 }
