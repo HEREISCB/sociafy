@@ -112,8 +112,10 @@ async function run(req: NextRequest) {
     }
   }
 
-  // Mark draft 'published' if all of its scheduled posts are published
-  const draftIds = Array.from(new Set(due.map((d) => d.draftId)));
+  // Mark draft 'published' if all of its scheduled posts are published.
+  // Filter out null/undefined draftIds defensively — schema requires notNull,
+  // but stale rows or migrations could violate that.
+  const draftIds = Array.from(new Set(due.map((d) => d.draftId).filter(Boolean)));
   for (const did of draftIds) {
     const remaining = await db()
       .select({ id: scheduledPosts.id, status: scheduledPosts.status })
