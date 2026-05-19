@@ -2,41 +2,94 @@ import { eq } from 'drizzle-orm';
 import { db } from '../db';
 import { connectedAccounts, type Platform } from '../db/schema';
 import { getAdapter } from './registry';
+import { decryptToken, encryptToken, isEncrypted } from '../crypto/tokens';
 
 const REFRESH_WINDOW_MS = 5 * 60 * 1000;
 
 type AccountRow = typeof connectedAccounts.$inferSelect;
 
 /**
+ * Return a copy of the account row with tokens decrypted in memory. Use for
+ * read paths that pass tokens to platform adapters. Storage remains encrypted.
+ */
+export function decryptAccount(acct: AccountRow): AccountRow {
+  return {
+    ...acct,
+    accessToken: decryptToken(acct.accessToken) ?? acct.accessToken,
+    refreshToken: acct.refreshToken ? decryptToken(acct.refreshToken) : null,
+  };
+}
+
+/**
  * If the account's access token is close to expiry (or expired) and the
  * adapter supports refresh, swap in a fresh token and persist it. Returns
- * the (possibly updated) account row. If refresh fails the original row
- * is returned and the caller will surface the platform's 401 normally —
- * the user then sees "Reconnect" on the Connections page.
+ * a row with decrypted tokens ready for use. On refresh failure the input
+ * (decrypted) row is returned and the caller will surface a 401 — the user
+ * then sees "Reconnect" on the Connections page.
+ *
+ * Accepts either an encrypted DB row or an already-decrypted row.
  */
 export async function ensureFreshToken(acct: AccountRow): Promise<AccountRow> {
-  if (acct.isStub) return acct;
-  if (!acct.tokenExpiresAt) return acct;
-  if (!acct.refreshToken) return acct;
+  const wasEncrypted = isEncrypted(acct.accessToken) || (acct.refreshToken !== null && isEncrypted(acct.refreshToken));
+  const plain = wasEncrypted ? decryptAccount(acct) : acct;
 
-  const remaining = new Date(acct.tokenExpiresAt).getTime() - Date.now();
-  if (remaining > REFRESH_WINDOW_MS) return acct;
+  if (plain.isStub) return plain;
+  if (!plain.tokenExpiresAt) {
+    // Even when we don't refresh, opportunistically migrate plaintext rows to ciphertext.
+    if (!wasEncrypted && plain.accessToken && plain.accessToken !== 'stub') {
+      await db()
+        .update(connectedAccounts)
+        .set({
+          accessToken: encryptToken(plain.accessToken),
+          refreshToken: plain.refreshToken ? encryptToken(plain.refreshToken) : null,
+          updatedAt: new Date(),
+        })
+        .where(eq(connectedAccounts.id, plain.id));
+    }
+    return plain;
+  }
+  if (!plain.refreshToken) return plain;
 
-  const adapter = getAdapter(acct.platform as Platform);
-  if (!adapter.refresh) return acct;
+  const remaining = new Date(plain.tokenExpiresAt).getTime() - Date.now();
+  if (remaining > REFRESH_WINDOW_MS) {
+    // Migrate legacy plaintext row even without refresh.
+    if (!wasEncrypted) {
+      await db()
+        .update(connectedAccounts)
+        .set({
+          accessToken: encryptToken(plain.accessToken),
+          refreshToken: encryptToken(plain.refreshToken),
+          updatedAt: new Date(),
+        })
+        .where(eq(connectedAccounts.id, plain.id));
+    }
+    return plain;
+  }
+
+  const adapter = getAdapter(plain.platform as Platform);
+  if (!adapter.refresh) return plain;
 
   try {
-    const tokens = await adapter.refresh(acct.refreshToken);
+    const tokens = await adapter.refresh(plain.refreshToken);
     const next = {
       accessToken: tokens.accessToken,
-      refreshToken: tokens.refreshToken ?? acct.refreshToken,
+      refreshToken: tokens.refreshToken ?? plain.refreshToken,
       tokenExpiresAt: tokens.expiresAt ?? null,
-      scope: tokens.scope ?? acct.scope,
+      scope: tokens.scope ?? plain.scope,
       updatedAt: new Date(),
     };
-    await db().update(connectedAccounts).set(next).where(eq(connectedAccounts.id, acct.id));
-    return { ...acct, ...next };
+    await db()
+      .update(connectedAccounts)
+      .set({
+        accessToken: encryptToken(next.accessToken),
+        refreshToken: encryptToken(next.refreshToken),
+        tokenExpiresAt: next.tokenExpiresAt,
+        scope: next.scope,
+        updatedAt: next.updatedAt,
+      })
+      .where(eq(connectedAccounts.id, plain.id));
+    return { ...plain, ...next };
   } catch {
-    return acct;
+    return plain;
   }
 }

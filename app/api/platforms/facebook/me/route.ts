@@ -4,6 +4,7 @@ import { withUser, jsonError } from '../../../../../lib/api';
 import { db } from '../../../../../lib/db';
 import { connectedAccounts } from '../../../../../lib/db/schema';
 import { env } from '../../../../../lib/env';
+import { decryptToken } from '../../../../../lib/crypto/tokens';
 
 const GRAPH = 'https://graph.facebook.com/v23.0';
 
@@ -29,16 +30,22 @@ export async function GET(_req: NextRequest) {
     }
 
     const pageId = acct.platformUserId;
-    const token = acct.accessToken;
+    const token = decryptToken(acct.accessToken) ?? acct.accessToken;
 
+    // Pass the access token as an Authorization header rather than a query
+    // string parameter so it doesn't appear in proxy/CDN access logs.
+    const authHeaders = { Authorization: `Bearer ${token}` };
     const [pageRes, postsRes] = await Promise.all([
-      fetch(`${GRAPH}/${pageId}?fields=id,name,username,fan_count,followers_count,picture.type(large),link,about,category&access_token=${token}`),
-      fetch(`${GRAPH}/${pageId}/posts?fields=id,message,created_time,permalink_url,full_picture,reactions.summary(true),comments.summary(true),shares&limit=5&access_token=${token}`),
+      fetch(`${GRAPH}/${pageId}?fields=id,name,username,fan_count,followers_count,picture.type(large),link,about,category`, { headers: authHeaders }),
+      fetch(`${GRAPH}/${pageId}/posts?fields=id,message,created_time,permalink_url,full_picture,reactions.summary(true),comments.summary(true),shares&limit=5`, { headers: authHeaders }),
     ]);
 
     if (!pageRes.ok) {
+      // Don't relay raw Graph error body to the client — it can include
+      // internal error codes/subcodes useful for enumeration.
       const detail = await pageRes.text();
-      return jsonError('graph_page_failed', pageRes.status, { detail });
+      console.error('[graph]', pageRes.status, detail);
+      return jsonError('graph_page_failed', pageRes.status);
     }
 
     const page = (await pageRes.json()) as {

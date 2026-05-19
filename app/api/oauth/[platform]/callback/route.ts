@@ -7,6 +7,7 @@ import { stubProfile } from '../../../../../lib/platforms/stub';
 import { verifyState } from '../../../../../lib/oauth/state';
 import { absoluteUrl } from '../../../../../lib/url';
 import { safeNextPath } from '../../../../../lib/safe-next';
+import { encryptToken } from '../../../../../lib/crypto/tokens';
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ platform: string }> }) {
   const { platform } = await ctx.params;
@@ -57,8 +58,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ platform: s
         handle: result.profile.handle ?? null,
         displayName: result.profile.displayName ?? null,
         avatarUrl: result.profile.avatarUrl ?? null,
-        accessToken: result.tokens.accessToken,
-        refreshToken: result.tokens.refreshToken ?? null,
+        accessToken: encryptToken(result.tokens.accessToken),
+        refreshToken: result.tokens.refreshToken ? encryptToken(result.tokens.refreshToken) : null,
         tokenExpiresAt: result.tokens.expiresAt ?? null,
         scope: result.tokens.scope ?? null,
         meta: (result.tokens.meta ?? {}) as Record<string, unknown>,
@@ -74,8 +75,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ platform: s
       handle: result.profile.handle ?? null,
       displayName: result.profile.displayName ?? null,
       avatarUrl: result.profile.avatarUrl ?? null,
-      accessToken: result.tokens.accessToken,
-      refreshToken: result.tokens.refreshToken ?? null,
+      accessToken: encryptToken(result.tokens.accessToken),
+      refreshToken: result.tokens.refreshToken ? encryptToken(result.tokens.refreshToken) : null,
       tokenExpiresAt: result.tokens.expiresAt ?? null,
       scope: result.tokens.scope ?? null,
       meta: (result.tokens.meta ?? {}) as Record<string, unknown>,

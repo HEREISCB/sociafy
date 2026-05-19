@@ -41,12 +41,13 @@ async function run(req: NextRequest) {
 
   const results: Array<{ id: string; platform: string; refreshed: boolean }> = [];
   for (const acct of candidates) {
-    const before = acct.accessToken;
+    const beforeExp = acct.tokenExpiresAt?.getTime() ?? 0;
     const after = await ensureFreshToken(acct);
+    const afterExp = after.tokenExpiresAt?.getTime() ?? 0;
     results.push({
       id: acct.id,
       platform: acct.platform,
-      refreshed: after.accessToken !== before,
+      refreshed: afterExp > beforeExp,
     });
   }
 

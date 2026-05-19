@@ -3,6 +3,7 @@ import { and, desc, eq, isNotNull } from 'drizzle-orm';
 import { withUser, jsonError } from '../../../../../lib/api';
 import { db } from '../../../../../lib/db';
 import { connectedAccounts, scheduledPosts } from '../../../../../lib/db/schema';
+import { decryptToken } from '../../../../../lib/crypto/tokens';
 
 const GRAPH = 'https://graph.facebook.com/v23.0';
 
@@ -35,7 +36,7 @@ export async function POST(_req: NextRequest) {
 
     if (posts.length === 0) return { synced: 0, posts: [] };
 
-    const token = acct.accessToken;
+    const token = decryptToken(acct.accessToken) ?? acct.accessToken;
     const results: Array<{
       id: string;
       platformPostId: string;
@@ -49,8 +50,8 @@ export async function POST(_req: NextRequest) {
       posts.map(async (p) => {
         if (!p.platformPostId) return;
         try {
-          const url = `${GRAPH}/${p.platformPostId}?fields=reactions.summary(true),comments.summary(true),shares&access_token=${token}`;
-          const resp = await fetch(url);
+          const url = `${GRAPH}/${p.platformPostId}?fields=reactions.summary(true),comments.summary(true),shares`;
+          const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
           if (!resp.ok) return;
           const data = (await resp.json()) as {
             reactions?: { summary?: { total_count?: number } };
