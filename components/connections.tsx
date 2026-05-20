@@ -605,9 +605,16 @@ const ConnectionsPage: React.FC = () => {
                           justifyContent: 'center',
                           padding: '9px 12px',
                           marginTop: 'auto',
-                          background: health.status === 'expired' || health.status === 'expiring' ? 'var(--ink)' : 'var(--bg-elev)',
-                          color: health.status === 'expired' || health.status === 'expiring' ? 'var(--bg)' : 'var(--ink)',
-                          borderColor: health.status === 'expired' || health.status === 'expiring' ? 'var(--ink)' : 'var(--line)',
+                          // Only fully-expired tokens get the urgent dark style. Tokens that
+                          // are still functional (expiring, auto-renewing, live) share the
+                          // neutral Reconnect look so the button doesn't read as disabled.
+                          ...(health.status === 'expired'
+                            ? {
+                                background: 'var(--ink)',
+                                color: 'var(--bg)',
+                                borderColor: 'var(--ink)',
+                              }
+                            : {}),
                         }}
                       >
                         <Icon name="refresh" size={12} />{' '}
