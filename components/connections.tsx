@@ -34,6 +34,8 @@ type PlatformDef = {
   tagline: string;
   blurb: string;
   capabilities: string[];
+  /** When true the card is greyed out and the Connect button is disabled. */
+  comingSoon?: boolean;
 };
 
 const PLATFORMS: PlatformDef[] = [
@@ -60,9 +62,10 @@ const PLATFORMS: PlatformDef[] = [
     short: 'x',
     name: 'X',
     color: 'var(--x)',
-    tagline: 'Tweets · threads · image posts',
-    blurb: 'Tweet text and media. Threads orchestrated by the agent when you want a series.',
+    tagline: 'Paused — paid API tier required',
+    blurb: 'X moved tweet.write behind a paid tier ($100/mo). Coming back when the demand is there.',
     capabilities: ['Tweets', 'Threads', 'Media'],
+    comingSoon: true,
   },
   {
     id: 'linkedin',
@@ -383,15 +386,19 @@ const ConnectionsPage: React.FC = () => {
                 overflow: 'hidden',
                 display: 'flex',
                 flexDirection: 'column',
-                opacity: unauth ? 0.55 : 1,
+                opacity: p.comingSoon ? 0.5 : unauth ? 0.55 : 1,
+                pointerEvents: p.comingSoon ? 'none' : 'auto',
+                filter: p.comingSoon ? 'grayscale(60%)' : 'none',
                 transition: 'transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease',
                 boxShadow: isLive ? '0 1px 0 rgba(10,10,10,0.04), 0 12px 32px -16px rgba(10,10,10,0.12)' : 'var(--shadow-1)',
               }}
               onMouseEnter={(e) => {
+                if (p.comingSoon) return;
                 e.currentTarget.style.transform = 'translateY(-2px)';
                 e.currentTarget.style.boxShadow = '0 4px 6px rgba(10,10,10,0.04), 0 18px 40px -16px rgba(10,10,10,0.18)';
               }}
               onMouseLeave={(e) => {
+                if (p.comingSoon) return;
                 e.currentTarget.style.transform = 'translateY(0)';
                 e.currentTarget.style.boxShadow = isLive
                   ? '0 1px 0 rgba(10,10,10,0.04), 0 12px 32px -16px rgba(10,10,10,0.12)'
