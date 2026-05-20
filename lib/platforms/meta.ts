@@ -155,15 +155,19 @@ const IG_SCOPES = [
   // we don't ship a DM workflow, and asking for them complicates app review.
 ];
 
+function instagramConfigured() {
+  return !!env.platforms.instagram.appId && !!env.platforms.instagram.appSecret;
+}
+
 export const instagramAdapter: PlatformAdapter = {
   id: 'instagram',
   label: 'Instagram',
   scopes: IG_SCOPES,
-  isConfigured: metaConfigured,
+  isConfigured: instagramConfigured,
   buildAuthorizeUrl({ redirectUri, state }) {
-    if (!metaConfigured()) return `/oauth/instagram/callback?stub=1&state=${state}`;
+    if (!instagramConfigured()) return `/oauth/instagram/callback?stub=1&state=${state}`;
     const params = new URLSearchParams({
-      client_id: env.platforms.meta.appId!,
+      client_id: env.platforms.instagram.appId!,
       redirect_uri: redirectUri,
       response_type: 'code',
       scope: IG_SCOPES.join(','),
@@ -172,15 +176,15 @@ export const instagramAdapter: PlatformAdapter = {
     return `${IG_OAUTH_AUTHORIZE}?${params.toString()}`;
   },
   async exchangeCode({ code, redirectUri }) {
-    if (!metaConfigured()) return stubProfile('instagram', 'unknown');
+    if (!instagramConfigured()) return stubProfile('instagram', 'unknown');
 
     // Step 1: short-lived token (~1 hour) from authorization code.
     const shortResp = await fetch(IG_OAUTH_TOKEN, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
-        client_id: env.platforms.meta.appId!,
-        client_secret: env.platforms.meta.appSecret!,
+        client_id: env.platforms.instagram.appId!,
+        client_secret: env.platforms.instagram.appSecret!,
         grant_type: 'authorization_code',
         redirect_uri: redirectUri,
         code,
@@ -200,7 +204,7 @@ export const instagramAdapter: PlatformAdapter = {
     // have the longer one.
     const longUrl = new URL(`${IG_GRAPH_NOVERSION}/access_token`);
     longUrl.searchParams.set('grant_type', 'ig_exchange_token');
-    longUrl.searchParams.set('client_secret', env.platforms.meta.appSecret!);
+    longUrl.searchParams.set('client_secret', env.platforms.instagram.appSecret!);
     longUrl.searchParams.set('access_token', short.access_token);
     const longResp = await fetch(longUrl);
     if (!longResp.ok) {
@@ -253,7 +257,7 @@ export const instagramAdapter: PlatformAdapter = {
     };
   },
   async refresh(refreshToken) {
-    if (!metaConfigured()) return { accessToken: 'stub', refreshToken };
+    if (!instagramConfigured()) return { accessToken: 'stub', refreshToken };
     const url = new URL(`${IG_GRAPH_NOVERSION}/refresh_access_token`);
     url.searchParams.set('grant_type', 'ig_refresh_token');
     url.searchParams.set('access_token', refreshToken);
@@ -270,7 +274,7 @@ export const instagramAdapter: PlatformAdapter = {
     };
   },
   async publishText(input: PublishInput): Promise<PublishResult> {
-    if (!metaConfigured() || input.account.accessToken === 'stub') return stubPublish(input, 'instagram');
+    if (!instagramConfigured() || input.account.accessToken === 'stub') return stubPublish(input, 'instagram');
     if (!input.media || input.media.length === 0) {
       throw new PlatformError(
         'instagram_requires_media',

@@ -46,6 +46,13 @@ export const env = {
       configId: required('META_CONFIG_ID'),
       webhookVerifyToken: required('META_WEBHOOK_VERIFY_TOKEN'),
     },
+    // Instagram Business Login product — Meta assigns this a SEPARATE app ID
+    // and app secret distinct from the parent Meta/Facebook app. Required for
+    // the direct Instagram OAuth flow and Instagram-side webhook signatures.
+    instagram: {
+      appId: required('INSTAGRAM_APP_ID'),
+      appSecret: required('INSTAGRAM_APP_SECRET'),
+    },
     tiktok: {
       clientKey: required('TIKTOK_CLIENT_KEY'),
       clientSecret: required('TIKTOK_CLIENT_SECRET'),
@@ -66,7 +73,7 @@ export const isStubMode = {
     switch (p) {
       case 'x': return !env.platforms.x.clientId;
       case 'linkedin': return !env.platforms.linkedin.clientId;
-      case 'instagram':
+      case 'instagram': return !env.platforms.instagram.appId;
       case 'facebook': return !env.platforms.meta.appId;
       case 'tiktok': return !env.platforms.tiktok.clientKey;
       case 'youtube': return !env.platforms.google.clientId;

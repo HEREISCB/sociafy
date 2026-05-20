@@ -38,10 +38,12 @@ export async function GET(req: NextRequest) {
 }
 
 function verifySignature(rawBody: string, header: string | null): boolean {
-  if (!env.platforms.meta.appSecret) return false;
+  // Instagram product has its own app secret (separate from META_APP_SECRET).
+  // Webhook events from this product are signed with it.
+  if (!env.platforms.instagram.appSecret) return false;
   if (!header) return false;
   const expected = `sha256=${crypto
-    .createHmac('sha256', env.platforms.meta.appSecret)
+    .createHmac('sha256', env.platforms.instagram.appSecret)
     .update(rawBody)
     .digest('hex')}`;
   try {

@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: 'no_signed_request' }, { status: 400 });
   }
 
-  const parsed = parseSignedRequest(signed, env.platforms.meta.appSecret);
+  const parsed = parseSignedRequest(signed, env.platforms.instagram.appSecret);
   if (!parsed) {
     return NextResponse.json({ ok: false, error: 'invalid_signature' }, { status: 401 });
   }
