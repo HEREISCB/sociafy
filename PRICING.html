@@ -1,0 +1,545 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sociafy — API & Model Pricing</title>
+<style>
+  :root {
+    --paper: #fbf8f3;
+    --paper-2: #f3eee5;
+    --ink: #161513;
+    --ink-2: #4a4640;
+    --ink-3: #847d72;
+    --line: #e4ddd0;
+    --line-2: #d0c7b6;
+    --accent: #c44520;
+    --accent-soft: #f8e8df;
+    --warn-bg: #fff3d6;
+    --warn-line: #e0c068;
+    --good-bg: #e3eed4;
+    --bad-bg: #f5dad0;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--paper); color: var(--ink); }
+  body {
+    font-family: 'Charter', 'Iowan Old Style', 'Source Serif Pro', Georgia, serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 56px 40px 80px;
+  }
+  .eyebrow {
+    font-family: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 18px;
+  }
+  .eyebrow::before {
+    content: '';
+    display: inline-block;
+    width: 26px; height: 1px;
+    background: var(--ink-3);
+  }
+  h1 {
+    margin: 0 0 12px;
+    font-family: 'Playfair Display', 'Charter', Georgia, serif;
+    font-size: 52px;
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    font-weight: 500;
+  }
+  h1 em { font-style: italic; color: var(--accent); }
+  h2 {
+    margin: 56px 0 14px;
+    font-family: 'Playfair Display', 'Charter', Georgia, serif;
+    font-size: 28px;
+    font-weight: 500;
+    letter-spacing: -0.015em;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--line-2);
+  }
+  h2 .num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    color: var(--ink-3);
+    letter-spacing: 0.04em;
+    margin-right: 14px;
+    vertical-align: 4px;
+  }
+  h3 {
+    margin: 28px 0 10px;
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--ink);
+  }
+  p { margin: 0 0 14px; color: var(--ink-2); }
+  p.lead { font-size: 18px; color: var(--ink); line-height: 1.55; max-width: 60ch; }
+  .muted { color: var(--ink-3); font-size: 14px; }
+  .accent { color: var(--accent); }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 14px 0 22px;
+    font-size: 14.5px;
+  }
+  th, td {
+    text-align: left;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  th {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    font-weight: 500;
+    background: var(--paper-2);
+    border-top: 1px solid var(--line-2);
+    border-bottom: 1px solid var(--line-2);
+  }
+  td.price, th.price {
+    font-family: 'JetBrains Mono', monospace;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-size: 13.5px;
+    color: var(--ink);
+  }
+  tbody tr:hover { background: var(--paper-2); }
+  td.label { font-weight: 500; }
+  .legend {
+    display: flex;
+    gap: 18px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-3);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin: 4px 0 18px;
+  }
+  .pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 100px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    vertical-align: 2px;
+    margin-left: 6px;
+  }
+  .pill.warn { background: var(--warn-bg); color: #7a5b00; }
+  .pill.dead { background: var(--bad-bg); color: #8a3a20; }
+  .pill.live { background: var(--good-bg); color: #36561a; }
+  .callout {
+    margin: 18px 0;
+    padding: 14px 18px;
+    border-left: 3px solid var(--accent);
+    background: var(--accent-soft);
+    border-radius: 0 6px 6px 0;
+    font-size: 14.5px;
+    color: var(--ink);
+  }
+  .callout.warn {
+    border-left-color: var(--warn-line);
+    background: var(--warn-bg);
+  }
+  .callout strong { color: var(--ink); }
+  .grid-two {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+    margin: 18px 0;
+  }
+  .source-row {
+    margin-top: 60px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line-2);
+    font-size: 13px;
+    color: var(--ink-3);
+    line-height: 1.65;
+  }
+  .source-row a { color: var(--ink-2); text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 3px; }
+  .source-row a:hover { color: var(--accent); }
+  .footer-mark {
+    margin-top: 80px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line-2);
+    display: flex;
+    justify-content: space-between;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+  @media print {
+    body { background: white; }
+    .page { padding: 0; max-width: none; }
+    h2 { page-break-after: avoid; }
+    table { page-break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<main class="page">
+
+  <div class="eyebrow">Sociafy · Operating costs · May 2026</div>
+  <h1>What every action <em>costs us</em>.</h1>
+  <p class="lead">
+    Per-action provider rates across every AI service Sociafy depends on — image and video
+    generation, text/LLM, web search, and LinkedIn enrichment. All figures are the rate we
+    charge against, billed by the listed provider in USD.
+  </p>
+
+  <!-- =========================================== -->
+  <h2><span class="num">01</span> Image generation <span class="pill live">gpt-image-2 · GA</span></h2>
+
+  <p>
+    OpenAI's <strong>gpt-image-2</strong> replaced gpt-image-1 in April 2026. Billed through tokens
+    underneath; the per-image figures below come from OpenAI's own calculator. Output above
+    2560×1440 (4K) is in <strong>beta</strong>.
+  </p>
+
+  <h3>Standard generation — per image</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Resolution</th>
+        <th class="price">Low</th>
+        <th class="price">Medium</th>
+        <th class="price">High</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td class="label">1024 × 1024 — square</td><td class="price">$0.0066</td><td class="price">$0.0583</td><td class="price">$0.2321</td></tr>
+      <tr><td class="label">1024 × 1536 — portrait</td><td class="price">$0.0055</td><td class="price">$0.0451</td><td class="price">$0.1815</td></tr>
+      <tr><td class="label">1536 × 1024 — landscape</td><td class="price">$0.0055</td><td class="price">$0.0451</td><td class="price">$0.1815</td></tr>
+      <tr><td class="label">1920 × 1080 — HD landscape</td><td class="price">$0.0055</td><td class="price">$0.0440</td><td class="price">$0.1738</td></tr>
+      <tr><td class="label">2048 × 1152 — 2K <span class="pill warn">est.</span></td><td class="price">$0.0078</td><td class="price">$0.0770</td><td class="price">$0.3300</td></tr>
+      <tr><td class="label">3840 × 2160 — 4K <span class="pill warn">beta</span></td><td class="price">$0.0132</td><td class="price">$0.1111</td><td class="price">$0.4411</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Batch API — overnight queue, half price</h3>
+  <p>
+    Yes — submitting image jobs through OpenAI's <strong>Batch API</strong> cuts the rate by
+    <strong>50%</strong>. Same endpoint family (<code>/v1/images/generations</code>), asynchronous,
+    24-hour service-level commitment. Use it for non-urgent generations queued overnight.
+  </p>
+  <table>
+    <thead>
+      <tr>
+        <th>Resolution</th>
+        <th class="price">Low (batch)</th>
+        <th class="price">Medium (batch)</th>
+        <th class="price">High (batch)</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td class="label">1024 × 1024</td><td class="price">$0.0033</td><td class="price">$0.0292</td><td class="price">$0.1161</td></tr>
+      <tr><td class="label">1024 × 1536 / 1536 × 1024</td><td class="price">$0.0028</td><td class="price">$0.0226</td><td class="price">$0.0908</td></tr>
+      <tr><td class="label">1920 × 1080</td><td class="price">$0.0028</td><td class="price">$0.0220</td><td class="price">$0.0869</td></tr>
+      <tr><td class="label">3840 × 2160 — 4K beta</td><td class="price">$0.0066</td><td class="price">$0.0556</td><td class="price">$0.2206</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <strong>Reference / edit images</strong> are billed at the high-fidelity input rate; edit
+    workflows can land at 2–3× the baseline number above. Keep a separate budget line for
+    image-edit operations if you expose that to users.
+  </div>
+
+  <!-- =========================================== -->
+  <h2><span class="num">02</span> Video generation <span class="pill live">Seedance 2.0 · PiAPI</span></h2>
+
+  <p>
+    ByteDance's <strong>Seedance 2.0</strong>, served through PiAPI. Pricing is per output second
+    × resolution — <em>not</em> per call. Native duration range is 4–15 seconds; we expose
+    <strong>8s, 10s, and 15s</strong>. Use <code>seedance-2-fast</code> for everyday clips
+    (faster, cheaper, no 1080p) and <code>seedance-2</code> for hero / 1080p work.
+  </p>
+
+  <h3>Per-second rate</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Model</th>
+        <th class="price">480p / second</th>
+        <th class="price">720p / second</th>
+        <th class="price">1080p / second</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td class="label">seedance-2 — quality</td><td class="price">$0.110</td><td class="price">$0.220</td><td class="price">$0.550</td></tr>
+      <tr><td class="label">seedance-2-fast</td><td class="price">$0.088</td><td class="price">$0.176</td><td class="price">—</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Per-video — 8s, 10s, 15s</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Model · Resolution</th>
+        <th class="price">8 seconds</th>
+        <th class="price">10 seconds</th>
+        <th class="price">15 seconds</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td class="label">seedance-2-fast · 480p</td><td class="price">$0.704</td><td class="price">$0.880</td><td class="price">$1.320</td></tr>
+      <tr><td class="label">seedance-2-fast · 720p</td><td class="price">$1.408</td><td class="price">$1.760</td><td class="price">$2.640</td></tr>
+      <tr><td class="label">seedance-2 · 480p</td><td class="price">$0.880</td><td class="price">$1.100</td><td class="price">$1.650</td></tr>
+      <tr><td class="label">seedance-2 · 720p</td><td class="price">$1.760</td><td class="price">$2.200</td><td class="price">$3.300</td></tr>
+      <tr><td class="label">seedance-2 · 1080p</td><td class="price">$4.400</td><td class="price">$5.500</td><td class="price">$8.250</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout warn">
+    <strong>Video-to-video adds extra:</strong> on top of the figures above, video-to-video
+    workflows incur <code>(unit_price ÷ 2) × input_duration</code> for the reference clip.
+    Budget separately if you ship that feature.
+  </div>
+
+  <!-- =========================================== -->
+  <h2><span class="num">03</span> Text & LLM <span class="pill live">OpenAI GPT-5</span></h2>
+
+  <p>
+    Standard OpenAI Chat / Responses API rates. Tokens, not requests. <code>gpt-5-mini</code>
+    is the default for high-volume operations (fast compose, simple drafts); <code>gpt-5</code>
+    is reserved for the daily agent loop, research, and brand monitoring.
+  </p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Model</th>
+        <th class="price">Input / 1M tokens</th>
+        <th class="price">Output / 1M tokens</th>
+        <th class="price">Cached input / 1M</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td class="label">gpt-5</td><td class="price">$1.375</td><td class="price">$11.00</td><td class="price">$0.138</td></tr>
+      <tr><td class="label">gpt-5-mini</td><td class="price">$0.275</td><td class="price">$2.200</td><td class="price">$0.028</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Typical per-call cost — by action</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Action</th>
+        <th>Model + tools</th>
+        <th class="price">Per call</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td class="label">Compose (fast, no tools)</td><td>gpt-5-mini, 3k in / 1k out</td><td class="price">$0.0033</td></tr>
+      <tr><td class="label">Compose (with research)</td><td>gpt-5 + 2 searches + 5k loop</td><td class="price">$0.0264</td></tr>
+      <tr><td class="label">Daily agent draft</td><td>gpt-5 + 3 searches + 7k loop</td><td class="price">$0.0418</td></tr>
+      <tr><td class="label">Research endpoint</td><td>gpt-5 + 3 searches + 6k loop</td><td class="price">$0.0352</td></tr>
+      <tr><td class="label">Brand monitor scan</td><td>gpt-5 + 4 searches + 8k loop</td><td class="price">$0.0484</td></tr>
+    </tbody>
+  </table>
+
+  <!-- =========================================== -->
+  <h2><span class="num">04</span> Web search APIs</h2>
+
+  <p>
+    Anthropic's native web_search is unavailable without an Anthropic key. Below: every credible
+    option, with current free-tier limits and metered rates. <strong>Bing Web Search</strong>
+    was retired by Microsoft on <strong>August 11, 2025</strong> — you can no longer onboard.
+  </p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Provider</th>
+        <th>Free tier</th>
+        <th class="price">Per 1k queries</th>
+        <th>Best for</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="label">Brave Search API</td>
+        <td>$5 prepaid credit · no free tier since Feb 2026</td>
+        <td class="price">$5.50</td>
+        <td>Independent index, privacy-first grounding</td>
+      </tr>
+      <tr>
+        <td class="label">Google Programmable Search <span class="pill warn">sunset Jan 2027</span></td>
+        <td>100 / day</td>
+        <td class="price">$5.50</td>
+        <td>Site-restricted search on existing accounts</td>
+      </tr>
+      <tr>
+        <td class="label">Bing Web Search <span class="pill dead">retired</span></td>
+        <td>—</td>
+        <td class="price">—</td>
+        <td>Migrate via Azure AI Foundry "Grounding with Bing"</td>
+      </tr>
+      <tr>
+        <td class="label">Tavily</td>
+        <td>1,000 credits / month</td>
+        <td class="price">$3.30 — $8.80</td>
+        <td>LLM agent / RAG grounding (snippets + citations)</td>
+      </tr>
+      <tr>
+        <td class="label">SerpAPI</td>
+        <td>100 / month</td>
+        <td class="price">$11.00</td>
+        <td>Structured SERPs, Google parity</td>
+      </tr>
+      <tr>
+        <td class="label">You.com API</td>
+        <td>Free tier</td>
+        <td class="price">$0 — $55.00</td>
+        <td>LLM-friendly results with auto summaries</td>
+      </tr>
+      <tr>
+        <td class="label">Exa (formerly Metaphor)</td>
+        <td>1,000 credits</td>
+        <td class="price">from $1.10 / 1k results</td>
+        <td>Neural / semantic search; research agents</td>
+      </tr>
+      <tr>
+        <td class="label">Perplexity API (Sonar)</td>
+        <td>Pay-as-you-go</td>
+        <td class="price">$5.50</td>
+        <td>Cited LLM answers, not raw SERPs</td>
+      </tr>
+      <tr>
+        <td class="label">DuckDuckGo Instant Answer</td>
+        <td>Free, no key</td>
+        <td class="price">non-commercial only</td>
+        <td>Quick topic / disambiguation lookups</td>
+      </tr>
+      <tr>
+        <td class="label">Kagi Search API</td>
+        <td>None — paid only</td>
+        <td class="price">$27.50</td>
+        <td>Premium curated index, low-spam grounding</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <strong>Recommended stack:</strong> default to <strong>Brave</strong> for raw web grounding
+    (cheapest mainstream option, independent index), and reserve <strong>Tavily</strong> for
+    research-style calls where you want pre-summarised snippets. Both are baked into the same
+    tool-use layer so the agent can swap automatically if one returns nothing.
+  </div>
+
+  <!-- =========================================== -->
+  <h2><span class="num">05</span> LinkedIn enrichment</h2>
+
+  <p>
+    <strong>"Enrichment"</strong> means: given a LinkedIn URL, an email, or a name + company,
+    return structured profile data — current title, employer, work history, education, skills,
+    location, connection counts, recent posts and engagement, and (sometimes) contact info.
+    "Per-post enrichment" returns a profile's recent posts / articles with reactions and
+    comments — useful for competitor monitoring.
+  </p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Provider</th>
+        <th class="price">Per profile</th>
+        <th class="price">Per post</th>
+        <th>Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="label">Proxycurl</td>
+        <td class="price">$0.022 / call (3 credits)</td>
+        <td class="price">bundled in profile (last 10)</td>
+        <td>API-first, ToS-aware, PAYG from $11</td>
+      </tr>
+      <tr>
+        <td class="label">Phantombuster</td>
+        <td class="price">$56 — $128 / month</td>
+        <td class="price">execution-minutes metered</td>
+        <td>Uses your LinkedIn cookie — account-risk</td>
+      </tr>
+      <tr>
+        <td class="label">Apify (LinkedIn actors)</td>
+        <td class="price">$0.0061 / profile (mass)</td>
+        <td class="price">from $5.50 / 1k posts</td>
+        <td>Third-party actors; quality varies</td>
+      </tr>
+      <tr>
+        <td class="label">RapidAPI LinkedIn endpoints</td>
+        <td class="price">$0.011 — $0.055</td>
+        <td class="price">varies per vendor</td>
+        <td>Aggregator; vendor-dependent SLAs</td>
+      </tr>
+      <tr>
+        <td class="label">Bright Data</td>
+        <td class="price">$0.055 / profile</td>
+        <td class="price">similar tier, per-record</td>
+        <td>Enterprise scale; ToS pushed onto buyer</td>
+      </tr>
+      <tr>
+        <td class="label">Apollo.io</td>
+        <td class="price">$54 — $164 / user / mo</td>
+        <td class="price">n/a</td>
+        <td>B2B contact DB, not a post / activity scraper</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout warn">
+    <strong>Legal note.</strong> LinkedIn's User Agreement prohibits scraping. <em>hiQ v. LinkedIn</em>
+    (9th Circuit) found that scraping <strong>public</strong> profile data is not a CFAA violation,
+    but LinkedIn still pursues civil claims (breach of contract, tortious interference) and bans
+    accounts. Proxycurl and Bright Data position themselves as "public data only" services —
+    GDPR / CCPA obligations on retention, consent (EU profiles especially), and downstream use
+    remain ours. Cookie-based tools like Phantombuster put the operator's own LinkedIn account
+    at restriction or ban risk.
+  </div>
+
+  <!-- =========================================== -->
+  <div class="source-row">
+    <p><strong>Sources verified May 2026.</strong> Pricing changes — re-check before any pricing
+    announcement.</p>
+    <p>
+      <a href="https://openai.com/api/pricing/">OpenAI API Pricing</a> ·
+      <a href="https://developers.openai.com/api/docs/guides/batch">OpenAI Batch API</a> ·
+      <a href="https://developers.openai.com/api/docs/models/gpt-image-2">gpt-image-2 model card</a> ·
+      <a href="https://piapi.ai/seedance-2-0">PiAPI Seedance 2.0</a> ·
+      <a href="https://piapi.ai/docs/seedance-api/seedance-2">Seedance 2 docs</a> ·
+      <a href="https://api-dashboard.search.brave.com/documentation/pricing">Brave Search pricing</a> ·
+      <a href="https://developers.google.com/custom-search/v1/overview">Google Custom Search</a> ·
+      <a href="https://docs.tavily.com/documentation/api-credits">Tavily credits</a> ·
+      <a href="https://serpapi.com/pricing">SerpAPI pricing</a> ·
+      <a href="https://help.kagi.com/kagi/api/search.html">Kagi Search API</a> ·
+      <a href="https://nubela.co/proxycurl/docs">Proxycurl pricing</a> ·
+      <a href="https://brightdata.com/blog/web-data/best-linkedin-scraping-tools">Bright Data LinkedIn</a> ·
+      <a href="https://www.apollo.io/pricing">Apollo.io pricing</a>
+    </p>
+  </div>
+
+  <div class="footer-mark">
+    <span>Sociafy · Internal</span>
+    <span>Compiled 2026-05-20</span>
+  </div>
+
+</main>
+</body>
+</html>
