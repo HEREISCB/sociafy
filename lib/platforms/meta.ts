@@ -6,13 +6,15 @@ import { stubProfile, stubPublish } from './stub';
 const GRAPH = 'https://graph.facebook.com/v19.0';
 const AUTH_URL = 'https://www.facebook.com/v19.0/dialog/oauth';
 
+// Facebook adapter only handles Facebook Pages now. Instagram is on its own
+// flow via the Instagram Login product (instagramAdapter below), so we no
+// longer pull instagram_basic / instagram_content_publish here — those were
+// the pre-Jan-2025 legacy scopes anyway.
 const FB_SCOPES = [
-  'pages_show_list',
-  'pages_manage_posts',
-  'pages_read_engagement',
-  'instagram_basic',
-  'instagram_content_publish',
-  'public_profile',
+  'pages_show_list',         // discover which pages the user manages
+  'pages_manage_posts',      // publish to /feed (the actual posting permission)
+  'pages_read_engagement',   // read post insights for the dashboard
+  'public_profile',          // user identity at OAuth time
 ];
 
 function metaConfigured() {
