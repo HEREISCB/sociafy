@@ -1,178 +1,200 @@
-import type Anthropic from '@anthropic-ai/sdk';
-import { getAnthropic, MODELS } from './client';
+import type OpenAI from 'openai';
+import { getOpenAI, MODELS } from './client';
 
 /**
- * Generic tool-use loop runner.
+ * Tool-use loop runner against OpenAI's Responses API.
  *
- * The Anthropic API returns `stop_reason === 'tool_use'` when the model wants
- * to call a tool. We execute each requested tool, append the tool_result, and
- * call the API again until the model returns `end_turn` or we hit max steps.
+ * The Responses API exposes both:
+ *  - **Hosted tools** Anthropic-style — `web_search` runs on OpenAI's side, we
+ *    just declare it. Results come back grounded and cited.
+ *  - **Custom tools** the model can call with a JSON-schema-validated payload;
+ *    we execute the handler and feed the result back.
  *
- * Supports:
- *  - Server-side custom tools (with handler functions)
- *  - Anthropic-hosted tools like `web_search_20250305` which run on
- *    Anthropic's side — we just pass the tool spec through.
+ * The loop drives the model with `previous_response_id` so we don't have to
+ * shuttle the conversation manually — OpenAI maintains the state.
  */
-
-type AnthropicToolUnion = Anthropic.Messages.ToolUnion;
-type MessageParam = Anthropic.Messages.MessageParam;
-type ContentBlock = Anthropic.Messages.ContentBlock;
-type ToolUseBlock = Anthropic.Messages.ToolUseBlock;
 
 export type CustomToolHandler = (input: unknown) => Promise<unknown> | unknown;
 
 export type ToolSpec =
   | {
       type: 'hosted';
-      // The full tool definition passed through to Anthropic (e.g. web_search_20250305).
-      def: AnthropicToolUnion;
+      def: { type: 'web_search'; [k: string]: unknown };
     }
   | {
       type: 'custom';
-      def: Anthropic.Messages.Tool;
+      def: {
+        type: 'function';
+        name: string;
+        description: string;
+        parameters: Record<string, unknown>;
+      };
       handler: CustomToolHandler;
     };
 
+type ChatMessage = OpenAI.Responses.ResponseInputItem;
+
 export type LoopOptions = {
   model?: keyof typeof MODELS;
+  /** System / developer instructions for the model. */
   system: string;
-  messages: MessageParam[];
+  /** Initial user input. */
+  user: string;
   tools: ToolSpec[];
   maxSteps?: number;
-  maxTokens?: number;
-  /** Forwarded to Anthropic — controls how the model decides which tool to call. */
-  toolChoice?: Anthropic.Messages.ToolChoice;
+  /** Cap on output tokens per model turn. */
+  maxOutputTokens?: number;
 };
 
 export type LoopResult = {
-  /** Final assistant text content concatenated. Empty when the model only made tool calls. */
+  /** Final assistant text content concatenated. */
   text: string;
-  /** Number of model turns consumed. */
-  steps: number;
   /** Distinct tool names called during the loop. */
   toolsUsed: string[];
-  /** Full final response from Anthropic (last call). */
-  raw: Anthropic.Messages.Message;
+  /** Number of model turns consumed. */
+  steps: number;
 };
 
 const DEFAULT_MAX_STEPS = 6;
 const DEFAULT_MAX_TOKENS = 3500;
 
+/**
+ * Drive a Responses-API tool loop until the model returns a final answer.
+ * Returns null when the client isn't configured (stub mode).
+ */
 export async function runAgentLoop(opts: LoopOptions): Promise<LoopResult | null> {
-  const anthropic = getAnthropic();
-  if (!anthropic) return null;
+  const openai = getOpenAI();
+  if (!openai) return null;
 
-  const tools = opts.tools.map((t) => t.def) as AnthropicToolUnion[];
+  const model = MODELS[opts.model ?? 'smart'];
+  const maxSteps = opts.maxSteps ?? DEFAULT_MAX_STEPS;
+  const tools = opts.tools.map((t) => t.def) as OpenAI.Responses.Tool[];
   const handlerByName = new Map<string, CustomToolHandler>(
-    opts.tools.filter((t): t is Extract<ToolSpec, { type: 'custom' }> => t.type === 'custom')
+    opts.tools
+      .filter((t): t is Extract<ToolSpec, { type: 'custom' }> => t.type === 'custom')
       .map((t) => [t.def.name, t.handler]),
   );
 
-  const model = MODELS[opts.model ?? 'smart'];
-  const messages: MessageParam[] = [...opts.messages];
-  const maxSteps = opts.maxSteps ?? DEFAULT_MAX_STEPS;
   const toolsUsed = new Set<string>();
-  let last: Anthropic.Messages.Message | null = null;
+  let input: ChatMessage[] = [
+    { role: 'system', content: opts.system },
+    { role: 'user', content: opts.user },
+  ];
+  let previousResponseId: string | undefined;
+  let lastText = '';
 
   for (let step = 0; step < maxSteps; step++) {
-    const resp = await anthropic.messages.create({
+    const response = await openai.responses.create({
       model,
-      max_tokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
-      system: opts.system,
+      input,
       tools,
-      tool_choice: opts.toolChoice,
-      messages,
+      max_output_tokens: opts.maxOutputTokens ?? DEFAULT_MAX_TOKENS,
+      previous_response_id: previousResponseId,
+      // Lets us pick up the tool calls and feed results back inline.
+      store: true,
     });
-    last = resp;
+    previousResponseId = response.id;
 
-    // Collect tool_use blocks the model wants us to execute (server-side custom tools).
-    const toolUses: ToolUseBlock[] = resp.content.filter(
-      (b: ContentBlock): b is ToolUseBlock => b.type === 'tool_use',
-    );
+    // Pull the model's text reply (if any) for the final return value.
+    const newText = extractText(response);
+    if (newText) lastText = newText;
 
-    // No tool calls or model says it's done — return.
-    if (resp.stop_reason !== 'tool_use' || toolUses.length === 0) {
+    // Collect any tool calls the model wants us to execute (custom tools).
+    const calls = collectFunctionCalls(response);
+    for (const c of calls) toolsUsed.add(c.name);
+    // Track hosted web_search calls too. SDK types use string-literal unions
+    // we can't always narrow against in older versions, so cast to string.
+    for (const item of response.output ?? []) {
+      if ((item as { type?: string }).type === 'web_search_call') toolsUsed.add('web_search');
+    }
+
+    if (calls.length === 0) {
+      // No more tool calls. Either we got our final text or the model is
+      // done thinking — return whatever text we have.
       break;
     }
 
-    // Run each requested custom tool. Hosted tools (web_search) are executed
-    // by Anthropic itself and arrive back as server_tool_use / web_search_tool_result
-    // blocks — we don't handle those here, they're already in the assistant message.
-    const toolResults: Anthropic.Messages.ToolResultBlockParam[] = [];
-    for (const use of toolUses) {
-      toolsUsed.add(use.name);
-      const handler = handlerByName.get(use.name);
+    // Build the next input batch with tool outputs.
+    const nextInput: ChatMessage[] = [];
+    for (const call of calls) {
+      const handler = handlerByName.get(call.name);
+      let output: string;
       if (!handler) {
-        toolResults.push({
-          type: 'tool_result',
-          tool_use_id: use.id,
-          content: JSON.stringify({ error: 'unknown_tool' }),
-          is_error: true,
-        });
-        continue;
+        output = JSON.stringify({ error: 'unknown_tool' });
+      } else {
+        try {
+          const result = await handler(safeJsonParse(call.arguments));
+          output = typeof result === 'string' ? result : JSON.stringify(result);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          output = JSON.stringify({ error: msg.slice(0, 500) });
+        }
       }
-      try {
-        const result = await handler(use.input);
-        toolResults.push({
-          type: 'tool_result',
-          tool_use_id: use.id,
-          content: typeof result === 'string' ? result : JSON.stringify(result),
-        });
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        toolResults.push({
-          type: 'tool_result',
-          tool_use_id: use.id,
-          content: JSON.stringify({ error: msg }),
-          is_error: true,
-        });
-      }
+      nextInput.push({
+        type: 'function_call_output',
+        call_id: call.call_id,
+        output,
+      });
     }
-
-    // If the model only used hosted tools (no custom-tool dispatches needed),
-    // bail — there's nothing for us to feed back. Anthropic has already
-    // executed the hosted call and the result is in the assistant message.
-    if (toolResults.length === 0) break;
-
-    messages.push({ role: 'assistant', content: resp.content });
-    messages.push({ role: 'user', content: toolResults });
+    input = nextInput;
   }
-
-  if (!last) {
-    return { text: '', steps: 0, toolsUsed: [], raw: {} as Anthropic.Messages.Message };
-  }
-
-  // Track hosted tool usage too — pull from any server_tool_use blocks.
-  for (const b of last.content) {
-    if (b.type === 'server_tool_use') toolsUsed.add(b.name);
-  }
-
-  const text = last.content
-    .filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text')
-    .map((b) => b.text)
-    .join('')
-    .trim();
 
   return {
-    text,
-    steps: maxSteps,
+    text: lastText.trim(),
     toolsUsed: Array.from(toolsUsed),
-    raw: last,
+    steps: maxSteps,
   };
 }
 
+type CollectedCall = { name: string; call_id: string; arguments: string };
+
+function collectFunctionCalls(response: OpenAI.Responses.Response): CollectedCall[] {
+  const calls: CollectedCall[] = [];
+  for (const item of response.output ?? []) {
+    if (item.type === 'function_call') {
+      calls.push({
+        name: item.name,
+        call_id: item.call_id,
+        arguments: item.arguments ?? '{}',
+      });
+    }
+  }
+  return calls;
+}
+
+function extractText(response: OpenAI.Responses.Response): string {
+  // The SDK provides output_text as a convenience aggregator. Fall back to
+  // walking output_message blocks if it's empty (some SDK versions don't
+  // populate it).
+  const direct = response.output_text;
+  if (direct && direct.trim()) return direct;
+  const parts: string[] = [];
+  for (const item of response.output ?? []) {
+    if (item.type === 'message') {
+      for (const c of item.content ?? []) {
+        if (c.type === 'output_text') parts.push(c.text);
+      }
+    }
+  }
+  return parts.join('');
+}
+
+function safeJsonParse(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
 /**
- * Convenience builder for the hosted web_search tool. Anthropic executes the
- * search; we just declare it as available and Anthropic returns cited results
- * the model already grounded its output on.
+ * Convenience builder for OpenAI's hosted web_search tool. The model
+ * autonomously decides when to call it; OpenAI executes the search and
+ * returns grounded results in the same response.
  */
-export function webSearchTool(maxUses = 3): ToolSpec {
+export function webSearchTool(): ToolSpec {
   return {
     type: 'hosted',
-    def: {
-      type: 'web_search_20250305',
-      name: 'web_search',
-      max_uses: maxUses,
-    } as AnthropicToolUnion,
+    def: { type: 'web_search' },
   };
 }

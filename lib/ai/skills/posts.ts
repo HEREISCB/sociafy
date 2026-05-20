@@ -49,16 +49,18 @@ export function readRecentPostsSkill(userId: string): ToolSpec {
   return {
     type: 'custom',
     def: {
+      type: 'function',
       name: 'read_recent_posts',
       description:
         'Read the current user\'s most recent published posts across all platforms, along with engagement ' +
         'counts (likes, comments, shares, views). Use this to learn what topics and formats have been ' +
         'working before drafting something new.',
-      input_schema: {
+      parameters: {
         type: 'object',
         properties: {
           limit: { type: 'number', description: 'Max posts to return. Default 8, hard cap 24.' },
         },
+        additionalProperties: false,
       },
     },
     handler: async (input) => {
@@ -88,15 +90,17 @@ export function readRecentDraftsSkill(userId: string): ToolSpec {
   return {
     type: 'custom',
     def: {
+      type: 'function',
       name: 'read_recent_drafts',
       description:
         'Read titles of the current user\'s recent drafts (published and unpublished). Use to avoid ' +
         'duplicating a topic the user has already written about recently.',
-      input_schema: {
+      parameters: {
         type: 'object',
         properties: {
           limit: { type: 'number' },
         },
+        additionalProperties: false,
       },
     },
     handler: async (input) => {

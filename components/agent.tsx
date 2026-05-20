@@ -180,7 +180,9 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
   };
 
   const niches = settings?.niches ?? [];
-  const feed = activity && activity.length > 0 ? activity : DEMO_FEED;
+  // Demo feed only for unauthenticated visitors. Signed-in users with an
+  // empty activity log see the real empty state below, not fake events.
+  const feed = unauth ? DEMO_FEED : (activity ?? []);
 
   return (
     <div className="two-col">

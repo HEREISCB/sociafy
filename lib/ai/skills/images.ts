@@ -100,17 +100,19 @@ function stubImages(query: string, limit: number): ImageResult[] {
 export const searchImagesSkill: ToolSpec = {
   type: 'custom',
   def: {
+    type: 'function',
     name: 'search_images',
     description:
       'Search free stock photography (Unsplash / Pexels) for an image that matches a query. ' +
       'Returns up to 6 candidates with URLs and attribution. Use this when a post needs visual support.',
-    input_schema: {
+    parameters: {
       type: 'object',
       properties: {
         query: { type: 'string', description: 'Visual concept to search for, e.g. "coffee shop laptop founder".' },
         limit: { type: 'number', description: 'Max results to return. Default 4.' },
       },
       required: ['query'],
+      additionalProperties: false,
     },
   },
   handler: async (input) => {

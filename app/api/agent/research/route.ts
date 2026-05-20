@@ -69,10 +69,10 @@ export async function POST(req: NextRequest) {
     const result = await runAgentLoop({
       model: 'smart',
       system: sys,
-      messages: [{ role: 'user', content: userMsg }],
-      tools: [webSearchTool(3), fetchUrlSkill],
+      user: userMsg,
+      tools: [webSearchTool(), fetchUrlSkill],
       maxSteps: 6,
-      maxTokens: 3000,
+      maxOutputTokens: 3000,
     });
     if (!result) return Response.json({ error: 'ai_not_configured' }, { status: 503 });
 

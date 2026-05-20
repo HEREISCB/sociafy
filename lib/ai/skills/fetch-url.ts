@@ -16,17 +16,19 @@ const UA = 'sociafy-agent/0.1 (+https://sociafy.app)';
 export const fetchUrlSkill: ToolSpec = {
   type: 'custom',
   def: {
+    type: 'function',
     name: 'fetch_url',
     description:
       'Fetch the text content of an HTTPS URL and return it as cleaned plaintext. ' +
       'Useful for reading the full body of an article or post the user mentioned. ' +
       'Returns up to 200KB of text. Strips HTML tags, scripts, and styles.',
-    input_schema: {
+    parameters: {
       type: 'object',
       properties: {
         url: { type: 'string', description: 'Absolute http(s) URL to fetch.' },
       },
       required: ['url'],
+      additionalProperties: false,
     },
   },
   handler: async (input) => {

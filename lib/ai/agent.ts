@@ -1,4 +1,4 @@
-import { getAnthropic } from './client';
+import { getOpenAI } from './client';
 import type { Niche, Platform, VoiceTemplate } from '../db/schema';
 import { PLATFORM_LIMITS } from './compose';
 import { runAgentLoop, webSearchTool } from './agent-loop';
@@ -31,8 +31,8 @@ export type DraftAgentArgs = {
 };
 
 export async function draftFromTrends(args: DraftAgentArgs): Promise<AgentDraft[]> {
-  const anthropic = getAnthropic();
-  if (!anthropic) return stubDrafts(args);
+  const openai = getOpenAI();
+  if (!openai) return stubDrafts(args);
 
   const sys = [
     'You are an autonomous social media agent for a solo founder.',
@@ -68,7 +68,7 @@ export async function draftFromTrends(args: DraftAgentArgs): Promise<AgentDraft[
   const enableTools = args.enableTools !== false;
   const tools = enableTools
     ? [
-        webSearchTool(3),
+        webSearchTool(),
         fetchUrlSkill,
         ...(args.userId ? [readRecentPostsSkill(args.userId), readRecentDraftsSkill(args.userId)] : []),
         searchImagesSkill,
@@ -78,10 +78,10 @@ export async function draftFromTrends(args: DraftAgentArgs): Promise<AgentDraft[
   const result = await runAgentLoop({
     model: 'smart',
     system: sys,
-    messages: [{ role: 'user', content: user }],
+    user,
     tools,
     maxSteps: 6,
-    maxTokens: 3500,
+    maxOutputTokens: 3500,
   });
   if (!result) return stubDrafts(args);
 

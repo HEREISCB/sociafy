@@ -115,7 +115,9 @@ const CalendarPage: React.FC = () => {
     }).filter((e) => e.day >= 0 && e.day < 7);
   }, [data, weekStart]);
 
-  const showDemo = !data || events.length === 0;
+  // Demo events ONLY for unauthenticated visitors landing on the page.
+  // Signed-in users with an empty schedule see a clean empty state.
+  const showDemo = unauth;
   const demoEvents: CalEvent[] = showDemo ? [
     { id: 'd1', day: Math.max(0, todayIdx - 1), start: 2, span: 1, type: 'posted', plats: ['x'], title: 'AI is eating SEO — but slowly', time: '9:15' },
     { id: 'd2', day: todayIdx, start: 5, span: 1, type: 'scheduled', plats: ['li'], title: 'Newsletter recap: indie growth', time: '12:00' },

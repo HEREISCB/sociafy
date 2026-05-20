@@ -51,8 +51,8 @@ const LPNav = () => (
       <div className="lp-nav-spacer" />
       <div className="lp-nav-actions">
         <span className="lp-nav-status"><span className="dot" /> 1,284 founders posting today</span>
-        <a className="btn" href="#login">Log in</a>
-        <Link className="btn primary" href="/dashboard">
+        <Link className="btn" href="/sign-in">Log in</Link>
+        <Link className="btn primary" href="/sign-up">
           Start free <ArrowIcon />
         </Link>
       </div>

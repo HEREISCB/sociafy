@@ -1,4 +1,4 @@
-import { getAnthropic, MODELS } from './client';
+import { getOpenAI, MODELS } from './client';
 import { type Platform, type DraftVariant, type VoiceTemplate } from '../db/schema';
 import { runAgentLoop, webSearchTool } from './agent-loop';
 import { fetchUrlSkill } from './skills/fetch-url';
@@ -59,8 +59,8 @@ export async function generateCompose(args: ComposeArgs): Promise<ComposeResult>
   const count = Math.min(args.count ?? 4, 4);
   const platforms = args.platforms?.length ? args.platforms : (['x', 'linkedin'] as Platform[]);
 
-  const anthropic = getAnthropic();
-  if (!anthropic) {
+  const openai = getOpenAI();
+  if (!openai) {
     return stubResult(args.prompt, count, platforms);
   }
 
@@ -99,33 +99,32 @@ export async function generateCompose(args: ComposeArgs): Promise<ComposeResult>
       args.userId ? ' - read_recent_posts: see what worked for THIS user before.' : '',
     ].filter(Boolean).join('\n');
     const tools = [
-      webSearchTool(2),
+      webSearchTool(),
       fetchUrlSkill,
       ...(args.userId ? [readRecentPostsSkill(args.userId)] : []),
     ];
     const result = await runAgentLoop({
       model: 'smart',
       system: sysWithTools,
-      messages: [{ role: 'user', content: user }],
+      user,
       tools,
       maxSteps: 5,
-      maxTokens: 2500,
+      maxOutputTokens: 2500,
     });
     if (!result) return stubResult(args.prompt, count, platforms);
     text = result.text;
     toolsUsed = result.toolsUsed;
   } else {
-    const resp = await anthropic.messages.create({
+    // Fast path: no tools, single Responses API call with gpt-5-mini.
+    const resp = await openai.responses.create({
       model: MODELS.fast,
-      max_tokens: 1500,
-      system: sys,
-      messages: [{ role: 'user', content: user }],
+      input: [
+        { role: 'system', content: sys },
+        { role: 'user', content: user },
+      ],
+      max_output_tokens: 1500,
     });
-    text = resp.content
-      .filter((b) => b.type === 'text')
-      .map((b) => (b as { type: 'text'; text: string }).text)
-      .join('')
-      .trim();
+    text = (resp.output_text ?? '').trim();
   }
 
   let parsed: { variants: DraftVariant[]; perPlatform: Partial<Record<Platform, string>> };

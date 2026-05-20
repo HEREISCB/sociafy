@@ -67,7 +67,8 @@ export const env = {
 export const isStubMode = {
   clerk: () => !env.clerk.publishableKey || !env.clerk.secretKey,
   database: () => !env.database.url,
-  ai: () => !env.anthropic.apiKey,
+  // AI runs on OpenAI now. Anthropic key kept as legacy fallback only.
+  ai: () => !process.env.OPENAI_API_KEY && !env.anthropic.apiKey,
   r2: () => !env.r2.accountId || !env.r2.bucket,
   platform: (p: 'x' | 'linkedin' | 'instagram' | 'facebook' | 'tiktok' | 'youtube'): boolean => {
     switch (p) {
