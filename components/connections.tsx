@@ -53,8 +53,8 @@ const PLATFORMS: PlatformDef[] = [
     short: 'ig',
     name: 'Instagram',
     color: 'var(--ig)',
-    tagline: 'Business accounts · carousels · reels',
-    blurb: 'Publish images, carousels and Reels to your Instagram Business account.',
+    tagline: 'Direct Instagram login · Business or Creator',
+    blurb: 'Sign in straight through Instagram. Requires a Professional account — no Facebook page needed.',
     capabilities: ['Carousels', 'Reels', 'Stories soon'],
   },
   {

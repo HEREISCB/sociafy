@@ -128,47 +128,144 @@ export const facebookAdapter: PlatformAdapter = {
   },
 };
 
+// ============================================================================
+// Instagram API with Instagram Login (Meta, GA 2024)
+//
+// Lets Instagram Business / Creator accounts authenticate directly through an
+// Instagram screen — no Facebook account, no Page selection, no Business
+// Manager. Different OAuth host (instagram.com), different scopes (the
+// `instagram_business_*` family), different publishing host
+// (graph.instagram.com). Personal accounts cannot authenticate; this is a
+// Meta limitation, not ours.
+// ============================================================================
+
+const IG_OAUTH_AUTHORIZE = 'https://www.instagram.com/oauth/authorize';
+const IG_OAUTH_TOKEN = 'https://api.instagram.com/oauth/access_token';
+const IG_GRAPH = 'https://graph.instagram.com/v22.0';
+const IG_GRAPH_NOVERSION = 'https://graph.instagram.com';
+
+const IG_SCOPES = [
+  'instagram_business_basic',
+  'instagram_business_content_publish',
+  'instagram_business_manage_comments',
+  'instagram_business_manage_messages',
+];
+
 export const instagramAdapter: PlatformAdapter = {
   id: 'instagram',
   label: 'Instagram',
-  scopes: FB_SCOPES,
+  scopes: IG_SCOPES,
   isConfigured: metaConfigured,
   buildAuthorizeUrl({ redirectUri, state }) {
     if (!metaConfigured()) return `/oauth/instagram/callback?stub=1&state=${state}`;
-    return buildMetaAuthorizeUrl(redirectUri, state);
+    const params = new URLSearchParams({
+      client_id: env.platforms.meta.appId!,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      scope: IG_SCOPES.join(','),
+      state,
+    });
+    return `${IG_OAUTH_AUTHORIZE}?${params.toString()}`;
   },
   async exchangeCode({ code, redirectUri }) {
     if (!metaConfigured()) return stubProfile('instagram', 'unknown');
-    const t = await exchangeMetaCode(code, redirectUri);
-    const userToken = t.access_token;
-    const pages = await fetchPages(userToken);
-    const pageWithIg = pages.data.find((p) => p.instagram_business_account?.id);
-    if (!pageWithIg || !pageWithIg.instagram_business_account) {
-      throw new PlatformError('meta_no_ig_business', 400, 'No connected Instagram Business account found.');
+
+    // Step 1: short-lived token (~1 hour) from authorization code.
+    const shortResp = await fetch(IG_OAUTH_TOKEN, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: env.platforms.meta.appId!,
+        client_secret: env.platforms.meta.appSecret!,
+        grant_type: 'authorization_code',
+        redirect_uri: redirectUri,
+        code,
+      }),
+    });
+    if (!shortResp.ok) {
+      throw new PlatformError('ig_short_token_failed', shortResp.status, await shortResp.text());
     }
-    const ig = pageWithIg.instagram_business_account;
+    const short = (await shortResp.json()) as {
+      access_token: string;
+      user_id: number | string;
+      permissions?: string;
+    };
+
+    // Step 2: swap short-lived for long-lived (60 days) immediately. Store
+    // ONLY the long-lived token — the short-lived one is useless once we
+    // have the longer one.
+    const longUrl = new URL(`${IG_GRAPH_NOVERSION}/access_token`);
+    longUrl.searchParams.set('grant_type', 'ig_exchange_token');
+    longUrl.searchParams.set('client_secret', env.platforms.meta.appSecret!);
+    longUrl.searchParams.set('access_token', short.access_token);
+    const longResp = await fetch(longUrl);
+    if (!longResp.ok) {
+      throw new PlatformError('ig_long_token_failed', longResp.status, await longResp.text());
+    }
+    const long = (await longResp.json()) as {
+      access_token: string;
+      token_type: string;
+      expires_in: number;
+    };
+
+    // Step 3: identify the connected account. /me returns user_id, username,
+    // and account_type (BUSINESS or MEDIA_CREATOR). PERSONAL would have failed
+    // at the OAuth step.
+    const meResp = await fetch(
+      `${IG_GRAPH}/me?fields=user_id,username,name,profile_picture_url,account_type&access_token=${long.access_token}`,
+    );
+    if (!meResp.ok) {
+      throw new PlatformError('ig_me_failed', meResp.status, await meResp.text());
+    }
+    const me = (await meResp.json()) as {
+      user_id?: string;
+      id?: string;
+      username: string;
+      name?: string;
+      profile_picture_url?: string;
+      account_type?: string;
+    };
+    const igUserId = String(me.user_id ?? me.id ?? short.user_id);
+
     return {
       tokens: {
-        accessToken: pageWithIg.access_token,
-        refreshToken: null,
-        expiresAt: null,
-        scope: FB_SCOPES.join(','),
+        accessToken: long.access_token,
+        // IG Login uses the same token for refresh extension — store it in both
+        // fields so ensureFreshToken() can swap it before expiry.
+        refreshToken: long.access_token,
+        expiresAt: new Date(Date.now() + long.expires_in * 1000),
+        scope: IG_SCOPES.join(','),
         meta: {
-          igUserId: ig.id,
-          pageId: pageWithIg.id,
-          pageName: pageWithIg.name,
+          igUserId,
+          accountType: me.account_type ?? 'BUSINESS',
         },
       },
       profile: {
-        platformUserId: ig.id,
-        handle: ig.username ?? null,
-        displayName: ig.username ?? null,
-        avatarUrl: ig.profile_picture_url ?? null,
+        platformUserId: igUserId,
+        handle: me.username,
+        displayName: me.name ?? me.username,
+        avatarUrl: me.profile_picture_url ?? null,
       },
     };
   },
+  async refresh(refreshToken) {
+    if (!metaConfigured()) return { accessToken: 'stub', refreshToken };
+    const url = new URL(`${IG_GRAPH_NOVERSION}/refresh_access_token`);
+    url.searchParams.set('grant_type', 'ig_refresh_token');
+    url.searchParams.set('access_token', refreshToken);
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      throw new PlatformError('ig_refresh_failed', resp.status, await resp.text());
+    }
+    const t = (await resp.json()) as { access_token: string; expires_in?: number };
+    return {
+      accessToken: t.access_token,
+      // Same token serves as future refresh source — extend in place.
+      refreshToken: t.access_token,
+      expiresAt: t.expires_in ? new Date(Date.now() + t.expires_in * 1000) : null,
+    };
+  },
   async publishText(input: PublishInput): Promise<PublishResult> {
-    // Instagram requires a media object — text-only posts are not supported.
     if (!metaConfigured() || input.account.accessToken === 'stub') return stubPublish(input, 'instagram');
     if (!input.media || input.media.length === 0) {
       throw new PlatformError(
@@ -181,22 +278,34 @@ export const instagramAdapter: PlatformAdapter = {
     const token = input.account.accessToken;
     const m = input.media[0];
     const isVideo = m.mimeType.startsWith('video/');
-    const containerParams = new URLSearchParams({
+
+    // Step 1: create the container.
+    const containerBody = new URLSearchParams({
       [isVideo ? 'video_url' : 'image_url']: m.url,
       caption: input.text,
       access_token: token,
       ...(isVideo ? { media_type: 'REELS' } : {}),
     });
-    const containerResp = await fetch(`${GRAPH}/${igUserId}/media?${containerParams.toString()}`, { method: 'POST' });
-    if (!containerResp.ok) throw new PlatformError('instagram_container_failed', containerResp.status, await containerResp.text());
+    const containerResp = await fetch(`${IG_GRAPH}/${igUserId}/media`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: containerBody,
+    });
+    if (!containerResp.ok) {
+      throw new PlatformError('instagram_container_failed', containerResp.status, await containerResp.text());
+    }
     const container = (await containerResp.json()) as { id: string };
 
-    // For videos, we need to poll status before publishing. Skipped here — IG returns FINISHED quickly for short clips.
-    const publishResp = await fetch(
-      `${GRAPH}/${igUserId}/media_publish?creation_id=${container.id}&access_token=${token}`,
-      { method: 'POST' },
-    );
-    if (!publishResp.ok) throw new PlatformError('instagram_publish_failed', publishResp.status, await publishResp.text());
+    // Step 2: publish. Short clips and images are usually FINISHED immediately;
+    // longer reels may need polling — TODO when we hit a case in prod.
+    const publishResp = await fetch(`${IG_GRAPH}/${igUserId}/media_publish`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ creation_id: container.id, access_token: token }),
+    });
+    if (!publishResp.ok) {
+      throw new PlatformError('instagram_publish_failed', publishResp.status, await publishResp.text());
+    }
     const data = (await publishResp.json()) as { id: string };
     return {
       platformPostId: data.id,
