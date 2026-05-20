@@ -4,7 +4,7 @@ import { connectedAccounts, type Platform } from '../db/schema';
 import { getAdapter } from './registry';
 import { decryptToken, encryptToken, isEncrypted } from '../crypto/tokens';
 
-const REFRESH_WINDOW_MS = 5 * 60 * 1000;
+const DEFAULT_REFRESH_WINDOW_MS = 5 * 60 * 1000;
 
 type AccountRow = typeof connectedAccounts.$inferSelect;
 
@@ -50,8 +50,13 @@ export async function ensureFreshToken(acct: AccountRow): Promise<AccountRow> {
   }
   if (!plain.refreshToken) return plain;
 
+  const adapter = getAdapter(plain.platform as Platform);
+  // Each adapter picks its own refresh window. Long-lived tokens (Instagram
+  // 60d) refresh well before expiry; short-lived (X 2h, YouTube 1h) refresh
+  // at the last few minutes.
+  const horizon = adapter.refreshHorizonMs ?? DEFAULT_REFRESH_WINDOW_MS;
   const remaining = new Date(plain.tokenExpiresAt).getTime() - Date.now();
-  if (remaining > REFRESH_WINDOW_MS) {
+  if (remaining > horizon) {
     // Migrate legacy plaintext row even without refresh.
     if (!wasEncrypted) {
       await db()
@@ -66,7 +71,6 @@ export async function ensureFreshToken(acct: AccountRow): Promise<AccountRow> {
     return plain;
   }
 
-  const adapter = getAdapter(plain.platform as Platform);
   if (!adapter.refresh) return plain;
 
   try {

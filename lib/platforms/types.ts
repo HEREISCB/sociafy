@@ -41,6 +41,13 @@ export interface PlatformAdapter {
   buildAuthorizeUrl(args: { redirectUri: string; state: string; codeVerifier?: string }): string;
   exchangeCode(args: { code: string; redirectUri: string; codeVerifier?: string }): Promise<{ tokens: OAuthTokens; profile: PlatformProfile }>;
   refresh?(refreshToken: string): Promise<OAuthTokens>;
+  /**
+   * How early before expiry to trigger a refresh. Short-lived tokens (X 2h,
+   * YouTube 1h) refresh at ~5 min left; long-lived (Instagram 60d) refresh
+   * at ~14 days left to leave a wide safety margin if any cron run fails.
+   * Default when omitted: 5 minutes.
+   */
+  refreshHorizonMs?: number;
   publishText(input: PublishInput): Promise<PublishResult>;
 }
 

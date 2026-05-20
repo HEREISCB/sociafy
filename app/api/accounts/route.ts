@@ -2,9 +2,11 @@ import { NextRequest } from 'next/server';
 import { eq, desc } from 'drizzle-orm';
 import { withUser } from '../../../lib/api';
 import { db } from '../../../lib/db';
-import { connectedAccounts } from '../../../lib/db/schema';
+import { connectedAccounts, type Platform } from '../../../lib/db/schema';
 import { encryptToken } from '../../../lib/crypto/tokens';
 import { stubAccountCreateSchema, parseBody } from '../../../lib/validation';
+import { ensureFreshToken } from '../../../lib/platforms/token';
+import { getAdapter } from '../../../lib/platforms/registry';
 
 // Strip access/refresh tokens from API responses — the client never needs them.
 const PUBLIC_COLUMNS = {
@@ -25,12 +27,41 @@ const PUBLIC_COLUMNS = {
 
 export async function GET(req: NextRequest) {
   return withUser(async (user) => {
+    // Read the full row server-side so we can opportunistically refresh
+    // expiring tokens. We strip access/refresh fields from the response.
     const rows = await db()
-      .select(PUBLIC_COLUMNS)
+      .select()
       .from(connectedAccounts)
       .where(eq(connectedAccounts.userId, user.id))
       .orderBy(desc(connectedAccounts.createdAt));
-    return rows;
+
+    // Opportunistic refresh: every time the Connections page loads we run
+    // each row through ensureFreshToken. Each adapter only actually swaps the
+    // token when remaining < its refreshHorizonMs, so this is cheap for
+    // tokens that don't need it. Net effect: even without an external cron
+    // scheduler, tokens get refreshed when the user opens the dashboard.
+    const refreshed = await Promise.all(rows.map((r) => ensureFreshToken(r).catch(() => r)));
+
+    return refreshed.map((row) => {
+      const adapter = getAdapter(row.platform as Platform);
+      const autoRefresh = !!adapter.refresh && row.refreshToken !== null && !row.isStub;
+      return {
+        id: row.id,
+        userId: row.userId,
+        platform: row.platform,
+        platformUserId: row.platformUserId,
+        handle: row.handle,
+        displayName: row.displayName,
+        avatarUrl: row.avatarUrl,
+        scope: row.scope,
+        tokenExpiresAt: row.tokenExpiresAt,
+        meta: row.meta,
+        isStub: row.isStub,
+        autoRefresh,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      };
+    });
   }, req);
 }
 

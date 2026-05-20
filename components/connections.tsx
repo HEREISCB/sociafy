@@ -15,6 +15,7 @@ type Account = {
   isStub: boolean;
   scope: string | null;
   tokenExpiresAt: string | null;
+  autoRefresh: boolean;
   createdAt: string;
   updatedAt: string;
   meta: { pageName?: string; pageId?: string; igUserId?: string } | null;
@@ -118,20 +119,35 @@ function healthFor(acct: Account | null): Health {
   if (diff <= 0) return { status: 'expired', label: 'Token expired', detail: 'reconnect to resume publishing', pct: 100, tone: 'bad' };
   const days = Math.floor(diff / DAY);
   const hrs = Math.floor((diff % DAY) / 3_600_000);
-  const detail =
+  const timeLeft =
     days >= 1
-      ? `expires in ${days}d ${hrs}h`
+      ? `${days}d ${hrs}h`
       : diff > 3_600_000
-      ? `expires in ${hrs}h ${Math.floor((diff % 3_600_000) / 60_000)}m`
-      : `expires in ${Math.max(1, Math.floor(diff / 60_000))}m`;
+      ? `${hrs}h ${Math.floor((diff % 3_600_000) / 60_000)}m`
+      : `${Math.max(1, Math.floor(diff / 60_000))}m`;
+
+  // Auto-renewing tokens get a calmer status — the expiry is a number the
+  // user can see, but the platform will refresh before we hit it.
+  if (acct.autoRefresh) {
+    const SIXTY = 60 * DAY;
+    const pct = Math.max(12, Math.min(100, (diff / SIXTY) * 100));
+    return {
+      status: 'live',
+      label: 'Auto-renewing',
+      detail: `auto · ${timeLeft} left`,
+      pct,
+      tone: 'good',
+    };
+  }
+
   if (diff < 24 * 3_600_000) {
     const pct = Math.max(8, Math.min(100, (diff / (24 * 3_600_000)) * 100));
-    return { status: 'expiring', label: 'Refresh soon', detail, pct, tone: 'warn' };
+    return { status: 'expiring', label: 'Refresh soon', detail: `expires in ${timeLeft}`, pct, tone: 'warn' };
   }
   // 60-day reference window for live bar fill
   const SIXTY = 60 * DAY;
   const pct = Math.max(12, Math.min(100, (diff / SIXTY) * 100));
-  return { status: 'live', label: 'Connected', detail, pct, tone: 'accent' };
+  return { status: 'live', label: 'Connected', detail: `expires in ${timeLeft}`, pct, tone: 'accent' };
 }
 
 function relTime(iso: string): string {

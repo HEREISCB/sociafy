@@ -9,7 +9,12 @@ import { isStubMode } from '../../../../lib/env';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const HORIZON_HOURS = 24;
+// Scan window for tokens to consider refreshing. Set just past the longest
+// adapter-specific horizon (Instagram's 14d) so every account that COULD
+// need a refresh gets picked up. ensureFreshToken then decides per-adapter
+// whether to actually refresh — short-lived tokens (X, YouTube) inside this
+// window still wait until they're close to expiry.
+const HORIZON_HOURS = 15 * 24;
 
 export async function GET(req: NextRequest) {
   return run(req);

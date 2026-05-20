@@ -164,6 +164,10 @@ export const instagramAdapter: PlatformAdapter = {
   label: 'Instagram',
   scopes: IG_SCOPES,
   isConfigured: instagramConfigured,
+  // Refresh at 14 days remaining out of 60. Leaves a ~46-day average window
+  // for the cron to retry if any single run fails. Meta lets you refresh
+  // any time after 24h from creation, so the early refresh is cheap.
+  refreshHorizonMs: 14 * 24 * 60 * 60 * 1000,
   buildAuthorizeUrl({ redirectUri, state }) {
     if (!instagramConfigured()) return `/oauth/instagram/callback?stub=1&state=${state}`;
     const params = new URLSearchParams({
