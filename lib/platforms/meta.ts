@@ -145,10 +145,12 @@ const IG_GRAPH = 'https://graph.instagram.com/v22.0';
 const IG_GRAPH_NOVERSION = 'https://graph.instagram.com';
 
 const IG_SCOPES = [
-  'instagram_business_basic',
-  'instagram_business_content_publish',
-  'instagram_business_manage_comments',
-  'instagram_business_manage_messages',
+  'instagram_business_basic',            // required, includes "login with Instagram"
+  'instagram_business_content_publish',  // posting
+  'instagram_business_manage_comments',  // read/reply to comments (brand monitor, agent)
+  'instagram_business_manage_insights',  // engagement metrics for the dashboard
+  // Intentionally omitted: instagram_business_manage_messages + Human Agent —
+  // we don't ship a DM workflow, and asking for them complicates app review.
 ];
 
 export const instagramAdapter: PlatformAdapter = {
