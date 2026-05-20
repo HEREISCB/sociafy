@@ -3,7 +3,10 @@
 import React, { useEffect, useState } from 'react';
 import { Icon } from './icons';
 import { apiPatch, apiPost, useApi } from '../lib/ui/fetcher';
-import type { Niche } from '../lib/db/schema';
+import type { Niche, Platform } from '../lib/db/schema';
+
+type BriefMode = 'text' | 'image' | 'video';
+type ConnectedAccount = { id: string; platform: Platform };
 
 type AgentSettings = {
   enabled: boolean;
@@ -159,6 +162,83 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
   const [running, setRunning] = useState<'agent' | 'trends' | null>(null);
   const [runMsg, setRunMsg] = useState<string | null>(null);
 
+  // Ask-first modal: replaces the silent "Run agent" flow with an explicit
+  // brief from the user. The agent's auto-cadence still runs in the background;
+  // this is the manual button.
+  const [briefOpen, setBriefOpen] = useState(false);
+  const [briefTopic, setBriefTopic] = useState('');
+  const [briefAngle, setBriefAngle] = useState('');
+  const [briefMode, setBriefMode] = useState<BriefMode>('text');
+  const [briefScheduleNow, setBriefScheduleNow] = useState(false);
+  const [briefBusy, setBriefBusy] = useState(false);
+  const [briefMsg, setBriefMsg] = useState<string | null>(null);
+  const { data: accountsForBrief } = useApi<ConnectedAccount[]>('/api/accounts');
+
+  const openBrief = () => {
+    setBriefTopic('');
+    setBriefAngle('');
+    setBriefMode('text');
+    setBriefScheduleNow(false);
+    setBriefMsg(null);
+    setBriefOpen(true);
+  };
+
+  const submitBrief = async () => {
+    if (!briefTopic.trim()) {
+      setBriefMsg('Tell the agent what to write about first.');
+      return;
+    }
+    setBriefBusy(true);
+    setBriefMsg('Drafting…');
+    try {
+      const platforms = (accountsForBrief ?? []).map((a) => a.platform).slice(0, 4);
+      if (platforms.length === 0) {
+        setBriefMsg('Connect at least one platform first.');
+        return;
+      }
+      // Compose with the user's brief — topic + optional angle become one prompt.
+      const promptText = briefAngle.trim()
+        ? `${briefTopic.trim()}\n\nAngle: ${briefAngle.trim()}`
+        : briefTopic.trim();
+      const composed = await apiPost<{
+        variants: { label: string; text: string; score?: number; rationale?: string }[];
+        perPlatform: Partial<Record<Platform, string>>;
+      }>('/api/compose/variants', {
+        prompt: promptText,
+        platforms,
+        preset: briefMode === 'video' ? 'reel' : 'announcement',
+      });
+      const best = composed.variants?.[0];
+      if (!best) {
+        setBriefMsg('No draft came back. Try a different brief.');
+        return;
+      }
+      const draft = await apiPost<{ id: string }>('/api/drafts', {
+        prompt: promptText,
+        body: best.text,
+        variants: composed.variants.map((v) => ({ label: v.label, text: v.text, score: v.score, rationale: v.rationale })),
+        selectedVariantLabel: best.label,
+        targetPlatforms: platforms,
+        perPlatformText: composed.perPlatform ?? {},
+        preset: briefMode === 'video' ? 'reel' : 'announcement',
+      });
+      if (briefScheduleNow) {
+        const when = new Date(Date.now() + 30 * 60 * 1000); // +30 min, sane default
+        await apiPost('/api/schedule', { draftId: draft.id, scheduledAt: when.toISOString(), platforms });
+        setBriefMsg(`Drafted + scheduled for ${when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}.`);
+      } else {
+        setBriefMsg('Drafted. Open the Compose page to review or schedule it.');
+      }
+      await refetchActivity();
+      setTimeout(() => { setBriefOpen(false); setBriefMsg(null); }, 900);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setBriefMsg(`Failed: ${msg.slice(0, 140)}`);
+    } finally {
+      setBriefBusy(false);
+    }
+  };
+
   const runAgentNow = async () => {
     setRunning('agent');
     setRunMsg(null);
@@ -307,19 +387,33 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
 
         <div className="card">
           <div className="card-head">
-            <h3><Icon name="bolt" size={14} /> Manual triggers</h3>
-            {runMsg && <span className="chip ghost mono">{runMsg}</span>}
+            <h3><Icon name="bolt" size={14} /> Tell the agent what to do</h3>
+            {(runMsg || briefMsg) && <span className="chip ghost mono">{runMsg ?? briefMsg}</span>}
           </div>
-          <div className="card-body" style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <button className="btn primary" onClick={refreshTrends} disabled={running !== null || unauth}>
+          <div className="card-body" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+            <button
+              className="btn accent"
+              onClick={openBrief}
+              disabled={unauth || needsSetup}
+              title={needsSetup ? 'Finish setup first.' : 'Brief the agent before it drafts.'}
+            >
+              <Icon name="sparkle" size={12} /> Brief the agent
+            </button>
+            <button className="btn" onClick={refreshTrends} disabled={running !== null || unauth || needsSetup}>
               <Icon name="refresh" size={12} /> {running === 'trends' ? 'Refreshing…' : 'Pull fresh trends'}
             </button>
-            <button className="btn accent" onClick={runAgentNow} disabled={running !== null || unauth}>
-              <Icon name="sparkle" size={12} /> {running === 'agent' ? 'Drafting…' : 'Run agent now'}
+            <button
+              className="btn ghost"
+              onClick={runAgentNow}
+              disabled={running !== null || unauth || needsSetup}
+              title="Lets the agent pick from your fresh trends instead of giving it a topic."
+            >
+              <Icon name="bolt" size={12} /> {running === 'agent' ? 'Drafting…' : 'Auto-draft from trends'}
             </button>
-            <div style={{ flex: 1 }} />
-            <span style={{ fontSize: 11.5, color: 'var(--ink-3)', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Icon name="bolt" size={11} /> Bypasses the weekly cadence cap. Demo + testing.
+            <div style={{ flex: 1, minWidth: 12 }} />
+            <span style={{ fontSize: 11.5, color: 'var(--ink-3)', display: 'flex', alignItems: 'center', gap: 6, maxWidth: 280 }}>
+              <Icon name="bolt" size={11} style={{ flexShrink: 0 }} />
+              Briefing gives the agent a topic + angle in your voice. Auto-draft lets it pick from your trends.
             </span>
           </div>
         </div>
@@ -545,6 +639,106 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
           </div>
         </div>
       </div>
+
+      {/* Brief-the-agent modal */}
+      {briefOpen && (
+        <div
+          className="modal-scrim"
+          onClick={() => { if (!briefBusy) { setBriefOpen(false); setBriefMsg(null); } }}
+        >
+          <div
+            className="modal-sheet"
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: 'min(600px, 92vw)' }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+              <Icon name="sparkle" size={16} style={{ color: 'var(--accent)' }} />
+              <h3 style={{ margin: 0, fontSize: 16, letterSpacing: '-0.01em' }}>
+                What should I write?
+              </h3>
+              <button className="icon-btn" style={{ marginLeft: 'auto' }} onClick={() => { if (!briefBusy) { setBriefOpen(false); setBriefMsg(null); } }}>
+                <Icon name="x" size={14} />
+              </button>
+            </div>
+            <div style={{ fontSize: 12.5, color: 'var(--ink-3)', marginBottom: 16 }}>
+              Give me a topic and an optional angle. I&apos;ll draft it in your voice and adapt it for each connected platform.
+            </div>
+
+            <label style={{ display: 'block', fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Topic</label>
+            <textarea
+              value={briefTopic}
+              onChange={(e) => setBriefTopic(e.target.value)}
+              placeholder="e.g. We shipped a new onboarding flow and conversion went from 12% to 28%."
+              autoFocus
+              style={{
+                width: '100%', minHeight: 76, padding: 12, fontSize: 13,
+                border: '1px solid var(--line-2)', borderRadius: 10, background: 'var(--bg)',
+                color: 'var(--ink)', fontFamily: 'inherit', resize: 'vertical', outline: 'none', lineHeight: 1.5,
+                marginBottom: 14,
+              }}
+            />
+
+            <label style={{ display: 'block', fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Angle (optional)</label>
+            <input
+              type="text"
+              value={briefAngle}
+              onChange={(e) => setBriefAngle(e.target.value)}
+              placeholder="e.g. Lessons learned. Or: how it broke before it worked."
+              style={{
+                width: '100%', padding: '10px 12px', fontSize: 13,
+                border: '1px solid var(--line-2)', borderRadius: 10, background: 'var(--bg)',
+                color: 'var(--ink)', fontFamily: 'inherit', outline: 'none',
+                marginBottom: 14,
+              }}
+            />
+
+            <label style={{ display: 'block', fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Post type</label>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+              {(['text', 'image', 'video'] as BriefMode[]).map((m) => (
+                <span
+                  key={m}
+                  onClick={() => setBriefMode(m)}
+                  className={`prompt-chip ${briefMode === m ? 'active' : ''}`}
+                  style={{ textTransform: 'capitalize' }}
+                >
+                  <Icon name={m === 'text' ? 'edit' : m === 'image' ? 'image' : 'play'} size={11} />
+                  {m === 'text' ? 'Text' : m === 'image' ? 'Image' : 'Video'} post
+                </span>
+              ))}
+            </div>
+
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: 'var(--ink-2)', cursor: 'pointer', marginBottom: 18 }}>
+              <input type="checkbox" checked={briefScheduleNow} onChange={(e) => setBriefScheduleNow(e.target.checked)} />
+              Schedule it in 30 minutes (otherwise it just lands in Drafts).
+            </label>
+
+            {briefMsg && (
+              <div style={{ padding: 10, fontSize: 12.5, background: 'var(--bg-sunk)', border: '1px solid var(--line)', borderRadius: 8, marginBottom: 14 }}>
+                {briefMsg}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'flex-end' }}>
+              <button
+                className="btn"
+                onClick={() => { if (!briefBusy) { setBriefOpen(false); setBriefMsg(null); } }}
+                disabled={briefBusy}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn primary"
+                onClick={submitBrief}
+                disabled={briefBusy || !briefTopic.trim()}
+              >
+                {briefBusy
+                  ? <><Icon name="refresh" size={12} /> Drafting</>
+                  : <><Icon name="sparkle" size={12} /> Brief the agent</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

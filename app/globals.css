@@ -485,6 +485,38 @@ a { color: inherit; text-decoration: none; }
   from { opacity: 0; transform: translateY(-6px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+/* Apple-style modal: scrim fades and blurs, sheet scales up from 96% with a
+   subtle upward translate. Spring-y but not bouncy — using a one-shot
+   cubic-bezier that overshoots ~3% before settling. */
+@keyframes modalScrimIn {
+  from { opacity: 0; backdrop-filter: blur(0px); }
+  to   { opacity: 1; backdrop-filter: blur(8px); }
+}
+@keyframes modalSheetIn {
+  0%   { opacity: 0; transform: scale(0.96) translateY(8px); }
+  60%  { opacity: 1; }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+.modal-scrim {
+  position: fixed; inset: 0;
+  background: rgba(10, 10, 10, 0.32);
+  display: grid; place-items: center;
+  z-index: 50;
+  animation: modalScrimIn 200ms ease-out both;
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+.modal-sheet {
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 24px;
+  box-shadow: 0 32px 80px -32px rgba(0, 0, 0, 0.45),
+              0 4px 14px -4px rgba(0, 0, 0, 0.12);
+  animation: modalSheetIn 320ms cubic-bezier(0.32, 1.18, 0.42, 1) both;
+  transform-origin: 50% 30%;
+}
 .briefing h2 {
   margin: 0 0 12px;
   font-size: 22px;

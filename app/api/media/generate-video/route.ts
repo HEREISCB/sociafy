@@ -17,11 +17,18 @@ const bodySchema = z.object({
   count: z.number().int().min(1).max(3).default(1),
   caption: z.string().max(2_000).optional(),
   rawPrompt: z.boolean().default(false),
+  // Which generation mode the user picked. The provider call shape
+  // depends on this — text-only ignores the anchors, image-to-video
+  // requires startFrameUrl, audio-driven requires audioUrl, etc.
+  genMode: z.enum(['text', 'image-to-video', 'reference', 'audio-driven']).default('text'),
   // Optional anchors. Seedance accepts first/last frames to lock the
-  // beginning/end of motion + reference images to lock subject/style.
+  // beginning/end of motion + reference images to lock subject/style +
+  // an optional reference video + an audio track for sync.
   startFrameUrl: z.string().url().max(2_000).optional(),
   endFrameUrl: z.string().url().max(2_000).optional(),
-  referenceImageUrls: z.array(z.string().url().max(2_000)).max(4).optional(),
+  referenceImageUrls: z.array(z.string().url().max(2_000)).max(9).optional(),
+  referenceVideoUrl: z.string().url().max(2_000).optional(),
+  audioUrl: z.string().url().max(2_000).optional(),
 });
 
 /**
@@ -50,7 +57,21 @@ export async function POST(req: NextRequest) {
     const raw = await req.json().catch(() => ({}));
     const parsed = parseBody(bodySchema, raw);
     if (!parsed.ok) return parsed.response;
-    const { prompt, durationSec, quality, aspect, count, caption, rawPrompt, startFrameUrl, endFrameUrl, referenceImageUrls } = parsed.data;
+    const {
+      prompt, durationSec, quality, aspect, count, caption, rawPrompt, genMode,
+      startFrameUrl, endFrameUrl, referenceImageUrls, referenceVideoUrl, audioUrl,
+    } = parsed.data;
+
+    // Pre-flight validation: each gen mode needs its own anchors.
+    if (genMode === 'image-to-video' && !startFrameUrl) {
+      return jsonError('image_to_video_needs_start_frame', 400);
+    }
+    if (genMode === 'reference' && !(referenceImageUrls?.length || referenceVideoUrl)) {
+      return jsonError('reference_mode_needs_a_reference', 400);
+    }
+    if (genMode === 'audio-driven' && !audioUrl) {
+      return jsonError('audio_driven_needs_audio_url', 400);
+    }
 
     const rewrite = rawPrompt
       ? { prompt, enhanced: false }
@@ -71,6 +92,7 @@ export async function POST(req: NextRequest) {
     return new Response(
       JSON.stringify({
         pending: true,
+        genMode,
         durationSec,
         quality,
         aspect,
@@ -79,6 +101,8 @@ export async function POST(req: NextRequest) {
           startFrameUrl: startFrameUrl ?? null,
           endFrameUrl: endFrameUrl ?? null,
           referenceImageUrls: referenceImageUrls ?? [],
+          referenceVideoUrl: referenceVideoUrl ?? null,
+          audioUrl: audioUrl ?? null,
         },
         rewrittenPrompt: rewrite.prompt,
         enhanced: rewrite.enhanced,

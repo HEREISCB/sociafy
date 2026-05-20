@@ -48,6 +48,14 @@ type ImageSize = '1024x1024' | '1536x1024' | '1024x1536';
 type ImageQuality = 'low' | 'medium' | 'high';
 type VideoQuality = '480p' | '720p' | '1080p';
 type VideoAspect = '9:16' | '1:1' | '16:9';
+type VideoGenMode = 'text' | 'image-to-video' | 'reference' | 'audio-driven';
+
+const VIDEO_GEN_MODES: { id: VideoGenMode; label: string; sub: string; icon: 'edit' | 'image' | 'grid' | 'bolt' }[] = [
+  { id: 'text',           label: 'Text only',       sub: 'Just a prompt',           icon: 'edit'  },
+  { id: 'image-to-video', label: 'Image → video',   sub: 'Start frame + prompt',    icon: 'image' },
+  { id: 'reference',      label: 'Reference',       sub: 'Up to 9 refs + a video',  icon: 'grid'  },
+  { id: 'audio-driven',   label: 'Audio-driven',    sub: 'Sync motion to a track',  icon: 'bolt'  },
+];
 
 // Per-platform capability matrix — which modes that platform's API actually
 // accepts as a primary post type. (Instagram requires media; TikTok requires
@@ -483,17 +491,21 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
   const [videoQuality, setVideoQuality] = useState<VideoQuality>('720p');
   const [videoAspect, setVideoAspect] = useState<VideoAspect>('9:16');
   const [videoBusy, setVideoBusy] = useState(false);
-  // Optional video anchors — start frame, end frame, references.
+  // Generation type picker + all the possible anchors.
+  const [videoGenMode, setVideoGenMode] = useState<VideoGenMode>('text');
   const [startFrameUrl, setStartFrameUrl] = useState<string | null>(null);
   const [endFrameUrl, setEndFrameUrl] = useState<string | null>(null);
   const [referenceImageUrls, setReferenceImageUrls] = useState<string[]>([]);
+  const [referenceVideoUrl, setReferenceVideoUrl] = useState<string | null>(null);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const refUploadRef = useRef<HTMLInputElement | null>(null);
-  const [refUploadTarget, setRefUploadTarget] = useState<'start' | 'end' | 'reference' | null>(null);
+  type AnchorTarget = 'start' | 'end' | 'reference' | 'refVideo' | 'audio';
+  const [refUploadTarget, setRefUploadTarget] = useState<AnchorTarget | null>(null);
 
-  const uploadFrameImage = async (file: File): Promise<string | null> => {
+  const uploadAnchor = async (file: File): Promise<string | null> => {
     const fd = new FormData();
     fd.append('file', file);
-    fd.append('label', `frame-${file.name}`);
+    fd.append('label', `anchor-${file.name}`);
     const r = await fetch('/api/media/upload', { method: 'POST', body: fd, credentials: 'include' });
     if (!r.ok) {
       setToast(r.status === 503 ? 'Storage not configured.' : `Upload failed: ${r.status}`);
@@ -503,9 +515,18 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
     return row.publicUrl as string;
   };
 
-  const onPickFrame = (target: 'start' | 'end' | 'reference') => {
+  const onPickFrame = (target: AnchorTarget) => {
     setRefUploadTarget(target);
-    refUploadRef.current?.click();
+    // Drive the file-picker's accept attribute via the target — easier than
+    // juggling three hidden inputs.
+    if (refUploadRef.current) {
+      refUploadRef.current.accept = target === 'audio'
+        ? 'audio/mpeg,audio/mp3,audio/wav,audio/ogg,audio/webm,audio/m4a,audio/x-m4a,audio/aac'
+        : target === 'refVideo'
+          ? 'video/mp4,video/webm,video/quicktime'
+          : 'image/png,image/jpeg,image/webp';
+      refUploadRef.current.click();
+    }
   };
 
   const onFrameChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -513,11 +534,13 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
     const target = refUploadTarget;
     e.target.value = '';
     if (!file || !target) return;
-    const url = await uploadFrameImage(file);
+    const url = await uploadAnchor(file);
     if (!url) return;
     if (target === 'start') setStartFrameUrl(url);
     else if (target === 'end') setEndFrameUrl(url);
-    else setReferenceImageUrls((cur) => [...cur, url].slice(0, 4));
+    else if (target === 'refVideo') setReferenceVideoUrl(url);
+    else if (target === 'audio') setAudioUrl(url);
+    else setReferenceImageUrls((cur) => [...cur, url].slice(0, 9));
     setRefUploadTarget(null);
   };
 
@@ -693,9 +716,12 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
           count: videoCount,
           caption: variant?.text?.slice(0, 600),
           rawPrompt: !autoEnhance,
+          genMode: videoGenMode,
           startFrameUrl: startFrameUrl ?? undefined,
           endFrameUrl: endFrameUrl ?? undefined,
           referenceImageUrls: referenceImageUrls.length ? referenceImageUrls : undefined,
+          referenceVideoUrl: referenceVideoUrl ?? undefined,
+          audioUrl: audioUrl ?? undefined,
         }),
       });
       const data = await r.json().catch(() => ({}));
@@ -975,59 +1001,149 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
         </div>
       </div>
 
-      {/* Optional anchors: start/end frames + reference images. The model
-          uses these to lock first/last beats of motion and to align subject
-          and style across regenerations. */}
+      {/* Generation type — drives which inputs render below. */}
       <div style={{ marginTop: 14 }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
-          <span style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Anchors</span>
-          <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>Optional — lock first/last frame or feed reference images</span>
+        <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>How to generate</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+          {VIDEO_GEN_MODES.map((m) => {
+            const isActive = videoGenMode === m.id;
+            return (
+              <button
+                key={m.id}
+                onClick={() => setVideoGenMode(m.id)}
+                style={{
+                  textAlign: 'left', padding: '10px 12px', borderRadius: 10,
+                  border: isActive ? '1px solid var(--ink)' : '1px solid var(--line)',
+                  background: isActive ? 'var(--ink)' : 'var(--bg-elev)',
+                  color: isActive ? 'var(--bg)' : 'var(--ink)',
+                  cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 4,
+                  transition: 'background 0.15s, border-color 0.15s',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Icon name={m.icon} size={11} />
+                  <span style={{ fontSize: 11.5, fontWeight: 600 }}>{m.label}</span>
+                </div>
+                <span style={{ fontSize: 10, opacity: 0.7, fontFamily: 'var(--mono)' }}>{m.sub}</span>
+              </button>
+            );
+          })}
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
-          {/* Start frame */}
-          <FrameSlot
-            label="Start frame"
-            url={startFrameUrl}
-            onUpload={() => onPickFrame('start')}
-            onClear={() => setStartFrameUrl(null)}
-          />
-          {/* End frame */}
-          <FrameSlot
-            label="End frame"
-            url={endFrameUrl}
-            onUpload={() => onPickFrame('end')}
-            onClear={() => setEndFrameUrl(null)}
-          />
-          {/* References (multi) */}
-          <div>
-            <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>References ({referenceImageUrls.length}/4)</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 4 }}>
-              {referenceImageUrls.map((url, i) => (
-                <div key={url + i} style={{ aspectRatio: '1/1', borderRadius: 6, border: '1px solid var(--line-2)', position: 'relative', overflow: 'hidden', background: 'var(--bg-sunk)' }}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={url} alt={`ref ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+      </div>
+
+      {/* Anchors — only render the slots relevant to the picked mode. */}
+      {videoGenMode !== 'text' && (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
+            <span style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Inputs</span>
+            <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>
+              {videoGenMode === 'image-to-video' && 'Start frame seeds the clip. End frame is optional.'}
+              {videoGenMode === 'reference'      && 'Up to 9 images + optionally a reference video.'}
+              {videoGenMode === 'audio-driven'   && 'Motion synced to your audio track.'}
+            </span>
+          </div>
+
+          {videoGenMode === 'image-to-video' && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <FrameSlot
+                label="Start frame *"
+                url={startFrameUrl}
+                onUpload={() => onPickFrame('start')}
+                onClear={() => setStartFrameUrl(null)}
+              />
+              <FrameSlot
+                label="End frame (optional)"
+                url={endFrameUrl}
+                onUpload={() => onPickFrame('end')}
+                onClear={() => setEndFrameUrl(null)}
+              />
+            </div>
+          )}
+
+          {videoGenMode === 'reference' && (
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 14 }}>
+              <div>
+                <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Reference images ({referenceImageUrls.length}/9)</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6 }}>
+                  {referenceImageUrls.map((url, i) => (
+                    <div key={url + i} style={{ aspectRatio: '1/1', borderRadius: 6, border: '1px solid var(--line-2)', position: 'relative', overflow: 'hidden', background: 'var(--bg-sunk)' }}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={url} alt={`ref ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      <button
+                        onClick={() => setReferenceImageUrls((cur) => cur.filter((_, j) => j !== i))}
+                        style={{ position: 'absolute', top: 2, right: 2, width: 14, height: 14, borderRadius: 3, background: 'rgba(10,10,10,0.7)', color: 'white', border: 0, display: 'grid', placeItems: 'center', cursor: 'pointer' }}
+                      >
+                        <Icon name="x" size={8} />
+                      </button>
+                    </div>
+                  ))}
+                  {referenceImageUrls.length < 9 && (
+                    <button
+                      onClick={() => onPickFrame('reference')}
+                      style={{ aspectRatio: '1/1', borderRadius: 6, border: '1px dashed var(--line-2)', background: 'var(--bg-sunk)', color: 'var(--ink-3)', display: 'grid', placeItems: 'center', cursor: 'pointer' }}
+                      title="Add reference image"
+                    >
+                      <Icon name="plus" size={14} />
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Reference video</div>
+                {referenceVideoUrl ? (
+                  <div style={{ aspectRatio: '16/9', borderRadius: 8, border: '1px solid var(--line-2)', position: 'relative', overflow: 'hidden', background: '#000' }}>
+                    <video src={referenceVideoUrl} muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    <button
+                      onClick={() => setReferenceVideoUrl(null)}
+                      style={{ position: 'absolute', top: 4, right: 4, width: 18, height: 18, borderRadius: 4, background: 'rgba(10,10,10,0.7)', color: 'white', border: 0, display: 'grid', placeItems: 'center', cursor: 'pointer' }}
+                    >
+                      <Icon name="x" size={10} />
+                    </button>
+                  </div>
+                ) : (
                   <button
-                    onClick={() => setReferenceImageUrls((cur) => cur.filter((_, j) => j !== i))}
-                    style={{ position: 'absolute', top: 2, right: 2, width: 14, height: 14, borderRadius: 3, background: 'rgba(10,10,10,0.7)', color: 'white', border: 0, display: 'grid', placeItems: 'center', cursor: 'pointer' }}
+                    onClick={() => onPickFrame('refVideo')}
+                    style={{ width: '100%', aspectRatio: '16/9', borderRadius: 8, border: '1px dashed var(--line-2)', background: 'var(--bg-sunk)', color: 'var(--ink-3)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, cursor: 'pointer', fontSize: 11, fontFamily: 'var(--mono)' }}
                   >
-                    <Icon name="x" size={8} />
+                    <Icon name="upload" size={14} />
+                    <span style={{ textTransform: 'uppercase', letterSpacing: '0.04em', fontSize: 9.5 }}>Upload</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {videoGenMode === 'audio-driven' && (
+            <div>
+              <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Audio track *</div>
+              {audioUrl ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 12, borderRadius: 10, border: '1px solid var(--line-2)', background: 'var(--bg-sunk)' }}>
+                  <Icon name="bolt" size={16} style={{ color: 'var(--accent)' }} />
+                  <audio src={audioUrl} controls style={{ flex: 1, height: 32 }} />
+                  <button
+                    onClick={() => setAudioUrl(null)}
+                    className="btn sm ghost"
+                    aria-label="Remove audio"
+                  >
+                    <Icon name="x" size={11} />
                   </button>
                 </div>
-              ))}
-              {referenceImageUrls.length < 4 && (
+              ) : (
                 <button
-                  onClick={() => onPickFrame('reference')}
-                  style={{ aspectRatio: '1/1', borderRadius: 6, border: '1px dashed var(--line-2)', background: 'var(--bg-sunk)', color: 'var(--ink-3)', display: 'grid', placeItems: 'center', cursor: 'pointer' }}
-                  title="Add reference image"
+                  onClick={() => onPickFrame('audio')}
+                  style={{ width: '100%', padding: 20, borderRadius: 10, border: '1px dashed var(--line-2)', background: 'var(--bg-sunk)', color: 'var(--ink-2)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, cursor: 'pointer', fontSize: 12, fontFamily: 'var(--mono)' }}
                 >
-                  <Icon name="plus" size={14} />
+                  <Icon name="upload" size={18} />
+                  <span style={{ textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: 10.5 }}>Upload audio track</span>
+                  <span style={{ fontSize: 10, color: 'var(--ink-4)' }}>MP3 / WAV / M4A / OGG · up to 50 MB</span>
                 </button>
               )}
             </div>
-          </div>
+          )}
+
+          <input ref={refUploadRef} type="file" hidden onChange={onFrameChange} />
         </div>
-        <input ref={refUploadRef} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={onFrameChange} />
-      </div>
+      )}
     </div>
   );
 

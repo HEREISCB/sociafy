@@ -299,19 +299,13 @@ const CalendarPage: React.FC = () => {
 
       {quickSlot && (
         <div
+          className="modal-scrim"
           onClick={() => { if (!quickBusy) { setQuickSlot(null); setQuickMsg(null); } }}
-          style={{
-            position: 'fixed', inset: 0, background: 'rgba(10,10,10,0.4)',
-            display: 'grid', placeItems: 'center', zIndex: 50,
-          }}
         >
           <div
+            className="modal-sheet"
             onClick={(e) => e.stopPropagation()}
-            style={{
-              background: 'var(--bg-elev)', border: '1px solid var(--line)',
-              borderRadius: 16, padding: 24, width: 'min(560px, 92vw)',
-              boxShadow: '0 24px 60px -24px rgba(0,0,0,0.3)',
-            }}
+            style={{ width: 'min(560px, 92vw)' }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
               <Icon name="sparkle" size={16} style={{ color: 'var(--accent)' }} />
@@ -388,19 +382,13 @@ const CalendarPage: React.FC = () => {
 
       {selected && (
         <div
+          className="modal-scrim"
           onClick={() => setSelected(null)}
-          style={{
-            position: 'fixed', inset: 0, background: 'rgba(10,10,10,0.4)',
-            display: 'grid', placeItems: 'center', zIndex: 50,
-          }}
         >
           <div
+            className="modal-sheet"
             onClick={(e) => e.stopPropagation()}
-            style={{
-              background: 'var(--bg-elev)', border: '1px solid var(--line)',
-              borderRadius: 16, padding: 24, width: 'min(520px, 90vw)',
-              boxShadow: '0 24px 60px -24px rgba(0,0,0,0.3)',
-            }}
+            style={{ width: 'min(520px, 90vw)' }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
               <span className={`pglyph ${PLATFORM_TO_SHORT[selected.platform]}`} style={{ width: 22, height: 22 }}>

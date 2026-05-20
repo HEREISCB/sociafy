@@ -9,7 +9,7 @@ export const runtime = 'nodejs';
 // Multipart bodies can be larger than the default 1MB. Bump generously.
 export const maxDuration = 60;
 
-const ACCEPT = /^(image\/(png|jpeg|jpg|webp|gif)|video\/(mp4|quicktime|webm))$/i;
+const ACCEPT = /^(image\/(png|jpeg|jpg|webp|gif)|video\/(mp4|quicktime|webm)|audio\/(mpeg|mp3|wav|ogg|webm|m4a|x-m4a|aac))$/i;
 const MAX_BYTES = 50 * 1024 * 1024; // 50MB cap for MVP
 
 export async function POST(req: NextRequest) {
