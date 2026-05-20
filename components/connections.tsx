@@ -63,10 +63,9 @@ const PLATFORMS: PlatformDef[] = [
     short: 'x',
     name: 'X',
     color: 'var(--x)',
-    tagline: 'Paused — paid API tier required',
-    blurb: 'X moved tweet.write behind a paid tier ($100/mo). Coming back when the demand is there.',
+    tagline: 'Tweets · threads · image posts',
+    blurb: 'Tweet text and media. Threads orchestrated by the agent when you want a series.',
     capabilities: ['Tweets', 'Threads', 'Media'],
-    comingSoon: true,
   },
   {
     id: 'linkedin',
