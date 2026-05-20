@@ -27,18 +27,38 @@ export function useApi<T>(url: string | null, config?: SWRConfiguration) {
   };
 }
 
-export async function apiPost<T = unknown>(url: string, body: unknown): Promise<T> {
-  const r = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-    credentials: 'include',
-  });
-  if (!r.ok) {
-    const detail = await r.text().catch(() => '');
-    throw new Error(`${r.status}: ${detail}`);
+export async function apiPost<T = unknown>(
+  url: string,
+  body: unknown,
+  opts?: { timeoutMs?: number },
+): Promise<T> {
+  // Default 2-minute ceiling. Long enough for tool-using model calls, short
+  // enough that a wedged server doesn't leave the UI stuck on "Generating…"
+  // forever. Callers can override per request.
+  const controller = new AbortController();
+  const timeoutMs = opts?.timeoutMs ?? 120_000;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      credentials: 'include',
+      signal: controller.signal,
+    });
+    if (!r.ok) {
+      const detail = await r.text().catch(() => '');
+      throw new Error(`${r.status}: ${detail}`);
+    }
+    return r.json();
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') {
+      throw new Error('timeout: request took too long, try again or disable research');
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
   }
-  return r.json();
 }
 
 export async function apiPatch<T = unknown>(url: string, body: unknown): Promise<T> {

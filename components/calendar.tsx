@@ -2,9 +2,12 @@
 
 import React, { useMemo, useState } from 'react';
 import { Icon } from './icons';
-import { apiDelete, apiPatch, useApi } from '../lib/ui/fetcher';
+import { apiDelete, apiPatch, apiPost, useApi } from '../lib/ui/fetcher';
 import { PLATFORM_TO_SHORT } from '../lib/ui/platforms';
 import type { Platform } from '../lib/db/schema';
+
+type QuickMode = 'text' | 'image' | 'video';
+type QuickSlot = { day: number; hour: number };
 
 const HOURS = ['7 AM', '8 AM', '9 AM', '10 AM', '11 AM', '12 PM', '1 PM', '2 PM', '3 PM', '4 PM', '5 PM', '6 PM', '7 PM', '8 PM'];
 
@@ -67,8 +70,78 @@ const CalendarPage: React.FC = () => {
 
   const url = `/api/schedule?from=${weekStart.toISOString()}&to=${weekEnd.toISOString()}`;
   const { data, unauth, mutate } = useApi<ScheduledRow[]>(url);
+  const accountsApi = useApi<{ platform: Platform }[]>('/api/accounts');
   const [selected, setSelected] = useState<ScheduledRow | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
+
+  // Quick-compose-from-slot state.
+  const [quickSlot, setQuickSlot] = useState<QuickSlot | null>(null);
+  const [quickMode, setQuickMode] = useState<QuickMode>('text');
+  const [quickPrompt, setQuickPrompt] = useState('');
+  const [quickBusy, setQuickBusy] = useState(false);
+  const [quickMsg, setQuickMsg] = useState<string | null>(null);
+
+  const slotIsoFor = (slot: QuickSlot): string => {
+    const d = new Date(weekStart);
+    d.setDate(d.getDate() + slot.day);
+    d.setHours(7 + slot.hour, 0, 0, 0);
+    return d.toISOString();
+  };
+
+  const quickScheduleAt = async (slot: QuickSlot) => {
+    if (!quickPrompt.trim()) {
+      setQuickMsg('Add a prompt first.');
+      return;
+    }
+    setQuickBusy(true);
+    setQuickMsg('Drafting…');
+    try {
+      const platforms = (accountsApi.data ?? []).map((a) => a.platform).slice(0, 3);
+      if (platforms.length === 0) {
+        setQuickMsg('Connect at least one platform first.');
+        return;
+      }
+      // 1. Generate caption variants.
+      const composed = await apiPost<{
+        variants: { label: string; text: string; score?: number; rationale?: string }[];
+        perPlatform: Partial<Record<Platform, string>>;
+      }>('/api/compose/variants', {
+        prompt: quickPrompt,
+        platforms,
+        preset: quickMode === 'video' ? 'reel' : 'announcement',
+      });
+      const best = composed.variants?.[0];
+      if (!best) {
+        setQuickMsg('No draft came back. Try a different prompt.');
+        return;
+      }
+      // 2. Save as a draft.
+      const draft = await apiPost<{ id: string }>('/api/drafts', {
+        prompt: quickPrompt,
+        body: best.text,
+        variants: composed.variants.map((v) => ({ label: v.label, text: v.text, score: v.score, rationale: v.rationale })),
+        selectedVariantLabel: best.label,
+        targetPlatforms: platforms,
+        perPlatformText: composed.perPlatform ?? {},
+        preset: quickMode === 'video' ? 'reel' : 'announcement',
+      });
+      // 3. Schedule at the picked slot.
+      const whenIso = slotIsoFor(slot);
+      await apiPost('/api/schedule', { draftId: draft.id, scheduledAt: whenIso, platforms });
+      setQuickMsg('Scheduled.');
+      await mutate();
+      setTimeout(() => {
+        setQuickSlot(null);
+        setQuickPrompt('');
+        setQuickMsg(null);
+      }, 700);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setQuickMsg(`Failed: ${msg.slice(0, 120)}`);
+    } finally {
+      setQuickBusy(false);
+    }
+  };
 
   const cancelScheduled = async (id: string) => {
     if (!confirm('Cancel this scheduled post? It will not be published.')) return;
@@ -183,7 +256,15 @@ const CalendarPage: React.FC = () => {
           </div>
           {days.map((_, dayIdx) => (
             <div key={dayIdx} className="cal-day-col">
-              {HOURS.map((_, hi) => <div key={hi} className="cal-slot" />)}
+              {HOURS.map((_, hi) => (
+                <div
+                  key={hi}
+                  className="cal-slot"
+                  onClick={() => { if (!unauth) { setQuickSlot({ day: dayIdx, hour: hi }); setQuickMsg(null); } }}
+                  style={{ cursor: unauth ? 'default' : 'pointer' }}
+                  title={unauth ? '' : 'Click to schedule a post'}
+                />
+              ))}
               {all.filter((e) => e.day === dayIdx).map((e) => {
                 const real = data?.find((s) => s.id === e.id) ?? null;
                 return (
@@ -215,6 +296,95 @@ const CalendarPage: React.FC = () => {
           ))}
         </div>
       </div>
+
+      {quickSlot && (
+        <div
+          onClick={() => { if (!quickBusy) { setQuickSlot(null); setQuickMsg(null); } }}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(10,10,10,0.4)',
+            display: 'grid', placeItems: 'center', zIndex: 50,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'var(--bg-elev)', border: '1px solid var(--line)',
+              borderRadius: 16, padding: 24, width: 'min(560px, 92vw)',
+              boxShadow: '0 24px 60px -24px rgba(0,0,0,0.3)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+              <Icon name="sparkle" size={16} style={{ color: 'var(--accent)' }} />
+              <h3 style={{ margin: 0, fontSize: 15, letterSpacing: '-0.01em' }}>
+                What do you want to post?
+              </h3>
+              <span className="chip ghost mono" style={{ marginLeft: 'auto' }}>
+                {new Date(slotIsoFor(quickSlot)).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+              </span>
+              <button className="icon-btn" onClick={() => { if (!quickBusy) { setQuickSlot(null); setQuickMsg(null); } }}>
+                <Icon name="x" size={14} />
+              </button>
+            </div>
+
+            {/* Mode chips */}
+            <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+              {(['text', 'image', 'video'] as QuickMode[]).map((m) => (
+                <span
+                  key={m}
+                  onClick={() => setQuickMode(m)}
+                  className={`prompt-chip ${quickMode === m ? 'active' : ''}`}
+                  style={{ textTransform: 'capitalize' }}
+                >
+                  <Icon name={m === 'text' ? 'edit' : m === 'image' ? 'image' : 'play'} size={11} />
+                  {m === 'text' ? 'Text' : m === 'image' ? 'Image' : 'Video'} post
+                </span>
+              ))}
+            </div>
+
+            <textarea
+              value={quickPrompt}
+              onChange={(e) => setQuickPrompt(e.target.value)}
+              placeholder="What's this post about? One sentence is enough."
+              autoFocus
+              style={{
+                width: '100%', minHeight: 88, padding: 12, fontSize: 13,
+                border: '1px solid var(--line-2)', borderRadius: 10, background: 'var(--bg)',
+                color: 'var(--ink)', fontFamily: 'inherit', resize: 'vertical', outline: 'none', lineHeight: 1.5,
+                marginBottom: 12,
+              }}
+            />
+
+            {quickMsg && (
+              <div style={{ padding: 10, fontSize: 12.5, background: 'var(--bg-sunk)', border: '1px solid var(--line)', borderRadius: 8, marginBottom: 12 }}>
+                {quickMsg}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+              <div style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>
+                Drafts in your voice, schedules at this slot.
+              </div>
+              <div style={{ flex: 1 }} />
+              <button
+                className="btn"
+                onClick={() => { if (!quickBusy) { setQuickSlot(null); setQuickMsg(null); } }}
+                disabled={quickBusy}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn primary"
+                onClick={() => quickScheduleAt(quickSlot)}
+                disabled={quickBusy || !quickPrompt.trim()}
+              >
+                {quickBusy
+                  ? <><Icon name="refresh" size={12} /> Drafting</>
+                  : <><Icon name="sparkle" size={12} /> Generate &amp; schedule</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {selected && (
         <div

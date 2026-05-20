@@ -81,6 +81,64 @@ const DEMO_FEED: Activity[] = [
   { id: 'demo-3', kind: 'agent_held', title: 'Held a draft — tone mismatch', body: 'Used "game-changing" twice. Rewriting and re-queuing.', meta: null, createdAt: new Date(Date.now() - 60 * 60_000).toISOString() },
 ];
 
+const HOW_IT_WORKS_STEPS = [
+  {
+    icon: 'fire' as const,
+    title: '1. It watches your niches',
+    body: 'Every few hours it pulls fresh trends from the niches you picked — RSS feeds, search trends, Reddit signals — and scores them against what you usually post about.',
+  },
+  {
+    icon: 'sparkle' as const,
+    title: '2. It drafts in your voice',
+    body: 'When a trend scores high enough, it writes a post in your voice (set by your style guide + voice template) and adapts it per platform.',
+  },
+  {
+    icon: 'check' as const,
+    title: '3. It auto-schedules — or holds',
+    body: 'Drafts scoring above your auto-publish threshold get scheduled into your calendar respecting quiet hours. Anything lower waits in Drafts for your review.',
+  },
+  {
+    icon: 'bolt' as const,
+    title: 'You stay in control',
+    body: 'Pause any time. Tighten the cadence, raise the threshold, or edit a draft before it ships. Everything it does shows up in the activity feed below.',
+  },
+];
+
+const HowItWorksCard: React.FC<{ expanded: boolean }> = ({ expanded: initialExpanded }) => {
+  const [expanded, setExpanded] = useState(initialExpanded);
+  return (
+    <div className="card">
+      <div
+        className="card-head"
+        style={{ cursor: 'pointer' }}
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <h3>
+          <Icon name="bolt" size={14} /> How Autopilot works
+        </h3>
+        <span className="chip ghost mono">{expanded ? 'Hide' : 'Show'}</span>
+      </div>
+      {expanded && (
+        <div className="card-body">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 14 }}>
+            {HOW_IT_WORKS_STEPS.map((s) => (
+              <div key={s.title} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: 12, background: 'var(--bg-sunk)', borderRadius: 10 }}>
+                <div style={{ width: 28, height: 28, borderRadius: 8, background: 'var(--bg-elev)', color: 'var(--accent)', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+                  <Icon name={s.icon} size={13} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 4 }}>{s.title}</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--ink-3)', lineHeight: 1.5 }}>{s.body}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 interface AgentPageProps {
   onEditDraft?: (id: string) => void;
 }
@@ -184,10 +242,43 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
   // empty activity log see the real empty state below, not fake events.
   const feed = unauth ? DEMO_FEED : (activity ?? []);
 
+  // First-run state: signed in but no niches picked yet. We block the
+  // Resume button until they've at least named what to write about so
+  // Autopilot doesn't run "blind".
+  const needsSetup = !unauth && niches.length === 0;
+
   return (
     <div className="two-col">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <div className="card" style={{ background: autopilot ? 'var(--bg-elev)' : 'var(--bg-sunk)' }}>
+        {/* How Autopilot works — collapsible explainer card. Always visible on
+            first run; signed-in users with niches already picked see it as a
+            compact summary that can be expanded for a refresher. */}
+        <HowItWorksCard expanded={needsSetup || !!unauth} />
+
+        {needsSetup && (
+          <div className="card" style={{ background: 'var(--accent-soft)', borderColor: 'oklch(0.86 0.08 70)' }}>
+            <div className="card-body" style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+              <div style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--accent)', color: 'white', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+                <Icon name="sparkle" size={16} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4, color: 'var(--accent-ink)' }}>One more step before Autopilot can run</div>
+                <div style={{ fontSize: 12.5, color: 'var(--accent-ink)', marginBottom: 10 }}>
+                  Pick the niches you want it to track, set how often it should draft, and tell it your voice. Without these it has nothing to write about.
+                </div>
+                <a
+                  href="/onboarding"
+                  className="btn primary"
+                  style={{ textDecoration: 'none', display: 'inline-flex' }}
+                >
+                  <Icon name="bolt" size={12} /> Finish setup
+                </a>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="card" style={{ background: autopilot ? 'var(--bg-elev)' : 'var(--bg-sunk)', opacity: needsSetup ? 0.5 : 1 }}>
           <div className="card-body" style={{ display: 'grid', gridTemplateColumns: '40px 1fr auto', gap: 16, alignItems: 'center' }}>
             <div style={{ width: 40, height: 40, borderRadius: 10, background: autopilot ? 'var(--ink)' : 'var(--bg-sunk)', color: autopilot ? 'var(--accent)' : 'var(--ink-3)', display: 'grid', placeItems: 'center', position: 'relative' }}>
               <Icon name="bolt" size={18} />
@@ -203,7 +294,12 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
                   : "I'll keep watching but won't draft or post without you."}
               </div>
             </div>
-            <button className={`btn ${autopilot ? '' : 'primary'}`} onClick={() => saveAutopilot(!autopilot)} disabled={unauth}>
+            <button
+              className={`btn ${autopilot ? '' : 'primary'}`}
+              onClick={() => saveAutopilot(!autopilot)}
+              disabled={unauth || needsSetup}
+              title={needsSetup ? 'Finish setup first — pick at least one niche.' : undefined}
+            >
               {autopilot ? <><Icon name="pause" size={12} /> Pause</> : <><Icon name="play" size={12} /> Resume</>}
             </button>
           </div>

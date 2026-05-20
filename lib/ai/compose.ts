@@ -89,6 +89,7 @@ export async function generateCompose(args: ComposeArgs): Promise<ComposeResult>
   let text: string;
   let toolsUsed: string[] | undefined;
 
+  console.log(`[compose] withTools=${!!args.withTools} platforms=${platforms.join(',')} prompt="${args.prompt.slice(0, 60)}"`);
   if (args.withTools) {
     const sysWithTools = [
       sys,

@@ -24,7 +24,12 @@ export const getAnthropic = getOpenAI;
 
 // Model defaults. Env-overridable so callers can pick a cheaper model if
 // they want. Resolved lazily so an unset env var doesn't crash module load.
+// `image` is the only one that doesn't have a hard-coded fallback we trust
+// to remain stable — OpenAI rotates image-gen model names faster than chat
+// models. Keep it env-configurable so we never have to ship a code change
+// when a new generation drops.
 export const MODELS = {
   fast: process.env.OPENAI_MODEL_FAST || 'gpt-5-mini',
   smart: process.env.OPENAI_MODEL || 'gpt-5',
+  image: process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1',
 } as const;

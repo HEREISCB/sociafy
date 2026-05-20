@@ -84,15 +84,25 @@ export async function runAgentLoop(opts: LoopOptions): Promise<LoopResult | null
   let lastText = '';
 
   for (let step = 0; step < maxSteps; step++) {
-    const response = await openai.responses.create({
-      model,
-      input,
-      tools,
-      max_output_tokens: opts.maxOutputTokens ?? DEFAULT_MAX_TOKENS,
-      previous_response_id: previousResponseId,
-      // Lets us pick up the tool calls and feed results back inline.
-      store: true,
-    });
+    const t0 = Date.now();
+    console.log(`[agent-loop] step ${step + 1}/${maxSteps} model=${model} tools=${tools.length}`);
+    let response: OpenAI.Responses.Response;
+    try {
+      response = await openai.responses.create({
+        model,
+        input,
+        tools,
+        max_output_tokens: opts.maxOutputTokens ?? DEFAULT_MAX_TOKENS,
+        previous_response_id: previousResponseId,
+        // Lets us pick up the tool calls and feed results back inline.
+        store: true,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error(`[agent-loop] step ${step + 1} FAILED after ${Date.now() - t0}ms:`, msg);
+      throw e;
+    }
+    console.log(`[agent-loop] step ${step + 1} done in ${Date.now() - t0}ms, output items=${response.output?.length ?? 0}`);
     previousResponseId = response.id;
 
     // Pull the model's text reply (if any) for the final return value.
