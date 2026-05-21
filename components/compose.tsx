@@ -1482,6 +1482,76 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
           </div>
         )}
 
+        {/* Variants sit ABOVE Distribution — you pick the winning caption,
+            THEN decide where + when to ship it. Compact layout: header chip
+            shows which one is selected, 2x2 grid with clamped previews. */}
+        {mode !== 'video' && (
+          <div className="card">
+            <div className="card-head">
+              <h3>
+                <Icon name="fork" size={14} />
+                Variants
+                <span className="chip ghost mono">{variants.find((v) => v.id === active)?.id ?? '—'} of {variants.length}</span>
+              </h3>
+              <button className="btn sm ghost" onClick={() => generate()} disabled={generating}>
+                <Icon name="refresh" size={11} /> Regenerate
+              </button>
+            </div>
+            <div className="card-body" style={{ paddingTop: 4 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+                {variants.map((v) => {
+                  const isActive = active === v.id;
+                  return (
+                    <div
+                      key={v.id}
+                      onClick={() => setActive(v.id)}
+                      style={{
+                        padding: 10,
+                        borderRadius: 8,
+                        border: isActive ? '1.5px solid var(--accent)' : '1px solid var(--line)',
+                        background: isActive ? 'var(--accent-soft)' : 'var(--bg-sunk)',
+                        cursor: 'pointer',
+                        transition: 'background 120ms ease, border-color 120ms ease',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                        <span style={{ fontSize: 11.5, fontWeight: 600, color: isActive ? 'var(--accent-ink)' : 'var(--ink)' }}>{v.name}</span>
+                        <span style={{ marginLeft: 'auto', fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
+                          <Icon name={v.score >= 85 ? 'fire' : 'chart'} size={10} style={{ verticalAlign: -1 }} /> {v.score}
+                        </span>
+                      </div>
+                      {isActive ? (
+                        <textarea
+                          value={v.text}
+                          onChange={(e) => {
+                            const next = e.target.value;
+                            setVariants((cur) => cur.map((x) => x.id === v.id ? { ...x, text: next } : x));
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          style={{
+                            width: '100%', minHeight: 64, padding: 8, fontSize: 12.5,
+                            background: 'var(--bg)', border: '1px solid var(--line-2)', borderRadius: 6,
+                            outline: 'none', color: 'var(--ink)', fontFamily: 'inherit', resize: 'vertical',
+                            lineHeight: 1.5,
+                          }}
+                        />
+                      ) : (
+                        <div style={{
+                          fontSize: 12, lineHeight: 1.5, color: 'var(--ink-2)',
+                          display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical',
+                          overflow: 'hidden', whiteSpace: 'pre-wrap',
+                        }}>
+                          {v.text}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="card">
           <div className="card-head">
             <h3><Icon name="globe" size={14} /> Distribution</h3>
@@ -1553,69 +1623,6 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
             </button>
           </div>
         </div>
-
-        {/* Variants only make sense for caption-heavy posts. Video posts get
-            ONE caption that pairs with the clip — multiple variants would be
-            noise. */}
-        {mode !== 'video' && (
-        <div className="card">
-          <div className="card-head">
-            <h3>
-              <Icon name="fork" size={14} />
-              Variants
-              <span className="chip ghost mono">{variants.length} {variants.length === 1 ? 'variant' : 'variants'}</span>
-            </h3>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <button className="btn sm ghost" onClick={() => generate()} disabled={generating}><Icon name="refresh" size={12} /> Regenerate</button>
-            </div>
-          </div>
-          <div className="card-body">
-            <div className="variants">
-              {variants.map((v) => (
-                <div
-                  key={v.id}
-                  className={`variant ${active === v.id ? 'active' : ''}`}
-                  onClick={() => setActive(v.id)}
-                >
-                  <div className="variant-head">
-                    <span className="variant-name">{v.name}</span>
-                    <span className="variant-meta">
-                      <Icon name={v.score >= 85 ? 'fire' : 'chart'} size={11} style={{ verticalAlign: -1 }} /> {v.score}
-                    </span>
-                  </div>
-                  {active === v.id ? (
-                    <textarea
-                      className="variant-text"
-                      value={v.text}
-                      onChange={(e) => {
-                        const next = e.target.value;
-                        setVariants((cur) => cur.map((x) => x.id === v.id ? { ...x, text: next } : x));
-                      }}
-                      onClick={(e) => e.stopPropagation()}
-                      style={{
-                        width: '100%', minHeight: 90, padding: 8, fontSize: 13.5,
-                        background: 'var(--bg)', border: '1px solid var(--line-2)', borderRadius: 6,
-                        outline: 'none', color: 'var(--ink)', fontFamily: 'inherit', resize: 'vertical',
-                        lineHeight: 1.5,
-                      }}
-                    />
-                  ) : (
-                    <div className="variant-text">{v.text}</div>
-                  )}
-                  {v.rationale && (
-                    <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 4, fontStyle: 'italic' }}>{v.rationale}</div>
-                  )}
-                  <div style={{ display: 'flex', gap: 4 }}>
-                    <button className="btn sm" onClick={(e) => { e.stopPropagation(); setActive(v.id); }}>
-                      <Icon name="check" size={11} /> {active === v.id ? 'Selected' : 'Use'}
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-        )}
 
         {/* === IMAGE MODE — output gallery (the input card sits above Distribution) === */}
         {mode === 'image' && (

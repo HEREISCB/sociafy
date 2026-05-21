@@ -37,7 +37,11 @@ export const draftCreateSchema = z.object({
     height: z.number().int().nonnegative().optional(),
   })).max(20).optional(),
   targetPlatforms: z.array(platform).max(6).optional(),
-  perPlatformText: z.record(platform, z.string().max(20_000)).optional(),
+  // String-keyed record so missing platform keys are allowed. With
+  // z.record(platform, ...), Zod 4 treats the enum as a closed set and
+  // requires every platform key to be present — which broke persistDraft
+  // any time the user picked only a subset of platforms.
+  perPlatformText: z.record(z.string(), z.string().max(20_000)).optional(),
   preset: z.string().max(80).nullable().optional(),
 });
 
