@@ -547,6 +547,12 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
   /** The media item the user has marked as the "hero" for the preview. */
   const [selectedMediaIdx, setSelectedMediaIdx] = useState<number>(0);
 
+  /** Success modal after a publish lands. null = closed. */
+  const [publishedModal, setPublishedModal] = useState<null | {
+    ok: Array<{ platform: string; url?: string | null }>;
+    failed: Array<{ platform: string; error?: string }>;
+  }>(null);
+
   // Stock image picker state
   const [stockOpen, setStockOpen] = useState(false);
   const [stockQuery, setStockQuery] = useState('');
@@ -1279,14 +1285,11 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
       }
       const ok = results.filter((res) => res.ok);
       const failed = results.filter((res) => !res.ok);
-      if (ok.length > 0 && failed.length === 0) {
-        const urls = ok.filter((res) => res.url).map((res) => `${res.platform}: ${res.url}`).join('  ·  ');
-        setToast(`Published to ${ok.map((res) => res.platform).join(', ')}${urls ? ` — ${urls}` : ''}`);
-        setTimeout(() => onDone?.(), 1200);
-      } else if (ok.length > 0 && failed.length > 0) {
-        setToast(`Partial: published to ${ok.map((res) => res.platform).join(', ')}; failed on ${failed.map((res) => `${res.platform} (${res.error})`).join(', ')}`);
-      } else {
-        setToast(`Publish failed: ${failed.map((res) => `${res.platform}: ${res.error}`).join('; ')}`);
+      // Always surface the result via the modal — even full failure — so the
+      // user sees real per-platform info + URLs without hunting in a toast,
+      // and we DON'T auto-navigate away. They dismiss when ready.
+      if (ok.length > 0 || failed.length > 0) {
+        setPublishedModal({ ok, failed });
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -1846,6 +1849,124 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
           </div>
         </div>
       </div>
+
+      {/* Published-success modal — shows per-platform status + clickable URLs.
+          Stays open until the user dismisses it; we no longer auto-navigate
+          back to the dashboard the moment a post lands. */}
+      {publishedModal && (
+        <div className="modal-scrim" onClick={() => setPublishedModal(null)}>
+          <div
+            className="modal-sheet"
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: 'min(520px, 92vw)' }}
+          >
+            {(() => {
+              const allOk = publishedModal.failed.length === 0 && publishedModal.ok.length > 0;
+              const partial = publishedModal.ok.length > 0 && publishedModal.failed.length > 0;
+              const title = allOk ? 'Published!' : partial ? 'Partial publish' : 'Publish failed';
+              const subtitle = allOk
+                ? 'Your post is live. Click through to open it on each platform.'
+                : partial
+                  ? 'Some platforms shipped, others didn\'t. Details below.'
+                  : 'No platforms accepted this post.';
+              return (
+                <>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+                    <div style={{
+                      width: 32, height: 32, borderRadius: 10,
+                      background: allOk ? 'var(--good, oklch(0.68 0.18 155))' : partial ? 'oklch(0.78 0.16 70)' : 'oklch(0.62 0.20 25)',
+                      color: 'white', display: 'grid', placeItems: 'center', flexShrink: 0,
+                    }}>
+                      <Icon name={allOk ? 'check' : partial ? 'bolt' : 'x'} size={14} />
+                    </div>
+                    <h3 style={{ margin: 0, fontSize: 16, letterSpacing: '-0.01em' }}>{title}</h3>
+                    <button className="icon-btn" style={{ marginLeft: 'auto' }} onClick={() => setPublishedModal(null)}>
+                      <Icon name="x" size={14} />
+                    </button>
+                  </div>
+                  <div style={{ fontSize: 12.5, color: 'var(--ink-3)', marginBottom: 16 }}>
+                    {subtitle}
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
+                    {publishedModal.ok.map((res) => (
+                      <div
+                        key={`ok-${res.platform}`}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 10,
+                          padding: 12, borderRadius: 10,
+                          border: '1px solid var(--line)',
+                          background: 'var(--bg-sunk)',
+                        }}
+                      >
+                        <Pglyph p={PLATFORM_TO_SHORT[res.platform as Platform] ?? res.platform} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600 }}>
+                            {(PLATFORM_BY_SHORT[PLATFORM_TO_SHORT[res.platform as Platform]] &&
+                              platformLabel(PLATFORM_BY_SHORT[PLATFORM_TO_SHORT[res.platform as Platform]], mode))
+                              || res.platform}
+                          </div>
+                          {res.url && (
+                            <div style={{ fontSize: 11, color: 'var(--ink-4)', fontFamily: 'var(--mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {res.url}
+                            </div>
+                          )}
+                        </div>
+                        {res.url && (
+                          <a
+                            href={res.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="btn sm primary"
+                            style={{ textDecoration: 'none' }}
+                          >
+                            <Icon name="arrow_right" size={11} /> View
+                          </a>
+                        )}
+                      </div>
+                    ))}
+                    {publishedModal.failed.map((res) => (
+                      <div
+                        key={`fail-${res.platform}`}
+                        style={{
+                          display: 'flex', alignItems: 'flex-start', gap: 10,
+                          padding: 12, borderRadius: 10,
+                          border: '1px solid oklch(0.86 0.10 25)',
+                          background: 'oklch(0.97 0.03 25)',
+                        }}
+                      >
+                        <Pglyph p={PLATFORM_TO_SHORT[res.platform as Platform] ?? res.platform} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: 'oklch(0.42 0.20 25)' }}>
+                            {(PLATFORM_BY_SHORT[PLATFORM_TO_SHORT[res.platform as Platform]] &&
+                              platformLabel(PLATFORM_BY_SHORT[PLATFORM_TO_SHORT[res.platform as Platform]], mode))
+                              || res.platform}
+                          </div>
+                          <div style={{ fontSize: 11.5, color: 'oklch(0.42 0.20 25)', marginTop: 2, lineHeight: 1.4 }}>
+                            {res.error || 'Unknown error'}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                    <button className="btn" onClick={() => setPublishedModal(null)}>
+                      Keep composing
+                    </button>
+                    <button
+                      className="btn primary"
+                      onClick={() => { setPublishedModal(null); onDone?.(); }}
+                    >
+                      <Icon name="chart" size={11} /> Back to dashboard
+                    </button>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
