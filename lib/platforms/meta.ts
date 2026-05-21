@@ -27,6 +27,10 @@ function buildMetaAuthorizeUrl(redirectUri: string, state: string): string {
     redirect_uri: redirectUri,
     state,
     response_type: 'code',
+    // Force the permissions dialog every time. Without this, Meta silently
+    // reuses any previous "skipped" decision, so a user who unchecked
+    // pages_manage_posts on first connect will never see it again.
+    auth_type: 'rerequest',
   });
   if (env.platforms.meta.configId) {
     // Facebook Login for Business — Configuration bundles permissions & assets.
@@ -38,6 +42,18 @@ function buildMetaAuthorizeUrl(redirectUri: string, state: string): string {
     params.set('scope', FB_SCOPES.join(','));
   }
   return `${AUTH_URL}?${params.toString()}`;
+}
+
+/**
+ * Verify the user actually granted the permissions we need. Meta's OAuth
+ * dialog lets users decline individual scopes — without this check we'd
+ * happily store a useless token and fail at publish time.
+ */
+async function fetchGrantedPermissions(userToken: string): Promise<Set<string>> {
+  const resp = await fetch(`${GRAPH}/me/permissions?access_token=${userToken}`);
+  if (!resp.ok) return new Set();
+  const json = (await resp.json()) as { data?: Array<{ permission: string; status: 'granted' | 'declined' | 'expired' }> };
+  return new Set((json.data ?? []).filter((p) => p.status === 'granted').map((p) => p.permission));
 }
 
 async function exchangeMetaCode(code: string, redirectUri: string) {
@@ -86,6 +102,21 @@ export const facebookAdapter: PlatformAdapter = {
     if (!metaConfigured()) return stubProfile('facebook', 'unknown');
     const t = await exchangeMetaCode(code, redirectUri);
     const userToken = t.access_token;
+
+    // Fail loud at connect time if the user skipped a required permission in
+    // the OAuth dialog. Without this we'd happily save a token that can't
+    // actually post and only discover at publish time.
+    const granted = await fetchGrantedPermissions(userToken);
+    const required = ['pages_show_list', 'pages_manage_posts', 'pages_read_engagement'] as const;
+    const missing = required.filter((p) => !granted.has(p));
+    if (missing.length > 0) {
+      throw new PlatformError(
+        'facebook_missing_permissions',
+        403,
+        `You skipped these Facebook permissions during sign-in: ${missing.join(', ')}. Reconnect Facebook and make sure every page-publishing toggle stays ON.`,
+      );
+    }
+
     const me = await fetchMe(userToken);
     const pages = await fetchPages(userToken);
     const page = pages.data[0]; // Pick first managed page; UI can let user pick later.
