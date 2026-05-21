@@ -11,6 +11,7 @@ import {
   type Platform,
 } from '../../../lib/db/schema';
 import { getAdapter } from '../../../lib/platforms/registry';
+import { PlatformError } from '../../../lib/platforms/types';
 import { ensureFreshToken } from '../../../lib/platforms/token';
 import { rateLimit } from '../../../lib/rate-limit';
 import { publishSchema, parseBody } from '../../../lib/validation';
@@ -134,21 +135,37 @@ export async function POST(req: NextRequest) {
           scheduledPostId: sp.id,
         });
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
+        // Unwrap PlatformError so the upstream HTTP status + response body
+        // make it back to the UI (and the activity log). Without this the
+        // user just sees "x_publish_failed" with no clue what X actually
+        // returned (rate limit? scope? duplicate?).
+        const platformErr = e instanceof PlatformError ? e : null;
+        const code = platformErr ? platformErr.message : (e instanceof Error ? e.message : String(e));
+        const status = platformErr?.status;
+        const detailRaw = platformErr?.detail;
+        const detailText = typeof detailRaw === 'string'
+          ? detailRaw
+          : detailRaw != null
+            ? (() => { try { return JSON.stringify(detailRaw); } catch { return String(detailRaw); } })()
+            : '';
+        const friendly = [code, status ? `(${status})` : '', detailText ? `· ${detailText.slice(0, 400)}` : '']
+          .filter(Boolean).join(' ');
+        console.error(`[publish] ${platform} failed: ${friendly}`);
+
         await db()
           .update(scheduledPosts)
-          .set({ status: 'failed', error: msg, updatedAt: new Date() })
+          .set({ status: 'failed', error: friendly.slice(0, 2000), updatedAt: new Date() })
           .where(eq(scheduledPosts.id, sp.id));
 
         await db().insert(activityLog).values({
           userId: user.id,
           kind: 'publish_failed',
           title: `Publish failed: ${platform}`,
-          body: msg,
-          meta: { scheduledPostId: sp.id, platform },
+          body: friendly.slice(0, 1000),
+          meta: { scheduledPostId: sp.id, platform, status: status ?? null },
         });
 
-        results.push({ platform, ok: false, error: msg, scheduledPostId: sp.id });
+        results.push({ platform, ok: false, error: friendly, scheduledPostId: sp.id });
       }
     }
 
