@@ -73,14 +73,20 @@ export async function rewritePromptForMedia(args: RewriteArgs): Promise<RewriteR
   ].filter(Boolean).join('\n\n');
 
   try {
-    const resp = await openai.responses.create({
-      model: MODELS.fast,
-      input: [
-        { role: 'system', content: sys },
-        { role: 'user', content: userMsg },
-      ],
-      max_output_tokens: 500,
-    });
+    // Hard 12s timeout — the rewriter is a nice-to-have. If the user's
+    // network is taking longer than that to even start a response we'd
+    // rather generate with the raw prompt than make them wait.
+    const resp = await openai.responses.create(
+      {
+        model: MODELS.fast,
+        input: [
+          { role: 'system', content: sys },
+          { role: 'user', content: userMsg },
+        ],
+        max_output_tokens: 500,
+      },
+      { timeout: 12_000 },
+    );
     const text = (resp.output_text ?? '').trim();
     if (!text) return { prompt: args.userPrompt, enhanced: false };
     // Strip any stray quote wrappers or "Prompt:" labels the model still emits.

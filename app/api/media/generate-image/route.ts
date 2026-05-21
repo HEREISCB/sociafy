@@ -138,11 +138,21 @@ export async function POST(req: NextRequest) {
     //         This sidesteps undici's HTTP/2 + connection pool which some
     //         Windows AV / proxy stacks reject mid-handshake.
     const apiKey = process.env.OPENAI_API_KEY ?? '';
-    const isNetworkErrMsg = (e: unknown) => {
-      const obj = e as { code?: string; message?: string } | null;
-      const h = `${obj?.message ?? ''} ${obj?.code ?? ''}`;
-      return /EPROTO|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|handshake|alert number 40/i.test(h);
+    // OpenAI SDK wraps network failures as APIConnectionError with the real
+    // EPROTO / ECONNRESET buried in `.cause` (sometimes nested several
+    // levels). Walk the whole chain — top-level error, all cause links,
+    // even AggregateError.errors[].
+    const flattenErr = (e: unknown, depth = 0): string => {
+      if (!e || depth > 6) return '';
+      if (typeof e === 'string') return e;
+      const o = e as { name?: string; message?: string; code?: string; cause?: unknown; errors?: unknown[] };
+      let out = `${o.name ?? ''} ${o.message ?? ''} ${o.code ?? ''}`;
+      if (o.cause) out += ' ' + flattenErr(o.cause, depth + 1);
+      if (Array.isArray(o.errors)) for (const sub of o.errors) out += ' ' + flattenErr(sub, depth + 1);
+      return out;
     };
+    const NETWORK_RX = /EPROTO|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|handshake|alert number 40|APIConnectionError|Connection error|fetch failed|UND_ERR/i;
+    const isNetworkErr = (e: unknown) => NETWORK_RX.test(flattenErr(e));
     const generateOnce = async () => {
       try {
         return await openai.images.generate({
@@ -153,8 +163,8 @@ export async function POST(req: NextRequest) {
           n: 1,
         });
       } catch (e) {
-        if (!isNetworkErrMsg(e)) throw e;
-        console.warn('[generate-image] SDK failed with network error, falling back to direct https.request:', (e as Error)?.message?.slice(0, 200));
+        if (!isNetworkErr(e)) throw e;
+        console.warn('[generate-image] SDK failed with network error, falling back to direct https.request:', flattenErr(e).slice(0, 200));
         return await generateImageDirect({ prompt: rewrite.prompt, size, quality, apiKey });
       }
     };
@@ -169,17 +179,14 @@ export async function POST(req: NextRequest) {
     const firstReject = generations.find((g): g is PromiseRejectedResult => g.status === 'rejected');
     const networkFailureCount = generations.filter((g) => {
       if (g.status !== 'rejected') return false;
-      const reason = (g as PromiseRejectedResult).reason as { message?: string; code?: string } | null;
-      const haystack = `${reason?.message ?? ''} ${reason?.code ?? ''}`;
-      return /EPROTO|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|handshake/i.test(haystack);
+      return isNetworkErr((g as PromiseRejectedResult).reason);
     }).length;
     if (networkFailureCount > 0 && networkFailureCount === generations.length) {
-      const reason = firstReject?.reason as { message?: string; code?: string } | null;
-      console.error('[generate-image] all generations failed with network error', reason?.code, reason?.message);
+      const flat = flattenErr(firstReject?.reason);
+      console.error('[generate-image] all generations failed with network error:', flat.slice(0, 500));
       return jsonError('upstream_network_error', 502, {
-        hint: 'Your machine couldn\'t complete a TLS handshake with the image provider. Likely an antivirus, VPN, or corporate proxy is intercepting the connection. Try disabling it for localhost or switching networks.',
-        code: reason?.code ?? null,
-        detail: (reason?.message ?? '').slice(0, 400),
+        hint: 'Your machine couldn\'t complete a TLS handshake with the image provider — even after the HTTP/1.1 fallback. Most likely an antivirus is doing HTTPS inspection (Kaspersky, Bitdefender, ESET) or a corporate proxy is intercepting the connection. Disable HTTPS scanning for localhost or switch networks.',
+        detail: flat.slice(0, 400),
       });
     }
 
