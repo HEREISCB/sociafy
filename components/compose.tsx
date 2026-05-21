@@ -1268,12 +1268,17 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
     try {
       const draft = await persistDraft();
       const fullPlatforms = platforms.map((s) => SHORT_TO_PLATFORM[s]).filter(Boolean) as Platform[];
-      const r = await apiPost<{ results: Array<{ platform: string; ok: boolean; url?: string | null; error?: string }> }>(
+      const r = await apiPost<{ results?: Array<{ platform: string; ok: boolean; url?: string | null; error?: string }> }>(
         '/api/publish',
         { draftId: draft.id, platforms: fullPlatforms },
       );
-      const ok = r.results.filter((res) => res.ok);
-      const failed = r.results.filter((res) => !res.ok);
+      const results = Array.isArray(r?.results) ? r.results : [];
+      if (results.length === 0) {
+        setToast('Publish returned no results. Check that the platform is connected and try again.');
+        return;
+      }
+      const ok = results.filter((res) => res.ok);
+      const failed = results.filter((res) => !res.ok);
       if (ok.length > 0 && failed.length === 0) {
         const urls = ok.filter((res) => res.url).map((res) => `${res.platform}: ${res.url}`).join('  ·  ');
         setToast(`Published to ${ok.map((res) => res.platform).join(', ')}${urls ? ` — ${urls}` : ''}`);

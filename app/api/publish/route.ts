@@ -44,6 +44,7 @@ export async function POST(req: NextRequest) {
       ? platforms
       : draft.targetPlatforms ?? []
     ).filter((p): p is Platform => (PLATFORMS as readonly string[]).includes(p));
+    console.log(`[publish] user=${user.id} draft=${draftId} platforms=${requested.join(',') || '<none>'}`);
     if (requested.length === 0) return jsonError('no_platforms');
 
     const accounts = await db()

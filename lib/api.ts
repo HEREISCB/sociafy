@@ -102,7 +102,14 @@ export async function withUser<T>(
   try {
     await ensureProfile(user.id);
     const result = await handler(user);
-    if (result instanceof NextResponse) return result;
+    // Pass through any Response (incl. plain Response used by rate-limit
+    // branches). Previously this checked `instanceof NextResponse`, which
+    // missed plain Response objects — they'd fall through to
+    // NextResponse.json(result), which silently serializes the Response as
+    // `{}` and returns 200, breaking every callsite that expected a real
+    // payload back. NextResponse extends Response so this still passes
+    // NextResponse-typed returns through unchanged.
+    if (result instanceof Response) return result as unknown as NextResponse;
     return NextResponse.json(result);
   } catch (e) {
     if (e instanceof Response) return e as NextResponse;
