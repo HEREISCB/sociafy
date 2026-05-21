@@ -1937,11 +1937,14 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                       // Heuristic recovery hints based on the platform + error
                       // payload, so users see *what to do* not just *what failed*.
                       const err = res.error ?? '';
-                      const isMetaPermission = /\(#200\)|pages_manage_posts|pages_read_engagement|permission|admin/i.test(err);
+                      const isMetaNoPage = /facebook_no_page_selected|no Facebook Page|Select the business assets/i.test(err);
+                      const isMetaPermission = /\(#200\)|pages_manage_posts|pages_read_engagement|facebook_missing_permissions|permission|admin/i.test(err);
                       const isAuthExpired = /\b(401|expired|invalid_token|invalid_grant|token)\b/i.test(err) && !isMetaPermission;
                       const isRateLimit = /\b429\b|rate.?limit|too many/i.test(err);
                       const isYtTextUnsupported = /youtube_text_unsupported|requires a video upload/i.test(err);
-                      const recoveryHint = isMetaPermission
+                      const recoveryHint = isMetaNoPage
+                        ? 'You didn\'t pick a Page on the "Select business assets" screen. Reconnect Facebook and choose your Page from the Page dropdown.'
+                        : isMetaPermission
                         ? 'Reconnect Facebook from Onboarding and approve every page-publishing permission.'
                         : isAuthExpired
                           ? 'Reconnect this platform — the access token expired or was revoked.'
@@ -1979,7 +1982,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                               }}>
                                 <Icon name="bolt" size={11} style={{ color: 'var(--accent)', flexShrink: 0 }} />
                                 <span>{recoveryHint}</span>
-                                {(isMetaPermission || isAuthExpired) && (
+                                {(isMetaPermission || isMetaNoPage || isAuthExpired) && (
                                   <a
                                     href="/onboarding"
                                     style={{ marginLeft: 'auto', color: 'var(--accent)', fontWeight: 600, textDecoration: 'underline' }}

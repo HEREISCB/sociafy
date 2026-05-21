@@ -121,7 +121,15 @@ export const facebookAdapter: PlatformAdapter = {
     const pages = await fetchPages(userToken);
     const page = pages.data[0]; // Pick first managed page; UI can let user pick later.
     if (!page) {
-      throw new PlatformError('meta_no_pages', 400, 'User has no Facebook Pages with manage_posts permission.');
+      // Most common cause with Facebook Login for Business: user reached the
+      // "Select the business assets to share" dialog and didn't pick a Page
+      // in the dropdown. Meta then returns a user token that can list assets
+      // but can't post to any of them. Explain that exactly.
+      throw new PlatformError(
+        'facebook_no_page_selected',
+        400,
+        'No Facebook Page was shared with Sociafy. Reconnect and, on the "Select the business assets to share" screen, pick a Page from the Page dropdown. If the dropdown is empty, add the Page to your Business Portfolio at business.facebook.com first.',
+      );
     }
     return {
       tokens: {
