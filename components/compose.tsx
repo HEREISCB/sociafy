@@ -78,7 +78,9 @@ const PLATFORM_LIST: {
   { id: 'fb', label: 'Facebook',  limit: 5000, full: 'facebook',  supports: { text: true,  image: true,  video: true  }, hint: {}, labelByMode: { video: 'Facebook Reels' } },
   { id: 'ig', label: 'Instagram', limit: 2200, full: 'instagram', supports: { text: false, image: true,  video: true  }, hint: { text: 'Instagram requires an image or video — switch to Image or Video mode.' }, labelByMode: { image: 'Instagram Post', video: 'Instagram Reels' } },
   { id: 'tt', label: 'TikTok',    limit: 2200, full: 'tiktok',    supports: { text: false, image: false, video: true  }, hint: { text: 'TikTok needs a video.', image: 'TikTok needs a video clip, not a single image.' } },
-  { id: 'yt', label: 'YouTube',   limit: 5000, full: 'youtube',   supports: { text: true,  image: true,  video: true  }, hint: {}, labelByMode: { text: 'YouTube Community', image: 'YouTube Community', video: 'YouTube Shorts' } },
+  // YouTube only supports video uploads via API — Community posts have no
+  // public posting endpoint, so we disallow text/image entirely.
+  { id: 'yt', label: 'YouTube',   limit: 5000, full: 'youtube',   supports: { text: false, image: false, video: true  }, hint: { text: 'YouTube only accepts video uploads via API. Community posts have no public endpoint.', image: 'YouTube only accepts video uploads — image posts go to Community which has no API.' }, labelByMode: { video: 'YouTube Shorts' } },
 ];
 
 const MODE_CARDS: { id: ComposeMode; label: string; sub: string; icon: 'edit' | 'image' | 'play' }[] = [
@@ -665,10 +667,16 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
         }),
       });
       if (!r.ok) {
+        // Try to read a structured error from the response so the user gets a
+        // real hint instead of a bare status code. The new generate-image
+        // route returns { error, hint, detail } for network failures.
+        const body = await r.json().catch(() => ({} as { error?: string; hint?: string; detail?: string }));
         if (r.status === 503) setToast('Image generation isn\'t configured yet. Check your AI + storage settings.');
         else if (r.status === 429) setToast('Slow down — too many image generations. Try again shortly.');
         else if (r.status === 401) setToast('Sign in to generate images.');
-        else setToast(`Image generation failed: ${r.status}`);
+        else if (body?.error === 'upstream_network_error') {
+          setToast(body.hint ?? 'Your network blocked the image provider — antivirus or proxy is likely intercepting TLS.');
+        } else setToast(`Image generation failed: ${r.status}${body?.detail ? ` · ${body.detail.slice(0, 140)}` : ''}`);
         return;
       }
       const data = (await r.json()) as {
@@ -1925,29 +1933,66 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                         )}
                       </div>
                     ))}
-                    {publishedModal.failed.map((res) => (
-                      <div
-                        key={`fail-${res.platform}`}
-                        style={{
-                          display: 'flex', alignItems: 'flex-start', gap: 10,
-                          padding: 12, borderRadius: 10,
-                          border: '1px solid oklch(0.86 0.10 25)',
-                          background: 'oklch(0.97 0.03 25)',
-                        }}
-                      >
-                        <Pglyph p={PLATFORM_TO_SHORT[res.platform as Platform] ?? res.platform} />
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: 'oklch(0.42 0.20 25)' }}>
-                            {(PLATFORM_BY_SHORT[PLATFORM_TO_SHORT[res.platform as Platform]] &&
-                              platformLabel(PLATFORM_BY_SHORT[PLATFORM_TO_SHORT[res.platform as Platform]], mode))
-                              || res.platform}
-                          </div>
-                          <div style={{ fontSize: 11.5, color: 'oklch(0.42 0.20 25)', marginTop: 2, lineHeight: 1.4 }}>
-                            {res.error || 'Unknown error'}
+                    {publishedModal.failed.map((res) => {
+                      // Heuristic recovery hints based on the platform + error
+                      // payload, so users see *what to do* not just *what failed*.
+                      const err = res.error ?? '';
+                      const isMetaPermission = /\(#200\)|pages_manage_posts|pages_read_engagement|permission|admin/i.test(err);
+                      const isAuthExpired = /\b(401|expired|invalid_token|invalid_grant|token)\b/i.test(err) && !isMetaPermission;
+                      const isRateLimit = /\b429\b|rate.?limit|too many/i.test(err);
+                      const isYtTextUnsupported = /youtube_text_unsupported|requires a video upload/i.test(err);
+                      const recoveryHint = isMetaPermission
+                        ? 'Reconnect Facebook from Onboarding and approve every page-publishing permission.'
+                        : isAuthExpired
+                          ? 'Reconnect this platform — the access token expired or was revoked.'
+                          : isRateLimit
+                            ? 'You\'re posting too fast for this platform. Wait a minute and try again.'
+                            : isYtTextUnsupported
+                              ? 'Switch to Video mode — YouTube only accepts video uploads via API.'
+                              : null;
+                      return (
+                        <div
+                          key={`fail-${res.platform}`}
+                          style={{
+                            display: 'flex', alignItems: 'flex-start', gap: 10,
+                            padding: 12, borderRadius: 10,
+                            border: '1px solid oklch(0.86 0.10 25)',
+                            background: 'oklch(0.97 0.03 25)',
+                          }}
+                        >
+                          <Pglyph p={PLATFORM_TO_SHORT[res.platform as Platform] ?? res.platform} />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: 'oklch(0.42 0.20 25)' }}>
+                              {(PLATFORM_BY_SHORT[PLATFORM_TO_SHORT[res.platform as Platform]] &&
+                                platformLabel(PLATFORM_BY_SHORT[PLATFORM_TO_SHORT[res.platform as Platform]], mode))
+                                || res.platform}
+                            </div>
+                            <div style={{ fontSize: 11.5, color: 'oklch(0.42 0.20 25)', marginTop: 2, lineHeight: 1.4 }}>
+                              {err || 'Unknown error'}
+                            </div>
+                            {recoveryHint && (
+                              <div style={{
+                                marginTop: 8, padding: '6px 8px', borderRadius: 6,
+                                background: 'rgba(255,255,255,0.6)',
+                                fontSize: 11.5, color: 'var(--ink-2)', lineHeight: 1.4,
+                                display: 'flex', alignItems: 'center', gap: 6,
+                              }}>
+                                <Icon name="bolt" size={11} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+                                <span>{recoveryHint}</span>
+                                {(isMetaPermission || isAuthExpired) && (
+                                  <a
+                                    href="/onboarding"
+                                    style={{ marginLeft: 'auto', color: 'var(--accent)', fontWeight: 600, textDecoration: 'underline' }}
+                                  >
+                                    Reconnect →
+                                  </a>
+                                )}
+                              </div>
+                            )}
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
 
                   <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>

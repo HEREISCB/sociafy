@@ -64,18 +64,51 @@ export async function POST(req: NextRequest) {
 
     // 2. Generate N in parallel. Each gpt-image-1 call returns one image; running
     //    them in Promise.all is faster than `n: count` and lets one failure not
-    //    sink the others.
+    //    sink the others. We wrap each call in a one-shot retry — local SSL /
+    //    network errors (EPROTO, ECONNRESET, ETIMEDOUT) are often transient
+    //    when an antivirus / corporate proxy is intercepting TLS to OpenAI.
+    const generateOnce = () =>
+      openai.images.generate({
+        model: MODELS.image,
+        prompt: rewrite.prompt,
+        size,
+        quality,
+        n: 1,
+      });
+    const tryWithRetry = async () => {
+      try { return await generateOnce(); }
+      catch (e) {
+        const code = (e as { code?: string } | null)?.code ?? '';
+        const isNetworkErr = /^(EPROTO|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|ECONNREFUSED)$/.test(code);
+        if (!isNetworkErr) throw e;
+        await new Promise((r) => setTimeout(r, 1200));
+        return await generateOnce();
+      }
+    };
+
     const generations = await Promise.allSettled(
-      Array.from({ length: count }, () =>
-        openai.images.generate({
-          model: MODELS.image,
-          prompt: rewrite.prompt,
-          size,
-          quality,
-          n: 1,
-        }),
-      ),
+      Array.from({ length: count }, () => tryWithRetry()),
     );
+
+    // Surface the most common network failure cleanly. If EVERY generation
+    // died with a TLS / connection error we tell the user it's their network
+    // and stop wasting their time on a generic 500.
+    const firstReject = generations.find((g): g is PromiseRejectedResult => g.status === 'rejected');
+    const networkFailureCount = generations.filter((g) => {
+      if (g.status !== 'rejected') return false;
+      const reason = (g as PromiseRejectedResult).reason as { message?: string; code?: string } | null;
+      const haystack = `${reason?.message ?? ''} ${reason?.code ?? ''}`;
+      return /EPROTO|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|handshake/i.test(haystack);
+    }).length;
+    if (networkFailureCount > 0 && networkFailureCount === generations.length) {
+      const reason = firstReject?.reason as { message?: string; code?: string } | null;
+      console.error('[generate-image] all generations failed with network error', reason?.code, reason?.message);
+      return jsonError('upstream_network_error', 502, {
+        hint: 'Your machine couldn\'t complete a TLS handshake with the image provider. Likely an antivirus, VPN, or corporate proxy is intercepting the connection. Try disabling it for localhost or switching networks.',
+        code: reason?.code ?? null,
+        detail: (reason?.message ?? '').slice(0, 400),
+      });
+    }
 
     const rows: unknown[] = [];
     for (const g of generations) {
@@ -102,7 +135,13 @@ export async function POST(req: NextRequest) {
       rows.push(row);
     }
 
-    if (rows.length === 0) return jsonError('no_image_returned', 502);
+    if (rows.length === 0) {
+      // No image came back. Surface whatever the model actually returned so
+      // the client can see it instead of a generic 502.
+      const reason = firstReject?.reason as { message?: string; status?: number } | null;
+      console.error('[generate-image] no image returned. first reject:', reason?.message);
+      return jsonError('no_image_returned', 502, { detail: (reason?.message ?? '').slice(0, 400) });
+    }
 
     return {
       items: rows,
