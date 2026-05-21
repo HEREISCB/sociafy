@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
+import * as https from 'node:https';
 import { withUser, jsonError } from '../../../../lib/api';
 import { parseBody } from '../../../../lib/validation';
 import { rateLimit } from '../../../../lib/rate-limit';
@@ -9,6 +10,73 @@ import { getOpenAI, MODELS } from '../../../../lib/ai/client';
 import { rewritePromptForMedia } from '../../../../lib/ai/prompt-rewriter';
 import { makeMediaKey, publicUrlFor, uploadBuffer } from '../../../../lib/storage/r2';
 import { isStubMode } from '../../../../lib/env';
+
+/**
+ * Direct https.request fallback to api.openai.com/v1/images/generations.
+ *
+ * Why: the OpenAI SDK uses native fetch → undici, which on Node 20+ defaults
+ * to HTTP/2 with connection pooling. Some Windows antivirus / corporate
+ * proxy stacks (Kaspersky, Bitdefender, Zscaler, etc.) intercept TLS and
+ * mishandle either the H2 upgrade or the resumed sessions, returning SSL
+ * alert 40 (handshake_failure). Going through node:https with keepAlive
+ * disabled and an explicit TLS 1.2+ floor produces a clean, single-use
+ * HTTP/1.1 handshake that those stacks almost always accept.
+ *
+ * Same JSON contract as the SDK so the rest of the route doesn't care.
+ */
+function generateImageDirect(args: {
+  prompt: string;
+  size: '1024x1024' | '1536x1024' | '1024x1536';
+  quality: 'low' | 'medium' | 'high';
+  apiKey: string;
+}): Promise<{ data: Array<{ b64_json?: string }> }> {
+  const body = JSON.stringify({
+    model: MODELS.image,
+    prompt: args.prompt,
+    size: args.size,
+    quality: args.quality,
+    n: 1,
+  });
+  return new Promise((resolve, reject) => {
+    const req = https.request(
+      {
+        hostname: 'api.openai.com',
+        port: 443,
+        path: '/v1/images/generations',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${args.apiKey}`,
+          'Content-Length': Buffer.byteLength(body),
+          'User-Agent': 'sociafy/1.0',
+          'Accept': 'application/json',
+        },
+        agent: new https.Agent({ keepAlive: false }),
+        minVersion: 'TLSv1.2',
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () => {
+          const text = Buffer.concat(chunks).toString('utf-8');
+          if (!res.statusCode || res.statusCode >= 400) {
+            reject(new Error(`openai_${res.statusCode}: ${text.slice(0, 500)}`));
+            return;
+          }
+          try {
+            resolve(JSON.parse(text));
+          } catch (e) {
+            reject(e instanceof Error ? e : new Error(String(e)));
+          }
+        });
+      },
+    );
+    req.setTimeout(120_000, () => req.destroy(new Error('ETIMEDOUT')));
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
 
 export const runtime = 'nodejs';
 export const maxDuration = 90;
@@ -62,32 +130,37 @@ export async function POST(req: NextRequest) {
 
     const [w, h] = size.split('x').map((n) => parseInt(n, 10));
 
-    // 2. Generate N in parallel. Each gpt-image-1 call returns one image; running
-    //    them in Promise.all is faster than `n: count` and lets one failure not
-    //    sink the others. We wrap each call in a one-shot retry — local SSL /
-    //    network errors (EPROTO, ECONNRESET, ETIMEDOUT) are often transient
-    //    when an antivirus / corporate proxy is intercepting TLS to OpenAI.
-    const generateOnce = () =>
-      openai.images.generate({
-        model: MODELS.image,
-        prompt: rewrite.prompt,
-        size,
-        quality,
-        n: 1,
-      });
-    const tryWithRetry = async () => {
-      try { return await generateOnce(); }
-      catch (e) {
-        const code = (e as { code?: string } | null)?.code ?? '';
-        const isNetworkErr = /^(EPROTO|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|ECONNREFUSED)$/.test(code);
-        if (!isNetworkErr) throw e;
-        await new Promise((r) => setTimeout(r, 1200));
-        return await generateOnce();
+    // 2. Generate N in parallel. Each gpt-image-1 call returns one image.
+    //    Strategy per call:
+    //      a) Try the SDK once.
+    //      b) On any TLS / network error, retry once via a direct
+    //         node:https.request (HTTP/1.1, no keep-alive, TLS 1.2+ floor).
+    //         This sidesteps undici's HTTP/2 + connection pool which some
+    //         Windows AV / proxy stacks reject mid-handshake.
+    const apiKey = process.env.OPENAI_API_KEY ?? '';
+    const isNetworkErrMsg = (e: unknown) => {
+      const obj = e as { code?: string; message?: string } | null;
+      const h = `${obj?.message ?? ''} ${obj?.code ?? ''}`;
+      return /EPROTO|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|handshake|alert number 40/i.test(h);
+    };
+    const generateOnce = async () => {
+      try {
+        return await openai.images.generate({
+          model: MODELS.image,
+          prompt: rewrite.prompt,
+          size,
+          quality,
+          n: 1,
+        });
+      } catch (e) {
+        if (!isNetworkErrMsg(e)) throw e;
+        console.warn('[generate-image] SDK failed with network error, falling back to direct https.request:', (e as Error)?.message?.slice(0, 200));
+        return await generateImageDirect({ prompt: rewrite.prompt, size, quality, apiKey });
       }
     };
 
     const generations = await Promise.allSettled(
-      Array.from({ length: count }, () => tryWithRetry()),
+      Array.from({ length: count }, () => generateOnce()),
     );
 
     // Surface the most common network failure cleanly. If EVERY generation
