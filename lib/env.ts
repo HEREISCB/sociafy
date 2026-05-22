@@ -1,6 +1,9 @@
+const PLACEHOLDER_RX = /^(placeholder|todo|changeme|change-me|your-.+-here|xxx+)$/i;
 const required = (key: string): string | null => {
   const v = process.env[key];
-  return v && v.length > 0 ? v : null;
+  if (!v || v.length === 0) return null;
+  if (PLACEHOLDER_RX.test(v.trim())) return null;
+  return v;
 };
 
 export const env = {

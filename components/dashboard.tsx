@@ -73,7 +73,6 @@ type PublishedPost = {
 };
 
 interface DashboardProps {
-  mode: string;
   onCompose: () => void;
   onEditDraft?: (id: string) => void;
 }

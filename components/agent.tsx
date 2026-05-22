@@ -1,9 +1,12 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { Icon } from './icons';
 import { apiPatch, apiPost, useApi } from '../lib/ui/fetcher';
 import type { Niche, Platform } from '../lib/db/schema';
+import { estimateWeeklyBurn, weeksOfRunway } from '../lib/credits/estimator';
+import type { CreditsPayload } from './credits';
 
 type BriefMode = 'text' | 'image' | 'video';
 type ConnectedAccount = { id: string; platform: Platform };
@@ -18,6 +21,12 @@ type AgentSettings = {
   voiceTemplate: 'me' | 'punchy' | 'thoughtful' | 'data-led';
   quietHours: { start: string; end: string };
   lastRunAt: string | null;
+  companyName: string | null;
+  brandBio: string | null;
+  website: string | null;
+  enabledPlatforms: Array<'x' | 'linkedin' | 'instagram' | 'facebook' | 'tiktok' | 'youtube'>;
+  postsPerWeekByPlatform: Partial<Record<'x' | 'linkedin' | 'instagram' | 'facebook' | 'tiktok' | 'youtube', number>>;
+  postsPerWeekByContentType: { text: number; image: number; video: number };
 };
 
 type Activity = {
@@ -159,6 +168,22 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
   const [threshold, setThreshold] = useState(90);
   const [strict, setStrict] = useState(true);
   const [savingInstr, setSavingInstr] = useState(false);
+  /** Brand profile state — these get injected into every AI surface
+   *  (image gen rewriter, video gen rewriter, caption variants) so output
+   *  feels on-brand instead of generic. */
+  const [companyName, setCompanyName] = useState('');
+  const [brandBio, setBrandBio] = useState('');
+  const [website, setWebsite] = useState('');
+  const [savingBrand, setSavingBrand] = useState(false);
+  const [brandEditing, setBrandEditing] = useState(false);
+
+  /** Autopilot permission matrix — controls which platforms the agent
+   *  may post to, how often per platform, and the text/image/video mix.
+   *  All edits flush to the server via `saveRules`. */
+  const [enabledPlatforms, setEnabledPlatforms] = useState<Array<'x' | 'linkedin' | 'instagram' | 'facebook' | 'tiktok' | 'youtube'>>([]);
+  const [postsPerPlatform, setPostsPerPlatform] = useState<Partial<Record<'x' | 'linkedin' | 'instagram' | 'facebook' | 'tiktok' | 'youtube', number>>>({});
+  const [contentTypeMix, setContentTypeMix] = useState<{ text: number; image: number; video: number }>({ text: 4, image: 0, video: 0 });
+  const [savingRules, setSavingRules] = useState(false);
   const [running, setRunning] = useState<'agent' | 'trends' | null>(null);
   const [runMsg, setRunMsg] = useState<string | null>(null);
 
@@ -287,7 +312,44 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
     setCadence(settings.cadencePerWeek);
     setThreshold(settings.autoPublishThreshold);
     setStrict(settings.brandSafetyStrict);
+    setCompanyName(settings.companyName ?? '');
+    setBrandBio(settings.brandBio ?? '');
+    setWebsite(settings.website ?? '');
+    setEnabledPlatforms(settings.enabledPlatforms ?? []);
+    setPostsPerPlatform(settings.postsPerWeekByPlatform ?? {});
+    setContentTypeMix(settings.postsPerWeekByContentType ?? { text: 4, image: 0, video: 0 });
   }, [settings]);
+
+  /** Save autopilot rules — fires on every change of platform toggle or
+   *  number step. Server is the source of truth for run.ts. */
+  const saveRules = async (patch: {
+    enabledPlatforms?: typeof enabledPlatforms;
+    postsPerWeekByPlatform?: typeof postsPerPlatform;
+    postsPerWeekByContentType?: typeof contentTypeMix;
+  }) => {
+    setSavingRules(true);
+    try {
+      await apiPatch('/api/agent/settings', patch);
+      await refetchSettings();
+    } finally {
+      setSavingRules(false);
+    }
+  };
+
+  const saveBrand = async () => {
+    setSavingBrand(true);
+    try {
+      await apiPatch('/api/agent/settings', {
+        companyName: companyName.trim() || undefined,
+        brandBio: brandBio.trim() || undefined,
+        website: website.trim() || undefined,
+      });
+      await refetchSettings();
+      setBrandEditing(false);
+    } finally {
+      setSavingBrand(false);
+    }
+  };
 
   const saveAutopilot = async (next: boolean) => {
     setAutopilot(next);
@@ -326,6 +388,36 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
   // Resume button until they've at least named what to write about so
   // Autopilot doesn't run "blind".
   const needsSetup = !unauth && niches.length === 0;
+
+  // Credit balance + live weekly burn estimate for the budget card.
+  // Recomputes whenever the user tweaks the autopilot rules.
+  const { data: creditsData } = useApi<CreditsPayload>('/api/credits', { refreshInterval: 60_000 });
+  const burnEstimate = useMemo(() => estimateWeeklyBurn({
+    platforms: enabledPlatforms as Platform[],
+    cadencePerWeek: cadence,
+    postsPerWeekByContentType: contentTypeMix,
+    withResearch: false,
+  }), [enabledPlatforms, cadence, contentTypeMix]);
+  const balance = creditsData?.balance ?? 0;
+  const runway = creditsData ? weeksOfRunway(burnEstimate.weekly, balance) : -1;
+
+  // First-run tooltip on the activity feed. Shows once, the first time the
+  // user enables autopilot — lives in localStorage so it doesn't nag again.
+  const [showFirstRunTip, setShowFirstRunTip] = useState(false);
+  useEffect(() => {
+    if (autopilot && typeof window !== 'undefined') {
+      const seen = window.localStorage.getItem('sociafy:firstAutopilotEnabled');
+      if (!seen) setShowFirstRunTip(true);
+    }
+  }, [autopilot]);
+  const dismissFirstRunTip = () => {
+    setShowFirstRunTip(false);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('sociafy:firstAutopilotEnabled', String(Date.now()));
+    }
+  };
+  // Drafts-only when threshold > 100 (101 = our "never auto-publish" sentinel).
+  const draftsOnly = threshold > 100;
 
   return (
     <div className="two-col">
@@ -501,6 +593,57 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
           <div className="card-head">
             <h3>
               <Icon name="chat" size={14} />
+              Agent activity
+              <span className="chip live"><span className="dot" />Live</span>
+            </h3>
+            <span className="meta">Last 24 hours</span>
+          </div>
+          <div className="card-body" style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {showFirstRunTip && (
+              <div style={{
+                padding: 12,
+                background: 'var(--accent-soft)',
+                border: '1px solid oklch(0.86 0.08 70)',
+                borderRadius: 8,
+                display: 'flex',
+                gap: 10,
+                alignItems: 'flex-start',
+              }}>
+                <Icon name="sparkle" size={14} style={{ color: 'var(--accent-ink)', marginTop: 2, flexShrink: 0 }} />
+                <div style={{ flex: 1, fontSize: 12.5, color: 'var(--accent-ink)', lineHeight: 1.5 }}>
+                  <strong>Autopilot is on.</strong> Your agent will draft over the next hour. Drafts land here {draftsOnly ? '— review and approve each one before it goes live.' : `— anything scoring ≥ ${threshold} auto-publishes; the rest waits for your review.`}
+                </div>
+                <button className="btn sm ghost" onClick={dismissFirstRunTip} aria-label="Dismiss">✕</button>
+              </div>
+            )}
+            {feed.map((a) => {
+              const meta = KIND_LABEL[a.kind] ?? { label: a.kind, tone: '' as const };
+              return (
+                <div className="agent-card" key={a.id}>
+                  <div className="agent-mark">A</div>
+                  <div>
+                    <div className="agent-meta">
+                      <span>Agent</span>
+                      <span style={{ color: 'var(--ink-4)' }}>·</span>
+                      <span>{relTime(a.createdAt)}</span>
+                      <span className={`chip ${meta.tone}`}><span className="dot" />{meta.label}</span>
+                    </div>
+                    <div className="agent-title">{a.title}</div>
+                    {a.body && <div className="agent-body">{a.body}</div>}
+                  </div>
+                </div>
+              );
+            })}
+            {feed.length === 0 && (
+              <div style={{ padding: 14, fontSize: 13, color: 'var(--ink-3)' }}>No activity yet. Enable autopilot to start drafting.</div>
+            )}
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-head">
+            <h3>
+              <Icon name="chat" size={14} />
               Agent instructions
               <span className="chip accent"><span className="dot" />Steers every draft</span>
             </h3>
@@ -538,50 +681,246 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
           </div>
         </div>
 
+        {/* Brand profile — feeds every AI surface. Moved to bottom of left
+            column since it's set-once context that shapes the AI prompts
+            but isn't a daily lever the user adjusts. */}
         <div className="card">
           <div className="card-head">
             <h3>
-              <Icon name="chat" size={14} />
-              Agent activity
-              <span className="chip live"><span className="dot" />Live</span>
+              <Icon name="sparkle" size={14} />
+              Brand profile
+              <span className="chip accent"><span className="dot" />Feeds every AI prompt</span>
             </h3>
-            <span className="meta">Last 24 hours</span>
+            <button className="btn sm" onClick={() => brandEditing ? saveBrand() : setBrandEditing(true)} disabled={savingBrand || unauth}>
+              <Icon name={brandEditing ? 'check' : 'edit'} size={11} /> {brandEditing ? (savingBrand ? 'Saving…' : 'Save') : 'Edit'}
+            </button>
           </div>
-          <div className="card-body" style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {feed.map((a) => {
-              const meta = KIND_LABEL[a.kind] ?? { label: a.kind, tone: '' as const };
-              return (
-                <div className="agent-card" key={a.id}>
-                  <div className="agent-mark">A</div>
-                  <div>
-                    <div className="agent-meta">
-                      <span>Agent</span>
-                      <span style={{ color: 'var(--ink-4)' }}>·</span>
-                      <span>{relTime(a.createdAt)}</span>
-                      <span className={`chip ${meta.tone}`}><span className="dot" />{meta.label}</span>
-                    </div>
-                    <div className="agent-title">{a.title}</div>
-                    {a.body && <div className="agent-body">{a.body}</div>}
-                  </div>
+          <div className="card-body">
+            {brandEditing ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div>
+                  <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Company / brand name</div>
+                  <input
+                    value={companyName}
+                    onChange={(e) => setCompanyName(e.target.value)}
+                    placeholder="Sociafy"
+                    style={{ width: '100%', padding: '8px 10px', fontSize: 13, border: '1px solid var(--line-2)', borderRadius: 8, background: 'var(--bg)', color: 'var(--ink)', fontFamily: 'inherit', outline: 'none' }}
+                  />
                 </div>
-              );
-            })}
-            {feed.length === 0 && (
-              <div style={{ padding: 14, fontSize: 13, color: 'var(--ink-3)' }}>No activity yet. Enable autopilot to start drafting.</div>
+                <div>
+                  <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>What you do (bio)</div>
+                  <textarea
+                    value={brandBio}
+                    onChange={(e) => setBrandBio(e.target.value)}
+                    placeholder="AI-powered social media management for solo founders. We turn one prompt into on-brand posts, images, and Shorts across every platform."
+                    style={{ width: '100%', minHeight: 90, padding: 10, fontSize: 13, border: '1px solid var(--line-2)', borderRadius: 8, background: 'var(--bg)', color: 'var(--ink)', fontFamily: 'inherit', resize: 'vertical', outline: 'none', lineHeight: 1.5 }}
+                  />
+                </div>
+                <div>
+                  <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Website</div>
+                  <input
+                    value={website}
+                    onChange={(e) => setWebsite(e.target.value)}
+                    placeholder="https://sociafy.app"
+                    style={{ width: '100%', padding: '8px 10px', fontSize: 13, border: '1px solid var(--line-2)', borderRadius: 8, background: 'var(--bg)', color: 'var(--ink)', fontFamily: 'var(--mono)', outline: 'none' }}
+                  />
+                </div>
+                <div style={{ fontSize: 11.5, color: 'var(--ink-3)', lineHeight: 1.5 }}>
+                  These three fields get injected into the system prompt of every image rewrite, video rewrite, and caption variant generation. The richer they are, the more on-brand your output.
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {(companyName || brandBio || website) ? (
+                  <>
+                    {companyName && (
+                      <div style={{ fontSize: 13, fontWeight: 550 }}>{companyName}</div>
+                    )}
+                    {brandBio && (
+                      <div style={{ fontSize: 12.5, lineHeight: 1.55, color: 'var(--ink-2)' }}>
+                        {brandBio}
+                      </div>
+                    )}
+                    {website && (
+                      <div style={{ fontSize: 11.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
+                        <Icon name="link" size={10} /> {website}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div style={{ fontSize: 13, color: 'var(--ink-3)', padding: 12, background: 'var(--bg-sunk)', borderRadius: 8, borderLeft: '2px solid var(--accent)' }}>
+                    Add your brand name, what you do, and your website. Sociafy uses this as context for every image, video, and caption it generates.
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </div>
+
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {/* Autopilot rules — moved from bottom of left column. This is the
+            "permissions + quotas" panel: which platforms autopilot is
+            allowed to post on, how often, and the text/image/video mix. */}
+        <div className="card">
+          <div className="card-head">
+            <h3>
+              <Icon name="lock" size={14} />
+              Autopilot rules
+              <span className="chip accent"><span className="dot" />Permissions</span>
+            </h3>
+            <span className="meta">{savingRules ? 'Saving…' : 'Auto-saves'}</span>
+          </div>
+          <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div>
+              <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
+                Per-platform caps
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                {(['x', 'linkedin', 'instagram', 'facebook', 'tiktok', 'youtube'] as const).map((p) => {
+                  const on = enabledPlatforms.includes(p);
+                  const cap = postsPerPlatform[p] ?? 0;
+                  return (
+                    <div key={p} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', background: on ? 'var(--accent-soft)' : 'var(--bg-sunk)', border: `1px solid ${on ? 'var(--accent)' : 'var(--line-2)'}`, borderRadius: 8 }}>
+                      <span style={{ flex: 1, fontSize: 12, fontWeight: 500 }}>
+                        {p === 'x' ? 'X' : p === 'linkedin' ? 'LinkedIn' : p === 'youtube' ? 'YouTube' : p === 'tiktok' ? 'TikTok' : p === 'instagram' ? 'Instagram' : 'Facebook'}
+                      </span>
+                      <button
+                        className={`chip ${on ? 'accent' : 'ghost'}`}
+                        onClick={() => {
+                          const next = on ? enabledPlatforms.filter((x) => x !== p) : [...enabledPlatforms, p];
+                          setEnabledPlatforms(next);
+                          saveRules({ enabledPlatforms: next });
+                        }}
+                        disabled={unauth}
+                        style={{ fontSize: 10 }}
+                      >
+                        {on ? 'on' : 'off'}
+                      </button>
+                      <input
+                        type="number"
+                        min={0}
+                        max={50}
+                        value={cap}
+                        disabled={!on || unauth}
+                        onChange={(e) => {
+                          const n = Math.max(0, Math.min(50, parseInt(e.target.value || '0', 10)));
+                          setPostsPerPlatform((cur) => ({ ...cur, [p]: n }));
+                        }}
+                        onBlur={() => saveRules({ postsPerWeekByPlatform: postsPerPlatform })}
+                        title="Posts per week"
+                        style={{ width: 48, padding: '3px 6px', textAlign: 'center', border: '1px solid var(--line-2)', borderRadius: 6, background: 'var(--bg)', color: 'var(--ink)', fontFamily: 'var(--mono)', fontSize: 11.5, opacity: on ? 1 : 0.4 }}
+                      />
+                      <span style={{ fontSize: 9.5, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>/wk</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div>
+              <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
+                Content mix per week
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+                {([
+                  { id: 'text' as const,  icon: 'edit' as const,  label: 'Text' },
+                  { id: 'image' as const, icon: 'image' as const, label: 'Image' },
+                  { id: 'video' as const, icon: 'play' as const,  label: 'Video' },
+                ]).map((t) => (
+                  <div key={t.id} style={{ padding: 8, border: '1px solid var(--line-2)', borderRadius: 8, background: 'var(--bg-sunk)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 6 }}>
+                      <Icon name={t.icon} size={10} style={{ color: 'var(--accent)' }} />
+                      <span style={{ fontSize: 11, fontWeight: 550 }}>{t.label}</span>
+                    </div>
+                    <input
+                      type="number"
+                      min={0}
+                      max={50}
+                      value={contentTypeMix[t.id]}
+                      disabled={unauth}
+                      onChange={(e) => {
+                        const n = Math.max(0, Math.min(50, parseInt(e.target.value || '0', 10)));
+                        setContentTypeMix((cur) => ({ ...cur, [t.id]: n }));
+                      }}
+                      onBlur={() => saveRules({ postsPerWeekByContentType: contentTypeMix })}
+                      style={{ width: '100%', padding: '5px 8px', textAlign: 'center', border: '1px solid var(--line-2)', borderRadius: 5, background: 'var(--bg)', color: 'var(--ink)', fontFamily: 'var(--mono)', fontSize: 13 }}
+                    />
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontSize: 10.5, color: 'var(--ink-4)', marginTop: 6, fontFamily: 'var(--mono)' }}>
+                Total: {contentTypeMix.text + contentTypeMix.image + contentTypeMix.video} / week
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Credit Budget — derived from the rules above + the live balance.
+            Shows weekly burn estimate + runway weeks so the user can see
+            "this plan fits 4 weeks of my balance" at a glance. */}
+        <div className="card">
+          <div className="card-head">
+            <h3>
+              <Icon name="bolt" size={14} />
+              Credit budget
+            </h3>
+            <Link href="/usage" className="meta" style={{ textDecoration: 'underline' }}>Usage →</Link>
+          </div>
+          <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+              <div>
+                <div className="mono" style={{ fontSize: 22, fontWeight: 600, letterSpacing: '-0.02em', lineHeight: 1 }}>
+                  {burnEstimate.weekly.toLocaleString()}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 4 }}>credits / week planned</div>
+              </div>
+              <div className="mono" style={{ fontSize: 11, color: 'var(--ink-3)', textAlign: 'right', lineHeight: 1.5 }}>
+                <div>Balance {balance.toLocaleString()}</div>
+                {runway > 0 ? <div>~{runway} weeks runway</div> : burnEstimate.weekly === 0 ? <div>no spend</div> : <div className="danger" style={{ color: '#b03333' }}>top up</div>}
+              </div>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {([
+                { id: 'text' as const,  label: 'Text',  v: burnEstimate.byKind.text  },
+                { id: 'image' as const, label: 'Image', v: burnEstimate.byKind.image },
+                { id: 'video' as const, label: 'Video', v: burnEstimate.byKind.video },
+              ]).map((r) => {
+                const pct = burnEstimate.weekly > 0 ? Math.min(100, Math.round((r.v / burnEstimate.weekly) * 100)) : 0;
+                return (
+                  <div key={r.id} style={{ display: 'grid', gridTemplateColumns: '40px 1fr 50px', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 10, color: 'var(--ink-3)', fontFamily: 'var(--mono)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{r.label}</span>
+                    <span style={{ height: 5, background: 'var(--line)', borderRadius: 999, overflow: 'hidden' }}>
+                      <span style={{
+                        display: 'block', height: '100%',
+                        width: `${pct}%`,
+                        background: r.id === 'text' ? 'oklch(0.76 0.13 200)' : r.id === 'image' ? 'oklch(0.72 0.18 55)' : 'oklch(0.55 0.21 30)',
+                        transition: 'width 0.25s ease',
+                      }} />
+                    </span>
+                    <span className="mono" style={{ fontSize: 10.5, color: 'var(--ink)', textAlign: 'right' }}>{r.v}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <Link href="/billing" className="btn ghost" style={{ justifyContent: 'center', fontSize: 11.5 }}>
+              <Icon name="bolt" size={11} /> Top up or upgrade plan
+            </Link>
+          </div>
+        </div>
+
         <div className="card">
           <div className="card-head">
             <h3><Icon name="settings" size={14} /> Guardrails</h3>
           </div>
           <div className="card-body flush">
+            {/* Cadence + publishing behavior + safety. The "Auto-publish"
+                row now includes 101 ("Drafts only") as the default option
+                — picking it routes every draft to your inbox for review. */}
             {[
               { label: 'Post cadence', value: `${cadence} / week`, key: 'cadence' as const, options: [2, 3, 4, 5, 7] },
-              { label: 'Auto-publish if score', value: `≥ ${threshold} / 100`, key: 'threshold' as const, options: [80, 85, 90, 95] },
+              { label: 'Auto-publish', value: draftsOnly ? 'Drafts only' : `≥ ${threshold} / 100`, key: 'threshold' as const, options: [101, 80, 85, 90, 95] },
               { label: 'Brand-safe filter', value: strict ? 'Strict' : 'Standard', key: 'strict' as const, options: [true, false] },
             ].map((row) => (
               <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid var(--line)' }}>
@@ -599,7 +938,9 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
                 >
                   {row.options.map((o) => (
                     <option key={String(o)} value={String(o)}>
-                      {row.key === 'cadence' ? `${o} / week` : row.key === 'threshold' ? `≥ ${o}` : (o ? 'Strict' : 'Standard')}
+                      {row.key === 'cadence' ? `${o} / week` :
+                        row.key === 'threshold' ? (o === 101 ? 'Drafts only' : `≥ ${o}`) :
+                        (o ? 'Strict' : 'Standard')}
                     </option>
                   ))}
                 </select>

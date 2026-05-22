@@ -80,6 +80,22 @@ const CalendarPage: React.FC = () => {
   const [quickPrompt, setQuickPrompt] = useState('');
   const [quickBusy, setQuickBusy] = useState(false);
   const [quickMsg, setQuickMsg] = useState<string | null>(null);
+  /** Platforms checked in the modal — defaults to all connected accounts
+   *  the first time the modal opens for a given session. */
+  const [quickPlatforms, setQuickPlatforms] = useState<Platform[]>([]);
+  /** After Generate is clicked we hold 2-3 variants in state and let the
+   *  user pick one before scheduling. null = haven't generated yet. */
+  const [quickVariants, setQuickVariants] = useState<null | Array<{ label: string; text: string; score?: number; rationale?: string }>>(null);
+  const [quickPickedVariant, setQuickPickedVariant] = useState<string | null>(null);
+  const [quickPerPlatform, setQuickPerPlatform] = useState<Partial<Record<Platform, string>>>({});
+
+  // When the modal opens, default platforms to whatever's connected.
+  React.useEffect(() => {
+    if (quickSlot && quickPlatforms.length === 0) {
+      const connected = (accountsApi.data ?? []).map((a) => a.platform);
+      if (connected.length > 0) setQuickPlatforms(connected.slice(0, 4));
+    }
+  }, [quickSlot, accountsApi.data, quickPlatforms.length]);
 
   const slotIsoFor = (slot: QuickSlot): string => {
     const d = new Date(weekStart);
@@ -88,51 +104,86 @@ const CalendarPage: React.FC = () => {
     return d.toISOString();
   };
 
-  const quickScheduleAt = async (slot: QuickSlot) => {
+  /** True when the slot's start time is in the past — the API would reject
+   *  with `scheduledAt_in_past`, and the user can't fix that from a modal.
+   *  We block the click upstream. */
+  const isSlotPast = (slot: QuickSlot): boolean => {
+    const d = new Date(weekStart);
+    d.setDate(d.getDate() + slot.day);
+    d.setHours(7 + slot.hour, 0, 0, 0);
+    return d.getTime() <= Date.now();
+  };
+
+  /** Step 1: turn the prompt into variants. The user then picks which one
+   *  to ship — same mental model as the main compose page. */
+  const quickGenerateVariants = async () => {
     if (!quickPrompt.trim()) {
       setQuickMsg('Add a prompt first.');
       return;
     }
+    if (quickPlatforms.length === 0) {
+      setQuickMsg('Pick at least one platform.');
+      return;
+    }
     setQuickBusy(true);
-    setQuickMsg('Drafting…');
+    setQuickMsg('Generating variants…');
     try {
-      const platforms = (accountsApi.data ?? []).map((a) => a.platform).slice(0, 3);
-      if (platforms.length === 0) {
-        setQuickMsg('Connect at least one platform first.');
-        return;
-      }
-      // 1. Generate caption variants.
       const composed = await apiPost<{
         variants: { label: string; text: string; score?: number; rationale?: string }[];
         perPlatform: Partial<Record<Platform, string>>;
       }>('/api/compose/variants', {
         prompt: quickPrompt,
-        platforms,
+        platforms: quickPlatforms,
         preset: quickMode === 'video' ? 'reel' : 'announcement',
       });
-      const best = composed.variants?.[0];
-      if (!best) {
+      if (!composed.variants?.length) {
         setQuickMsg('No draft came back. Try a different prompt.');
         return;
       }
-      // 2. Save as a draft.
+      setQuickVariants(composed.variants);
+      setQuickPerPlatform(composed.perPlatform ?? {});
+      setQuickPickedVariant(composed.variants[0].label);
+      setQuickMsg(null);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setQuickMsg(`Failed: ${msg.slice(0, 120)}`);
+    } finally {
+      setQuickBusy(false);
+    }
+  };
+
+  /** Step 2: persist the picked variant + schedule it at the chosen slot. */
+  const quickScheduleAt = async (slot: QuickSlot) => {
+    if (!quickVariants || !quickPickedVariant) {
+      setQuickMsg('Generate and pick a variant first.');
+      return;
+    }
+    if (isSlotPast(slot)) {
+      setQuickMsg('That slot has already passed. Pick a future time.');
+      return;
+    }
+    const picked = quickVariants.find((v) => v.label === quickPickedVariant) ?? quickVariants[0];
+    setQuickBusy(true);
+    setQuickMsg('Scheduling…');
+    try {
       const draft = await apiPost<{ id: string }>('/api/drafts', {
         prompt: quickPrompt,
-        body: best.text,
-        variants: composed.variants.map((v) => ({ label: v.label, text: v.text, score: v.score, rationale: v.rationale })),
-        selectedVariantLabel: best.label,
-        targetPlatforms: platforms,
-        perPlatformText: composed.perPlatform ?? {},
+        body: picked.text,
+        variants: quickVariants.map((v) => ({ label: v.label, text: v.text, score: v.score, rationale: v.rationale })),
+        selectedVariantLabel: picked.label,
+        targetPlatforms: quickPlatforms,
+        perPlatformText: quickPerPlatform,
         preset: quickMode === 'video' ? 'reel' : 'announcement',
       });
-      // 3. Schedule at the picked slot.
       const whenIso = slotIsoFor(slot);
-      await apiPost('/api/schedule', { draftId: draft.id, scheduledAt: whenIso, platforms });
+      await apiPost('/api/schedule', { draftId: draft.id, scheduledAt: whenIso, platforms: quickPlatforms });
       setQuickMsg('Scheduled.');
       await mutate();
       setTimeout(() => {
         setQuickSlot(null);
         setQuickPrompt('');
+        setQuickVariants(null);
+        setQuickPickedVariant(null);
         setQuickMsg(null);
       }, 700);
     } catch (e) {
@@ -256,15 +307,23 @@ const CalendarPage: React.FC = () => {
           </div>
           {days.map((_, dayIdx) => (
             <div key={dayIdx} className="cal-day-col">
-              {HOURS.map((_, hi) => (
-                <div
-                  key={hi}
-                  className="cal-slot"
-                  onClick={() => { if (!unauth) { setQuickSlot({ day: dayIdx, hour: hi }); setQuickMsg(null); } }}
-                  style={{ cursor: unauth ? 'default' : 'pointer' }}
-                  title={unauth ? '' : 'Click to schedule a post'}
-                />
-              ))}
+              {HOURS.map((_, hi) => {
+                const past = isSlotPast({ day: dayIdx, hour: hi });
+                const clickable = !unauth && !past;
+                return (
+                  <div
+                    key={hi}
+                    className="cal-slot"
+                    onClick={() => { if (clickable) { setQuickSlot({ day: dayIdx, hour: hi }); setQuickMsg(null); } }}
+                    style={{
+                      cursor: clickable ? 'pointer' : 'default',
+                      background: past ? 'repeating-linear-gradient(135deg, transparent 0 6px, var(--bg-sunk) 6px 7px)' : undefined,
+                      opacity: past ? 0.55 : 1,
+                    }}
+                    title={past ? 'Past time' : unauth ? '' : 'Click to schedule a post'}
+                  />
+                );
+              })}
               {all.filter((e) => e.day === dayIdx).map((e) => {
                 const real = data?.find((s) => s.id === e.id) ?? null;
                 return (
@@ -341,12 +400,81 @@ const CalendarPage: React.FC = () => {
               placeholder="What's this post about? One sentence is enough."
               autoFocus
               style={{
-                width: '100%', minHeight: 88, padding: 12, fontSize: 13,
+                width: '100%', minHeight: 72, padding: 12, fontSize: 13,
                 border: '1px solid var(--line-2)', borderRadius: 10, background: 'var(--bg)',
                 color: 'var(--ink)', fontFamily: 'inherit', resize: 'vertical', outline: 'none', lineHeight: 1.5,
-                marginBottom: 12,
+                marginBottom: 10,
               }}
             />
+
+            {/* Platform pills — multi-select. We default to all connected,
+                but the user can dial it down to a subset for this one slot. */}
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
+                Platforms
+              </div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {(accountsApi.data ?? []).map((acct) => {
+                  const p = acct.platform;
+                  const on = quickPlatforms.includes(p);
+                  return (
+                    <span
+                      key={p}
+                      onClick={() => setQuickPlatforms((cur) => on ? cur.filter((x) => x !== p) : [...cur, p])}
+                      className={`prompt-chip ${on ? 'active' : ''}`}
+                      style={{ textTransform: 'capitalize' }}
+                    >
+                      {p}
+                    </span>
+                  );
+                })}
+                {(accountsApi.data ?? []).length === 0 && (
+                  <span style={{ fontSize: 11, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>
+                    No accounts connected yet.
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Variants — only shown after Generate. User picks one. */}
+            {quickVariants && quickVariants.length > 0 && (
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  Pick a variant
+                  <button
+                    className="chip ghost"
+                    onClick={quickGenerateVariants}
+                    disabled={quickBusy}
+                    style={{ marginLeft: 'auto', fontSize: 10 }}
+                  >
+                    <Icon name="refresh" size={10} /> Regenerate
+                  </button>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
+                  {quickVariants.map((v) => {
+                    const picked = quickPickedVariant === v.label;
+                    return (
+                      <div
+                        key={v.label}
+                        onClick={() => setQuickPickedVariant(v.label)}
+                        style={{
+                          padding: 10, fontSize: 12, lineHeight: 1.4,
+                          border: picked ? '2px solid var(--accent)' : '1px solid var(--line-2)',
+                          borderRadius: 8, background: picked ? 'var(--accent-soft)' : 'var(--bg)',
+                          cursor: 'pointer', position: 'relative',
+                          display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+                        }}
+                      >
+                        <div style={{ fontSize: 9.5, fontFamily: 'var(--mono)', color: picked ? 'var(--accent-ink)' : 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
+                          {v.label}{typeof v.score === 'number' ? ` · ${Math.round(v.score)}` : ''}
+                        </div>
+                        {v.text}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {quickMsg && (
               <div style={{ padding: 10, fontSize: 12.5, background: 'var(--bg-sunk)', border: '1px solid var(--line)', borderRadius: 8, marginBottom: 12 }}>
@@ -354,27 +482,43 @@ const CalendarPage: React.FC = () => {
               </div>
             )}
 
-            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-              <div style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>
-                Drafts in your voice, schedules at this slot.
-              </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <a
+                href={`/dashboard?tab=compose&prompt=${encodeURIComponent(quickPrompt)}&slot=${encodeURIComponent(slotIsoFor(quickSlot))}&platforms=${encodeURIComponent(quickPlatforms.join(','))}`}
+                className="chip ghost"
+                style={{ fontSize: 11 }}
+              >
+                <Icon name="edit" size={10} /> Edit in compose
+              </a>
               <div style={{ flex: 1 }} />
               <button
                 className="btn"
-                onClick={() => { if (!quickBusy) { setQuickSlot(null); setQuickMsg(null); } }}
+                onClick={() => { if (!quickBusy) { setQuickSlot(null); setQuickMsg(null); setQuickVariants(null); setQuickPickedVariant(null); } }}
                 disabled={quickBusy}
               >
                 Cancel
               </button>
-              <button
-                className="btn primary"
-                onClick={() => quickScheduleAt(quickSlot)}
-                disabled={quickBusy || !quickPrompt.trim()}
-              >
-                {quickBusy
-                  ? <><Icon name="refresh" size={12} /> Drafting</>
-                  : <><Icon name="sparkle" size={12} /> Generate &amp; schedule</>}
-              </button>
+              {!quickVariants ? (
+                <button
+                  className="btn primary"
+                  onClick={quickGenerateVariants}
+                  disabled={quickBusy || !quickPrompt.trim() || quickPlatforms.length === 0}
+                >
+                  {quickBusy
+                    ? <><Icon name="refresh" size={12} /> Generating</>
+                    : <><Icon name="sparkle" size={12} /> Generate variants</>}
+                </button>
+              ) : (
+                <button
+                  className="btn primary"
+                  onClick={() => quickScheduleAt(quickSlot)}
+                  disabled={quickBusy || !quickPickedVariant}
+                >
+                  {quickBusy
+                    ? <><Icon name="refresh" size={12} /> Scheduling</>
+                    : <><Icon name="calendar" size={12} /> Schedule this</>}
+                </button>
+              )}
             </div>
           </div>
         </div>

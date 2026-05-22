@@ -80,16 +80,16 @@ const Hero = () => (
             the loop. The grind doesn&apos;t.
           </p>
           <div className="hero-cta">
-            <Link className="btn btn-lg primary" href="/dashboard">
-              <SparkleIcon /> Connect accounts <span className="kbd">⌘ ↵</span>
+            <Link className="btn btn-lg primary" href="/sign-up">
+              <SparkleIcon /> Get started <span className="kbd">⌘ ↵</span>
             </Link>
             <a className="btn btn-lg" href="#workflow">
               <PlayIcon /> Watch 90s demo
             </a>
           </div>
           <div className="hero-meta">
-            <span className="dotted">14-day free trial</span>
-            <span className="dotted">No credit card</span>
+            <span className="dotted">From $30 / month</span>
+            <span className="dotted">Cancel anytime</span>
             <span className="dotted">SOC&nbsp;2 Type II</span>
           </div>
         </div>
@@ -418,71 +418,124 @@ const VoiceSection = () => (
   </section>
 );
 
-const Pricing = () => (
+type Tier = 'starter' | 'pro' | 'business';
+
+const startCheckoutFromLanding = async (tier: Tier, setBusy: (t: Tier | null) => void) => {
+  setBusy(tier);
+  try {
+    const r = await fetch('/api/billing/checkout', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ tier }),
+    });
+    if (r.status === 401) {
+      // Not signed in — bounce through sign-up then back to billing for upgrade.
+      window.location.href = `/sign-up?next=${encodeURIComponent(`/billing?tier=${tier}`)}`;
+      return;
+    }
+    const data = await r.json().catch(() => ({} as { url?: string }));
+    if (data?.url) {
+      window.location.href = data.url;
+    } else {
+      // Billing isn't configured yet — send them to /billing so they see the
+      // friendly "Stripe not configured" banner instead of a raw error.
+      window.location.href = '/billing';
+    }
+  } finally {
+    setBusy(null);
+  }
+};
+
+const Pricing = () => {
+  const [busy, setBusy] = React.useState<Tier | null>(null);
+  return (
   <section className="lp-section" id="pricing">
     <div className="lp">
       <div className="lp-section-head">
         <div>
           <div className="lp-section-eyebrow">Pricing</div>
-          <h2>Pay for what posts. <em>Not for seats.</em></h2>
+          <h2>Every action is a <em>credit</em>. <em>Bigger plans, better rates.</em></h2>
         </div>
         <p className="blurb">
-          Start free. Upgrade when the agent saves you more time than it costs —
-          we&apos;ll tell you the day it does.
+          Text post: 1 credit. AI image: 4 credits. 720p video reel: 180 credits.
+          Top up anytime at $15 per 1,000 credits. No free trial — start when you&apos;re ready.
         </p>
       </div>
 
       <div className="pricing">
         <div className="price-card">
-          <div className="price-name">Solo</div>
-          <div className="price-amt">$0<small>/ forever</small></div>
-          <div className="price-tag">For testing the waters and your first 30 posts.</div>
+          <div className="price-name">Starter</div>
+          <div className="price-amt">$30<small>/ mo</small></div>
+          <div className="price-tag">2,000 credits / month · $0.015 per credit</div>
           <div className="price-divider" />
           <ul className="price-list">
-            <li><span className="check">✓</span> 2 connected accounts</li>
-            <li><span className="check">✓</span> 30 AI drafts / month</li>
-            <li><span className="check">✓</span> Manual approve only</li>
-            <li><span className="check">✓</span> 7-day briefing history</li>
-            <li><span className="check">✓</span> Community support</li>
+            <li><span className="check">✓</span> All 6 platforms</li>
+            <li><span className="check">✓</span> Text, image &amp; 720p video gen</li>
+            <li><span className="check">✓</span> ~11 reels OR 500 images / mo</li>
+            <li><span className="check">✓</span> Manual posting + scheduling</li>
+            <li><span className="check">✓</span> 1-month credit rollover</li>
+            <li><span className="check" style={{ opacity: 0.4 }}>—</span> No autopilot</li>
           </ul>
-          <div className="price-cta"><Link className="btn" href="/dashboard">Start free</Link></div>
+          <div className="price-cta">
+            <button className="btn" onClick={() => startCheckoutFromLanding('starter', setBusy)} disabled={busy !== null}>
+              {busy === 'starter' ? 'Redirecting…' : 'Get Starter'}
+            </button>
+          </div>
         </div>
 
         <div className="price-card featured">
-          <div className="price-name">Founder</div>
-          <div className="price-amt">$29<small>/ mo</small></div>
-          <div className="price-tag">Auto-pilot, all platforms, voice training. The default.</div>
+          <div className="price-name">Pro</div>
+          <div className="price-amt">$80<small>/ mo</small></div>
+          <div className="price-tag">6,000 credits / month · $0.0133 per credit · 11% off Starter</div>
           <div className="price-divider" />
           <ul className="price-list">
-            <li><span className="check">✓</span> Unlimited accounts &amp; platforms</li>
-            <li><span className="check">✓</span> Unlimited AI drafts</li>
-            <li><span className="check">✓</span> Auto-pilot with confidence threshold</li>
-            <li><span className="check">✓</span> Voice training on 90 days of writing</li>
-            <li><span className="check">✓</span> Trend &amp; competitor monitoring</li>
-            <li><span className="check">✓</span> 12-month analytics &amp; export</li>
+            <li><span className="check">✓</span> Everything in Starter</li>
+            <li><span className="check">✓</span> <strong>Autopilot enabled</strong> — trend → draft → schedule</li>
+            <li><span className="check">✓</span> Web research on captions</li>
+            <li><span className="check">✓</span> ~33 reels OR daily image + research</li>
+            <li><span className="check">✓</span> Per-platform &amp; per-content quotas</li>
+            <li><span className="check">✓</span> Priority email support</li>
           </ul>
-          <div className="price-cta"><Link className="btn primary" href="/dashboard">Start 14-day trial</Link></div>
+          <div className="price-cta">
+            <button className="btn primary" onClick={() => startCheckoutFromLanding('pro', setBusy)} disabled={busy !== null}>
+              {busy === 'pro' ? 'Redirecting…' : 'Get Pro'}
+            </button>
+          </div>
         </div>
 
         <div className="price-card">
-          <div className="price-name">Studio</div>
-          <div className="price-amt">$89<small>/ mo</small></div>
-          <div className="price-tag">For 2-person teams and founders with a ghostwriter.</div>
+          <div className="price-name">Business</div>
+          <div className="price-amt">$299<small>/ mo</small></div>
+          <div className="price-tag">25,000 credits / month · $0.012 per credit · 20% off Starter</div>
           <div className="price-divider" />
           <ul className="price-list">
-            <li><span className="check">✓</span> Everything in Founder</li>
-            <li><span className="check">✓</span> 3 voice profiles</li>
-            <li><span className="check">✓</span> Approval routing &amp; roles</li>
-            <li><span className="check">✓</span> Brand kit &amp; asset library</li>
-            <li><span className="check">✓</span> SOC&nbsp;2 + SSO</li>
-            <li><span className="check">✓</span> Priority human support</li>
+            <li><span className="check">✓</span> Everything in Pro</li>
+            <li><span className="check">✓</span> <strong>30 daily 720p reels + 5 × 1080p hero clips / mo</strong></li>
+            <li><span className="check">✓</span> Autopilot with media generation</li>
+            <li><span className="check">✓</span> 2-month credit rollover</li>
+            <li><span className="check">✓</span> Priority support + onboarding call</li>
+            <li><span className="check">✓</span> Best per-credit value of any tier</li>
           </ul>
-          <div className="price-cta"><Link className="btn" href="/dashboard">Talk to us</Link></div>
+          <div className="price-cta">
+            <button className="btn" onClick={() => startCheckoutFromLanding('business', setBusy)} disabled={busy !== null}>
+              {busy === 'business' ? 'Redirecting…' : 'Get Business'}
+            </button>
+          </div>
         </div>
+      </div>
+
+      <div style={{ textAlign: 'center', marginTop: 16, fontSize: 11.5, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>
+        Every plan covers all six platforms — X · LinkedIn · Instagram · Facebook · TikTok · YouTube
+      </div>
+
+      <div style={{ textAlign: 'center', marginTop: 32, fontSize: 12.5, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>
+        Need more? Top up at $15 / 1,000 credits · Annual plans save 2 months · Custom Enterprise tier on request
       </div>
     </div>
   </section>
-);
+  );
+};
 
 const FAQ_ITEMS = [
   ['Does the agent post without my approval?', 'Only if you tell it to. Auto-publish is off by default. When you turn it on, you set a confidence threshold (e.g. ≥ 90/100) and a quiet-hours window — anything below the bar lands in your inbox.'],
@@ -523,7 +576,7 @@ const FinalCTA = () => (
           <h2>Stop posting on willpower.<br /><em>Start shipping on auto-pilot.</em></h2>
           <p>Connect two accounts in under three minutes. The agent will have your first morning briefing ready by tomorrow at 6 AM.</p>
           <div className="final-cta-actions">
-            <Link className="btn primary" href="/dashboard"><SparkleIcon /> Start free trial</Link>
+            <Link className="btn primary" href="/sign-up"><SparkleIcon /> Get started — from $30/mo</Link>
             <a className="btn" href="#workflow">Watch the 90s tour</a>
             <a className="btn" href="#"><LockIcon /> Read security note</a>
           </div>

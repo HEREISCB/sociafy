@@ -3,9 +3,10 @@ import crypto from 'crypto';
 import { auth, currentUser } from '@clerk/nextjs/server';
 import { isStubMode } from './env';
 import { db } from './db';
-import { profiles } from './db/schema';
+import { profiles, TIER_CREDITS, type Tier } from './db/schema';
 import { eq } from 'drizzle-orm';
 import { getOrigin } from './url';
+import { ensureSignupBonus } from './credits/ledger';
 
 export type ApiUser = { id: string; email?: string | null };
 
@@ -32,27 +33,44 @@ export function jsonOk<T>(data: T, init?: ResponseInit) {
 // Ensure a profile row exists for the current Clerk user. Idempotent. Best-effort metadata sync.
 async function ensureProfile(userId: string) {
   if (isStubMode.database()) return;
-  const existing = await db().select({ id: profiles.id }).from(profiles).where(eq(profiles.id, userId)).limit(1);
-  if (existing.length > 0) return;
-  let meta: { displayName?: string; email?: string; avatarUrl?: string } = {};
-  try {
-    const u = await currentUser();
-    if (u) {
-      meta = {
-        displayName: [u.firstName, u.lastName].filter(Boolean).join(' ') || u.username || null as unknown as string,
-        email: u.emailAddresses?.[0]?.emailAddress ?? null as unknown as string,
-        avatarUrl: u.imageUrl ?? null as unknown as string,
-      };
+  const [existing] = await db()
+    .select({ id: profiles.id, tier: profiles.tier })
+    .from(profiles)
+    .where(eq(profiles.id, userId))
+    .limit(1);
+
+  if (!existing) {
+    let meta: { displayName?: string; email?: string; avatarUrl?: string } = {};
+    try {
+      const u = await currentUser();
+      if (u) {
+        meta = {
+          displayName: [u.firstName, u.lastName].filter(Boolean).join(' ') || u.username || null as unknown as string,
+          email: u.emailAddresses?.[0]?.emailAddress ?? null as unknown as string,
+          avatarUrl: u.imageUrl ?? null as unknown as string,
+        };
+      }
+    } catch {
+      // currentUser() can fail outside of authenticated request contexts — that's OK
     }
-  } catch {
-    // currentUser() can fail outside of authenticated request contexts — that's OK
+    await db().insert(profiles).values({
+      id: userId,
+      displayName: meta.displayName ?? null,
+      email: meta.email ?? null,
+      avatarUrl: meta.avatarUrl ?? null,
+    }).onConflictDoNothing();
   }
-  await db().insert(profiles).values({
-    id: userId,
-    displayName: meta.displayName ?? null,
-    email: meta.email ?? null,
-    avatarUrl: meta.avatarUrl ?? null,
-  }).onConflictDoNothing();
+
+  // Every profile gets one signup grant — idempotent, so re-runs are no-ops.
+  // The grant uses the profile's *current* tier allocation so admins can
+  // upgrade a user before they've ever hit a route and have it take effect.
+  const tier = (existing?.tier ?? 'starter') as Tier;
+  try {
+    await ensureSignupBonus(userId, TIER_CREDITS[tier]);
+  } catch (e) {
+    // Don't fail the request if the ledger insert errors out — log and move on.
+    console.warn('[ensureProfile] ensureSignupBonus failed:', e instanceof Error ? e.message : e);
+  }
 }
 
 const IS_PROD = process.env.NODE_ENV === 'production';

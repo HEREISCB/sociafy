@@ -96,6 +96,18 @@ export const agentSettingsUpdateSchema = z.object({
   niches: z.array(z.string().min(1).max(40)).max(40).optional(),
   voiceTemplate: z.enum(VOICE_TEMPLATES).optional(),
   trendSources: z.array(z.string().max(200)).max(20).optional(),
+  // Brand profile — flows into every AI surface (image, video, text gen).
+  companyName: z.string().max(120).optional(),
+  brandBio: z.string().max(2_000).optional(),
+  website: z.string().url().max(500).optional().or(z.literal('')),
+  // Autopilot permission matrix.
+  enabledPlatforms: z.array(platform).max(6).optional(),
+  postsPerWeekByPlatform: z.record(platform, z.number().int().min(0).max(50)).optional(),
+  postsPerWeekByContentType: z.object({
+    text: z.number().int().min(0).max(50),
+    image: z.number().int().min(0).max(50),
+    video: z.number().int().min(0).max(20),
+  }).optional(),
 });
 
 // Accounts -------------------------------------------------------------

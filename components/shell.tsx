@@ -5,44 +5,62 @@ import Link from 'next/link';
 import { UserButton, useUser } from '@clerk/nextjs';
 import { Icon } from './icons';
 import { useApi } from '../lib/ui/fetcher';
+import { CreditMeter } from './credits';
 
 type Page = 'dashboard' | 'compose' | 'agent' | 'calendar' | 'connections' | 'onboarding';
+// Legacy alias kept so callers compile during the topbar refactor.
 type Mode = 'manual' | 'auto';
 
-interface ModeSwitchProps {
-  value: Mode;
-  onChange: (v: Mode) => void;
+/**
+ * AutopilotStatusPill — persistent at-a-glance state indicator for the
+ * autopilot. Replaces the old "Co-pilot ↔ Agent" mode toggle which created
+ * three names for two concepts (Compose vs Auto-pilot in the sidebar
+ * already distinguishes "you driving" from "AI driving"). Clicking the pill
+ * jumps to the Auto-pilot tab.
+ *
+ * Polls /api/agent/settings every 60s. Loading state is the same as paused
+ * — a slow nav shouldn't flash misleading "ON" then "off."
+ */
+interface AutopilotStatusPillProps {
+  onClick?: () => void;
 }
 
-export const ModeSwitch: React.FC<ModeSwitchProps> = ({ value, onChange }) => {
-  const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ left: 3, width: 0 });
-
-  useEffect(() => {
-    const opts = ref.current?.querySelectorAll<HTMLElement>('.opt') || [];
-    const idx = value === 'manual' ? 0 : 1;
-    const el = opts[idx];
-    if (el) setPos({ left: el.offsetLeft, width: el.offsetWidth });
-  }, [value]);
-
+export const AutopilotStatusPill: React.FC<AutopilotStatusPillProps> = ({ onClick }) => {
+  const { data } = useApi<{ enabled?: boolean; autoPublishThreshold?: number }>('/api/agent/settings', {
+    refreshInterval: 60_000,
+  });
+  const enabled = !!data?.enabled;
+  // Threshold 101 (or absent) means drafts-only; anything ≤ 100 means it
+  // auto-publishes high-scorers.
+  const draftsOnly = !data?.autoPublishThreshold || data.autoPublishThreshold > 100;
   return (
-    <div className="mode-switch" ref={ref}>
-      <div className="pill" style={{ left: pos.left, width: pos.width }} />
-      <span className={`opt ${value === 'manual' ? 'active' : ''}`} onClick={() => onChange('manual')}>
-        <Icon name="edit" size={12} /> Co-pilot
+    <button
+      type="button"
+      className={`autopilot-pill ${enabled ? 'on' : 'off'}`}
+      onClick={onClick}
+      title={
+        enabled
+          ? draftsOnly
+            ? 'Autopilot is on · drafts only (you review)'
+            : `Autopilot is on · auto-publishes ≥ ${data?.autoPublishThreshold}`
+          : 'Autopilot is paused'
+      }
+    >
+      <span className={`status-dot ${enabled ? 'live' : 'idle'}`} />
+      <span className="autopilot-pill-label">
+        <span className="mono kicker">Autopilot</span>
+        <span className="state">{enabled ? (draftsOnly ? 'drafts only' : 'auto-publish') : 'paused'}</span>
       </span>
-      <span className={`opt ${value === 'auto' ? 'active' : ''}`} onClick={() => onChange('auto')}>
-        <Icon name="bolt" size={12} /> Agent
-      </span>
-    </div>
+    </button>
   );
 };
 
 interface SidebarProps {
   page: Page;
   onNav: (p: Page) => void;
-  mode: Mode;
-  onMode: (m: Mode) => void;
+  /** Legacy — accepted for backward compat but no longer driving UI. */
+  mode?: Mode;
+  onMode?: (m: Mode) => void;
   showTTS?: boolean;
 }
 
@@ -129,12 +147,17 @@ const UserCard: React.FC = () => {
 
 interface TopbarProps {
   crumbs: string[];
+  /** Optional callback for clicking the Autopilot status pill — typically
+   *  navigates to the Auto-pilot tab. When omitted the pill becomes a
+   *  Link to /dashboard?tab=agent. */
+  onAutopilotClick?: () => void;
+  /** Legacy mode props — accepted for backward compat, ignored. */
   mode?: Mode;
   onMode?: (m: Mode) => void;
   children?: React.ReactNode;
 }
 
-export const Topbar: React.FC<TopbarProps> = ({ crumbs, mode, onMode, children }) => (
+export const Topbar: React.FC<TopbarProps> = ({ crumbs, onAutopilotClick, children }) => (
   <div className="topbar">
     <div className="crumbs">
       {crumbs.map((c, i) => (
@@ -146,12 +169,10 @@ export const Topbar: React.FC<TopbarProps> = ({ crumbs, mode, onMode, children }
     </div>
     <div className="topbar-spacer" />
     <div className="topbar-actions">
-      {mode !== undefined && onMode && <ModeSwitch value={mode} onChange={onMode} />}
-      <div className="search">
-        <Icon name="search" size={13} />
-        <span>Search posts, drafts, trends…</span>
-        <span className="kbd">⌘K</span>
-      </div>
+      <AutopilotStatusPill
+        onClick={onAutopilotClick ?? (() => { window.location.href = '/dashboard?tab=agent'; })}
+      />
+      <CreditMeter />
       <NotificationsBell />
       {children}
     </div>

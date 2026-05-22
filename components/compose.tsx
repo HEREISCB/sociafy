@@ -1,10 +1,15 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { Icon, Pglyph } from './icons';
 import { apiPatch, apiPost, useApi } from '../lib/ui/fetcher';
 import { PLATFORM_TO_SHORT, SHORT_TO_PLATFORM } from '../lib/ui/platforms';
 import type { Platform } from '../lib/db/schema';
+import { useSWRConfig } from 'swr';
+import { InsufficientCreditsBanner } from './credits';
+import { priceForImage, priceForVideo, priceForCompose, ACTION_LABELS } from '../lib/credits/pricing';
+import type { CreditsPayload } from './credits';
 
 type ComposeMode = 'text' | 'image' | 'video';
 type MediaKind = 'image' | 'carousel' | 'video';
@@ -112,6 +117,11 @@ interface MediaItem {
   url?: string;
   mimeType?: string;
   uploading?: boolean;
+  /** CSS-friendly aspect ratio (e.g. "9/16", "1/1", "16/9"). Used by the
+   * phone-preview's media area so a vertical clip doesn't get crop-fit
+   * into a horizontal X/LinkedIn preview. Falls back to platform default
+   * when missing (legacy uploads, stock images). */
+  aspect?: string;
 }
 
 type MediaPlaceholderProps = {
@@ -123,6 +133,9 @@ type MediaPlaceholderProps = {
   onUpload?: () => void;
   /** Optional second action — "Generate with AI" — shown alongside upload. */
   onGenerate?: () => void;
+  /** When set + url present, clicking the filled media calls this — used to
+   *  open the full-screen lightbox / video player from the phone preview. */
+  onExpand?: () => void;
 };
 
 const UploadCTA: React.FC<{
@@ -204,15 +217,20 @@ const FrameSlot: React.FC<{ label: string; url: string | null; onUpload: () => v
   </div>
 );
 
-const MediaPlaceholder: React.FC<MediaPlaceholderProps> = ({ kind, ratio = '16/9', count = 1, url, onUpload, onGenerate }) => {
+const MediaPlaceholder: React.FC<MediaPlaceholderProps> = ({ kind, ratio = '16/9', count = 1, url, onUpload, onGenerate, onExpand }) => {
   if (kind === 'video') {
     if (url) {
       return (
-        <div style={{ aspectRatio: ratio, position: 'relative', background: '#000', overflow: 'hidden' }}>
-          <video src={url} muted loop playsInline style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+        <div
+          style={{ aspectRatio: ratio, position: 'relative', background: '#000', overflow: 'hidden', cursor: onExpand ? 'zoom-in' : 'default' }}
+          onClick={onExpand}
+          role={onExpand ? 'button' : undefined}
+          aria-label={onExpand ? 'Play video full-screen' : undefined}
+        >
+          <video src={url} muted loop playsInline style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
           <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', pointerEvents: 'none' }}>
-            <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'rgba(255,255,255,0.92)', color: 'var(--ink)', display: 'grid', placeItems: 'center' }}>
-              <Icon name="play" size={14} />
+            <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(255,255,255,0.92)', color: 'var(--ink)', display: 'grid', placeItems: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
+              <Icon name="play" size={16} />
             </div>
           </div>
         </div>
@@ -234,9 +252,14 @@ const MediaPlaceholder: React.FC<MediaPlaceholderProps> = ({ kind, ratio = '16/9
   }
   if (url) {
     return (
-      <div style={{ aspectRatio: ratio, position: 'relative', background: 'var(--bg-sunk)', overflow: 'hidden' }}>
+      <div
+        style={{ aspectRatio: ratio, position: 'relative', background: 'var(--bg-sunk)', overflow: 'hidden', cursor: onExpand ? 'zoom-in' : 'default' }}
+        onClick={onExpand}
+        role={onExpand ? 'button' : undefined}
+        aria-label={onExpand ? 'View image full-screen' : undefined}
+      >
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={url} alt="post media" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+        <img src={url} alt="post media" style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
         {count > 1 && <span style={{ position: 'absolute', top: 6, right: 6, fontFamily: 'var(--mono)', fontSize: 9.5, background: 'rgba(0,0,0,0.7)', color: 'white', padding: '1px 5px', borderRadius: 3 }}>1/{count}</span>}
       </div>
     );
@@ -266,7 +289,7 @@ type Author = {
   headline?: string;
 };
 
-type PostProps = { text: string; mediaKind: string; mediaUrl?: string; onUpload?: () => void; onGenerate?: () => void; author: Author };
+type PostProps = { text: string; mediaKind: string; mediaUrl?: string; onUpload?: () => void; onGenerate?: () => void; author: Author; mediaAspect?: string; onExpand?: () => void };
 
 /** Initials for the gradient-avatar fallback. */
 function initialsOf(name: string): string {
@@ -299,7 +322,7 @@ const AvatarCircle: React.FC<{ author: Author; size: number; gradient?: string }
   );
 };
 
-const PostX: React.FC<PostProps> = ({ text, mediaKind, mediaUrl, onUpload, onGenerate, author }) => (
+const PostX: React.FC<PostProps> = ({ text, mediaKind, mediaUrl, onUpload, onGenerate, author, mediaAspect, onExpand }) => (
   <div style={{ padding: '12px 14px', borderTop: '1px solid var(--line)' }}>
     <div style={{ display: 'flex', gap: 10, marginBottom: 8 }}>
       <AvatarCircle author={author} size={36} />
@@ -312,7 +335,7 @@ const PostX: React.FC<PostProps> = ({ text, mediaKind, mediaUrl, onUpload, onGen
         <div style={{ fontSize: 13.5, lineHeight: 1.4, marginTop: 4, whiteSpace: 'pre-wrap', color: 'var(--ink)' }}>{text}</div>
         {mediaKind && (
           <div style={{ marginTop: 8, borderRadius: 12, overflow: 'hidden', border: '1px solid var(--line)' }}>
-            <MediaPlaceholder kind={mediaKind} ratio="16/9" url={mediaUrl} onUpload={onUpload} onGenerate={onGenerate} />
+            <MediaPlaceholder kind={mediaKind} ratio={mediaAspect ?? '16/9'} url={mediaUrl} onUpload={onUpload} onGenerate={onGenerate} onExpand={onExpand} />
           </div>
         )}
       </div>
@@ -323,7 +346,7 @@ const PostX: React.FC<PostProps> = ({ text, mediaKind, mediaUrl, onUpload, onGen
   </div>
 );
 
-const PostLI: React.FC<PostProps> = ({ text, mediaKind, mediaUrl, onUpload, onGenerate, author }) => (
+const PostLI: React.FC<PostProps> = ({ text, mediaKind, mediaUrl, onUpload, onGenerate, author, mediaAspect, onExpand }) => (
   <div style={{ padding: '12px 14px' }}>
     <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
       <AvatarCircle author={author} size={36} gradient="linear-gradient(135deg, var(--li), #003B82)" />
@@ -334,14 +357,14 @@ const PostLI: React.FC<PostProps> = ({ text, mediaKind, mediaUrl, onUpload, onGe
       </div>
     </div>
     <div style={{ fontSize: 12.5, lineHeight: 1.5, whiteSpace: 'pre-wrap', color: 'var(--ink-2)' }}>{text}</div>
-    {mediaKind && <div style={{ marginTop: 10 }}><MediaPlaceholder kind={mediaKind} ratio="16/9" url={mediaUrl} onUpload={onUpload} onGenerate={onGenerate} /></div>}
+    {mediaKind && <div style={{ marginTop: 10 }}><MediaPlaceholder kind={mediaKind} ratio={mediaAspect ?? '16/9'} url={mediaUrl} onUpload={onUpload} onGenerate={onGenerate} onExpand={onExpand} /></div>}
     <div style={{ borderTop: '1px solid var(--line)', marginTop: 12, paddingTop: 8, display: 'flex', justifyContent: 'space-around', fontSize: 10.5, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>
       <span>👍 Like</span><span>💬 Comment</span><span>↻ Repost</span><span>↗ Send</span>
     </div>
   </div>
 );
 
-const PostIG: React.FC<{ text: string; mediaKind: string; mediaCount: number; mediaUrl?: string; onUpload?: () => void; onGenerate?: () => void; author: Author }> = ({ text, mediaKind, mediaCount, mediaUrl, onUpload, onGenerate, author }) => {
+const PostIG: React.FC<{ text: string; mediaKind: string; mediaCount: number; mediaUrl?: string; onUpload?: () => void; onGenerate?: () => void; author: Author; mediaAspect?: string; onExpand?: () => void }> = ({ text, mediaKind, mediaCount, mediaUrl, onUpload, onGenerate, author, mediaAspect, onExpand }) => {
   const handle = (author.handle ?? author.name).toLowerCase().replace(/\s+/g, '');
   return (
     <div>
@@ -350,7 +373,7 @@ const PostIG: React.FC<{ text: string; mediaKind: string; mediaCount: number; me
         <span style={{ fontSize: 12, fontWeight: 600 }}>{handle}</span>
         <span style={{ marginLeft: 'auto', color: 'var(--ink-4)' }}>•••</span>
       </div>
-      <MediaPlaceholder kind={mediaKind || 'image'} ratio="1/1" count={mediaKind === 'carousel' ? mediaCount : 1} url={mediaUrl} onUpload={onUpload} onGenerate={onGenerate} />
+      <MediaPlaceholder kind={mediaKind || 'image'} ratio={mediaAspect ?? '1/1'} count={mediaKind === 'carousel' ? mediaCount : 1} url={mediaUrl} onUpload={onUpload} onGenerate={onGenerate} onExpand={onExpand} />
       <div style={{ padding: '8px 12px', display: 'flex', gap: 14, fontSize: 16 }}>
         <span>♡</span><span>💬</span><span>↗</span>
         <span style={{ marginLeft: 'auto' }}>⊟</span>
@@ -362,7 +385,7 @@ const PostIG: React.FC<{ text: string; mediaKind: string; mediaCount: number; me
   );
 };
 
-const PostFB: React.FC<PostProps> = ({ text, mediaKind, mediaUrl, onUpload, onGenerate, author }) => (
+const PostFB: React.FC<PostProps> = ({ text, mediaKind, mediaUrl, onUpload, onGenerate, author, mediaAspect, onExpand }) => (
   <div style={{ padding: '12px 14px' }}>
     <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
       <AvatarCircle author={author} size={36} gradient="var(--fb)" />
@@ -372,16 +395,21 @@ const PostFB: React.FC<PostProps> = ({ text, mediaKind, mediaUrl, onUpload, onGe
       </div>
     </div>
     <div style={{ fontSize: 12.5, lineHeight: 1.5, whiteSpace: 'pre-wrap', marginBottom: mediaKind ? 10 : 0 }}>{text}</div>
-    {mediaKind && <MediaPlaceholder kind={mediaKind} ratio="4/3" url={mediaUrl} onUpload={onUpload} onGenerate={onGenerate} />}
+    {mediaKind && <MediaPlaceholder kind={mediaKind} ratio={mediaAspect ?? '4/3'} url={mediaUrl} onUpload={onUpload} onGenerate={onGenerate} onExpand={onExpand} />}
   </div>
 );
 
-const PostTT: React.FC<{ text: string; mediaUrl?: string; onUpload?: () => void; onGenerate?: () => void; author: Author }> = ({ text, mediaUrl, onUpload, onGenerate, author }) => {
+const PostTT: React.FC<{ text: string; mediaUrl?: string; onUpload?: () => void; onGenerate?: () => void; author: Author; mediaAspect?: string; onExpand?: () => void }> = ({ text, mediaUrl, onUpload, onGenerate, author, mediaAspect, onExpand }) => {
   const handle = (author.handle ?? author.name).toLowerCase().replace(/\s+/g, '');
   return (
-    <div style={{ position: 'relative', height: '100%', minHeight: 360, background: '#000' }}>
+    <div
+      style={{ position: 'relative', height: '100%', minHeight: 360, aspectRatio: mediaAspect ?? '9/16', background: '#000', cursor: mediaUrl && onExpand ? 'zoom-in' : 'default' }}
+      onClick={mediaUrl && onExpand ? onExpand : undefined}
+      role={mediaUrl && onExpand ? 'button' : undefined}
+      aria-label={mediaUrl && onExpand ? 'Play video full-screen' : undefined}
+    >
       {mediaUrl ? (
-        <video src={mediaUrl} muted loop autoPlay playsInline style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
+        <video src={mediaUrl} muted loop autoPlay playsInline style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain' }} />
       ) : onUpload ? (
         <div style={{ position: 'absolute', inset: 0, background: 'repeating-linear-gradient(135deg, #111 0 8px, #181818 8px 16px)' }}>
           <UploadCTA kind="video" onClick={onUpload} onGenerate={onGenerate} dark />
@@ -399,12 +427,16 @@ const PostTT: React.FC<{ text: string; mediaUrl?: string; onUpload?: () => void;
   );
 };
 
-const PostYT: React.FC<PostProps> = ({ text, mediaKind, mediaUrl, onUpload, onGenerate, author }) => (
+const PostYT: React.FC<PostProps> = ({ text, mediaKind, mediaUrl, onUpload, onGenerate, author, mediaAspect, onExpand }) => (
   <div>
     {mediaKind === 'video' ? (
-      <div style={{ aspectRatio: '9/16', background: '#000', position: 'relative', overflow: 'hidden' }}>
+      <div
+        style={{ aspectRatio: mediaAspect ?? '9/16', background: '#000', position: 'relative', overflow: 'hidden', cursor: mediaUrl && onExpand ? 'zoom-in' : 'default' }}
+        onClick={mediaUrl && onExpand ? onExpand : undefined}
+        role={mediaUrl && onExpand ? 'button' : undefined}
+      >
         {mediaUrl ? (
-          <video src={mediaUrl} muted loop autoPlay playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          <video src={mediaUrl} muted loop autoPlay playsInline style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
         ) : onUpload ? (
           <div style={{ position: 'absolute', inset: 0, background: 'repeating-linear-gradient(135deg, #111 0 8px, #181818 8px 16px)' }}>
             <UploadCTA kind="video" onClick={onUpload} onGenerate={onGenerate} dark />
@@ -422,25 +454,25 @@ const PostYT: React.FC<PostProps> = ({ text, mediaKind, mediaUrl, onUpload, onGe
           <div style={{ fontSize: 12, fontWeight: 600 }}>{author.name} <span style={{ color: 'var(--ink-3)', fontWeight: 400 }}>· Community</span></div>
         </div>
         <div style={{ fontSize: 12.5, lineHeight: 1.5, whiteSpace: 'pre-wrap', marginBottom: mediaKind ? 8 : 0 }}>{text}</div>
-        {mediaKind === 'image' && <MediaPlaceholder kind="image" ratio="16/9" url={mediaUrl} onUpload={onUpload} onGenerate={onGenerate} />}
+        {mediaKind === 'image' && <MediaPlaceholder kind="image" ratio={mediaAspect ?? '16/9'} url={mediaUrl} onUpload={onUpload} onGenerate={onGenerate} onExpand={onExpand} />}
       </div>
     )}
   </div>
 );
 
-const PhonePreview: React.FC<{ platform: string; text: string; mediaKind: string; mediaCount: number; mediaUrl?: string; onUpload?: () => void; onGenerate?: () => void; author: Author }> = ({ platform, text, mediaKind, mediaCount, mediaUrl, onUpload, onGenerate, author }) => (
+const PhonePreview: React.FC<{ platform: string; text: string; mediaKind: string; mediaCount: number; mediaUrl?: string; onUpload?: () => void; onGenerate?: () => void; author: Author; mediaAspect?: string; onExpand?: () => void }> = ({ platform, text, mediaKind, mediaCount, mediaUrl, onUpload, onGenerate, author, mediaAspect, onExpand }) => (
   <div className="phone">
     <div className="phone-screen">
       <div className="phone-statusbar">
         <span>9:41</span>
         <div className="icons"><span>•••</span><span>◊</span><span>▮</span></div>
       </div>
-      {platform === 'x' && <PostX text={text} mediaKind={mediaKind} mediaUrl={mediaUrl} onUpload={onUpload} onGenerate={onGenerate} author={author} />}
-      {platform === 'li' && <PostLI text={text} mediaKind={mediaKind} mediaUrl={mediaUrl} onUpload={onUpload} onGenerate={onGenerate} author={author} />}
-      {platform === 'ig' && <PostIG text={text} mediaKind={mediaKind} mediaCount={mediaCount} mediaUrl={mediaUrl} onUpload={onUpload} onGenerate={onGenerate} author={author} />}
-      {platform === 'fb' && <PostFB text={text} mediaKind={mediaKind} mediaUrl={mediaUrl} onUpload={onUpload} onGenerate={onGenerate} author={author} />}
-      {platform === 'tt' && <PostTT text={text} mediaUrl={mediaUrl} onUpload={onUpload} onGenerate={onGenerate} author={author} />}
-      {platform === 'yt' && <PostYT text={text} mediaKind={mediaKind} mediaUrl={mediaUrl} onUpload={onUpload} onGenerate={onGenerate} author={author} />}
+      {platform === 'x' && <PostX text={text} mediaKind={mediaKind} mediaUrl={mediaUrl} onUpload={onUpload} onGenerate={onGenerate} author={author} mediaAspect={mediaAspect} onExpand={onExpand} />}
+      {platform === 'li' && <PostLI text={text} mediaKind={mediaKind} mediaUrl={mediaUrl} onUpload={onUpload} onGenerate={onGenerate} author={author} mediaAspect={mediaAspect} onExpand={onExpand} />}
+      {platform === 'ig' && <PostIG text={text} mediaKind={mediaKind} mediaCount={mediaCount} mediaUrl={mediaUrl} onUpload={onUpload} onGenerate={onGenerate} author={author} mediaAspect={mediaAspect} onExpand={onExpand} />}
+      {platform === 'fb' && <PostFB text={text} mediaKind={mediaKind} mediaUrl={mediaUrl} onUpload={onUpload} onGenerate={onGenerate} author={author} mediaAspect={mediaAspect} onExpand={onExpand} />}
+      {platform === 'tt' && <PostTT text={text} mediaUrl={mediaUrl} onUpload={onUpload} onGenerate={onGenerate} author={author} mediaAspect={mediaAspect} onExpand={onExpand} />}
+      {platform === 'yt' && <PostYT text={text} mediaKind={mediaKind} mediaUrl={mediaUrl} onUpload={onUpload} onGenerate={onGenerate} author={author} mediaAspect={mediaAspect} onExpand={onExpand} />}
     </div>
   </div>
 );
@@ -477,9 +509,24 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
   const [toast, setToast] = useState<string | null>(null);
   const [customSchedule, setCustomSchedule] = useState('');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  /** Anchor for auto-scroll after a generation lands so the user
+   *  doesn't have to scroll down to find their image / video. */
+  const generatedMediaRef = useRef<HTMLDivElement | null>(null);
+  /** Insufficient-credits banner state — set when any AI route returns 402. */
+  const [creditError, setCreditError] = useState<{ balance: number; needed: number } | null>(null);
+  const { mutate: swrMutate } = useSWRConfig();
+  /** Tell the credit-meter (and any /usage tab) to refetch. Call after any
+   *  AI route resolves so the user sees their balance update instantly. */
+  const refreshCredits = () => { swrMutate('/api/credits'); };
+  /** Live credit balance for cost-preview pills. Polls every 30s in the
+   *  background; refreshed on demand via refreshCredits. */
+  const { data: credits } = useApi<CreditsPayload>('/api/credits', { refreshInterval: 30_000 });
+  const balance = credits?.balance ?? 0;
+  /** Insufficient-credits derived from the cost preview vs. balance. Used
+   *  to disable the generate button + show an inline danger note. */
+  const [previewCost, setPreviewCost] = useState<{ credits: number; label: string; action: string } | null>(null);
 
   // Image generation state
-  const [imagePrompt, setImagePrompt] = useState('');
   const [imageSize, setImageSize] = useState<ImageSize>('1024x1024');
   const [imageQuality, setImageQuality] = useState<ImageQuality>('medium');
   const [imageCount, setImageCount] = useState<number>(2);
@@ -487,7 +534,6 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
   const [autoEnhance, setAutoEnhance] = useState<boolean>(true);
 
   // Video generation state.
-  const [videoPrompt, setVideoPrompt] = useState('');
   const [videoCount, setVideoCount] = useState<number>(1);
   const [videoDuration, setVideoDuration] = useState<number>(8);
   const [videoQuality, setVideoQuality] = useState<VideoQuality>('720p');
@@ -554,6 +600,34 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
     ok: Array<{ platform: string; url?: string | null }>;
     failed: Array<{ platform: string; error?: string }>;
   }>(null);
+
+  // Recompute the credit cost preview whenever inputs change. Renders in the
+  // strip under the prompt + pills onto the generate button so the user
+  // always knows what each click will cost.
+  useEffect(() => {
+    if (mode === 'image') {
+      const { credits: unit, action } = priceForImage(imageSize, imageQuality);
+      const total = unit * imageCount;
+      setPreviewCost({ credits: total, action, label: ACTION_LABELS[action] });
+    } else if (mode === 'video') {
+      const per = priceForVideo({ durationSec: videoDuration, quality: videoQuality, fast: false });
+      const total = per.credits * videoCount;
+      setPreviewCost({ credits: total, action: per.action, label: ACTION_LABELS[per.action] });
+    } else {
+      // Text post: 1 credit, or 6 + maybe extra searches if research is on.
+      const p = priceForCompose({ withTools: withResearch, extraSearches: 0 });
+      setPreviewCost({ credits: p.credits, action: p.action, label: ACTION_LABELS[p.action] });
+    }
+  }, [mode, imageSize, imageQuality, imageCount, videoDuration, videoQuality, videoCount, withResearch]);
+
+  /** Full-screen media preview. null = closed. Handles both images and videos. */
+  const [lightbox, setLightbox] = useState<{ url: string; label?: string; kind?: 'image' | 'video' } | null>(null);
+  useEffect(() => {
+    if (!lightbox) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setLightbox(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [lightbox]);
 
   // Stock image picker state
   const [stockOpen, setStockOpen] = useState(false);
@@ -645,9 +719,9 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
   }, [mode, preset]);
 
   const generateImage = async () => {
-    const p = imagePrompt.trim() || prompt.trim();
+    const p = prompt.trim();
     if (!p) {
-      setToast('Add a prompt for the image first.');
+      setToast('Add a post topic first — it drives the image too.');
       return;
     }
     setImageBusy(true);
@@ -670,7 +744,13 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
         // Try to read a structured error from the response so the user gets a
         // real hint instead of a bare status code. The new generate-image
         // route returns { error, hint, detail } for network failures.
-        const body = await r.json().catch(() => ({} as { error?: string; hint?: string; detail?: string }));
+        const body = await r.json().catch(() => ({} as { error?: string; hint?: string; detail?: string; balance?: number; needed?: number }));
+        if (r.status === 402 && body?.error === 'insufficient_credits') {
+          setCreditError({ balance: Number(body.balance ?? 0), needed: Number(body.needed ?? 0) });
+          setToast(null);
+          refreshCredits();
+          return;
+        }
         if (r.status === 503) setToast('Image generation isn\'t configured yet. Check your AI + storage settings.');
         else if (r.status === 429) setToast('Slow down — too many image generations. Try again shortly.');
         else if (r.status === 401) setToast('Sign in to generate images.');
@@ -684,6 +764,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
         rewrittenPrompt?: string;
         enhanced?: boolean;
       };
+      const imageAspect = imageSize.replace('x', '/');
       const added: MediaItem[] = data.items.map((row) => ({
         kind: 'image',
         label: row.label || p.slice(0, 60),
@@ -691,8 +772,11 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
         id: row.id,
         url: row.publicUrl,
         mimeType: row.mimeType,
+        aspect: imageAspect,
       }));
       setMedia((m) => [...m, ...added]);
+      setCreditError(null);
+      refreshCredits();
       // Auto-select the first newly generated image as hero
       setSelectedMediaIdx((modeMedia.length) + (mode === 'image' ? 0 : 0));
       setToast(
@@ -700,6 +784,11 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
           ? `Generated ${added.length} · enhanced prompt: "${(data.rewrittenPrompt ?? '').slice(0, 90)}${(data.rewrittenPrompt ?? '').length > 90 ? '…' : ''}"`
           : `Generated ${added.length} image${added.length === 1 ? '' : 's'}.`,
       );
+      // Pull the freshly-rendered media card into view so the user
+      // sees the result without scrolling.
+      setTimeout(() => {
+        generatedMediaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 80);
       setTimeout(() => setToast(null), 4000);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -710,9 +799,9 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
   };
 
   const generateVideo = async () => {
-    const p = videoPrompt.trim() || prompt.trim();
+    const p = prompt.trim();
     if (!p) {
-      setToast('Describe the video first.');
+      setToast('Add a post topic first — it drives the video too.');
       return;
     }
     setVideoBusy(true);
@@ -738,18 +827,99 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
           audioUrl: audioUrl ?? undefined,
         }),
       });
-      const data = await r.json().catch(() => ({}));
-      if (r.status === 503 && data?.error === 'video_provider_not_configured') {
-        setToast(`AI video isn't configured yet. Rewritten prompt ready: "${(data.rewrittenPrompt ?? '').slice(0, 90)}…"`);
+      const data = await r.json().catch(() => ({} as Record<string, unknown>));
+      if (r.status === 402 && (data as { error?: string })?.error === 'insufficient_credits') {
+        const body = data as { balance?: number; needed?: number };
+        setCreditError({ balance: Number(body.balance ?? 0), needed: Number(body.needed ?? 0) });
+        setToast(null);
+        refreshCredits();
+        return;
+      }
+      if (r.status === 503 && (data as { error?: string })?.error === 'video_provider_not_configured') {
+        setToast('AI video isn\'t configured yet. Add PIAPI_API_KEY to .env.local.');
         return;
       }
       if (!r.ok && r.status !== 202) {
         if (r.status === 429) setToast('Slow down — too many video generations. Try again shortly.');
         else if (r.status === 401) setToast('Sign in to generate videos.');
-        else setToast(`Video generation failed: ${r.status}`);
+        else {
+          const detail = (data as { detail?: string }).detail;
+          setToast(`Video generation failed: ${r.status}${detail ? ` · ${detail.slice(0, 140)}` : ''}`);
+        }
         return;
       }
-      setToast(`Queued. Rewritten prompt: "${(data.rewrittenPrompt ?? '').slice(0, 90)}…" — webhook will drop the clip in your library when done.`);
+      setCreditError(null);
+      refreshCredits();
+
+      const submitData = data as {
+        jobs?: Array<{ id: string; providerTaskId: string }>;
+        rewrittenPrompt?: string;
+        enhanced?: boolean;
+      };
+      const jobs = submitData.jobs ?? [];
+      if (jobs.length === 0) {
+        setToast('Video queue returned no jobs.');
+        return;
+      }
+
+      setToast(
+        submitData.enhanced
+          ? `Queued ${jobs.length} · enhanced prompt: "${(submitData.rewrittenPrompt ?? '').slice(0, 90)}…" — rendering, ~30–120s`
+          : `Queued ${jobs.length} video${jobs.length === 1 ? '' : 's'} — rendering, ~30–120s`,
+      );
+
+      // Poll each job in parallel. PiAPI Seedance typically resolves in
+      // 30–120s; we cap at 5 minutes and back off slightly over time.
+      const pollOne = async (jobId: string): Promise<MediaItem | null> => {
+        const startedAt = Date.now();
+        const maxMs = 5 * 60_000;
+        let interval = 4_000;
+        while (Date.now() - startedAt < maxMs) {
+          await new Promise((res) => setTimeout(res, interval));
+          interval = Math.min(interval + 500, 8_000);
+          let pr: Response;
+          try {
+            pr = await fetch(`/api/media/video-job/${jobId}`, { credentials: 'include' });
+          } catch { continue; }
+          if (!pr.ok) continue;
+          const pd = await pr.json().catch(() => ({} as Record<string, unknown>)) as {
+            status?: 'pending' | 'completed' | 'failed';
+            asset?: { id: string; publicUrl: string; mimeType: string; label?: string };
+            error?: string;
+          };
+          if (pd.status === 'completed' && pd.asset) {
+            return {
+              kind: 'video',
+              label: pd.asset.label || p.slice(0, 60),
+              tag: submitData.enhanced ? 'AI ✨' : 'AI',
+              id: pd.asset.id,
+              url: pd.asset.publicUrl,
+              mimeType: pd.asset.mimeType,
+              aspect: videoAspect.replace(':', '/'),
+            };
+          }
+          if (pd.status === 'failed') {
+            console.warn('[generateVideo] job failed:', jobId, pd.error);
+            return null;
+          }
+        }
+        console.warn('[generateVideo] job timed out:', jobId);
+        return null;
+      };
+
+      const settled = await Promise.all(jobs.map((j) => pollOne(j.id)));
+      const added = settled.filter((m): m is MediaItem => m !== null);
+      // Refresh credits — refunds may have landed for failed jobs.
+      refreshCredits();
+      if (added.length > 0) {
+        setMedia((m) => [...m, ...added]);
+        setToast(`Generated ${added.length} video${added.length === 1 ? '' : 's'}.`);
+        setTimeout(() => {
+          generatedMediaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 80);
+      } else {
+        setToast('Video generation timed out or failed. Try a shorter clip or 720p.');
+      }
       setTimeout(() => setToast(null), 5000);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -764,6 +934,54 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
     () => (accounts ?? []).map((a) => PLATFORM_TO_SHORT[a.platform]),
     [accounts],
   );
+
+  // Hydrate the media grid with the user's previously generated images
+  // and videos on mount. Without this, refreshing the page or coming
+  // back from another tab wipes everything you've made. Drafts override
+  // this (a draft's media list is canonical for that draft).
+  useEffect(() => {
+    if (draftId) return; // draft loader below handles its own media
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch('/api/media?limit=40', { credentials: 'include' });
+        if (!r.ok) return;
+        const data = (await r.json()) as {
+          items: Array<{
+            id: string;
+            publicUrl: string;
+            mimeType: string;
+            label: string | null;
+            width: number | null;
+            height: number | null;
+          }>;
+        };
+        if (cancelled) return;
+        const restored: MediaItem[] = data.items.map((row) => {
+          const isVideo = row.mimeType.startsWith('video/');
+          const aspect = row.width && row.height ? `${row.width}/${row.height}` : undefined;
+          return {
+            kind: isVideo ? 'video' : 'image',
+            label: row.label ?? (isVideo ? 'Generated clip' : 'Generated image'),
+            tag: 'Library',
+            id: row.id,
+            url: row.publicUrl,
+            mimeType: row.mimeType,
+            aspect,
+          };
+        });
+        setMedia((prev) => {
+          // De-dupe by id — a freshly generated item may already be in
+          // local state if the user generated something during this load.
+          const seen = new Set(prev.map((m) => m.id).filter(Boolean));
+          return [...prev, ...restored.filter((r) => !r.id || !seen.has(r.id))];
+        });
+      } catch {
+        // Library hydration is best-effort. Silent failure keeps the UI usable.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [draftId]);
 
   // Load existing draft when editing
   useEffect(() => {
@@ -875,19 +1093,12 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
     <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px dashed var(--line)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
         <Icon name="image" size={14} style={{ color: 'var(--accent)' }} />
-        <span style={{ fontSize: 12, fontWeight: 550, letterSpacing: '-0.005em' }}>What&apos;s in the image?</span>
+        <span style={{ fontSize: 12, fontWeight: 550, letterSpacing: '-0.005em' }}>Image options</span>
+        <span style={{ marginLeft: 'auto', fontSize: 10.5, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>
+          Uses the post topic above
+        </span>
       </div>
-      <textarea
-        value={imagePrompt}
-        onChange={(e) => setImagePrompt(e.target.value)}
-        placeholder="Loose is fine — auto-enhance polishes it before generating."
-        style={{
-          width: '100%', minHeight: 56, padding: 10, fontSize: 13,
-          border: '1px solid var(--line-2)', borderRadius: 8, background: 'var(--bg)',
-          color: 'var(--ink)', fontFamily: 'inherit', resize: 'vertical', outline: 'none', lineHeight: 1.5,
-        }}
-      />
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, marginTop: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, marginTop: 4 }}>
         <div>
           <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>How many</div>
           <div style={{ display: 'flex', gap: 4 }}>
@@ -941,22 +1152,12 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
     <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px dashed var(--line)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
         <Icon name="play" size={14} style={{ color: 'var(--accent)' }} />
-        <span style={{ fontSize: 12, fontWeight: 550, letterSpacing: '-0.005em' }}>What&apos;s the clip about?</span>
+        <span style={{ fontSize: 12, fontWeight: 550, letterSpacing: '-0.005em' }}>Video options</span>
         <span style={{ marginLeft: 'auto', fontSize: 10.5, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>
-          {videoDuration}s · {videoQuality} · {videoAspect}
+          {videoDuration}s · {videoQuality} · {videoAspect} · uses topic above
         </span>
       </div>
-      <textarea
-        value={videoPrompt}
-        onChange={(e) => setVideoPrompt(e.target.value)}
-        placeholder="Short description is enough — auto-enhance polishes it before generating."
-        style={{
-          width: '100%', minHeight: 56, padding: 10, fontSize: 13,
-          border: '1px solid var(--line-2)', borderRadius: 8, background: 'var(--bg)',
-          color: 'var(--ink)', fontFamily: 'inherit', resize: 'vertical', outline: 'none', lineHeight: 1.5,
-        }}
-      />
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginTop: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginTop: 4 }}>
         <div>
           <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>How many</div>
           <div style={{ display: 'flex', gap: 4 }}>
@@ -1192,13 +1393,28 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
         setActive(incoming[0].id);
       }
       setPerPlatform(r.perPlatform ?? {});
-      if (r.stub) {
-        setToast('Running in demo mode — connect an AI provider for real generation.');
-      } else if (opts?.withTools && r.toolsUsed?.length) {
+      setCreditError(null);
+      refreshCredits();
+      // Note: `r.stub` previously triggered a "demo mode" toast. We removed
+      // that — when the user is signed in with a real AI key, stub never
+      // fires, and when it does it's because Clerk is still hydrating; the
+      // banner below covers that case more clearly.
+      if (opts?.withTools && r.toolsUsed?.length) {
         setToast(`Researched with ${r.toolsUsed.join(' + ')} before drafting.`);
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      // apiPost throws "${status}: ${body}" — sniff for 402 + structured body.
+      const m = msg.match(/^402:\s*(\{.*\})/);
+      if (m) {
+        try {
+          const body = JSON.parse(m[1]) as { balance?: number; needed?: number };
+          setCreditError({ balance: Number(body.balance ?? 0), needed: Number(body.needed ?? 0) });
+          setToast(null);
+          refreshCredits();
+          return;
+        } catch { /* fall through */ }
+      }
       if (msg.startsWith('401') || msg.startsWith('503')) {
         setToast('Sign in to generate real variants.');
       } else if (msg.startsWith('429')) {
@@ -1316,6 +1532,13 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
   return (
     <div className="composer">
       <div className="composer-left">
+        {creditError && (
+          <InsufficientCreditsBanner
+            balance={creditError.balance}
+            needed={creditError.needed}
+            onDismiss={() => setCreditError(null)}
+          />
+        )}
         {loadedDraftId && (
           <div style={{
             padding: '10px 14px',
@@ -1413,9 +1636,13 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder={mode === 'video'
-              ? 'What should the caption say? The reel script preset works great here.'
-              : 'Write a thread about why solo founders should treat their newsletter as their #1 channel…'}
+            placeholder={
+              mode === 'video'
+                ? "What's this post about? The same idea drives the video and the caption."
+                : mode === 'image'
+                  ? "What's this post about? The same idea drives the image and the caption."
+                  : "What's this post about? — e.g. \"Solo founders should treat their newsletter as their #1 channel.\""
+            }
           />
 
           {/* Mode-specific second section — image or video prompt + controls.
@@ -1469,7 +1696,12 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
             <button
               className="btn accent"
               onClick={generateAll}
-              disabled={generating || imageBusy || videoBusy || !prompt.trim()}
+              disabled={generating || imageBusy || videoBusy || !prompt.trim() || (previewCost ? balance < previewCost.credits : false)}
+              title={previewCost && balance < previewCost.credits
+                ? `Need ${previewCost.credits} credits · ${balance} remaining`
+                : previewCost
+                  ? `Costs ${previewCost.credits} credits`
+                  : undefined}
             >
               {(generating || imageBusy || videoBusy)
                 ? <><Icon name="refresh" size={12} /> {withResearch ? 'Researching' : 'Generating'}</>
@@ -1477,9 +1709,29 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                     {mode === 'text' && 'Generate 4 variants'}
                     {mode === 'image' && `Generate post${imageCount > 1 ? ` + ${imageCount} images` : ' + image'}`}
                     {mode === 'video' && `Generate post${videoCount > 1 ? ` + ${videoCount} clips` : ' + clip'}`}
+                    {previewCost && (
+                      <span className={`cost-pill ${balance < previewCost.credits ? 'cant-afford' : ''}`}>
+                        <Icon name="bolt" size={9} /> {previewCost.credits.toLocaleString()}
+                      </span>
+                    )}
                   </>}
             </button>
           </div>
+          {previewCost && (
+            <div className="cost-line">
+              <Icon name="bolt" size={11} />
+              <span>
+                <span className="strong">{previewCost.credits.toLocaleString()} credits</span>
+                {' · '}{previewCost.label}
+                {credits && (
+                  <> · balance <span className="strong">{balance.toLocaleString()}</span></>
+                )}
+                {credits && balance < previewCost.credits && (
+                  <> · <span className="danger">need {(previewCost.credits - balance).toLocaleString()} more</span> — <Link href="/billing" style={{ color: 'var(--accent-ink)', textDecoration: 'underline' }}>upgrade</Link></>
+                )}
+              </span>
+            </div>
+          )}
         </div>
 
         {toast && (
@@ -1638,7 +1890,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
         {/* === IMAGE MODE — output gallery (the input card sits above Distribution) === */}
         {mode === 'image' && (
           <>
-            <div className="card">
+            <div className="card" ref={generatedMediaRef}>
               <div className="card-head">
                 <h3><Icon name="image" size={14} /> Your images <span className="chip ghost mono">{modeMedia.length}</span></h3>
                 <div className="media-tabs">
@@ -1676,6 +1928,16 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                         <span style={{ position: 'absolute', top: 6, left: 6, fontFamily: 'var(--mono)', fontSize: 9, padding: '2px 5px', background: 'rgba(10,10,10,0.7)', color: 'white', borderRadius: 3, letterSpacing: '0.04em', textTransform: 'uppercase' }}>{m.tag}</span>
                         {isHero && (
                           <span style={{ position: 'absolute', bottom: 6, left: 6, fontFamily: 'var(--mono)', fontSize: 9, padding: '2px 5px', background: 'var(--accent)', color: 'white', borderRadius: 3, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Hero</span>
+                        )}
+                        {m.url && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setLightbox({ url: m.url!, label: m.label, kind: m.mimeType?.startsWith('video/') ? 'video' : 'image' }); }}
+                            style={{ position: 'absolute', top: 4, right: 26, width: 18, height: 18, borderRadius: 4, background: 'rgba(10,10,10,0.6)', color: 'white', display: 'grid', placeItems: 'center', border: 0, cursor: 'pointer' }}
+                            aria-label="Expand image"
+                            title="View full size"
+                          >
+                            <Icon name="maximize" size={10} />
+                          </button>
                         )}
                         <button
                           onClick={(e) => { e.stopPropagation(); setMedia(media.filter((it) => it !== m)); }}
@@ -1754,12 +2016,15 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
             built-in overlay is the sole empty-state entry, so there is exactly
             one place to upload or generate. */}
         {mode === 'video' && modeMedia.length > 0 && (
-          <div className="card">
+          <div className="card" ref={generatedMediaRef}>
             <div className="card-head">
               <h3><Icon name="play" size={14} /> Your video <span className="chip ghost mono">{modeMedia.length}</span></h3>
             </div>
             <div className="card-body">
-              <div style={{ position: 'relative', borderRadius: 12, overflow: 'hidden', border: '1px solid var(--line-2)', background: '#000', aspectRatio: '16/9' }}>
+              {/* Match the actual aspect of the selected clip so a 9:16 vertical
+                  doesn't get letterboxed inside a 16:9 frame. Falls back to 16/9
+                  for legacy media without aspect metadata. */}
+              <div style={{ position: 'relative', borderRadius: 12, overflow: 'hidden', border: '1px solid var(--line-2)', background: '#000', maxHeight: 560, aspectRatio: currentMediaItem?.aspect ?? '16/9', maxWidth: currentMediaItem?.aspect === '9/16' ? 320 : undefined, margin: '0 auto' }}>
                 {currentMediaUrl ? (
                   <video src={currentMediaUrl} controls playsInline style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
                 ) : (
@@ -1846,12 +2111,18 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
               mediaKind={mode === 'text' ? '' : mediaKind}
               mediaCount={media.length}
               mediaUrl={mode === 'text' ? undefined : currentMediaUrl}
+              mediaAspect={mode === 'text' ? undefined : currentMediaItem?.aspect}
               onUpload={mode !== 'text' && !currentMediaUrl ? onPickFile : undefined}
               onGenerate={mode === 'image' && !currentMediaUrl
                 ? generateImage
                 : mode === 'video' && !currentMediaUrl
                   ? generateVideo
                   : undefined}
+              onExpand={currentMediaUrl ? () => setLightbox({
+                url: currentMediaUrl!,
+                label: currentMediaItem?.label,
+                kind: currentMediaItem?.mimeType?.startsWith('video/') ? 'video' : 'image',
+              }) : undefined}
               author={previewAuthor}
             />
           </div>
@@ -2012,6 +2283,81 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                 </>
               );
             })()}
+          </div>
+        </div>
+      )}
+
+      {/* Lightbox — click any generated image's expand icon to view it full-size.
+          Closes on backdrop click, ESC, or the close button. */}
+      {lightbox && (
+        <div
+          className="modal-scrim"
+          onClick={() => setLightbox(null)}
+          style={{ background: 'rgba(0, 0, 0, 0.82)', cursor: 'zoom-out' }}
+        >
+          <div
+            className="modal-sheet"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 'min(92vw, 1400px)',
+              maxHeight: '92vh',
+              background: 'transparent',
+              boxShadow: 'none',
+              padding: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 12,
+            }}
+          >
+            {lightbox.kind === 'video' ? (
+              <video
+                src={lightbox.url}
+                controls
+                autoPlay
+                playsInline
+                style={{
+                  maxWidth: '100%',
+                  maxHeight: '82vh',
+                  borderRadius: 10,
+                  boxShadow: '0 24px 64px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.06)',
+                  background: '#000',
+                }}
+              />
+            ) : (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={lightbox.url}
+                alt={lightbox.label ?? 'preview'}
+                style={{
+                  maxWidth: '100%',
+                  maxHeight: '82vh',
+                  objectFit: 'contain',
+                  borderRadius: 10,
+                  boxShadow: '0 24px 64px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.06)',
+                  background: '#000',
+                }}
+              />
+            )}
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <a
+                href={lightbox.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="chip ghost"
+                style={{ color: 'white', borderColor: 'rgba(255,255,255,0.25)', background: 'rgba(255,255,255,0.06)' }}
+              >
+                <Icon name="arrow_up_right" size={11} /> Open original
+              </a>
+              <button
+                onClick={() => setLightbox(null)}
+                className="chip ghost"
+                style={{ color: 'white', borderColor: 'rgba(255,255,255,0.25)', background: 'rgba(255,255,255,0.06)' }}
+                aria-label="Close preview"
+              >
+                <Icon name="x" size={11} /> Close
+              </button>
+            </div>
           </div>
         </div>
       )}

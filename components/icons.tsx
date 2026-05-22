@@ -10,7 +10,8 @@ type IconName =
   | 'trend' | 'chat' | 'mic' | 'chevron_down' | 'chevron_right'
   | 'chevron_left' | 'more' | 'upload' | 'eye' | 'heart' | 'bookmark'
   | 'send' | 'fire' | 'globe' | 'lock' | 'waveform' | 'target'
-  | 'folder' | 'grid' | 'list' | 'filter' | 'link' | 'book' | 'fork' | 'alert';
+  | 'folder' | 'grid' | 'list' | 'filter' | 'link' | 'book' | 'fork' | 'alert'
+  | 'maximize';
 
 interface IconProps extends React.SVGProps<SVGSVGElement> {
   name: IconName;
@@ -68,6 +69,7 @@ export const Icon: React.FC<IconProps> = ({ name, size = 16, ...props }) => {
     book: <><path d="M2.5 3.5h5a2 2 0 012 2v8a2 2 0 00-2-2h-5v-8zM13.5 3.5h-5a2 2 0 00-2 2v8a2 2 0 012-2h5v-8z"/></>,
     fork: <><circle cx="4" cy="3" r="1.5"/><circle cx="12" cy="3" r="1.5"/><circle cx="8" cy="13" r="1.5"/><path d="M4 4.5v3a2 2 0 002 2h4a2 2 0 002-2v-3M8 9.5v2"/></>,
     alert: <><path d="M8 2L1.5 13.5h13L8 2z"/><path d="M8 6.5v3.5M8 12v.5"/></>,
+    maximize: <><path d="M2.5 6V2.5H6M14 6V2.5H10.5M2.5 10v3.5H6M14 10v3.5H10.5"/></>,
   };
 
   return (

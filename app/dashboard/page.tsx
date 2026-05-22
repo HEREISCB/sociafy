@@ -12,7 +12,6 @@ import ConnectionsPage from '../../components/connections';
 import Onboarding from '../../components/onboarding';
 
 type Page = 'dashboard' | 'compose' | 'agent' | 'calendar' | 'connections' | 'onboarding';
-type Mode = 'manual' | 'auto';
 
 function greetingFor(name: string | null | undefined): string {
   const hour = new Date().getHours();
@@ -81,7 +80,6 @@ function initialPageFromUrl(): Page {
 
 export default function Home() {
   const [page, setPage] = useState<Page>(initialPageFromUrl);
-  const [mode, setMode] = useState<Mode>('manual');
   const [refreshing, setRefreshing] = useState(false);
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
   const { user } = useUser();
@@ -129,9 +127,9 @@ export default function Home() {
 
   return (
     <div className="app">
-      <Sidebar page={page} onNav={setPage} mode={mode} onMode={setMode} />
+      <Sidebar page={page} onNav={setPage} />
       <div className="main">
-        <Topbar crumbs={meta.crumbs} mode={mode} onMode={setMode}>
+        <Topbar crumbs={meta.crumbs} onAutopilotClick={() => setPage('agent')}>
           <button className="btn primary" onClick={() => setPage('compose')}>
             <SparkleIcon /> Compose
           </button>
@@ -154,7 +152,7 @@ export default function Home() {
             </div>
           </div>
 
-          {page === 'dashboard' && <Dashboard mode={mode} onCompose={() => goCompose()} onEditDraft={(id) => goCompose(id)} />}
+          {page === 'dashboard' && <Dashboard onCompose={() => goCompose()} onEditDraft={(id) => goCompose(id)} />}
           {page === 'compose' && <Compose draftId={editingDraftId} onDone={goDashboard} />}
           {page === 'agent' && <AgentPage onEditDraft={(id) => goCompose(id)} />}
           {page === 'calendar' && <CalendarPage />}
