@@ -166,8 +166,21 @@ class RazorpayBillingProvider implements BillingProvider {
       };
     }
 
-    // Downgrade path → Task 17.
-    throw new Error('not implemented in Task 16 — see Task 17');
+    // Downgrade: schedule at cycle end.
+    const periodEnd = row.subscriptionCurrentPeriodEnd;
+    if (!periodEnd) throw new Error('cannot downgrade — missing period_end');
+
+    await getRazorpay().subscriptions.cancel(row.razorpaySubscriptionId, true);
+    await db()
+      .update(profiles)
+      .set({
+        pendingTierChangeTo: toTier,
+        pendingTierChangeAt: periodEnd,
+        updatedAt: new Date(),
+      })
+      .where(eq(profiles.id, userId));
+
+    return { kind: 'scheduled', effectiveAt: periodEnd };
   }
 }
 

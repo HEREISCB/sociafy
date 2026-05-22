@@ -37,6 +37,8 @@ const dbState = {
   },
 };
 
+const updates: Array<{ id: string; vals: Record<string, unknown> }> = [];
+
 vi.mock('../../../db', () => ({
   db: () => ({
     select: () => ({
@@ -49,6 +51,14 @@ vi.mock('../../../db', () => ({
             creditCycleStart: (dbState.profile as Record<string, unknown>).creditCycleStart,
           }]),
         }),
+      }),
+    }),
+    update: () => ({
+      set: (vals: Record<string, unknown>) => ({
+        where: (clause: { __whereId: string }) => {
+          updates.push({ id: clause.__whereId, vals });
+          return Promise.resolve();
+        },
       }),
     }),
   }),
@@ -198,5 +208,32 @@ describe('razorpayProvider.changeTier — upgrade', () => {
     if (result.kind === 'immediate') expect(result.handoff).toBeUndefined();
 
     vi.useRealTimers();
+  });
+});
+
+describe('razorpayProvider.changeTier — downgrade', () => {
+  beforeEach(() => {
+    subsCancel.mockReset();
+    updates.length = 0;
+    const periodEnd = new Date('2026-06-01T00:00:00Z');
+    dbState.profile = { razorpaySubscriptionId: 'sub_old', subscriptionCurrentPeriodEnd: periodEnd };
+    (dbState.profile as Record<string, unknown>).tier = 'business';
+    (dbState.profile as Record<string, unknown>).creditCycleStart = new Date('2026-05-01T00:00:00Z');
+  });
+
+  it('cancels at cycle end and stores pendingTierChange', async () => {
+    subsCancel.mockResolvedValue({ id: 'sub_old', status: 'cancelled' });
+
+    const result = await razorpayProvider().changeTier({ userId: 'u1', toTier: 'pro' });
+
+    expect(subsCancel).toHaveBeenCalledWith('sub_old', true);
+    expect(updates[0].vals).toMatchObject({
+      pendingTierChangeTo: 'pro',
+      pendingTierChangeAt: new Date('2026-06-01T00:00:00Z'),
+    });
+    expect(result).toMatchObject({
+      kind: 'scheduled',
+      effectiveAt: new Date('2026-06-01T00:00:00Z'),
+    });
   });
 });
