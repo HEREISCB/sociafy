@@ -65,6 +65,14 @@ export const profiles = pgTable('profiles', {
   stripeSubscriptionId: text('stripe_subscription_id'),
   subscriptionStatus: text('subscription_status'), // 'active' | 'past_due' | 'canceled' | 'incomplete' | null
   subscriptionCurrentPeriodEnd: timestamp('subscription_current_period_end', { withTimezone: true }),
+  // ---- new in 0007: Razorpay + multi-provider billing ----
+  billingCountry: text('billing_country'),                              // ISO 3166-1 alpha-2
+  billingCurrency: text('billing_currency').$type<'INR' | 'USD'>(),     // locked once active sub
+  paymentProvider: text('payment_provider').$type<'stripe' | 'razorpay'>(), // locked once active sub
+  razorpayCustomerId: text('razorpay_customer_id'),
+  razorpaySubscriptionId: text('razorpay_subscription_id'),
+  pendingTierChangeTo: text('pending_tier_change_to').$type<Tier>(),
+  pendingTierChangeAt: timestamp('pending_tier_change_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
