@@ -41,8 +41,35 @@ class RazorpayBillingProvider implements BillingProvider {
     };
   }
 
-  async startTopUp(_args: { userId: string; credits: number }): Promise<CheckoutHandoff> {
-    throw new Error('not implemented in Task 13 — see Task 14');
+  async startTopUp({ userId, credits }: { userId: string; credits: number }): Promise<CheckoutHandoff> {
+    if (credits <= 0 || credits % 1000 !== 0) {
+      throw new Error('credits must be a positive multiple of 1000');
+    }
+    const packs = credits / 1000;
+    const amountMinor = TOPUP_PRICING.INR.amountMinor * packs;
+    const customerId = await ensureRazorpayCustomer(userId);
+
+    const order = await getRazorpay().orders.create({
+      amount: amountMinor,
+      currency: 'INR',
+      customer_id: customerId,
+      notes: {
+        sociafy_user_id: userId,
+        kind: 'topup',
+        credits: String(credits),
+      },
+    } as Parameters<ReturnType<typeof getRazorpay>['orders']['create']>[0]);
+
+    return {
+      kind: 'razorpay_modal',
+      keyId: env.razorpay.keyId!,
+      orderId: order.id,
+      amountMinor,
+      currency: 'INR',
+      description: `Sociafy top-up — ${credits.toLocaleString()} credits`,
+      prefill: {},
+      notes: { sociafy_user_id: userId, kind: 'topup', credits: String(credits) },
+    };
   }
 
   async cancelSubscription(_args: { userId: string }): Promise<{ periodEnd: Date | null }> {
@@ -59,6 +86,3 @@ export function razorpayProvider(): RazorpayBillingProvider {
   if (!_instance) _instance = new RazorpayBillingProvider();
   return _instance;
 }
-
-// Suppress unused-import lint until later tasks populate the implementations.
-void TOPUP_PRICING;
