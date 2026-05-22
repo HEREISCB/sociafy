@@ -14,6 +14,7 @@ import type { BillingProvider, CheckoutHandoff, TierChangeResult } from '../../p
 import { env } from '../../../env';
 import { getRazorpay, razorpayPlanIdFor } from './client';
 import { ensureRazorpayCustomer } from './customer';
+import { proratedDiffMinor } from './proration';
 
 class RazorpayBillingProvider implements BillingProvider {
   readonly name = 'razorpay' as const;
@@ -93,8 +94,80 @@ class RazorpayBillingProvider implements BillingProvider {
     return { periodEnd: row.subscriptionCurrentPeriodEnd ?? null };
   }
 
-  async changeTier(_args: { userId: string; toTier: Tier }): Promise<TierChangeResult> {
-    throw new Error('not implemented in Task 13 — see Tasks 16-17');
+  async changeTier({ userId, toTier }: { userId: string; toTier: Tier }): Promise<TierChangeResult> {
+    const [row] = await db()
+      .select({
+        razorpaySubscriptionId: profiles.razorpaySubscriptionId,
+        subscriptionCurrentPeriodEnd: profiles.subscriptionCurrentPeriodEnd,
+        tier: profiles.tier,
+        creditCycleStart: profiles.creditCycleStart,
+      })
+      .from(profiles)
+      .where(eq(profiles.id, userId))
+      .limit(1);
+
+    if (!row?.razorpaySubscriptionId) throw new Error('no active razorpay subscription');
+
+    const fromTier = row.tier as Tier;
+    const isUpgrade = TIER_PRICING.INR[toTier].amountMinor > TIER_PRICING.INR[fromTier].amountMinor;
+    const isDowngrade = TIER_PRICING.INR[toTier].amountMinor < TIER_PRICING.INR[fromTier].amountMinor;
+
+    if (!isUpgrade && !isDowngrade) {
+      throw new Error('toTier is the same as the current tier');
+    }
+
+    if (isUpgrade) {
+      const now = new Date();
+      const periodStart = row.creditCycleStart;
+      const periodEnd = row.subscriptionCurrentPeriodEnd ?? now;
+      const amountMinor = proratedDiffMinor({
+        oldAmountMinor: TIER_PRICING.INR[fromTier].amountMinor,
+        newAmountMinor: TIER_PRICING.INR[toTier].amountMinor,
+        now, periodStart, periodEnd,
+      });
+
+      if (amountMinor <= 0) {
+        return { kind: 'immediate', effectiveAt: now };
+      }
+
+      const customerId = await ensureRazorpayCustomer(userId);
+      const order = await getRazorpay().orders.create({
+        amount: amountMinor,
+        currency: 'INR',
+        customer_id: customerId,
+        notes: {
+          sociafy_user_id: userId,
+          kind: 'upgrade_diff',
+          from_tier: fromTier,
+          to_tier: toTier,
+          old_sub_id: row.razorpaySubscriptionId,
+        },
+      } as Parameters<ReturnType<typeof getRazorpay>['orders']['create']>[0]);
+
+      return {
+        kind: 'immediate',
+        effectiveAt: now,
+        handoff: {
+          kind: 'razorpay_modal',
+          keyId: env.razorpay.keyId!,
+          orderId: order.id,
+          amountMinor,
+          currency: 'INR',
+          description: `Upgrade to ${toTier} — prorated`,
+          prefill: {},
+          notes: {
+            sociafy_user_id: userId,
+            kind: 'upgrade_diff',
+            from_tier: fromTier,
+            to_tier: toTier,
+            old_sub_id: row.razorpaySubscriptionId,
+          },
+        },
+      };
+    }
+
+    // Downgrade path → Task 17.
+    throw new Error('not implemented in Task 16 — see Task 17');
   }
 }
 

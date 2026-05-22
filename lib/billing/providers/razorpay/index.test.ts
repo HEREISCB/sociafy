@@ -45,6 +45,8 @@ vi.mock('../../../db', () => ({
           limit: () => Promise.resolve([{
             razorpaySubscriptionId: dbState.profile.razorpaySubscriptionId,
             subscriptionCurrentPeriodEnd: dbState.profile.subscriptionCurrentPeriodEnd,
+            tier: (dbState.profile as Record<string, unknown>).tier,
+            creditCycleStart: (dbState.profile as Record<string, unknown>).creditCycleStart,
           }]),
         }),
       }),
@@ -131,5 +133,70 @@ describe('razorpayProvider.cancelSubscription', () => {
 
     expect(subsCancel).toHaveBeenCalledWith('sub_x', true);
     expect(result).toEqual({ periodEnd });
+  });
+});
+
+describe('razorpayProvider.changeTier — upgrade', () => {
+  beforeEach(() => {
+    ordersCreate.mockReset();
+    dbState.profile = { razorpaySubscriptionId: 'sub_old', subscriptionCurrentPeriodEnd: null };
+  });
+
+  it('creates an upgrade-diff order and returns an immediate handoff', async () => {
+    // Mid-cycle: 15 days remain of a 30-day cycle.
+    const now = new Date('2026-05-16T00:00:00Z');
+    const periodStart = new Date('2026-05-01T00:00:00Z');
+    const periodEnd   = new Date('2026-05-31T00:00:00Z');
+    dbState.profile = { razorpaySubscriptionId: 'sub_old', subscriptionCurrentPeriodEnd: periodEnd };
+
+    (dbState.profile as Record<string, unknown>).tier = 'starter';
+    (dbState.profile as Record<string, unknown>).creditCycleStart = periodStart;
+
+    vi.setSystemTime(now);
+    ordersCreate.mockResolvedValue({ id: 'order_up' });
+
+    const result = await razorpayProvider().changeTier({ userId: 'u1', toTier: 'pro' });
+
+    // Starter → Pro: 7999 - 2999 = 5000 INR diff, half cycle remaining → 2500 INR = 250000 paise.
+    expect(ordersCreate).toHaveBeenCalledWith(expect.objectContaining({
+      amount: 250000,
+      currency: 'INR',
+      notes: expect.objectContaining({
+        sociafy_user_id: 'u1',
+        kind: 'upgrade_diff',
+        from_tier: 'starter',
+        to_tier: 'pro',
+        old_sub_id: 'sub_old',
+      }),
+    }));
+    expect(result.kind).toBe('immediate');
+    if (result.kind === 'immediate') {
+      expect(result.handoff).toMatchObject({
+        kind: 'razorpay_modal',
+        orderId: 'order_up',
+        amountMinor: 250000,
+      });
+    }
+
+    vi.useRealTimers();
+  });
+
+  it('skips the diff order if prorated amount is 0 and just signals immediate', async () => {
+    const periodStart = new Date('2026-05-01T00:00:00Z');
+    const periodEnd   = new Date('2026-05-31T00:00:00Z');
+    dbState.profile = { razorpaySubscriptionId: 'sub_old', subscriptionCurrentPeriodEnd: periodEnd };
+    (dbState.profile as Record<string, unknown>).tier = 'starter';
+    (dbState.profile as Record<string, unknown>).creditCycleStart = periodStart;
+
+    // periodEnd has passed → diff is 0.
+    vi.setSystemTime(new Date('2026-06-15T00:00:00Z'));
+
+    const result = await razorpayProvider().changeTier({ userId: 'u1', toTier: 'pro' });
+
+    expect(ordersCreate).not.toHaveBeenCalled();
+    expect(result.kind).toBe('immediate');
+    if (result.kind === 'immediate') expect(result.handoff).toBeUndefined();
+
+    vi.useRealTimers();
   });
 });
