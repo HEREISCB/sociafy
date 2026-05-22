@@ -91,6 +91,41 @@ function BillingPageInner() {
   const [toast, setToast] = useState<string | null>(null);
   const [topupOpen, setTopupOpen] = useState(false);
   const [topupBusy, setTopupBusy] = useState(false);
+  const [cancelBusy, setCancelBusy] = useState(false);
+
+  async function apiFetch<T>(url: string, init: RequestInit): Promise<T> {
+    const r = await fetch(url, { ...init, headers: { 'content-type': 'application/json', ...(init.headers ?? {}) } });
+    if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+    return r.json() as Promise<T>;
+  }
+
+  const cancelSubscription = async () => {
+    if (!confirm('Cancel your subscription? Credits stay usable until your renewal date.')) return;
+    setCancelBusy(true);
+    try {
+      const r = await apiPost<{ periodEnd: string | null }>('/api/billing/cancel', {});
+      const end = r.periodEnd ? new Date(r.periodEnd).toLocaleDateString() : 'your renewal date';
+      setToast(`Subscription will end on ${end}.`);
+      await mutate();
+    } catch (e) {
+      setToast(`Couldn't cancel: ${e instanceof Error ? e.message.slice(0, 160) : String(e)}`);
+    } finally {
+      setCancelBusy(false);
+    }
+  };
+
+  const clearPendingDowngrade = async () => {
+    setBusy('clear-pending');
+    try {
+      const r = await apiFetch<{ cleared: boolean; caveat: string }>('/api/billing/change-tier', { method: 'DELETE' });
+      setToast(r.caveat);
+      await mutate();
+    } catch (e) {
+      setToast(`Couldn't clear pending switch: ${e instanceof Error ? e.message.slice(0, 160) : String(e)}`);
+    } finally {
+      setBusy(null);
+    }
+  };
 
   // Surface checkout return state from query params.
   useEffect(() => {
@@ -253,6 +288,13 @@ function BillingPageInner() {
                   </div>
                 ))}
               </div>
+              {data?.hasActiveSubscription && (
+                <div style={{ marginTop: 12 }}>
+                  <button className="btn ghost" onClick={cancelSubscription} disabled={cancelBusy}>
+                    {cancelBusy ? 'Canceling…' : 'Cancel subscription'}
+                  </button>
+                </div>
+              )}
             </section>
 
             {data?.pendingTierChange && (
@@ -262,7 +304,7 @@ function BillingPageInner() {
                   <strong>Switches to {data.pendingTierChange.toTier} on {data.pendingTierChange.at ? new Date(data.pendingTierChange.at).toLocaleDateString() : 'cycle end'}.</strong>
                   <span className="muted"> Credits from your current tier remain usable until then.</span>
                 </div>
-                <button className="btn ghost" onClick={() => {}} disabled={busy === 'clear-pending'}>
+                <button className="btn ghost" onClick={clearPendingDowngrade} disabled={busy === 'clear-pending'}>
                   {busy === 'clear-pending' ? '…' : 'Cancel switch'}
                 </button>
               </div>
