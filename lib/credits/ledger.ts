@@ -212,3 +212,44 @@ export function insufficientCreditsResponse(args: { balance: number; needed: num
     },
   );
 }
+
+/**
+ * Idempotent grant keyed by `meta.source`. Used by both Stripe and
+ * Razorpay webhooks so that retried events do not double-credit a user.
+ *
+ * Implementation note: we scan the user's recent monthly_grant /
+ * topup rows and check for a matching source in TS rather than relying
+ * on a JSONB unique index (cheaper to ship, fast enough at our scale).
+ * A future migration can promote `meta.source` to a true unique
+ * constraint.
+ */
+export async function grantIdempotent(args: {
+  userId: string;
+  kind: Extract<CreditLedgerKind, 'monthly_grant' | 'topup'>;
+  credits: number;
+  source: string;
+  meta?: Record<string, unknown>;
+}): Promise<boolean> {
+  const recent = await db()
+    .select({ id: creditLedger.id, meta: creditLedger.meta })
+    .from(creditLedger)
+    .where(and(eq(creditLedger.userId, args.userId), eq(creditLedger.kind, args.kind)))
+    .limit(50);
+
+  const dup = recent.find(
+    (row) => (row.meta as Record<string, unknown> | null)?.source === args.source,
+  );
+  if (dup) return false;
+
+  await db()
+    .insert(creditLedger)
+    .values({
+      userId: args.userId,
+      kind: args.kind,
+      action: null,
+      credits: Math.abs(args.credits),
+      meta: { source: args.source, ...(args.meta ?? {}) } as Record<string, unknown>,
+    })
+    .returning({ id: creditLedger.id });
+  return true;
+}
