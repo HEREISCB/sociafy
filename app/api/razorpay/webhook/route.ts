@@ -114,6 +114,10 @@ async function handleSubActivated(payload: Record<string, unknown>) {
     providerCustomerId: sub.customer_id,
     providerSubscriptionId: sub.id,
   });
+  await db()
+    .update(profiles)
+    .set({ creditCycleStart: new Date() })
+    .where(eq(profiles.id, userId));
   await grantIdempotent({
     userId,
     kind: 'monthly_grant',
@@ -138,6 +142,10 @@ async function handleSubCharged(payload: Record<string, unknown>) {
     periodEnd: tsToDate(sub.current_end),
     providerSubscriptionId: sub.id,
   });
+  await db()
+    .update(profiles)
+    .set({ creditCycleStart: new Date() })
+    .where(eq(profiles.id, userId));
   await grantIdempotent({
     userId,
     kind: 'monthly_grant',
