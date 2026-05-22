@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { and, eq, isNull } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import { db } from '../../../../lib/db';
-import { profiles, creditLedger, activityLog, TIER_CREDITS, type Tier } from '../../../../lib/db/schema';
+import { profiles, activityLog, TIER_CREDITS, type Tier } from '../../../../lib/db/schema';
 import { isStubMode, env } from '../../../../lib/env';
 import { getStripe, tierForPriceId } from '../../../../lib/stripe';
+import { grantIdempotent } from '../../../../lib/credits/ledger';
+import { applySubscriptionState } from '../../../../lib/billing/state';
 
 export const runtime = 'nodejs';
 // Stripe needs the raw body to verify the signature. Next.js App Router
@@ -103,20 +105,23 @@ async function handleCheckoutCompleted(event: Stripe.Event) {
     return;
   }
 
+  await applySubscriptionState({
+    userId,
+    provider: 'stripe',
+    status: 'active',
+    tier,
+    periodEnd: subPeriodEnd(sub),
+    providerCustomerId: typeof session.customer === 'string' ? session.customer : session.customer?.id ?? undefined,
+    providerSubscriptionId: subscriptionId,
+  });
   await db()
     .update(profiles)
-    .set({
-      tier,
-      stripeSubscriptionId: subscriptionId,
-      subscriptionStatus: sub.status,
-      subscriptionCurrentPeriodEnd: subPeriodEnd(sub),
-      creditCycleStart: new Date(),
-      updatedAt: new Date(),
-    })
+    .set({ creditCycleStart: new Date() })
     .where(eq(profiles.id, userId));
 
-  await grantIfNew({
+  await grantIdempotent({
     userId,
+    kind: 'monthly_grant',
     credits: TIER_CREDITS[tier],
     source: `checkout:${event.id}`,
     meta: {
@@ -154,19 +159,22 @@ async function handleInvoicePaid(event: Stripe.Event) {
   const tier = tierForPriceId(sub.items.data[0]?.price?.id);
   if (!tier) return;
 
+  await applySubscriptionState({
+    userId,
+    provider: 'stripe',
+    status: 'active',
+    tier,
+    periodEnd: subPeriodEnd(sub),
+    providerSubscriptionId: subscriptionId,
+  });
   await db()
     .update(profiles)
-    .set({
-      tier,
-      subscriptionStatus: sub.status,
-      subscriptionCurrentPeriodEnd: subPeriodEnd(sub),
-      creditCycleStart: new Date(),
-      updatedAt: new Date(),
-    })
+    .set({ creditCycleStart: new Date() })
     .where(eq(profiles.id, userId));
 
-  await grantIfNew({
+  await grantIdempotent({
     userId,
+    kind: 'monthly_grant',
     credits: TIER_CREDITS[tier],
     source: `invoice:${invoice.id}`,
     meta: {
@@ -184,16 +192,14 @@ async function handleSubscriptionUpdated(event: Stripe.Event) {
   if (!userId) return;
   const tier = tierForPriceId(sub.items.data[0]?.price?.id);
 
-  await db()
-    .update(profiles)
-    .set({
-      ...(tier ? { tier } : {}),
-      stripeSubscriptionId: sub.id,
-      subscriptionStatus: sub.status,
-      subscriptionCurrentPeriodEnd: subPeriodEnd(sub),
-      updatedAt: new Date(),
-    })
-    .where(eq(profiles.id, userId));
+  await applySubscriptionState({
+    userId,
+    provider: 'stripe',
+    status: normalizeStripeStatus(sub.status),
+    tier: tier ?? null,
+    periodEnd: subPeriodEnd(sub),
+    providerSubscriptionId: sub.id,
+  });
 }
 
 async function handleSubscriptionDeleted(event: Stripe.Event) {
@@ -203,14 +209,13 @@ async function handleSubscriptionDeleted(event: Stripe.Event) {
   // We keep the credits already granted until period_end. The user is
   // effectively on "paid until X, then no more grants". A future cron can
   // flip tier back to a "free" tier when the period ends — not in scope today.
-  await db()
-    .update(profiles)
-    .set({
-      subscriptionStatus: 'canceled',
-      subscriptionCurrentPeriodEnd: subPeriodEnd(sub),
-      updatedAt: new Date(),
-    })
-    .where(eq(profiles.id, userId));
+  await applySubscriptionState({
+    userId,
+    provider: 'stripe',
+    status: 'canceled',
+    tier: null,
+    periodEnd: subPeriodEnd(sub),
+  });
 
   await db().insert(activityLog).values({
     userId,
@@ -259,39 +264,22 @@ async function resolveUserIdByCustomer(
   return null;
 }
 
-/**
- * Insert a monthly_grant only if no prior ledger row carries the same
- * `meta.source`. Idempotent over Stripe webhook retries.
- */
-async function grantIfNew(args: {
-  userId: string;
-  credits: number;
-  source: string;
-  meta: Record<string, unknown>;
-}): Promise<boolean> {
-  // We can't easily query JSONB equality with Drizzle's helpers without
-  // SQL helpers, so we filter in TS after a narrow read.
-  const recent = await db()
-    .select({ id: creditLedger.id, meta: creditLedger.meta })
-    .from(creditLedger)
-    .where(and(
-      eq(creditLedger.userId, args.userId),
-      eq(creditLedger.kind, 'monthly_grant'),
-      // Recent grants only — limits the scan.
-      isNull(creditLedger.relatedLedgerId),
-    ))
-    .limit(50);
-  const dup = recent.find((row) => (row.meta as Record<string, unknown> | null)?.source === args.source);
-  if (dup) return false;
-
-  await db().insert(creditLedger).values({
-    userId: args.userId,
-    kind: 'monthly_grant',
-    action: null,
-    credits: Math.abs(args.credits),
-    meta: { source: args.source, ...args.meta } as Record<string, unknown>,
-  });
-  return true;
+/** Map Stripe subscription status strings to our NormalizedStatus vocabulary. */
+function normalizeStripeStatus(status: Stripe.Subscription['status']): import('../../../../lib/billing/providers/razorpay/status').NormalizedStatus {
+  switch (status) {
+    case 'active':
+    case 'trialing':
+      return 'active';
+    case 'past_due':
+    case 'unpaid':
+      return 'past_due';
+    case 'canceled':
+      return 'canceled';
+    case 'incomplete':
+    case 'incomplete_expired':
+    default:
+      return 'incomplete';
+  }
 }
 
 // Unused-import shim. `Tier` is referenced in type-only positions through
