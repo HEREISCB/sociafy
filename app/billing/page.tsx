@@ -6,6 +6,21 @@ import { useSearchParams } from 'next/navigation';
 import { Sidebar, Topbar } from '../../components/shell';
 import { Icon } from '../../components/icons';
 import { apiPost, useApi } from '../../lib/ui/fetcher';
+import { openRazorpayModal } from '../../components/billing/razorpay-checkout';
+
+type CheckoutHandoff =
+  | { kind: 'redirect'; url: string }
+  | {
+      kind: 'razorpay_modal';
+      keyId: string;
+      subscriptionId?: string;
+      orderId?: string;
+      amountMinor: number;
+      currency: 'INR';
+      description: string;
+      prefill: { email?: string; name?: string };
+      notes: Record<string, string>;
+    };
 
 type Page = 'dashboard' | 'compose' | 'agent' | 'calendar' | 'connections' | 'onboarding';
 
@@ -17,17 +32,25 @@ type BillingPayload = {
   subscriptionStatus: string | null;
   subscriptionCurrentPeriodEnd: string | null;
   stripeCustomerId: string | null;
+  razorpayCustomerId: string | null;
   hasActiveSubscription: boolean;
   billingConfigured: boolean;
+  currency: 'INR' | 'USD';
+  provider: 'razorpay' | 'stripe' | null;
+  isIndia: boolean;
+  canSwitchProvider: boolean;
+  pendingTierChange: { toTier: 'starter' | 'pro' | 'business'; at: string | null } | null;
   tiers: Array<{
     tier: 'starter' | 'pro' | 'business';
     label: string;
     priceMonthly: string;
-    tagline: string;
+    amountMinor: number;
     credits: number;
     isCurrent: boolean;
   }>;
 };
+
+const TIER_RANK: Record<BillingPayload['currentTier'], number> = { starter: 0, pro: 1, business: 2 };
 
 const TIER_PERKS: Record<BillingPayload['currentTier'], string[]> = {
   starter: [
@@ -83,18 +106,51 @@ function BillingPageInner() {
     }
   }, [params, mutate]);
 
+  const dispatchHandoff = async (handoff: CheckoutHandoff) => {
+    if (handoff.kind === 'redirect') {
+      window.location.href = handoff.url;
+      return;
+    }
+    await openRazorpayModal(handoff, {
+      onDismiss: () => setToast('Checkout canceled — no changes to your plan.'),
+    });
+  };
+
   const startCheckout = async (tier: 'starter' | 'pro' | 'business') => {
     setBusy(tier);
     try {
-      const r = await apiPost<{ url: string }>('/api/billing/checkout', { tier });
-      if (r.url) window.location.href = r.url;
+      const handoff = await apiPost<CheckoutHandoff>('/api/billing/checkout', { tier });
+      await dispatchHandoff(handoff);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg.includes('503')) {
-        setToast('Billing isn\'t configured yet — Stripe keys missing in .env.local.');
+        setToast('Billing isn\'t configured yet — Razorpay keys missing in .env.local.');
       } else {
         setToast(`Checkout failed: ${msg.slice(0, 160)}`);
       }
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const changeTier = async (toTier: 'starter' | 'pro' | 'business') => {
+    setBusy(toTier);
+    try {
+      const result = await apiPost<{ kind: 'immediate' | 'scheduled'; effectiveAt: string; handoff?: CheckoutHandoff }>(
+        '/api/billing/change-tier',
+        { toTier },
+      );
+      if (result.kind === 'immediate' && result.handoff) {
+        await dispatchHandoff(result.handoff);
+      } else if (result.kind === 'scheduled') {
+        setToast(`Plan will switch to ${toTier} on ${new Date(result.effectiveAt).toLocaleDateString()}.`);
+        await mutate();
+      } else {
+        setToast('Plan switched.');
+        await mutate();
+      }
+    } catch (e) {
+      setToast(`Couldn't switch tier: ${e instanceof Error ? e.message.slice(0, 160) : String(e)}`);
     } finally {
       setBusy(null);
     }
@@ -139,8 +195,8 @@ function BillingPageInner() {
             <div className="insufficient-credits-banner" style={{ background: '#fff8eb', borderColor: '#f0d68a' }}>
               <div className="icon" style={{ background: '#fbe9c8', color: '#6b4408' }}>!</div>
               <div className="copy">
-                <strong>Stripe isn&apos;t configured yet.</strong>
-                <span className="muted"> Add STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, and the three STRIPE_PRICE_* env vars to .env.local. Until then, upgrades just show this page.</span>
+                <strong>Razorpay isn&apos;t configured yet.</strong>
+                <span className="muted"> Add RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, RAZORPAY_WEBHOOK_SECRET, and the three RAZORPAY_PLAN_* env vars to .env.local. Until then, upgrades just show this page.</span>
               </div>
             </div>
           )}
@@ -176,6 +232,61 @@ function BillingPageInner() {
               </div>
             </section>
 
+            {data?.pendingTierChange && (
+              <div className="insufficient-credits-banner" style={{ background: '#eef6ff', borderColor: '#bcd4f0' }}>
+                <div className="icon" style={{ background: '#cfe3fb', color: '#264b7a' }}>i</div>
+                <div className="copy" style={{ flex: 1 }}>
+                  <strong>Switches to {data.pendingTierChange.toTier} on {data.pendingTierChange.at ? new Date(data.pendingTierChange.at).toLocaleDateString() : 'cycle end'}.</strong>
+                  <span className="muted"> Credits from your current tier remain usable until then.</span>
+                </div>
+                <button className="btn ghost" onClick={() => {}} disabled={busy === 'clear-pending'}>
+                  {busy === 'clear-pending' ? '…' : 'Cancel switch'}
+                </button>
+              </div>
+            )}
+
+            {data && data.canSwitchProvider && (
+              <div className="billing-currency-banner" style={{
+                padding: '10px 14px',
+                background: 'var(--accent-soft)',
+                border: '1px solid var(--border)',
+                borderRadius: 10,
+                marginBottom: 16,
+                fontSize: 13,
+              }}>
+                {data.currency === 'INR' ? (
+                  <>Pay in <strong>₹ INR via Razorpay</strong>. USD billing coming soon.</>
+                ) : (
+                  <>USD billing via Stripe — <em>coming soon</em>.{' '}
+                    <button
+                      className="btn ghost"
+                      style={{ marginLeft: 8 }}
+                      onClick={async () => {
+                        try {
+                          await apiPost('/api/billing/preferences', { currency: 'INR' });
+                          await mutate();
+                        } catch (e) {
+                          setToast(`Couldn't switch currency: ${e instanceof Error ? e.message : String(e)}`);
+                        }
+                      }}
+                    >Pay in ₹ INR via Razorpay instead</button>
+                  </>
+                )}
+              </div>
+            )}
+            {data && !data.canSwitchProvider && (
+              <div className="billing-currency-banner" style={{
+                padding: '10px 14px',
+                background: 'transparent',
+                borderRadius: 10,
+                marginBottom: 16,
+                fontSize: 12,
+                color: 'var(--muted)',
+              }}>
+                Billing in <strong>{data.currency === 'INR' ? '₹ INR via Razorpay' : '$ USD via Stripe'}</strong> · cancel to change
+              </div>
+            )}
+
             <section className="billing-tiers">
               <h2 className="billing-section-head">Switch plan</h2>
               <div className="billing-tier-grid">
@@ -184,7 +295,6 @@ function BillingPageInner() {
                     {t.isCurrent && <div className="current-badge mono">Current</div>}
                     <div className="tier-label">{t.label}</div>
                     <div className="tier-price">{t.priceMonthly}<span className="per">/mo</span></div>
-                    <div className="tier-tagline">{t.tagline}</div>
                     <ul className="tier-perks">
                       {TIER_PERKS[t.tier].map((perk) => (
                         <li key={perk}>{perk}</li>
@@ -194,6 +304,22 @@ function BillingPageInner() {
                       <button className="btn" disabled style={{ width: '100%', justifyContent: 'center' }}>
                         <Icon name="check" size={12} /> Current plan
                       </button>
+                    ) : data?.currency === 'USD' ? (
+                      <button className="btn" disabled style={{ width: '100%', justifyContent: 'center' }}>
+                        USD billing coming soon
+                      </button>
+                    ) : data?.hasActiveSubscription ? (
+                      <button
+                        className="btn primary"
+                        style={{ width: '100%', justifyContent: 'center' }}
+                        onClick={() => changeTier(t.tier)}
+                        disabled={busy === t.tier}
+                      >
+                        {busy === t.tier ? 'Working…' :
+                          TIER_RANK[t.tier] > TIER_RANK[data!.currentTier]
+                            ? `Upgrade to ${t.label}`
+                            : `Downgrade to ${t.label}`}
+                      </button>
                     ) : (
                       <button
                         className="btn primary"
@@ -201,7 +327,7 @@ function BillingPageInner() {
                         onClick={() => startCheckout(t.tier)}
                         disabled={busy === t.tier}
                       >
-                        {busy === t.tier ? 'Redirecting…' : `Upgrade to ${t.label}`}
+                        {busy === t.tier ? 'Redirecting…' : `Subscribe to ${t.label}`}
                       </button>
                     )}
                   </div>
@@ -210,7 +336,7 @@ function BillingPageInner() {
             </section>
 
             <section className="billing-footnote mono">
-              All prices in USD. Cancel anytime — credits remain usable until your renewal date. Billing handled by Stripe. Top-up packs ($15 per 1,000 credits) coming soon.
+              All prices in {data?.currency === 'INR' ? 'INR' : 'USD'}. Cancel anytime — credits remain usable until your renewal date. Billing handled by {data?.provider === 'razorpay' ? 'Razorpay' : 'Stripe'}. Top-up packs coming soon.
             </section>
           </div>
         </div>
