@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 const subsCreate = vi.fn();
+const subsCancel = vi.fn();
 const ordersCreate = vi.fn();
 
 // Stable object returned by every getRazorpay() call so mutations persist.
 const _mockRzp = {
-  subscriptions: { create: subsCreate },
+  subscriptions: { create: subsCreate, cancel: subsCancel },
   orders: { create: ordersCreate },
 };
 
@@ -28,6 +29,30 @@ vi.mock('../../../env', () => ({
     },
   },
 }));
+
+const dbState = {
+  profile: {
+    razorpaySubscriptionId: null as string | null,
+    subscriptionCurrentPeriodEnd: null as Date | null,
+  },
+};
+
+vi.mock('../../../db', () => ({
+  db: () => ({
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: () => Promise.resolve([{
+            razorpaySubscriptionId: dbState.profile.razorpaySubscriptionId,
+            subscriptionCurrentPeriodEnd: dbState.profile.subscriptionCurrentPeriodEnd,
+          }]),
+        }),
+      }),
+    }),
+  }),
+}));
+
+vi.mock('drizzle-orm', () => ({ eq: (_c: unknown, v: string) => ({ __whereId: v }) }));
 
 import { razorpayProvider } from './index';
 
@@ -83,5 +108,28 @@ describe('razorpayProvider.startTopUp', () => {
       amountMinor: 449700,
       currency: 'INR',
     });
+  });
+});
+
+describe('razorpayProvider.cancelSubscription', () => {
+  beforeEach(() => {
+    subsCancel.mockReset();
+    dbState.profile = { razorpaySubscriptionId: null, subscriptionCurrentPeriodEnd: null };
+  });
+
+  it('throws when there is no active razorpay subscription', async () => {
+    await expect(razorpayProvider().cancelSubscription({ userId: 'u1' }))
+      .rejects.toThrow(/no active razorpay subscription/);
+  });
+
+  it('cancels at cycle end and returns the period_end', async () => {
+    const periodEnd = new Date('2026-06-01T00:00:00Z');
+    dbState.profile = { razorpaySubscriptionId: 'sub_x', subscriptionCurrentPeriodEnd: periodEnd };
+    subsCancel.mockResolvedValue({ id: 'sub_x', status: 'cancelled' });
+
+    const result = await razorpayProvider().cancelSubscription({ userId: 'u1' });
+
+    expect(subsCancel).toHaveBeenCalledWith('sub_x', true);
+    expect(result).toEqual({ periodEnd });
   });
 });

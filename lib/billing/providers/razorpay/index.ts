@@ -5,7 +5,10 @@
  * via Razorpay's Standard Checkout JS.
  */
 
+import { eq } from 'drizzle-orm';
 import type { Tier } from '../../../db/schema';
+import { profiles } from '../../../db/schema';
+import { db } from '../../../db';
 import { TIER_PRICING, TOPUP_PRICING } from '../../pricing';
 import type { BillingProvider, CheckoutHandoff, TierChangeResult } from '../../provider';
 import { env } from '../../../env';
@@ -72,8 +75,22 @@ class RazorpayBillingProvider implements BillingProvider {
     };
   }
 
-  async cancelSubscription(_args: { userId: string }): Promise<{ periodEnd: Date | null }> {
-    throw new Error('not implemented in Task 13 — see Task 15');
+  async cancelSubscription({ userId }: { userId: string }): Promise<{ periodEnd: Date | null }> {
+    const [row] = await db()
+      .select({
+        razorpaySubscriptionId: profiles.razorpaySubscriptionId,
+        subscriptionCurrentPeriodEnd: profiles.subscriptionCurrentPeriodEnd,
+      })
+      .from(profiles)
+      .where(eq(profiles.id, userId))
+      .limit(1);
+
+    const subId = row?.razorpaySubscriptionId;
+    if (!subId) throw new Error('no active razorpay subscription');
+
+    // cancel_at_cycle_end=true → user keeps credits until period_end.
+    await getRazorpay().subscriptions.cancel(subId, true);
+    return { periodEnd: row.subscriptionCurrentPeriodEnd ?? null };
   }
 
   async changeTier(_args: { userId: string; toTier: Tier }): Promise<TierChangeResult> {
