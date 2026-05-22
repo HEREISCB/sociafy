@@ -89,6 +89,8 @@ function BillingPageInner() {
   const params = useSearchParams();
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [topupOpen, setTopupOpen] = useState(false);
+  const [topupBusy, setTopupBusy] = useState(false);
 
   // Surface checkout return state from query params.
   useEffect(() => {
@@ -156,6 +158,19 @@ function BillingPageInner() {
     }
   };
 
+  const buyTopUp = async (credits: number) => {
+    setTopupBusy(true);
+    try {
+      const handoff = await apiPost<CheckoutHandoff>('/api/billing/topup', { credits });
+      setTopupOpen(false);
+      await dispatchHandoff(handoff);
+    } catch (e) {
+      setToast(`Top-up failed: ${e instanceof Error ? e.message.slice(0, 160) : String(e)}`);
+    } finally {
+      setTopupBusy(false);
+    }
+  };
+
   const cycleEnd = data?.subscriptionCurrentPeriodEnd ? new Date(data.subscriptionCurrentPeriodEnd) : null;
   const daysLeft = cycleEnd ? Math.max(0, Math.ceil((cycleEnd.getTime() - Date.now()) / (24 * 60 * 60 * 1000))) : null;
   const pct = data && data.monthlyAllocation > 0
@@ -219,6 +234,14 @@ function BillingPageInner() {
                     <div>No active subscription</div>
                   )}
                 </div>
+              </div>
+              <div style={{ marginTop: 12 }}>
+                <button className="btn" onClick={() => setTopupOpen(true)} disabled={!data?.hasActiveSubscription}>
+                  <span aria-hidden style={{ marginRight: 4 }}>+</span> Top up credits
+                </button>
+                {!data?.hasActiveSubscription && (
+                  <span className="muted" style={{ marginLeft: 8, fontSize: 12 }}>Subscribe first to enable top-ups.</span>
+                )}
               </div>
               <div className="billing-bar">
                 <div className="fill" style={{ width: `${pct}%` }} />
@@ -341,6 +364,47 @@ function BillingPageInner() {
           </div>
         </div>
       </div>
+      {topupOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setTopupOpen(false)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'var(--surface)', borderRadius: 12, padding: 20,
+              width: 'min(420px, 92vw)', boxShadow: '0 20px 60px rgba(0,0,0,.3)',
+            }}
+          >
+            <h3 style={{ marginTop: 0 }}>Top up credits</h3>
+            <p className="muted" style={{ fontSize: 13 }}>
+              {data?.currency === 'INR' ? '₹1,499' : '$15'} per 1,000 credits. Charged once.
+            </p>
+            <div style={{ display: 'grid', gap: 8 }}>
+              {[1000, 2000, 5000].map((n) => (
+                <button
+                  key={n}
+                  className="btn primary"
+                  style={{ justifyContent: 'space-between' }}
+                  onClick={() => buyTopUp(n)}
+                  disabled={topupBusy}
+                >
+                  <span>{n.toLocaleString()} credits</span>
+                  <span className="mono">{data?.currency === 'INR' ? `₹${(1499 * (n / 1000)).toLocaleString()}` : `$${15 * (n / 1000)}`}</span>
+                </button>
+              ))}
+            </div>
+            <button className="btn ghost" style={{ marginTop: 12, width: '100%' }} onClick={() => setTopupOpen(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
