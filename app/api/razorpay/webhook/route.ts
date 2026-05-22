@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'node:crypto';
+import { eq } from 'drizzle-orm';
 import { env, isStubMode } from '../../../../lib/env';
 import { TIER_CREDITS, type Tier } from '../../../../lib/db/schema';
+import { profiles } from '../../../../lib/db/schema';
+import { db } from '../../../../lib/db';
 import { applySubscriptionState } from '../../../../lib/billing/state';
 import { grantIdempotent } from '../../../../lib/credits/ledger';
 import { normalizeRazorpayStatus, type RazorpaySubscriptionStatus } from '../../../../lib/billing/providers/razorpay/status';
+import { getRazorpay, razorpayPlanIdFor } from '../../../../lib/billing/providers/razorpay/client';
+import { deltaCredits } from '../../../../lib/billing/providers/razorpay/proration';
 
 export const runtime = 'nodejs';
 
@@ -171,10 +176,48 @@ async function handleSubCancelled(payload: Record<string, unknown>) {
 }
 
 async function handleSubCompleted(payload: Record<string, unknown>) {
-  // For pure cancels this is a no-op beyond marking canceled. The
-  // pending-tier-change handoff (downgrade) is wired in Task 18b that
-  // reads pending_tier_change_to on profile and creates the new sub.
-  // For Task 18 we just mirror state.
+  const sub = readSub(payload);
+  const userId = sub.notes?.sociafy_user_id;
+  if (!userId) return;
+
+  const [row] = await db()
+    .select({
+      pendingTierChangeTo: profiles.pendingTierChangeTo,
+      razorpayCustomerId: profiles.razorpayCustomerId,
+    })
+    .from(profiles)
+    .where(eq(profiles.id, userId))
+    .limit(1);
+
+  const pendingTo = row?.pendingTierChangeTo as Tier | null;
+  if (pendingTo && row?.razorpayCustomerId) {
+    const planId = razorpayPlanIdFor(pendingTo);
+    if (planId) {
+      const next = await getRazorpay().subscriptions.create({
+        plan_id: planId,
+        customer_id: row.razorpayCustomerId,
+        total_count: 120,
+        customer_notify: 1,
+        notes: { sociafy_user_id: userId, tier: pendingTo },
+      } as Parameters<ReturnType<typeof getRazorpay>['subscriptions']['create']>[0]);
+
+      await applySubscriptionState({
+        userId,
+        provider: 'razorpay',
+        status: 'incomplete',
+        tier: pendingTo,
+        periodEnd: null,
+        providerSubscriptionId: next.id,
+      });
+      await db()
+        .update(profiles)
+        .set({ pendingTierChangeTo: null, pendingTierChangeAt: null, updatedAt: new Date() })
+        .where(eq(profiles.id, userId));
+      return;
+    }
+  }
+
+  // No pending change → behave like cancel.
   await handleSubCancelled(payload);
 }
 
@@ -195,15 +238,23 @@ async function handleSubPastDue(payload: Record<string, unknown>) {
 async function handlePaymentCaptured(payload: Record<string, unknown>) {
   const payment = (payload.payment as { entity: {
     id: string;
-    notes?: { sociafy_user_id?: string; kind?: string; credits?: string; [k: string]: unknown };
+    notes?: {
+      sociafy_user_id?: string;
+      kind?: string;
+      credits?: string;
+      from_tier?: Tier;
+      to_tier?: Tier;
+      old_sub_id?: string;
+      [k: string]: unknown;
+    };
   } } | undefined)?.entity;
   if (!payment) return;
-  const userId = payment.notes?.sociafy_user_id;
-  const kind = payment.notes?.kind;
+  const notes = payment.notes ?? {};
+  const userId = notes.sociafy_user_id;
   if (!userId) return;
 
-  if (kind === 'topup') {
-    const credits = Number(payment.notes?.credits ?? '0');
+  if (notes.kind === 'topup') {
+    const credits = Number(notes.credits ?? '0');
     if (credits <= 0) return;
     await grantIdempotent({
       userId,
@@ -212,7 +263,48 @@ async function handlePaymentCaptured(payload: Record<string, unknown>) {
       source: `rzp_topup:${payment.id}`,
       meta: { reason: 'topup', paymentId: payment.id },
     });
+    return;
   }
-  // kind === 'upgrade_diff' handoff (cancel old sub + create new) is
-  // handled in Task 18b.
+
+  if (notes.kind === 'upgrade_diff' && notes.from_tier && notes.to_tier && notes.old_sub_id) {
+    const [row] = await db()
+      .select({ razorpayCustomerId: profiles.razorpayCustomerId })
+      .from(profiles)
+      .where(eq(profiles.id, userId))
+      .limit(1);
+    if (!row?.razorpayCustomerId) return;
+
+    const planId = razorpayPlanIdFor(notes.to_tier);
+    if (!planId) return;
+
+    try { await getRazorpay().subscriptions.cancel(notes.old_sub_id, false); } catch { /* okay */ }
+
+    const next = await getRazorpay().subscriptions.create({
+      plan_id: planId,
+      customer_id: row.razorpayCustomerId,
+      total_count: 120,
+      customer_notify: 1,
+      notes: { sociafy_user_id: userId, tier: notes.to_tier },
+    } as Parameters<ReturnType<typeof getRazorpay>['subscriptions']['create']>[0]);
+
+    await applySubscriptionState({
+      userId,
+      provider: 'razorpay',
+      status: 'active',
+      tier: notes.to_tier,
+      periodEnd: null,
+      providerSubscriptionId: next.id,
+    });
+
+    const delta = deltaCredits(notes.from_tier, notes.to_tier);
+    if (delta > 0) {
+      await grantIdempotent({
+        userId,
+        kind: 'monthly_grant',
+        credits: delta,
+        source: `rzp_upgrade:${payment.id}`,
+        meta: { reason: 'upgrade_delta', fromTier: notes.from_tier, toTier: notes.to_tier, paymentId: payment.id },
+      });
+    }
+  }
 }

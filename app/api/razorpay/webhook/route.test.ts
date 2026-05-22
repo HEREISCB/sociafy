@@ -2,16 +2,41 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import crypto from 'node:crypto';
 
 vi.mock('../../../../lib/env', () => ({
-  env: { razorpay: { webhookSecret: 'whsec_test' } },
+  env: { razorpay: { webhookSecret: 'whsec_test', planStarter: 'plan_s', planPro: 'plan_p', planBusiness: 'plan_b' } },
   isStubMode: { razorpay: () => false },
 }));
 
-const { applyState, grantIdempotent } = vi.hoisted(() => ({
-  applyState: vi.fn(),
-  grantIdempotent: vi.fn(),
-}));
+const { applyState, grantIdempotent, subsCreate, subsCancel, profileRow, updates } = vi.hoisted(() => {
+  return {
+    applyState: vi.fn(),
+    grantIdempotent: vi.fn(),
+    subsCreate: vi.fn(),
+    subsCancel: vi.fn(),
+    profileRow: { tier: undefined as string | undefined, razorpayCustomerId: undefined as string | undefined, pendingTierChangeTo: null as string | null },
+    updates: [] as Array<Record<string, unknown>>,
+  };
+});
+
 vi.mock('../../../../lib/billing/state', () => ({ applySubscriptionState: applyState }));
 vi.mock('../../../../lib/credits/ledger', () => ({ grantIdempotent }));
+
+vi.mock('../../../../lib/billing/providers/razorpay/client', () => ({
+  getRazorpay: () => ({ subscriptions: { create: subsCreate, cancel: subsCancel } }),
+  razorpayPlanIdFor: (tier: string) => ({ starter: 'plan_s', pro: 'plan_p', business: 'plan_b' }[tier]),
+}));
+
+vi.mock('../../../../lib/db', () => ({
+  db: () => ({
+    select: () => ({
+      from: () => ({ where: () => ({ limit: () => Promise.resolve([profileRow]) }) }),
+    }),
+    update: () => ({
+      set: (vals: Record<string, unknown>) => ({ where: () => { updates.push(vals); return Promise.resolve(); } }),
+    }),
+  }),
+}));
+
+vi.mock('drizzle-orm', () => ({ eq: (_c: unknown, v: string) => ({ __whereId: v }) }));
 
 import { POST } from './route';
 
@@ -105,5 +130,85 @@ describe('POST /api/razorpay/webhook', () => {
     expect(res.status).toBe(200);
     expect(applyState).not.toHaveBeenCalled();
     expect(grantIdempotent).not.toHaveBeenCalled();
+  });
+});
+
+describe('payment.captured with notes.kind=upgrade_diff', () => {
+  beforeEach(() => {
+    subsCreate.mockReset();
+    subsCancel.mockReset();
+    grantIdempotent.mockReset();
+    applyState.mockReset();
+    profileRow.razorpayCustomerId = 'cust_x';
+    profileRow.tier = 'starter';
+    profileRow.pendingTierChangeTo = null;
+    updates.length = 0;
+  });
+
+  it('cancels the old sub, creates a new sub on the target plan, and grants the delta', async () => {
+    subsCreate.mockResolvedValue({ id: 'sub_new', status: 'active', plan_id: 'plan_p' });
+    grantIdempotent.mockResolvedValue(true);
+
+    const body = JSON.stringify({
+      event: 'payment.captured',
+      payload: {
+        payment: { entity: {
+          id: 'pay_up1',
+          notes: {
+            sociafy_user_id: 'u1',
+            kind: 'upgrade_diff',
+            from_tier: 'starter',
+            to_tier: 'pro',
+            old_sub_id: 'sub_old',
+          },
+        } },
+      },
+    });
+
+    const res = await POST(makeReq(body, sign(body)));
+    expect(res.status).toBe(200);
+    expect(subsCancel).toHaveBeenCalledWith('sub_old', false);
+    expect(subsCreate).toHaveBeenCalledWith(expect.objectContaining({
+      plan_id: 'plan_p',
+      customer_id: 'cust_x',
+      notes: expect.objectContaining({ sociafy_user_id: 'u1', tier: 'pro' }),
+    }));
+    expect(grantIdempotent).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'monthly_grant',
+      credits: 4000,
+      source: 'rzp_upgrade:pay_up1',
+    }));
+  });
+});
+
+describe('subscription.completed with a pending downgrade', () => {
+  beforeEach(() => {
+    subsCreate.mockReset();
+    grantIdempotent.mockReset();
+    updates.length = 0;
+    profileRow.razorpayCustomerId = 'cust_x';
+    profileRow.pendingTierChangeTo = 'pro';
+  });
+
+  it('creates a new sub on the pending plan and clears the pending flag', async () => {
+    subsCreate.mockResolvedValue({ id: 'sub_next', status: 'active', plan_id: 'plan_p' });
+
+    const body = JSON.stringify({
+      event: 'subscription.completed',
+      payload: { subscription: { entity: {
+        id: 'sub_done', status: 'completed', plan_id: 'plan_b',
+        notes: { sociafy_user_id: 'u1', tier: 'business' },
+      } } },
+    });
+
+    const res = await POST(makeReq(body, sign(body)));
+    expect(res.status).toBe(200);
+    expect(subsCreate).toHaveBeenCalledWith(expect.objectContaining({
+      plan_id: 'plan_p',
+      customer_id: 'cust_x',
+      notes: expect.objectContaining({ sociafy_user_id: 'u1', tier: 'pro' }),
+    }));
+    const clearUpdate = updates.find((u) => u.pendingTierChangeTo === null);
+    expect(clearUpdate).toBeDefined();
   });
 });
