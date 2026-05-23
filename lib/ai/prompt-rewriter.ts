@@ -44,6 +44,10 @@ export type RewriteArgs = {
   target: RewriteTarget;
   /** Optional caption / post text the media should harmonize with. */
   caption?: string;
+  /** Brand context block rendered by `renderBrandBlock(ctx, 'media')`.
+   *  When present, the rewriter has access to who the user is — name,
+   *  bio, niches, website — so output feels on-brand instead of generic. */
+  brandBlock?: string;
 };
 
 export type RewriteResult = {
@@ -63,6 +67,8 @@ export async function rewritePromptForMedia(args: RewriteArgs): Promise<RewriteR
     `You are a prompt rewriter for the ${args.target} generation model.`,
     'Take the user\'s loose description and produce ONE polished prompt for the model.',
     'Return ONLY the prompt text — no explanations, no quotes, no labels, no markdown.',
+    args.brandBlock ? '\nUse the brand context below to keep the output on-brand. Do not name the brand in the visual unless the user asked for it — let the context steer subject, palette, vibe.\n' : '',
+    args.brandBlock ?? '',
     '',
     skill,
   ].filter(Boolean).join('\n');

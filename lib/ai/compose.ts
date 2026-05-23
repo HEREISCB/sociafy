@@ -38,6 +38,10 @@ export type ComposeArgs = {
   platforms?: Platform[];
   count?: number;
   agentInstructions?: string;
+  /** Pre-rendered brand context block from `renderBrandBlock(ctx, 'text')`.
+   *  When present, the model has access to company name, brand bio, website,
+   *  niches, and the voice/safety preferences — output stays on-brand. */
+  brandBlock?: string;
   /**
    * Opt-in. When true, give the model web_search + url fetch + read-past-posts
    * tools. Use for "compose with research" — costs a couple cents extra per call.
@@ -71,6 +75,7 @@ export async function generateCompose(args: ComposeArgs): Promise<ComposeResult>
     'You are a social media copy partner for a solo founder.',
     `Voice: ${voice}`,
     `Format: ${preset}`,
+    args.brandBlock ? `\n${args.brandBlock}\n` : '',
     args.agentInstructions
       ? `User\'s style guide:\n${args.agentInstructions}`
       : '',

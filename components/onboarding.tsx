@@ -1,10 +1,12 @@
 'use client';
 
-import React, { Fragment, useEffect, useState } from 'react';
+import React, { Fragment, useEffect, useMemo, useState } from 'react';
 import { Icon, Pglyph } from './icons';
 import { apiPatch, useApi } from '../lib/ui/fetcher';
 import { PLATFORM_TO_SHORT, SHORT_TO_PLATFORM } from '../lib/ui/platforms';
 import type { Platform } from '../lib/db/schema';
+import { estimateWeeklyBurn, weeksOfRunway, type ContentMixWeekly } from '../lib/credits/estimator';
+import type { CreditsPayload } from './credits';
 
 const ONBOARD_PLATFORMS: { id: Platform; short: string; name: string }[] = [
   { id: 'x', short: 'x', name: 'X (Twitter)' },
@@ -53,6 +55,22 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
   const [savingTopics, setSavingTopics] = useState(false);
   const [savingVoice, setSavingVoice] = useState(false);
   const [enabling, setEnabling] = useState(false);
+  // Brand profile — flows into every AI surface (image, video, text).
+  // The richer these fields are, the more on-brand the output. The same
+  // fields are editable later from Auto-pilot → Brand profile.
+  const [companyName, setCompanyName] = useState('');
+  const [brandBio, setBrandBio] = useState('');
+  const [website, setWebsite] = useState('');
+  const [savingBrand, setSavingBrand] = useState(false);
+
+  // Plan step state — what autopilot should actually do once enabled.
+  const [planPlatforms, setPlanPlatforms] = useState<Platform[]>([]);
+  const [planTextPerWeek, setPlanTextPerWeek] = useState<number>(3);
+  const [planImagePerWeek, setPlanImagePerWeek] = useState<number>(1);
+  const [planVideoPerWeek, setPlanVideoPerWeek] = useState<number>(0);
+  const [planAutoPublish, setPlanAutoPublish] = useState<boolean>(false);
+  const [planThreshold, setPlanThreshold] = useState<number>(90);
+  const [savingPlan, setSavingPlan] = useState(false);
 
   const addCustomNiche = () => {
     const v = customNiche.trim().toLowerCase().replace(/\s+/g, '-').slice(0, 40);
@@ -63,12 +81,62 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
   };
 
   const { data: accounts, mutate: refetchAccounts, unauth } = useApi<Account[]>('/api/accounts');
-  const { data: settings, mutate: refetchSettings } = useApi<{ niches: string[]; voiceTemplate: 'me' | 'punchy' | 'thoughtful' | 'data-led' }>('/api/agent/settings');
+  const { data: settings, mutate: refetchSettings } = useApi<{
+    niches: string[];
+    voiceTemplate: 'me' | 'punchy' | 'thoughtful' | 'data-led';
+    companyName: string | null;
+    brandBio: string | null;
+    website: string | null;
+    enabledPlatforms: Platform[];
+    postsPerWeekByContentType: ContentMixWeekly;
+    autoPublishThreshold: number;
+  }>('/api/agent/settings');
+  // Pulled into the Plan step's runway estimate.
+  const { data: credits } = useApi<CreditsPayload>('/api/credits');
 
   useEffect(() => {
     if (settings?.niches?.length) setTopics(settings.niches);
     if (settings?.voiceTemplate) setVoice(settings.voiceTemplate);
+    if (settings?.companyName) setCompanyName(settings.companyName);
+    if (settings?.brandBio) setBrandBio(settings.brandBio);
+    if (settings?.website) setWebsite(settings.website);
+    if (settings?.enabledPlatforms?.length) setPlanPlatforms(settings.enabledPlatforms);
+    if (settings?.postsPerWeekByContentType) {
+      setPlanTextPerWeek(settings.postsPerWeekByContentType.text ?? 3);
+      setPlanImagePerWeek(settings.postsPerWeekByContentType.image ?? 1);
+      setPlanVideoPerWeek(settings.postsPerWeekByContentType.video ?? 0);
+    }
+    if (typeof settings?.autoPublishThreshold === 'number') {
+      const t = settings.autoPublishThreshold;
+      setPlanAutoPublish(t <= 100);
+      setPlanThreshold(Math.min(99, Math.max(70, t <= 100 ? t : 90)));
+    }
   }, [settings]);
+
+  // First time we have connected accounts, pre-check them for autopilot.
+  useEffect(() => {
+    if (planPlatforms.length === 0 && accounts && accounts.length > 0) {
+      setPlanPlatforms(accounts.map((a) => a.platform));
+    }
+    // Intentionally only re-runs when accounts changes — we don't want to
+    // overwrite the user's selection if they uncheck something.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accounts]);
+
+  const estimate = useMemo(() => estimateWeeklyBurn({
+    platforms: planPlatforms,
+    cadencePerWeek: planTextPerWeek + planImagePerWeek + planVideoPerWeek,
+    postsPerWeekByContentType: {
+      text: planTextPerWeek,
+      image: planImagePerWeek,
+      video: planVideoPerWeek,
+    },
+    withResearch: false,
+  }), [planPlatforms, planTextPerWeek, planImagePerWeek, planVideoPerWeek]);
+
+  const runwayWeeks = credits ? weeksOfRunway(estimate.weekly, credits.balance) : -1;
+  const tierAllocation = credits?.monthlyAllocation ?? 0;
+  const fitsTier = tierAllocation > 0 && estimate.weekly * 4 <= tierAllocation;
 
   const connectedShorts = (accounts ?? []).map((a) => PLATFORM_TO_SHORT[a.platform]);
 
@@ -107,6 +175,51 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
     }
   };
 
+  const saveBrandAndContinue = async () => {
+    setSavingBrand(true);
+    try {
+      await apiPatch('/api/agent/settings', {
+        companyName: companyName.trim() || undefined,
+        brandBio: brandBio.trim() || undefined,
+        website: website.trim() || undefined,
+      });
+      await refetchSettings();
+      setStep(4);
+    } catch {
+      setStep(4);
+    } finally {
+      setSavingBrand(false);
+    }
+  };
+
+  const savePlanAndContinue = async () => {
+    setSavingPlan(true);
+    try {
+      // We don't yet split per-platform caps in the Plan step — that's a
+      // fine-tuning surface on the /agent page. For now we save the total
+      // cadence + enabledPlatforms + per-type mix + auto-publish setting.
+      const totalPerWeek = Math.max(1, planTextPerWeek + planImagePerWeek + planVideoPerWeek);
+      await apiPatch('/api/agent/settings', {
+        enabledPlatforms: planPlatforms,
+        cadencePerWeek: totalPerWeek,
+        postsPerWeekByContentType: {
+          text: planTextPerWeek,
+          image: planImagePerWeek,
+          video: planVideoPerWeek,
+        },
+        // 101 = drafts-only (unreachable score). Anything ≤ 100 means
+        // "auto-publish if the AI scores the draft above this threshold."
+        autoPublishThreshold: planAutoPublish ? planThreshold : 101,
+      });
+      await refetchSettings();
+      setStep(5);
+    } catch {
+      setStep(5);
+    } finally {
+      setSavingPlan(false);
+    }
+  };
+
   const finish = async () => {
     setEnabling(true);
     try {
@@ -122,7 +235,9 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
     { num: 1, label: 'Connect' },
     { num: 2, label: 'Niches' },
     { num: 3, label: 'Style' },
-    { num: 4, label: 'Ready' },
+    { num: 4, label: 'Brand' },
+    { num: 5, label: 'Plan' },
+    { num: 6, label: 'Ready' },
   ];
 
   return (
@@ -262,25 +377,199 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
 
         {step === 3 && (
           <>
+            <h1>Tell me about your <em>business</em>.</h1>
+            <p className="lede">
+              The richer this is, the more on-brand every image, video, and caption Sociafy generates. All three flow into the system prompt of every AI call. Editable later in Auto-pilot → Brand profile.
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 32 }}>
+              <div>
+                <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Company / brand name</div>
+                <input
+                  type="text"
+                  value={companyName}
+                  onChange={(e) => setCompanyName(e.target.value)}
+                  placeholder="Sociafy"
+                  style={{ width: '100%', padding: '12px 14px', border: '1px solid var(--line-2)', borderRadius: 10, fontSize: 14, background: 'var(--bg-elev)', color: 'var(--ink)', outline: 'none', fontFamily: 'inherit' }}
+                />
+              </div>
+              <div>
+                <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>What do you do? <span style={{ textTransform: 'none', color: 'var(--ink-4)', fontWeight: 400 }}>· Be specific. Audience, what you sell, what makes you different.</span></div>
+                <textarea
+                  value={brandBio}
+                  onChange={(e) => setBrandBio(e.target.value)}
+                  placeholder="We help solo founders turn one idea into on-brand posts, images, and Shorts across every platform. Voice is calm and direct — never hype-y, never corporate. We sell a $19/mo SaaS that automates the whole social media loop."
+                  style={{ width: '100%', minHeight: 160, padding: 14, border: '1px solid var(--line-2)', borderRadius: 10, fontSize: 13.5, background: 'var(--bg-elev)', color: 'var(--ink)', outline: 'none', fontFamily: 'inherit', resize: 'vertical', lineHeight: 1.55 }}
+                />
+                <div style={{ fontSize: 11, color: 'var(--ink-4)', fontFamily: 'var(--mono)', marginTop: 4, textAlign: 'right' }}>
+                  {brandBio.length} / 2000
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Website</div>
+                <input
+                  type="url"
+                  value={website}
+                  onChange={(e) => setWebsite(e.target.value)}
+                  placeholder="https://sociafy.app"
+                  style={{ width: '100%', padding: '12px 14px', border: '1px solid var(--line-2)', borderRadius: 10, fontSize: 14, background: 'var(--bg-elev)', color: 'var(--ink)', outline: 'none', fontFamily: 'var(--mono)' }}
+                />
+              </div>
+            </div>
+            <div style={{ padding: 14, background: 'var(--bg-elev)', border: '1px solid var(--line)', borderRadius: 10, fontSize: 12, color: 'var(--ink-3)', display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 32 }}>
+              <Icon name="folder" size={14} style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 2 }} />
+              <span><strong style={{ color: 'var(--ink)' }}>Coming soon:</strong> upload PDFs / docs about your business — pitch decks, brand guidelines, product specs — and Sociafy will use them as long-term context for every AI call.</span>
+            </div>
+          </>
+        )}
+
+        {step === 4 && (
+          <>
+            <h1>How should autopilot <em>behave</em>?</h1>
+            <p className="lede">
+              Where can it post, how often, and what mix? You can change this anytime from the Auto-pilot page. We recommend starting with drafts only — review each one before it goes live.
+            </p>
+
+            <div className="onboard-plan">
+              <section className="plan-card">
+                <div className="plan-card-head">
+                  <div>
+                    <h3 className="plan-card-title">1 · Platforms</h3>
+                    <div className="plan-card-sub">Pick the channels autopilot is allowed to post on. We pre-checked your connected accounts.</div>
+                  </div>
+                </div>
+                <div className="plan-platform-grid">
+                  {ONBOARD_PLATFORMS.map((p) => {
+                    const isConnected = connectedShorts.includes(p.short);
+                    const selected = planPlatforms.includes(p.id);
+                    return (
+                      <button
+                        type="button"
+                        key={p.id}
+                        className={`plan-platform ${selected ? 'on' : ''} ${!isConnected ? 'muted' : ''}`}
+                        onClick={() => {
+                          if (!isConnected) return;
+                          setPlanPlatforms((prev) => prev.includes(p.id) ? prev.filter((x) => x !== p.id) : [...prev, p.id]);
+                        }}
+                        title={isConnected ? p.name : `Connect ${p.name} first`}
+                      >
+                        <Pglyph p={p.short} size="lg" />
+                        <span className="plan-platform-name">{p.name}</span>
+                        {!isConnected && <span className="plan-platform-tag mono">connect first</span>}
+                        {isConnected && selected && <Icon name="check" size={12} />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+
+              <section className="plan-card">
+                <div className="plan-card-head">
+                  <div>
+                    <h3 className="plan-card-title">2 · Cadence + mix</h3>
+                    <div className="plan-card-sub">How many posts per week of each kind. Defaults are conservative — autopilot fans these out across your selected platforms.</div>
+                  </div>
+                  <div className="plan-total mono">{estimate.totalPosts} / week</div>
+                </div>
+                <div className="plan-sliders">
+                  <PlanSlider
+                    label="Text posts" sub="1 credit each · cheapest"
+                    value={planTextPerWeek} min={0} max={14}
+                    onChange={setPlanTextPerWeek}
+                  />
+                  <PlanSlider
+                    label="Image posts" sub="~5 credits each (caption + medium image)"
+                    value={planImagePerWeek} min={0} max={14}
+                    onChange={setPlanImagePerWeek}
+                  />
+                  <PlanSlider
+                    label="Video posts" sub="~181 credits each (caption + 8s 720p reel)"
+                    value={planVideoPerWeek} min={0} max={7}
+                    onChange={setPlanVideoPerWeek}
+                  />
+                </div>
+              </section>
+
+              <section className="plan-card">
+                <div className="plan-card-head">
+                  <div>
+                    <h3 className="plan-card-title">3 · Auto-publish?</h3>
+                    <div className="plan-card-sub">Recommended: drafts only — autopilot fills your inbox, you approve each one before it goes live.</div>
+                  </div>
+                </div>
+                <div className="plan-radio-group">
+                  <label className={`plan-radio ${!planAutoPublish ? 'on' : ''}`}>
+                    <input type="radio" checked={!planAutoPublish} onChange={() => setPlanAutoPublish(false)} />
+                    <div>
+                      <div className="plan-radio-title"><Icon name="edit" size={11} /> Draft &amp; review <span className="plan-radio-pill mono">recommended</span></div>
+                      <div className="plan-radio-sub">Autopilot drafts every post and parks it in your inbox. You hit publish.</div>
+                    </div>
+                  </label>
+                  <label className={`plan-radio ${planAutoPublish ? 'on' : ''}`}>
+                    <input type="radio" checked={planAutoPublish} onChange={() => setPlanAutoPublish(true)} />
+                    <div>
+                      <div className="plan-radio-title"><Icon name="bolt" size={11} /> Auto-publish high-confidence drafts</div>
+                      <div className="plan-radio-sub">When autopilot scores a draft above your threshold, it schedules without asking.</div>
+                      {planAutoPublish && (
+                        <div className="plan-threshold">
+                          <span className="mono">Threshold</span>
+                          <input
+                            type="range" min={70} max={99}
+                            value={planThreshold}
+                            onChange={(e) => setPlanThreshold(parseInt(e.target.value, 10))}
+                          />
+                          <span className="mono strong">≥ {planThreshold} / 100</span>
+                        </div>
+                      )}
+                    </div>
+                  </label>
+                </div>
+              </section>
+
+              <section className="plan-estimate">
+                <div className="plan-estimate-num mono">
+                  <span className="big">{estimate.weekly.toLocaleString()}</span>
+                  <span className="muted"> credits / week</span>
+                </div>
+                <div className="plan-estimate-meta mono">
+                  {credits ? (
+                    <>
+                      Balance {credits.balance.toLocaleString()} · {runwayWeeks > 0 ? `${runwayWeeks} weeks runway at this rate` : estimate.weekly === 0 ? 'no autopilot spend' : 'top up to keep autopilot running'}
+                      {tierAllocation > 0 && (
+                        <> · {fitsTier ? '✓ fits monthly tier' : <span className="danger">over your monthly allocation</span>}</>
+                      )}
+                    </>
+                  ) : '— loading balance —'}
+                </div>
+                <div className="plan-estimate-bars">
+                  <div className="bar-row"><span className="bar-label">Text</span><span className="bar-track"><span className="bar-fill text" style={{ width: `${barPct(estimate.byKind.text, estimate.weekly)}%` }} /></span><span className="bar-val mono">{estimate.byKind.text}</span></div>
+                  <div className="bar-row"><span className="bar-label">Image</span><span className="bar-track"><span className="bar-fill image" style={{ width: `${barPct(estimate.byKind.image, estimate.weekly)}%` }} /></span><span className="bar-val mono">{estimate.byKind.image}</span></div>
+                  <div className="bar-row"><span className="bar-label">Video</span><span className="bar-track"><span className="bar-fill video" style={{ width: `${barPct(estimate.byKind.video, estimate.weekly)}%` }} /></span><span className="bar-val mono">{estimate.byKind.video}</span></div>
+                </div>
+              </section>
+            </div>
+          </>
+        )}
+
+        {step === 5 && (
+          <>
             <h1>You&apos;re <em>ready</em>.</h1>
             <p className="lede">
-              I&apos;ll start watching trends across your niches and drafting on the cadence you set. Hit &quot;Enter Sociafy&quot; to enable autopilot — or skip and stay in co-pilot mode.
+              I&apos;ll start watching trends across your niches and drafting on the cadence you set. Hit &quot;Enter Sociafy&quot; to enable autopilot — you can pause it anytime from the topbar.
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 32 }}>
               {[
                 { label: `✓ Connected ${connectedShorts.length} platforms`, sub: connectedShorts.length ? connectedShorts.map((c) => ONBOARD_PLATFORMS.find((p) => p.short === c)?.name).join(' · ') : 'No accounts connected yet' },
                 { label: `✓ Watching ${topics.length} niches`, sub: topics.join(' · ') || 'None selected' },
                 { label: `✓ Style: ${VOICES.find((v) => v.id === voice)?.name ?? 'Custom'}`, sub: 'Tunable from the autopilot page' },
-                { label: '→ Drafting cadence: 4 / week', sub: 'Adjustable in autopilot settings' },
+                { label: `✓ Brand: ${companyName || 'Not set'}`, sub: brandBio ? `${brandBio.slice(0, 80)}${brandBio.length > 80 ? '…' : ''}` : 'Add a brand bio anytime in Auto-pilot' },
+                { label: `✓ Plan: ${estimate.totalPosts}/wk · ${planAutoPublish ? `auto ≥ ${planThreshold}` : 'drafts only'}`, sub: `~${estimate.weekly} credits / week · ${planPlatforms.length} platform${planPlatforms.length === 1 ? '' : 's'}` },
               ].map((row, i) => (
                 <div key={i} style={{ padding: '14px 16px', background: 'var(--bg-elev)', border: '1px solid var(--line)', borderRadius: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
                     <div style={{ fontSize: 13.5, fontWeight: 500, marginBottom: 2 }}>{row.label}</div>
                     <div className="mono" style={{ fontSize: 11, color: 'var(--ink-3)' }}>{row.sub}</div>
                   </div>
-                  {i < 3
-                    ? <Icon name="check" size={14} style={{ color: 'var(--good)' }} />
-                    : <Icon name="refresh" size={14} style={{ color: 'var(--accent)' }} />}
+                  <Icon name="check" size={14} style={{ color: 'var(--good)' }} />
                 </div>
               ))}
             </div>
@@ -291,19 +580,21 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
           <button className="btn ghost" onClick={() => step > 0 && setStep(step - 1)} disabled={step === 0}>
             <Icon name="chevron_left" size={12} /> Back
           </button>
-          <span className="onboard-skip mono">{step + 1} / 4</span>
+          <span className="onboard-skip mono">{step + 1} / 6</span>
           <button
             className="btn primary"
             onClick={async () => {
               if (step === 0) { await refetchAccounts(); setStep(1); }
               else if (step === 1) await saveTopicsAndContinue();
               else if (step === 2) await saveVoiceAndContinue();
+              else if (step === 3) await saveBrandAndContinue();
+              else if (step === 4) await savePlanAndContinue();
               else await finish();
             }}
-            disabled={savingTopics || savingVoice || enabling}
+            disabled={savingTopics || savingVoice || savingBrand || savingPlan || enabling}
           >
-            {step === 3 ? (enabling ? 'Enabling…' : 'Enter Sociafy') :
-              savingTopics || savingVoice ? 'Saving…' :
+            {step === 5 ? (enabling ? 'Enabling…' : 'Enter Sociafy') :
+              savingTopics || savingVoice || savingBrand || savingPlan ? 'Saving…' :
               'Continue'} <Icon name="arrow_right" size={12} />
           </button>
         </div>
@@ -311,6 +602,39 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
     </div>
   );
 };
+
+// Small helper used by the Plan step. Pulled out so the JSX above stays
+// readable and so the estimator's bar chart has a single bar-percentage
+// definition.
+function barPct(value: number, total: number): number {
+  if (total <= 0) return 0;
+  return Math.min(100, Math.max(0, Math.round((value / total) * 100)));
+}
+
+// Slider row for the Plan step's text/image/video cadence. Kept inline
+// here because it has zero reuse outside this file.
+const PlanSlider: React.FC<{
+  label: string;
+  sub: string;
+  value: number;
+  min: number;
+  max: number;
+  onChange: (v: number) => void;
+}> = ({ label, sub, value, min, max, onChange }) => (
+  <div className="plan-slider">
+    <div className="plan-slider-head">
+      <div>
+        <div className="plan-slider-label">{label}</div>
+        <div className="plan-slider-sub mono">{sub}</div>
+      </div>
+      <div className="plan-slider-val mono">{value}<span className="muted"> / wk</span></div>
+    </div>
+    <input
+      type="range" min={min} max={max} value={value}
+      onChange={(e) => onChange(parseInt(e.target.value, 10))}
+    />
+  </div>
+);
 
 export default Onboarding;
 

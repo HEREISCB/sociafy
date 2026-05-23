@@ -347,8 +347,19 @@ export const instagramAdapter: PlatformAdapter = {
     }
     const container = (await containerResp.json()) as { id: string };
 
-    // Step 2: publish. Short clips and images are usually FINISHED immediately;
-    // longer reels may need polling — TODO when we hit a case in prod.
+    // Step 2: Instagram processes containers asynchronously. Publishing
+    // before status_code=FINISHED yields "Media ID is not available" (#9007,
+    // subcode 2207027). Reels can take 10–60s; we poll up to 90s.
+    const ready = await waitForIgContainerFinished({ containerId: container.id, token });
+    if (!ready.ok) {
+      throw new PlatformError(
+        'instagram_container_not_ready',
+        408,
+        `Container ${container.id} stuck in ${ready.lastStatus ?? 'unknown'} after ${ready.attempts} polls. ${ready.error ?? ''}`,
+      );
+    }
+
+    // Step 3: publish the now-FINISHED container.
     const publishResp = await fetch(`${IG_GRAPH}/${igUserId}/media_publish`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -365,3 +376,43 @@ export const instagramAdapter: PlatformAdapter = {
     };
   },
 };
+
+/**
+ * Poll an Instagram media container until status_code === 'FINISHED' or a
+ * terminal state. Required before /media_publish — calling publish on a
+ * still-processing container yields "Media ID is not available" (#9007).
+ *
+ * Backs off slowly (1.5s → 4s) and gives up at ~90s. Returns enough state
+ * for the caller to surface a useful error if Instagram wedges.
+ */
+async function waitForIgContainerFinished(args: { containerId: string; token: string }): Promise<{
+  ok: boolean;
+  lastStatus?: string;
+  attempts: number;
+  error?: string;
+}> {
+  const start = Date.now();
+  const maxMs = 90_000;
+  let interval = 1_500;
+  let attempts = 0;
+  let lastStatus: string | undefined;
+  while (Date.now() - start < maxMs) {
+    await new Promise((r) => setTimeout(r, interval));
+    interval = Math.min(interval + 250, 4_000);
+    attempts++;
+    try {
+      const resp = await fetch(
+        `${IG_GRAPH}/${encodeURIComponent(args.containerId)}?fields=status_code,status&access_token=${encodeURIComponent(args.token)}`,
+      );
+      if (!resp.ok) continue;
+      const j = (await resp.json()) as { status_code?: string; status?: string };
+      lastStatus = j.status_code ?? j.status;
+      // status_code: EXPIRED, ERROR, FINISHED, IN_PROGRESS, PUBLISHED
+      if (lastStatus === 'FINISHED' || lastStatus === 'PUBLISHED') return { ok: true, attempts, lastStatus };
+      if (lastStatus === 'ERROR' || lastStatus === 'EXPIRED') return { ok: false, attempts, lastStatus };
+    } catch (e) {
+      lastStatus = e instanceof Error ? e.message : String(e);
+    }
+  }
+  return { ok: false, attempts, lastStatus, error: 'timeout' };
+}

@@ -1,6 +1,9 @@
+const PLACEHOLDER_RX = /^(placeholder|todo|changeme|change-me|your-.+-here|xxx+)$/i;
 const required = (key: string): string | null => {
   const v = process.env[key];
-  return v && v.length > 0 ? v : null;
+  if (!v || v.length === 0) return null;
+  if (PLACEHOLDER_RX.test(v.trim())) return null;
+  return v;
 };
 
 export const env = {
@@ -62,6 +65,23 @@ export const env = {
       clientSecret: required('GOOGLE_CLIENT_SECRET'),
     },
   },
+
+  stripe: {
+    secretKey: required('STRIPE_SECRET_KEY'),
+    webhookSecret: required('STRIPE_WEBHOOK_SECRET'),
+    priceStarter: required('STRIPE_PRICE_STARTER'),
+    pricePro: required('STRIPE_PRICE_PRO'),
+    priceBusiness: required('STRIPE_PRICE_BUSINESS'),
+  },
+
+  razorpay: {
+    keyId: required('RAZORPAY_KEY_ID'),
+    keySecret: required('RAZORPAY_KEY_SECRET'),
+    webhookSecret: required('RAZORPAY_WEBHOOK_SECRET'),
+    planStarter: required('RAZORPAY_PLAN_STARTER'),
+    planPro: required('RAZORPAY_PLAN_PRO'),
+    planBusiness: required('RAZORPAY_PLAN_BUSINESS'),
+  },
 } as const;
 
 export const isStubMode = {
@@ -70,6 +90,8 @@ export const isStubMode = {
   // AI runs on OpenAI now. Anthropic key kept as legacy fallback only.
   ai: () => !process.env.OPENAI_API_KEY && !env.anthropic.apiKey,
   r2: () => !env.r2.accountId || !env.r2.bucket,
+  stripe: () => !env.stripe.secretKey,
+  razorpay: () => !env.razorpay.keyId || !env.razorpay.keySecret,
   platform: (p: 'x' | 'linkedin' | 'instagram' | 'facebook' | 'tiktok' | 'youtube'): boolean => {
     switch (p) {
       case 'x': return !env.platforms.x.clientId;
@@ -81,3 +103,9 @@ export const isStubMode = {
     }
   },
 };
+
+/** Returns the country to use when the Vercel geo header is absent. Reads
+ *  DEV_FORCE_COUNTRY (e.g. 'IN' / 'US'). Returns null if unset. */
+export function devForcedCountry(): string | null {
+  return process.env.DEV_FORCE_COUNTRY?.toUpperCase() ?? null;
+}

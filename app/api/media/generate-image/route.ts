@@ -8,8 +8,11 @@ import { db } from '../../../../lib/db';
 import { mediaAssets } from '../../../../lib/db/schema';
 import { getOpenAI, MODELS } from '../../../../lib/ai/client';
 import { rewritePromptForMedia } from '../../../../lib/ai/prompt-rewriter';
+import { loadBrandContext, renderBrandBlock } from '../../../../lib/ai/brand-context';
 import { makeMediaKey, publicUrlFor, uploadBuffer } from '../../../../lib/storage/r2';
 import { isStubMode } from '../../../../lib/env';
+import { priceForImage } from '../../../../lib/credits/pricing';
+import { ensureBalance, charge, refund, partialRefund, insufficientCreditsResponse } from '../../../../lib/credits/ledger';
 
 /**
  * Direct https.request fallback to api.openai.com/v1/images/generations.
@@ -51,8 +54,19 @@ function generateImageDirect(args: {
           'User-Agent': 'sociafy/1.0',
           'Accept': 'application/json',
         },
-        agent: new https.Agent({ keepAlive: false }),
-        minVersion: 'TLSv1.2',
+        // TLS options MUST be on the Agent — when an explicit `agent` is
+        // passed, request-level TLS options are silently ignored because
+        // the socket is created by the agent's createConnection().
+        // Verified the agent-level form via `node -e https.request(...)`:
+        // TLS 1.3 trips "alert 40 handshake_failure" on this machine but
+        // TLS 1.2 + http/1.1 ALPN + IPv4 succeeds (same path curl uses).
+        agent: new https.Agent({
+          keepAlive: false,
+          minVersion: 'TLSv1.2',
+          maxVersion: 'TLSv1.2',
+          ALPNProtocols: ['http/1.1'],
+          family: 4,
+        }),
       },
       (res) => {
         const chunks: Buffer[] = [];
@@ -80,6 +94,42 @@ function generateImageDirect(args: {
 
 export const runtime = 'nodejs';
 export const maxDuration = 90;
+
+/**
+ * GET /api/media/generate-image — TLS diagnostic.
+ *
+ * Tests each upstream host (OpenAI + the user's R2 endpoint) with both
+ * Node's default TLS settings and our TLS 1.2 + http/1.1 + IPv4 cap.
+ * api.openai.com worked on default — but the S3 SDK uses its own request
+ * handler so R2 calls don't benefit from our OpenAI overrides, and that
+ * was the actual broken hop.
+ */
+export async function GET() {
+  const r2Host = `${process.env.R2_ACCOUNT_ID ?? 'unknown'}.r2.cloudflarestorage.com`;
+  const hosts = [
+    { host: 'api.openai.com', path: '/v1/models' },
+    { host: r2Host, path: '/' },
+  ];
+  const agents = [
+    { name: 'default', agent: new https.Agent({ keepAlive: false }) },
+    { name: 'tls12+alpn-http1+ipv4', agent: new https.Agent({ keepAlive: false, minVersion: 'TLSv1.2', maxVersion: 'TLSv1.2', ALPNProtocols: ['http/1.1'], family: 4 }) },
+  ];
+  type Row = { host: string; agent: string; ok: boolean; status?: number; error?: string };
+  const tasks: Array<Promise<Row>> = [];
+  for (const h of hosts) for (const a of agents) {
+    tasks.push(new Promise<Row>((resolve) => {
+      const req = https.request({ hostname: h.host, port: 443, path: h.path, method: 'GET', agent: a.agent }, (res) => {
+        res.resume();
+        resolve({ host: h.host, agent: a.name, ok: true, status: res.statusCode });
+      });
+      req.setTimeout(15_000, () => req.destroy(new Error('timeout')));
+      req.on('error', (e) => resolve({ host: h.host, agent: a.name, ok: false, error: `${(e as { code?: string }).code ?? ''} ${e.message}`.trim().slice(0, 200) }));
+      req.end();
+    }));
+  }
+  const results = await Promise.all(tasks);
+  return Response.json({ results }, { headers: { 'cache-control': 'no-store' } });
+}
 
 const bodySchema = z.object({
   prompt: z.string().min(2).max(2_000),
@@ -117,8 +167,16 @@ const NETWORK_RX = /EPROTO|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|ECONNREFUSED
 const isNetworkErr = (e: unknown) => NETWORK_RX.test(flattenErr(e));
 
 export async function POST(req: NextRequest) {
-  console.log('[generate-image] route invoked — v3 (full handler try/catch + module-level matcher)');
+  console.log('[generate-image] route invoked — v7 (step labels in errors)');
   return withUser(async (user) => {
+    let step: 'init' | 'rewrite' | 'generate' | 'r2_upload' | 'db_insert' = 'init';
+    // Hoisted so the outer catch can refund on uncaught error.
+    let chargeInfo: {
+      ledgerId: string;
+      action: import('../../../../lib/credits/pricing').CreditAction;
+      totalCost: number;
+      unitCredits: number;
+    } | null = null;
     try {
       const openai = getOpenAI();
       if (!openai) return jsonError('ai_not_configured', 503);
@@ -139,10 +197,40 @@ export async function POST(req: NextRequest) {
       if (!parsed.ok) return parsed.response;
       const { prompt, size, quality, count, caption, rawPrompt } = parsed.data;
 
-      // 1. Rewrite prompt (unless the caller opted out)
+      // Credit pre-flight. We reserve the FULL cost upfront, then refund
+      // any unfulfilled image after generation. This prevents a user from
+      // racing two large requests that together exceed balance.
+      const unit = priceForImage(size, quality);
+      const totalCost = unit.credits * count;
+      const pre = await ensureBalance(user.id, totalCost);
+      if (!pre.ok) {
+        console.log('[generate-image] insufficient credits:', pre);
+        return insufficientCreditsResponse({ balance: pre.balance, needed: pre.needed });
+      }
+      // Charge upfront with the per-image action key. We hold the ledgerId
+      // so we can issue a refund if generation fails partially or fully.
+      const charged = await charge({
+        userId: user.id,
+        action: unit.action,
+        credits: totalCost,
+        meta: { size, quality, count, prompt: prompt.slice(0, 200) },
+      });
+      chargeInfo = { ledgerId: charged.ledgerId, action: unit.action, totalCost, unitCredits: unit.credits };
+      console.log(`[generate-image] charged ${totalCost} credits (${unit.action} ×${count}), balance=${charged.balanceAfter}`);
+
+      // Step tracking — lets the outer catch report WHICH hop blew up.
+      step = 'rewrite';
+
+      // 1. Rewrite prompt (unless the caller opted out). Inject the
+      //    user's brand context so the rewriter knows WHO this is for
+      //    — without it, output is generic stock-photo-feeling.
+      console.log('[generate-image] step=rewrite');
+      const brandCtx = await loadBrandContext(user.id);
+      const brandBlock = renderBrandBlock(brandCtx, 'media');
       const rewrite = rawPrompt
         ? { prompt, enhanced: false }
-        : await rewritePromptForMedia({ userPrompt: prompt, target: 'gpt-image-1', caption });
+        : await rewritePromptForMedia({ userPrompt: prompt, target: 'gpt-image-1', caption, brandBlock });
+      console.log('[generate-image] step=rewrite done, enhanced=', rewrite.enhanced, 'brand=', !!brandBlock);
 
       const [w, h] = size.split('x').map((n) => parseInt(n, 10));
 
@@ -152,13 +240,19 @@ export async function POST(req: NextRequest) {
       const apiKey = process.env.OPENAI_API_KEY ?? '';
       const generateOnce = async () => {
         try {
-          return await openai.images.generate({
-            model: MODELS.image,
-            prompt: rewrite.prompt,
-            size,
-            quality,
-            n: 1,
-          });
+          // maxRetries: 0 — the SDK's default of 2 retries on a network
+          // error means a TLS-broken machine sits there for ~50s before
+          // our fallback kicks in. Fail fast, hand off to direct.
+          return await openai.images.generate(
+            {
+              model: MODELS.image,
+              prompt: rewrite.prompt,
+              size,
+              quality,
+              n: 1,
+            },
+            { maxRetries: 0 },
+          );
         } catch (e) {
           if (!isNetworkErr(e)) throw e;
           console.warn('[generate-image] SDK failed with network error, falling back to direct https.request:', flattenErr(e).slice(0, 200));
@@ -166,9 +260,13 @@ export async function POST(req: NextRequest) {
         }
       };
 
+      step = 'generate';
+      console.log('[generate-image] step=generate, count=', count);
       const generations = await Promise.allSettled(
         Array.from({ length: count }, () => generateOnce()),
       );
+      const okCount = generations.filter((g) => g.status === 'fulfilled').length;
+      console.log('[generate-image] step=generate done, fulfilled=', okCount, '/', generations.length);
 
       const firstReject = generations.find((g): g is PromiseRejectedResult => g.status === 'rejected');
       const networkFailureCount = generations.filter((g) => {
@@ -178,6 +276,11 @@ export async function POST(req: NextRequest) {
       if (networkFailureCount > 0 && networkFailureCount === generations.length) {
         const flat = flattenErr(firstReject?.reason);
         console.error('[generate-image] all generations failed with network error:', flat.slice(0, 500));
+        // Full refund — every image failed.
+        if (chargeInfo) {
+          await refund({ userId: user.id, ledgerId: chargeInfo.ledgerId, reason: 'upstream_network_error' });
+          chargeInfo = null;
+        }
         return jsonError('upstream_network_error', 502, {
           hint: 'Your machine couldn\'t complete a TLS handshake with the image provider — even after the HTTP/1.1 fallback. Most likely an antivirus is doing HTTPS inspection (Kaspersky, Bitdefender, ESET) or a corporate proxy is intercepting the connection. Disable HTTPS scanning for localhost or switch networks.',
           detail: flat.slice(0, 400),
@@ -191,8 +294,13 @@ export async function POST(req: NextRequest) {
         if (!b64) continue;
         const buf = Buffer.from(b64, 'base64');
         const key = makeMediaKey(user.id, `gen-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.png`);
+        step = 'r2_upload';
+        console.log('[generate-image] step=r2_upload, key=', key, 'bytes=', buf.length);
         await uploadBuffer({ key, body: buf, contentType: 'image/png' });
+        console.log('[generate-image] step=r2_upload done');
         const url = publicUrlFor(key);
+        step = 'db_insert';
+        console.log('[generate-image] step=db_insert');
         const [row] = await db()
           .insert(mediaAssets)
           .values({
@@ -206,33 +314,70 @@ export async function POST(req: NextRequest) {
             label: prompt.slice(0, 80),
           })
           .returning();
+        console.log('[generate-image] step=db_insert done');
         rows.push(row);
       }
 
       if (rows.length === 0) {
         const reason = firstReject?.reason as { message?: string; status?: number } | null;
         console.error('[generate-image] no image returned. first reject:', reason?.message);
+        if (chargeInfo) {
+          await refund({ userId: user.id, ledgerId: chargeInfo.ledgerId, reason: 'no_image_returned' });
+          chargeInfo = null;
+        }
         return jsonError('no_image_returned', 502, { detail: (reason?.message ?? '').slice(0, 400) });
+      }
+
+      // Partial refund: user paid for `count` images but only `rows.length`
+      // came back. Refund the cost of the missing ones.
+      let creditsCharged = chargeInfo?.totalCost ?? 0;
+      let balanceAfter: number | undefined;
+      if (chargeInfo && rows.length < count) {
+        const missing = count - rows.length;
+        const refundCredits = chargeInfo.unitCredits * missing;
+        const r = await partialRefund({
+          userId: user.id,
+          ledgerId: chargeInfo.ledgerId,
+          credits: refundCredits,
+          action: chargeInfo.action,
+          reason: `partial_failure: ${rows.length}/${count} succeeded`,
+        });
+        creditsCharged = chargeInfo.totalCost - refundCredits;
+        balanceAfter = r.balanceAfter;
+        console.log(`[generate-image] partial refund: ${refundCredits} credits returned, ${rows.length}/${count} succeeded`);
       }
 
       return {
         items: rows,
         rewrittenPrompt: rewrite.prompt,
         enhanced: rewrite.enhanced,
+        creditsCharged,
+        balanceAfter,
       };
     } catch (e) {
       // Defensive: ANYTHING that escapes the inner try (rewriter, R2 upload,
       // db insert, etc.) lands here. If it looks network-shaped we return the
       // friendly 502 so the user sees the hint, not a withUser 500.
       const flat = flattenErr(e);
+      const where = step;
+      // Always refund on uncaught error — user shouldn't pay for a failure.
+      if (chargeInfo) {
+        try {
+          await refund({ userId: user.id, ledgerId: chargeInfo.ledgerId, reason: `outer_catch:${where}` });
+        } catch (refundErr) {
+          console.warn('[generate-image] refund failed in outer catch:', refundErr);
+        }
+        chargeInfo = null;
+      }
       if (isNetworkErr(e)) {
-        console.error('[generate-image] outer catch network error:', flat.slice(0, 500));
+        console.error(`[generate-image] outer catch network error (step=${where}):`, flat.slice(0, 500));
         return jsonError('upstream_network_error', 502, {
-          hint: 'A TLS / network connection failed somewhere in the image-gen pipeline (OpenAI or your R2 storage). Most likely an antivirus is doing HTTPS inspection (Kaspersky, Bitdefender, ESET) or a corporate proxy is intercepting the connection. Disable HTTPS scanning for localhost or switch networks.',
+          hint: `A TLS / network connection failed during step "${where}". Most likely an antivirus is doing HTTPS inspection (Kaspersky, Bitdefender, ESET) or a corporate proxy is intercepting the connection. Disable HTTPS scanning for localhost or switch networks.`,
           detail: flat.slice(0, 400),
+          step: where,
         });
       }
-      console.error('[generate-image] outer catch unhandled error:', flat.slice(0, 500));
+      console.error(`[generate-image] outer catch unhandled error (step=${where}):`, flat.slice(0, 500));
       throw e; // let withUser see non-network errors
     }
   }, req);

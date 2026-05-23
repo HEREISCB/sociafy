@@ -1,8 +1,8 @@
 import { NextRequest } from 'next/server';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { withUser } from '../../../../lib/api';
 import { db } from '../../../../lib/db';
-import { agentSettings, activityLog } from '../../../../lib/db/schema';
+import { agentSettings, activityLog, profiles } from '../../../../lib/db/schema';
 import { agentSettingsUpdateSchema, parseBody } from '../../../../lib/validation';
 
 const DEFAULT_INSTRUCTIONS = `Match my voice. Don't use emojis unless I do. Avoid hyperbole and corporate jargon. Lead with a clear point of view. When sharing data, cite the source. Hold posts that mention competitors or unverified claims for review.`;
@@ -46,6 +46,12 @@ export async function PATCH(req: NextRequest) {
         .filter((n) => n.length > 0) as typeof patch.niches;
     }
     if (body.voiceTemplate !== undefined) patch.voiceTemplate = body.voiceTemplate;
+    if (body.companyName !== undefined) patch.companyName = body.companyName || null;
+    if (body.brandBio !== undefined) patch.brandBio = body.brandBio || null;
+    if (body.website !== undefined) patch.website = body.website || null;
+    if (body.enabledPlatforms !== undefined) patch.enabledPlatforms = body.enabledPlatforms;
+    if (body.postsPerWeekByPlatform !== undefined) patch.postsPerWeekByPlatform = body.postsPerWeekByPlatform;
+    if (body.postsPerWeekByContentType !== undefined) patch.postsPerWeekByContentType = body.postsPerWeekByContentType;
     const [row] = await db()
       .update(agentSettings)
       .set(patch)
@@ -60,6 +66,20 @@ export async function PATCH(req: NextRequest) {
         meta: {},
       });
     }
+
+    // Mark profile as onboarded on first save only (idempotent). Gates the
+    // /onboarding redirect — once set, /onboarding sends them to /dashboard.
+    await db()
+      .update(profiles)
+      .set({ onboardedAt: new Date() })
+      .where(and(eq(profiles.id, user.id), isNull(profiles.onboardedAt)));
+    // Cover the rare case where the profile row doesn't exist yet (Clerk
+    // webhook usually creates it on signup but it could lag).
+    await db()
+      .insert(profiles)
+      .values({ id: user.id, onboardedAt: new Date() })
+      .onConflictDoNothing({ target: profiles.id });
+
     return row;
   }, req);
 }

@@ -111,7 +111,24 @@ export const xAdapter: PlatformAdapter = {
       },
       body: JSON.stringify({ text: input.text }),
     });
-    if (!resp.ok) throw new PlatformError('x_publish_failed', resp.status, await resp.text());
+    if (!resp.ok) {
+      const body = await resp.text();
+      // X moved many endpoints to a credit/quota system in 2024. Free tier
+      // posts ARE limited (500/month app-wide cap) — and "free for 500 users"
+      // doesn't exist as a plan. A 402 with type=/2/problems/credits means
+      // either the app's monthly post quota is exhausted (Free / Basic) or
+      // the paid wallet is empty. Surface the actionable hint upstream so
+      // the published-modal can render a "Upgrade or wait until next month"
+      // path instead of a wall of JSON.
+      if (resp.status === 402 && /credits|CreditsDepleted|\/problems\/credits/i.test(body)) {
+        throw new PlatformError(
+          'x_credits_depleted',
+          402,
+          'X (Twitter) API credits exhausted for this app. The Free tier caps posts at ~500/month app-wide; the Basic tier ($200/mo) raises that. Check developer.x.com → Projects & Apps → Usage. Detail: ' + body.slice(0, 400),
+        );
+      }
+      throw new PlatformError('x_publish_failed', resp.status, body);
+    }
     const data = (await resp.json()) as { data: { id: string; text: string } };
     return {
       platformPostId: data.data.id,
