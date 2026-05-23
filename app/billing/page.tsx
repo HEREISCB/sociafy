@@ -401,7 +401,9 @@ function BillingPageInner() {
             </section>
 
             <section className="billing-footnote mono">
-              All prices in {data?.currency === 'INR' ? 'INR' : 'USD'}. Cancel anytime — credits remain usable until your renewal date. Billing handled by {data?.provider === 'razorpay' ? 'Razorpay' : 'Stripe'}. Top-up packs coming soon.
+              All prices in {data?.currency === 'INR' ? 'INR' : 'USD'}. Cancel anytime — credits remain usable until your renewal date. Billing handled by {data?.provider === 'razorpay' ? 'Razorpay' : 'Stripe'}. See our <a href="/legal/refund">Refund &amp; Cancellation Policy</a>.
+              <br />
+              Sociafy is a product of GNIX SEMICONDUCTORS PRIVATE LIMITED.
             </section>
           </div>
         </div>

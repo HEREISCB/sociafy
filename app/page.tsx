@@ -639,15 +639,16 @@ const Footer = () => (
           <h6>Legal</h6>
           <ul>
             <li><a href="#">Security</a></li>
-            <li><a href="#">Privacy</a></li>
-            <li><a href="#">Terms</a></li>
-            <li><a href="#">DPA</a></li>
+            <li><a href="/legal/privacy">Privacy</a></li>
+            <li><a href="/legal/terms">Terms</a></li>
+            <li><a href="/legal/refund">Refund &amp; Cancellation</a></li>
           </ul>
         </div>
       </div>
-      <div className="lp-foot-bottom">
-        <span>© 2026 Sociafy Labs · Made for founders, in Lisbon &amp; Brooklyn</span>
-        <span>v2.4.1 · all systems normal</span>
+      <div className="lp-foot-bottom" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
+        <span>Sociafy is a product of <strong>GNIX SEMICONDUCTORS PRIVATE LIMITED</strong>.</span>
+        <span>© 2026 GNIX SEMICONDUCTORS PRIVATE LIMITED · Made for founders, in Lisbon &amp; Brooklyn</span>
+        <span style={{ opacity: 0.7 }}>v2.4.1 · all systems normal</span>
       </div>
     </div>
   </footer>
