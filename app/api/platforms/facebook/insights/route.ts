@@ -4,8 +4,7 @@ import { withUser, jsonError } from '../../../../../lib/api';
 import { db } from '../../../../../lib/db';
 import { connectedAccounts, scheduledPosts } from '../../../../../lib/db/schema';
 import { decryptToken } from '../../../../../lib/crypto/tokens';
-
-const GRAPH = 'https://graph.facebook.com/v23.0';
+import { facebookAdapter } from '../../../../../lib/platforms/meta';
 
 // POST /api/platforms/facebook/insights
 // Fetches reactions + comments + shares for every published Facebook post the
@@ -36,7 +35,14 @@ export async function POST(_req: NextRequest) {
 
     if (posts.length === 0) return { synced: 0, posts: [] };
 
-    const token = decryptToken(acct.accessToken) ?? acct.accessToken;
+    const adapterAccount = {
+      id: acct.id,
+      accessToken: decryptToken(acct.accessToken) ?? acct.accessToken,
+      refreshToken: acct.refreshToken,
+      platformUserId: acct.platformUserId,
+      meta: acct.meta,
+    };
+
     const results: Array<{
       id: string;
       platformPostId: string;
@@ -50,20 +56,11 @@ export async function POST(_req: NextRequest) {
       posts.map(async (p) => {
         if (!p.platformPostId) return;
         try {
-          const url = `${GRAPH}/${p.platformPostId}?fields=reactions.summary(true),comments.summary(true),shares`;
-          const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-          if (!resp.ok) return;
-          const data = (await resp.json()) as {
-            reactions?: { summary?: { total_count?: number } };
-            comments?: { summary?: { total_count?: number } };
-            shares?: { count?: number };
-          };
-          const engagement = {
-            likes: data.reactions?.summary?.total_count ?? 0,
-            comments: data.comments?.summary?.total_count ?? 0,
-            shares: data.shares?.count ?? 0,
-            lastSyncedAt: new Date().toISOString(),
-          };
+          const counts = await facebookAdapter.fetchPostEngagement!({
+            account: adapterAccount,
+            platformPostId: p.platformPostId,
+          });
+          const engagement = { ...counts, lastSyncedAt: new Date().toISOString() };
           await db()
             .update(scheduledPosts)
             .set({ engagement, updatedAt: new Date() })

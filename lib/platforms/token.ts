@@ -51,12 +51,15 @@ export async function ensureFreshToken(acct: AccountRow): Promise<AccountRow> {
   if (!plain.refreshToken) return plain;
 
   const adapter = getAdapter(plain.platform as Platform);
-  // Each adapter picks its own refresh window. Long-lived tokens (Instagram
-  // 60d) refresh well before expiry; short-lived (X 2h, YouTube 1h) refresh
-  // at the last few minutes.
-  const horizon = adapter.refreshHorizonMs ?? DEFAULT_REFRESH_WINDOW_MS;
+  // Each adapter owns its refresh policy. Long-lived tokens (Instagram 60d)
+  // refresh well before expiry; short-lived (X 2h, YouTube 1h) wait until
+  // the last few minutes. Default when an adapter doesn't override: refresh
+  // when ≤ 5 min remain.
   const remaining = new Date(plain.tokenExpiresAt).getTime() - Date.now();
-  if (remaining > horizon) {
+  const needsRefresh = adapter.shouldRefresh
+    ? adapter.shouldRefresh(remaining)
+    : remaining <= DEFAULT_REFRESH_WINDOW_MS;
+  if (!needsRefresh) {
     // Migrate legacy plaintext row even without refresh.
     if (!wasEncrypted) {
       await db()

@@ -36,8 +36,8 @@ export async function GET(req: NextRequest) {
       .orderBy(desc(connectedAccounts.createdAt));
 
     // Opportunistic refresh: every time the Connections page loads we run
-    // each row through ensureFreshToken. Each adapter only actually swaps the
-    // token when remaining < its refreshHorizonMs, so this is cheap for
+    // each row through ensureFreshToken. Each adapter's shouldRefresh()
+    // decides whether to actually swap the token, so this is cheap for
     // tokens that don't need it. Net effect: even without an external cron
     // scheduler, tokens get refreshed when the user opens the dashboard.
     const refreshed = await Promise.all(rows.map((r) => ensureFreshToken(r).catch(() => r)));

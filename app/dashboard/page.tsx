@@ -155,7 +155,7 @@ export default function Home() {
           {page === 'dashboard' && <Dashboard onCompose={() => goCompose()} onEditDraft={(id) => goCompose(id)} />}
           {page === 'compose' && <Compose draftId={editingDraftId} onDone={goDashboard} />}
           {page === 'agent' && <AgentPage onEditDraft={(id) => goCompose(id)} />}
-          {page === 'calendar' && <CalendarPage />}
+          {page === 'calendar' && <CalendarPage onCompose={() => goCompose()} />}
           {page === 'connections' && <ConnectionsPage />}
         </div>
       </div>

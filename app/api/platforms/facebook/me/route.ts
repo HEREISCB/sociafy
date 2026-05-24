@@ -1,12 +1,12 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import { withUser, jsonError } from '../../../../../lib/api';
 import { db } from '../../../../../lib/db';
 import { connectedAccounts } from '../../../../../lib/db/schema';
 import { env } from '../../../../../lib/env';
 import { decryptToken } from '../../../../../lib/crypto/tokens';
-
-const GRAPH = 'https://graph.facebook.com/v23.0';
+import { facebookAdapter } from '../../../../../lib/platforms/meta';
+import { PlatformError } from '../../../../../lib/platforms/types';
 
 export async function GET(_req: NextRequest) {
   return withUser(async (user) => {
@@ -29,72 +29,45 @@ export async function GET(_req: NextRequest) {
       return jsonError('meta_not_configured', 503);
     }
 
-    const pageId = acct.platformUserId;
-    const token = decryptToken(acct.accessToken) ?? acct.accessToken;
-
-    // Pass the access token as an Authorization header rather than a query
-    // string parameter so it doesn't appear in proxy/CDN access logs.
-    const authHeaders = { Authorization: `Bearer ${token}` };
-    const [pageRes, postsRes] = await Promise.all([
-      fetch(`${GRAPH}/${pageId}?fields=id,name,username,fan_count,followers_count,picture.type(large),link,about,category`, { headers: authHeaders }),
-      fetch(`${GRAPH}/${pageId}/posts?fields=id,message,created_time,permalink_url,full_picture,reactions.summary(true),comments.summary(true),shares&limit=5`, { headers: authHeaders }),
-    ]);
-
-    if (!pageRes.ok) {
+    try {
+      const info = await facebookAdapter.fetchPageInfo!({
+        id: acct.id,
+        accessToken: decryptToken(acct.accessToken) ?? acct.accessToken,
+        refreshToken: acct.refreshToken,
+        platformUserId: acct.platformUserId,
+        meta: acct.meta,
+      });
+      return {
+        stub: false,
+        page: {
+          id: info.id,
+          name: info.name,
+          username: info.username ?? null,
+          about: info.about ?? null,
+          category: info.category ?? null,
+          link: info.link ?? null,
+          avatarUrl: info.avatarUrl ?? null,
+        },
+        followerCount: info.followerCount,
+        recentPosts: info.recentPosts.map((p) => ({
+          id: p.id,
+          message: p.message,
+          createdAt: p.createdAt,
+          url: p.url,
+          image: p.image,
+          likes: p.engagement.likes,
+          comments: p.engagement.comments,
+          shares: p.engagement.shares,
+        })),
+      };
+    } catch (e) {
       // Don't relay raw Graph error body to the client — it can include
       // internal error codes/subcodes useful for enumeration.
-      const detail = await pageRes.text();
-      console.error('[graph]', pageRes.status, detail);
-      return jsonError('graph_page_failed', pageRes.status);
+      if (e instanceof PlatformError) {
+        console.error('[graph]', e.status, e.detail);
+        return jsonError('graph_page_failed', e.status);
+      }
+      throw e;
     }
-
-    const page = (await pageRes.json()) as {
-      id: string;
-      name: string;
-      username?: string;
-      fan_count?: number;
-      followers_count?: number;
-      picture?: { data?: { url?: string } };
-      link?: string;
-      about?: string;
-      category?: string;
-    };
-
-    type RawPost = {
-      id: string;
-      message?: string;
-      created_time: string;
-      permalink_url?: string;
-      full_picture?: string;
-      reactions?: { summary?: { total_count?: number } };
-      comments?: { summary?: { total_count?: number } };
-      shares?: { count?: number };
-    };
-
-    const posts: RawPost[] = postsRes.ok ? ((await postsRes.json()).data ?? []) : [];
-
-    return {
-      stub: false,
-      page: {
-        id: page.id,
-        name: page.name,
-        username: page.username ?? null,
-        about: page.about ?? null,
-        category: page.category ?? null,
-        link: page.link ?? null,
-        avatarUrl: page.picture?.data?.url ?? null,
-      },
-      followerCount: page.followers_count ?? page.fan_count ?? 0,
-      recentPosts: posts.map((p) => ({
-        id: p.id,
-        message: p.message ?? '',
-        createdAt: p.created_time,
-        url: p.permalink_url ?? null,
-        image: p.full_picture ?? null,
-        likes: p.reactions?.summary?.total_count ?? 0,
-        comments: p.comments?.summary?.total_count ?? 0,
-        shares: p.shares?.count ?? 0,
-      })),
-    };
   });
 }

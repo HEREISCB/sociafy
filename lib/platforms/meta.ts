@@ -1,9 +1,23 @@
 import { env } from '../env';
-import type { PlatformAdapter, PublishInput, PublishResult } from './types';
+import type {
+  AdapterAccount,
+  PageInfo,
+  PlatformAdapter,
+  PostEngagement,
+  PublishInput,
+  PublishResult,
+  RecentPost,
+  WaitForPublishResult,
+} from './types';
 import { PlatformError } from './types';
 import { stubProfile, stubPublish } from './stub';
 
 const GRAPH = 'https://graph.facebook.com/v19.0';
+// Dashboard read endpoints (page + posts insights) use a newer Graph version
+// than the publish/auth flow. They were pinned independently before this
+// adapter existed; keeping them split avoids re-validating every read field
+// against a different version at the same time as the OAuth refactor.
+const GRAPH_READ = 'https://graph.facebook.com/v23.0';
 const AUTH_URL = 'https://www.facebook.com/v19.0/dialog/oauth';
 
 // Facebook adapter only handles Facebook Pages now. Instagram is on its own
@@ -167,6 +181,93 @@ export const facebookAdapter: PlatformAdapter = {
       raw: data,
     };
   },
+  async fetchPageInfo(account: AdapterAccount): Promise<PageInfo> {
+    if (!metaConfigured() || account.accessToken === 'stub') {
+      throw new PlatformError('facebook_stub', 503, 'Facebook is not configured');
+    }
+    const pageId = account.platformUserId;
+    const token = account.accessToken;
+    // Authorization header keeps the token out of proxy/CDN access logs.
+    const authHeaders = { Authorization: `Bearer ${token}` };
+    const [pageRes, postsRes] = await Promise.all([
+      fetch(`${GRAPH_READ}/${pageId}?fields=id,name,username,fan_count,followers_count,picture.type(large),link,about,category`, { headers: authHeaders }),
+      fetch(`${GRAPH_READ}/${pageId}/posts?fields=id,message,created_time,permalink_url,full_picture,reactions.summary(true),comments.summary(true),shares&limit=5`, { headers: authHeaders }),
+    ]);
+
+    if (!pageRes.ok) {
+      const detail = await pageRes.text();
+      throw new PlatformError('facebook_page_failed', pageRes.status, detail);
+    }
+
+    const page = (await pageRes.json()) as {
+      id: string;
+      name: string;
+      username?: string;
+      fan_count?: number;
+      followers_count?: number;
+      picture?: { data?: { url?: string } };
+      link?: string;
+      about?: string;
+      category?: string;
+    };
+
+    type RawPost = {
+      id: string;
+      message?: string;
+      created_time: string;
+      permalink_url?: string;
+      full_picture?: string;
+      reactions?: { summary?: { total_count?: number } };
+      comments?: { summary?: { total_count?: number } };
+      shares?: { count?: number };
+    };
+    const posts: RawPost[] = postsRes.ok ? ((await postsRes.json()).data ?? []) : [];
+
+    const recentPosts: RecentPost[] = posts.map((p) => ({
+      id: p.id,
+      message: p.message ?? '',
+      createdAt: p.created_time,
+      url: p.permalink_url ?? null,
+      image: p.full_picture ?? null,
+      engagement: {
+        likes: p.reactions?.summary?.total_count ?? 0,
+        comments: p.comments?.summary?.total_count ?? 0,
+        shares: p.shares?.count ?? 0,
+      },
+    }));
+
+    return {
+      id: page.id,
+      name: page.name,
+      username: page.username ?? null,
+      about: page.about ?? null,
+      category: page.category ?? null,
+      link: page.link ?? null,
+      avatarUrl: page.picture?.data?.url ?? null,
+      followerCount: page.followers_count ?? page.fan_count ?? 0,
+      recentPosts,
+    };
+  },
+  async fetchPostEngagement({ account, platformPostId }): Promise<PostEngagement> {
+    if (!metaConfigured() || account.accessToken === 'stub') {
+      return { likes: 0, comments: 0, shares: 0 };
+    }
+    const url = `${GRAPH_READ}/${platformPostId}?fields=reactions.summary(true),comments.summary(true),shares`;
+    const resp = await fetch(url, { headers: { Authorization: `Bearer ${account.accessToken}` } });
+    if (!resp.ok) {
+      throw new PlatformError('facebook_engagement_failed', resp.status, await resp.text());
+    }
+    const data = (await resp.json()) as {
+      reactions?: { summary?: { total_count?: number } };
+      comments?: { summary?: { total_count?: number } };
+      shares?: { count?: number };
+    };
+    return {
+      likes: data.reactions?.summary?.total_count ?? 0,
+      comments: data.comments?.summary?.total_count ?? 0,
+      shares: data.shares?.count ?? 0,
+    };
+  },
 };
 
 // ============================================================================
@@ -206,7 +307,7 @@ export const instagramAdapter: PlatformAdapter = {
   // Refresh at 14 days remaining out of 60. Leaves a ~46-day average window
   // for the cron to retry if any single run fails. Meta lets you refresh
   // any time after 24h from creation, so the early refresh is cheap.
-  refreshHorizonMs: 14 * 24 * 60 * 60 * 1000,
+  shouldRefresh: (remainingMs) => remainingMs <= 14 * 24 * 60 * 60 * 1000,
   buildAuthorizeUrl({ redirectUri, state }) {
     if (!instagramConfigured()) return `/oauth/instagram/callback?stub=1&state=${state}`;
     const params = new URLSearchParams({
@@ -349,8 +450,9 @@ export const instagramAdapter: PlatformAdapter = {
 
     // Step 2: Instagram processes containers asynchronously. Publishing
     // before status_code=FINISHED yields "Media ID is not available" (#9007,
-    // subcode 2207027). Reels can take 10–60s; we poll up to 90s.
-    const ready = await waitForIgContainerFinished({ containerId: container.id, token });
+    // subcode 2207027). Reels can take 10–60s; we poll up to 90s via the
+    // adapter's waitForPublish method so tests can stub it.
+    const ready = await instagramAdapter.waitForPublish!({ publishId: container.id, account: input.account });
     if (!ready.ok) {
       throw new PlatformError(
         'instagram_container_not_ready',
@@ -375,44 +477,38 @@ export const instagramAdapter: PlatformAdapter = {
       raw: data,
     };
   },
-};
-
-/**
- * Poll an Instagram media container until status_code === 'FINISHED' or a
- * terminal state. Required before /media_publish — calling publish on a
- * still-processing container yields "Media ID is not available" (#9007).
- *
- * Backs off slowly (1.5s → 4s) and gives up at ~90s. Returns enough state
- * for the caller to surface a useful error if Instagram wedges.
- */
-async function waitForIgContainerFinished(args: { containerId: string; token: string }): Promise<{
-  ok: boolean;
-  lastStatus?: string;
-  attempts: number;
-  error?: string;
-}> {
-  const start = Date.now();
-  const maxMs = 90_000;
-  let interval = 1_500;
-  let attempts = 0;
-  let lastStatus: string | undefined;
-  while (Date.now() - start < maxMs) {
-    await new Promise((r) => setTimeout(r, interval));
-    interval = Math.min(interval + 250, 4_000);
-    attempts++;
-    try {
-      const resp = await fetch(
-        `${IG_GRAPH}/${encodeURIComponent(args.containerId)}?fields=status_code,status&access_token=${encodeURIComponent(args.token)}`,
-      );
-      if (!resp.ok) continue;
-      const j = (await resp.json()) as { status_code?: string; status?: string };
-      lastStatus = j.status_code ?? j.status;
-      // status_code: EXPIRED, ERROR, FINISHED, IN_PROGRESS, PUBLISHED
-      if (lastStatus === 'FINISHED' || lastStatus === 'PUBLISHED') return { ok: true, attempts, lastStatus };
-      if (lastStatus === 'ERROR' || lastStatus === 'EXPIRED') return { ok: false, attempts, lastStatus };
-    } catch (e) {
-      lastStatus = e instanceof Error ? e.message : String(e);
+  /**
+   * Poll an Instagram media container until status_code === 'FINISHED' or a
+   * terminal state. Required before /media_publish — calling publish on a
+   * still-processing container yields "Media ID is not available" (#9007).
+   *
+   * Backs off slowly (1.5s → 4s) and gives up at ~90s. Returns enough state
+   * for the caller to surface a useful error if Instagram wedges.
+   */
+  async waitForPublish({ publishId, account }): Promise<WaitForPublishResult> {
+    const start = Date.now();
+    const maxMs = 90_000;
+    let interval = 1_500;
+    let attempts = 0;
+    let lastStatus: string | undefined;
+    while (Date.now() - start < maxMs) {
+      await new Promise((r) => setTimeout(r, interval));
+      interval = Math.min(interval + 250, 4_000);
+      attempts++;
+      try {
+        const resp = await fetch(
+          `${IG_GRAPH}/${encodeURIComponent(publishId)}?fields=status_code,status&access_token=${encodeURIComponent(account.accessToken)}`,
+        );
+        if (!resp.ok) continue;
+        const j = (await resp.json()) as { status_code?: string; status?: string };
+        lastStatus = j.status_code ?? j.status;
+        // status_code: EXPIRED, ERROR, FINISHED, IN_PROGRESS, PUBLISHED
+        if (lastStatus === 'FINISHED' || lastStatus === 'PUBLISHED') return { ok: true, attempts, lastStatus };
+        if (lastStatus === 'ERROR' || lastStatus === 'EXPIRED') return { ok: false, attempts, lastStatus };
+      } catch (e) {
+        lastStatus = e instanceof Error ? e.message : String(e);
+      }
     }
-  }
-  return { ok: false, attempts, lastStatus, error: 'timeout' };
-}
+    return { ok: false, attempts, lastStatus, error: 'timeout' };
+  },
+};

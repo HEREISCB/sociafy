@@ -51,7 +51,26 @@ function fmtRange(start: Date) {
   return `${sM} ${start.getDate()} – ${eM} ${end.getDate()}, ${start.getFullYear()}`;
 }
 
-const CalendarPage: React.FC = () => {
+/** Short timezone label for the calendar's leftmost header cell.
+ *  IANA names like "Asia/Kolkata" are too long for the 64px column and end
+ *  up looking like empty space; "GMT+5:30" / "IST" fit and read clearly. */
+function shortTzLabel(): string {
+  try {
+    const parts = new Intl.DateTimeFormat(undefined, { timeZoneName: 'short' }).formatToParts(new Date());
+    const tz = parts.find((p) => p.type === 'timeZoneName')?.value;
+    if (tz) return tz;
+  } catch { /* fall through */ }
+  return Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
+
+interface CalendarPageProps {
+  /** Optional handler for the "New post" button — when provided, the button
+   *  hands off to the compose surface. Falls back to a /dashboard?tab=compose
+   *  navigation when omitted so the calendar stays usable in isolation. */
+  onCompose?: () => void;
+}
+
+const CalendarPage: React.FC<CalendarPageProps> = ({ onCompose }) => {
   const slotH = 48;
   const [cursor, setCursor] = useState(() => startOfWeek(new Date()));
   const weekStart = cursor;
@@ -275,7 +294,15 @@ const CalendarPage: React.FC = () => {
           <span className="opt" style={{ fontSize: 11, padding: '3px 10px' }}>Month</span>
           <span className="opt" style={{ fontSize: 11, padding: '3px 10px' }}>List</span>
         </div>
-        <button className="btn sm primary"><Icon name="plus" size={11} /> New post</button>
+        <button
+          className="btn sm primary"
+          onClick={() => {
+            if (onCompose) onCompose();
+            else window.location.href = '/dashboard?tab=compose';
+          }}
+        >
+          <Icon name="plus" size={11} /> New post
+        </button>
       </div>
 
       {unauth && (
@@ -293,7 +320,13 @@ const CalendarPage: React.FC = () => {
 
       <div className="calendar">
         <div className="cal-head">
-          <div className="cell mono" style={{ fontSize: 10, padding: '14px 8px' }}>{Intl.DateTimeFormat().resolvedOptions().timeZone}</div>
+          <div
+            className="cell mono"
+            style={{ fontSize: 11, padding: '14px 4px', display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}
+            title={Intl.DateTimeFormat().resolvedOptions().timeZone}
+          >
+            {shortTzLabel()}
+          </div>
           {days.map((d, i) => (
             <div key={i} className={`cell ${d.today ? 'today' : ''}`}>
               <div>{d.name}</div>
