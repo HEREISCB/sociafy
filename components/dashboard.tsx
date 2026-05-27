@@ -366,9 +366,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose, onEditDraft }) => {
                   {editable && (
                     <button className="icon-btn" title="Edit" onClick={() => onEditDraft!(q.id)}><Icon name="edit" size={13} /></button>
                   )}
-                  {!editable && <button className="icon-btn" title="Edit"><Icon name="edit" size={13} /></button>}
-                  <button className="icon-btn" title="Reschedule"><Icon name="clock" size={13} /></button>
-                  <button className="icon-btn" title="More"><Icon name="more" size={13} /></button>
                 </div>
               </div>
             );

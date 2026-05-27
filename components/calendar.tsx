@@ -8,6 +8,7 @@ import type { Platform } from '../lib/db/schema';
 
 type QuickMode = 'text' | 'image' | 'video';
 type QuickSlot = { day: number; hour: number };
+type CalView = 'week' | 'list';
 
 const HOURS = ['7 AM', '8 AM', '9 AM', '10 AM', '11 AM', '12 PM', '1 PM', '2 PM', '3 PM', '4 PM', '5 PM', '6 PM', '7 PM', '8 PM'];
 
@@ -72,6 +73,7 @@ interface CalendarPageProps {
 
 const CalendarPage: React.FC<CalendarPageProps> = ({ onCompose }) => {
   const slotH = 48;
+  const [view, setView] = useState<CalView>('week');
   const [cursor, setCursor] = useState(() => startOfWeek(new Date()));
   const weekStart = cursor;
   const weekEnd = new Date(cursor);
@@ -290,9 +292,27 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onCompose }) => {
         <button className="btn sm" onClick={() => setCursor(startOfWeek(new Date()))}>Today</button>
         <div style={{ flex: 1 }} />
         <div className="mode-switch" style={{ padding: 2 }}>
-          <span className="opt active" style={{ fontSize: 11, padding: '3px 10px' }}>Week</span>
-          <span className="opt" style={{ fontSize: 11, padding: '3px 10px' }}>Month</span>
-          <span className="opt" style={{ fontSize: 11, padding: '3px 10px' }}>List</span>
+          <span
+            className={`opt ${view === 'week' ? 'active' : ''}`}
+            style={{ fontSize: 11, padding: '3px 10px', cursor: 'pointer' }}
+            onClick={() => setView('week')}
+          >
+            Week
+          </span>
+          <span
+            className="opt"
+            style={{ fontSize: 11, padding: '3px 10px', cursor: 'not-allowed', opacity: 0.5 }}
+            title="Month view coming soon"
+          >
+            Month
+          </span>
+          <span
+            className={`opt ${view === 'list' ? 'active' : ''}`}
+            style={{ fontSize: 11, padding: '3px 10px', cursor: 'pointer' }}
+            onClick={() => setView('list')}
+          >
+            List
+          </span>
         </div>
         <button
           className="btn sm primary"
@@ -318,6 +338,9 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onCompose }) => {
         <span className="chip"><span className="dot" style={{ background: 'var(--ink-4)' }} />Drafts ({counts.draft})</span>
       </div>
 
+      {view === 'list' ? (
+        <CalendarListView events={all} weekStart={weekStart} data={data ?? null} onSelect={setSelected} />
+      ) : (
       <div className="calendar">
         <div className="cal-head">
           <div
@@ -388,6 +411,7 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onCompose }) => {
           ))}
         </div>
       </div>
+      )}
 
       {quickSlot && (
         <div
@@ -606,6 +630,82 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onCompose }) => {
         </div>
       )}
     </>
+  );
+};
+
+interface CalendarListViewProps {
+  events: CalEvent[];
+  weekStart: Date;
+  data: ScheduledRow[] | null;
+  onSelect: (row: ScheduledRow) => void;
+}
+
+const CalendarListView: React.FC<CalendarListViewProps> = ({ events, weekStart, data, onSelect }) => {
+  const byDay = new Map<number, CalEvent[]>();
+  for (const e of events) {
+    const list = byDay.get(e.day) ?? [];
+    list.push(e);
+    byDay.set(e.day, list);
+  }
+  const days = Array.from({ length: 7 }).map((_, i) => {
+    const d = new Date(weekStart);
+    d.setDate(d.getDate() + i);
+    return { idx: i, date: d, label: d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }) };
+  });
+
+  return (
+    <div className="card" style={{ padding: 0 }}>
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+        {days.map((d) => {
+          const list = (byDay.get(d.idx) ?? []).slice().sort((a, b) => a.start - b.start);
+          return (
+            <div key={d.idx} style={{ borderBottom: '1px solid var(--line)' }}>
+              <div className="mono" style={{ padding: '10px 16px', fontSize: 11, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', background: 'var(--bg-sunk)' }}>
+                {d.label}
+              </div>
+              {list.length === 0 ? (
+                <div style={{ padding: '12px 16px', fontSize: 12.5, color: 'var(--ink-4)' }}>Nothing scheduled.</div>
+              ) : (
+                list.map((e) => {
+                  const real = data?.find((s) => s.id === e.id) ?? null;
+                  return (
+                    <div
+                      key={e.id}
+                      onClick={() => real && onSelect(real)}
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '64px 1fr auto',
+                        gap: 12,
+                        padding: '10px 16px',
+                        cursor: real ? 'pointer' : 'default',
+                        alignItems: 'center',
+                        borderTop: '1px solid var(--line)',
+                      }}
+                    >
+                      <span className="mono" style={{ fontSize: 12, color: 'var(--ink-3)' }}>{e.time}</span>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.title}</div>
+                        <div style={{ display: 'flex', gap: 6, marginTop: 3, alignItems: 'center' }}>
+                          {e.plats.map((p) => (
+                            <span key={p} className={`pglyph ${p}`} style={{ width: 14, height: 14, fontSize: 9, borderRadius: 3 }}>
+                              {platGlyphs[p]}
+                            </span>
+                          ))}
+                          <span className={`chip ${e.type === 'ai' ? 'accent' : ''}`} style={{ fontSize: 10 }}>
+                            {e.type === 'posted' ? 'Posted' : e.type === 'scheduled' ? 'Scheduled' : e.type === 'ai' ? 'Agent draft' : 'Draft'}
+                          </span>
+                        </div>
+                      </div>
+                      {real && <Icon name="arrow_right" size={12} style={{ color: 'var(--ink-3)' }} />}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 };
 

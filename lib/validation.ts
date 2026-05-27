@@ -86,7 +86,10 @@ export const agentSettingsUpdateSchema = z.object({
   enabled: z.boolean().optional(),
   instructions: z.string().max(4_000).optional(),
   cadencePerWeek: z.number().int().min(0).max(50).optional(),
-  autoPublishThreshold: z.number().int().min(0).max(100).optional(),
+  // 101 is the "Drafts only — review every post" sentinel; the agent's
+  // run loop treats anything > 100 as never-auto-publish. Keep that ceiling
+  // in sync with components/agent.tsx if you ever change the magic value.
+  autoPublishThreshold: z.number().int().min(0).max(101).optional(),
   quietHours: z.object({
     start: z.string().regex(/^\d{2}:\d{2}$/),
     end: z.string().regex(/^\d{2}:\d{2}$/),

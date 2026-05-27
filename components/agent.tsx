@@ -183,7 +183,17 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
   const [enabledPlatforms, setEnabledPlatforms] = useState<Array<'x' | 'linkedin' | 'instagram' | 'facebook' | 'tiktok' | 'youtube'>>([]);
   const [postsPerPlatform, setPostsPerPlatform] = useState<Partial<Record<'x' | 'linkedin' | 'instagram' | 'facebook' | 'tiktok' | 'youtube', number>>>({});
   const [contentTypeMix, setContentTypeMix] = useState<{ text: number; image: number; video: number }>({ text: 4, image: 0, video: 0 });
+  const [quietStart, setQuietStart] = useState('22:00');
+  const [quietEnd, setQuietEnd] = useState('07:00');
   const [savingRules, setSavingRules] = useState(false);
+  /** Briefly flashes a "Saved" pill on auto-save. Cleared after 1.5s so
+   *  successive edits don't pile up timeouts. */
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  useEffect(() => {
+    if (!savedAt) return;
+    const t = setTimeout(() => setSavedAt(null), 1500);
+    return () => clearTimeout(t);
+  }, [savedAt]);
   const [running, setRunning] = useState<'agent' | 'trends' | null>(null);
   const [runMsg, setRunMsg] = useState<string | null>(null);
 
@@ -318,6 +328,8 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
     setEnabledPlatforms(settings.enabledPlatforms ?? []);
     setPostsPerPlatform(settings.postsPerWeekByPlatform ?? {});
     setContentTypeMix(settings.postsPerWeekByContentType ?? { text: 4, image: 0, video: 0 });
+    setQuietStart(settings.quietHours?.start ?? '22:00');
+    setQuietEnd(settings.quietHours?.end ?? '07:00');
   }, [settings]);
 
   /** Save autopilot rules — fires on every change of platform toggle or
@@ -331,6 +343,7 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
     try {
       await apiPatch('/api/agent/settings', patch);
       await refetchSettings();
+      setSavedAt(Date.now());
     } finally {
       setSavingRules(false);
     }
@@ -457,12 +470,17 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
               {autopilot && <span style={{ position: 'absolute', top: -2, right: -2, width: 10, height: 10, borderRadius: '50%', background: 'var(--good)', border: '2px solid var(--bg-elev)' }} />}
             </div>
             <div>
-              <div style={{ fontSize: 14, fontWeight: 550, letterSpacing: '-0.01em', marginBottom: 2 }}>
+              <div style={{ fontSize: 14, fontWeight: 550, letterSpacing: '-0.01em', marginBottom: 2, display: 'flex', alignItems: 'center', gap: 8 }}>
                 Autopilot is {autopilot ? 'running' : 'paused'}
+                {settings?.lastRunAt && (
+                  <span className="chip ghost mono" style={{ fontSize: 10 }}>
+                    Last drafted {relTime(settings.lastRunAt)}
+                  </span>
+                )}
               </div>
               <div style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>
                 {autopilot
-                  ? `Monitoring ${niches.length} niches, drafting on a ${cadence}/week cadence, auto-publishing posts scoring ≥ ${threshold}.`
+                  ? `Monitoring ${niches.length} niches, drafting on a ${cadence}/week cadence, ${draftsOnly ? 'sending every draft to your inbox for review' : `auto-publishing posts scoring ≥ ${threshold}`}.`
                   : "I'll keep watching but won't draft or post without you."}
               </div>
             </div>
@@ -475,6 +493,12 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
               {autopilot ? <><Icon name="pause" size={12} /> Pause</> : <><Icon name="play" size={12} /> Resume</>}
             </button>
           </div>
+          {autopilot && enabledPlatforms.length === 0 && (
+            <div style={{ padding: '8px 14px', fontSize: 12, color: 'oklch(0.45 0.18 30)', background: 'oklch(0.97 0.04 30)', borderTop: '1px solid oklch(0.86 0.08 30)', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Icon name="bolt" size={11} />
+              No platforms enabled in Autopilot rules — Autopilot has nowhere to post. Toggle at least one platform on the right.
+            </div>
+          )}
         </div>
 
         <div className="card">
@@ -770,7 +794,17 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
               Autopilot rules
               <span className="chip accent"><span className="dot" />Permissions</span>
             </h3>
-            <span className="meta">{savingRules ? 'Saving…' : 'Auto-saves'}</span>
+            <span className="meta" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              {savingRules ? (
+                'Saving…'
+              ) : savedAt ? (
+                <span style={{ color: 'var(--good, #2a8a3b)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <Icon name="check" size={10} /> Saved
+                </span>
+              ) : (
+                'Auto-saves'
+              )}
+            </span>
           </div>
           <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div>
@@ -919,19 +953,22 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
                 row now includes 101 ("Drafts only") as the default option
                 — picking it routes every draft to your inbox for review. */}
             {[
-              { label: 'Post cadence', value: `${cadence} / week`, key: 'cadence' as const, options: [2, 3, 4, 5, 7] },
-              { label: 'Auto-publish', value: draftsOnly ? 'Drafts only' : `≥ ${threshold} / 100`, key: 'threshold' as const, options: [101, 80, 85, 90, 95] },
-              { label: 'Brand-safe filter', value: strict ? 'Strict' : 'Standard', key: 'strict' as const, options: [true, false] },
+              { label: 'Post cadence', hint: 'How many drafts per week.', key: 'cadence' as const, options: [2, 3, 4, 5, 7] },
+              { label: 'Auto-publish', hint: 'Score threshold each draft must beat to ship automatically. Drafts only sends everything to your inbox for review.', key: 'threshold' as const, options: [101, 80, 85, 90, 95] },
+              { label: 'Brand-safe filter', hint: 'Strict refuses anything mentioning competitors or unverified claims.', key: 'strict' as const, options: [true, false] },
             ].map((row) => (
               <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid var(--line)' }}>
-                <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>{row.label}</span>
+                <div>
+                  <div style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>{row.label}</div>
+                  <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 2 }}>{row.hint}</div>
+                </div>
                 <select
                   value={String(row.key === 'cadence' ? cadence : row.key === 'threshold' ? threshold : strict)}
                   onChange={(e) => {
                     const v = e.target.value;
-                    if (row.key === 'cadence') { setCadence(parseInt(v)); updateField({ cadencePerWeek: parseInt(v) }); }
-                    else if (row.key === 'threshold') { setThreshold(parseInt(v)); updateField({ autoPublishThreshold: parseInt(v) }); }
-                    else { const b = v === 'true'; setStrict(b); updateField({ brandSafetyStrict: b }); }
+                    if (row.key === 'cadence') { setCadence(parseInt(v)); updateField({ cadencePerWeek: parseInt(v) }); setSavedAt(Date.now()); }
+                    else if (row.key === 'threshold') { setThreshold(parseInt(v)); updateField({ autoPublishThreshold: parseInt(v) }); setSavedAt(Date.now()); }
+                    else { const b = v === 'true'; setStrict(b); updateField({ brandSafetyStrict: b }); setSavedAt(Date.now()); }
                   }}
                   style={{ fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--ink)', background: 'transparent', border: 'none', textAlign: 'right' }}
                   disabled={unauth}
@@ -939,7 +976,7 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
                   {row.options.map((o) => (
                     <option key={String(o)} value={String(o)}>
                       {row.key === 'cadence' ? `${o} / week` :
-                        row.key === 'threshold' ? (o === 101 ? 'Drafts only' : `≥ ${o}`) :
+                        row.key === 'threshold' ? (o === 101 ? 'Drafts only (review each)' : `Auto if score ≥ ${o}`) :
                         (o ? 'Strict' : 'Standard')}
                     </option>
                   ))}
@@ -947,10 +984,39 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
               </div>
             ))}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px' }}>
-              <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>Quiet hours</span>
-              <span className="mono" style={{ fontSize: 11.5, color: 'var(--ink)' }}>
-                {settings?.quietHours?.start ?? '22:00'} – {settings?.quietHours?.end ?? '07:00'}
-              </span>
+              <div>
+                <div style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>Quiet hours</div>
+                <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 2 }}>Autopilot won&apos;t publish in this window.</div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input
+                  type="time"
+                  value={quietStart}
+                  onChange={(e) => setQuietStart(e.target.value)}
+                  onBlur={() => {
+                    if (quietStart && quietEnd && (quietStart !== settings?.quietHours?.start || quietEnd !== settings?.quietHours?.end)) {
+                      updateField({ quietHours: { start: quietStart, end: quietEnd } });
+                      setSavedAt(Date.now());
+                    }
+                  }}
+                  disabled={unauth}
+                  style={{ fontFamily: 'var(--mono)', fontSize: 11.5, padding: '4px 6px', border: '1px solid var(--line-2)', borderRadius: 6, background: 'var(--bg)', color: 'var(--ink)' }}
+                />
+                <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>–</span>
+                <input
+                  type="time"
+                  value={quietEnd}
+                  onChange={(e) => setQuietEnd(e.target.value)}
+                  onBlur={() => {
+                    if (quietStart && quietEnd && (quietStart !== settings?.quietHours?.start || quietEnd !== settings?.quietHours?.end)) {
+                      updateField({ quietHours: { start: quietStart, end: quietEnd } });
+                      setSavedAt(Date.now());
+                    }
+                  }}
+                  disabled={unauth}
+                  style={{ fontFamily: 'var(--mono)', fontSize: 11.5, padding: '4px 6px', border: '1px solid var(--line-2)', borderRadius: 6, background: 'var(--bg)', color: 'var(--ink)' }}
+                />
+              </div>
             </div>
           </div>
         </div>

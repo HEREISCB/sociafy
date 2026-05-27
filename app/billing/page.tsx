@@ -7,6 +7,7 @@ import { Sidebar, Topbar } from '../../components/shell';
 import { Icon } from '../../components/icons';
 import { apiPost, useApi } from '../../lib/ui/fetcher';
 import { openRazorpayModal } from '../../components/billing/razorpay-checkout';
+import { TOPUP_PRICING } from '../../lib/billing/pricing';
 
 type CheckoutHandoff =
   | { kind: 'redirect'; url: string }
@@ -427,21 +428,30 @@ function BillingPageInner() {
           >
             <h3 style={{ marginTop: 0 }}>Top up credits</h3>
             <p className="muted" style={{ fontSize: 13 }}>
-              {data?.currency === 'INR' ? '₹1,499' : '$15'} per 1,000 credits. Charged once.
+              {TOPUP_PRICING[data?.currency ?? 'USD'].display}. Charged once.
             </p>
             <div style={{ display: 'grid', gap: 8 }}>
-              {[1000, 2000, 5000].map((n) => (
-                <button
-                  key={n}
-                  className="btn primary"
-                  style={{ justifyContent: 'space-between' }}
-                  onClick={() => buyTopUp(n)}
-                  disabled={topupBusy}
-                >
-                  <span>{n.toLocaleString()} credits</span>
-                  <span className="mono">{data?.currency === 'INR' ? `₹${(1499 * (n / 1000)).toLocaleString()}` : `$${15 * (n / 1000)}`}</span>
-                </button>
-              ))}
+              {[1000, 2000, 5000].map((n) => {
+                const pack = TOPUP_PRICING[data?.currency ?? 'USD'];
+                const packs = n / pack.credits;
+                // amountMinor is paise (INR) or cents (USD); divide to display.
+                const total = (pack.amountMinor * packs) / 100;
+                const formatted = data?.currency === 'INR'
+                  ? `₹${total.toLocaleString('en-IN')}`
+                  : `$${total.toLocaleString('en-US')}`;
+                return (
+                  <button
+                    key={n}
+                    className="btn primary"
+                    style={{ justifyContent: 'space-between' }}
+                    onClick={() => buyTopUp(n)}
+                    disabled={topupBusy}
+                  >
+                    <span>{n.toLocaleString()} credits</span>
+                    <span className="mono">{formatted}</span>
+                  </button>
+                );
+              })}
             </div>
             <button className="btn ghost" style={{ marginTop: 12, width: '100%' }} onClick={() => setTopupOpen(false)}>
               Cancel
