@@ -82,6 +82,7 @@ export default function Home() {
   const [page, setPage] = useState<Page>(initialPageFromUrl);
   const [refreshing, setRefreshing] = useState(false);
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const { user } = useUser();
   const { mutate } = useSWRConfig();
 
@@ -127,9 +128,18 @@ export default function Home() {
 
   return (
     <div className="app">
-      <Sidebar page={page} onNav={setPage} />
+      <Sidebar
+        page={page}
+        onNav={setPage}
+        mobileOpen={sidebarOpen}
+        onMobileClose={() => setSidebarOpen(false)}
+      />
       <div className="main">
-        <Topbar crumbs={meta.crumbs} onAutopilotClick={() => setPage('agent')}>
+        <Topbar
+          crumbs={meta.crumbs}
+          onAutopilotClick={() => setPage('agent')}
+          onMenuClick={() => setSidebarOpen(true)}
+        >
           <button className="btn primary" onClick={() => setPage('compose')}>
             <SparkleIcon /> Compose
           </button>

@@ -3069,3 +3069,320 @@ a { color: inherit; text-decoration: none; }
 }
 .cost-line .strong { color: var(--ink); font-weight: 600; }
 .cost-line .danger { color: #b03333; }
+
+/* ===================================================================
+   Mobile drawer infrastructure — desktop hides these, mobile shows them
+   =================================================================== */
+.topbar-menu-btn {
+  display: none;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-sm);
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-2);
+  cursor: pointer;
+  margin-right: -4px;
+  flex-shrink: 0;
+}
+.topbar-menu-btn:hover { background: var(--bg-sunk); color: var(--ink); }
+.sidebar-scrim {
+  display: none;
+}
+
+/* ===================================================================
+   MOBILE — everything below this breakpoint
+   Tablet: ≤ 900px (sidebar collapses, multi-col layouts stack)
+   Phone:  ≤ 640px (single column everywhere, larger tap targets, fluid type)
+   =================================================================== */
+
+@media (max-width: 900px) {
+  /* App shell: collapse sidebar into a drawer; main becomes the only column. */
+  .app {
+    grid-template-columns: 1fr;
+    height: 100dvh;
+  }
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: min(280px, 84vw);
+    z-index: 90;
+    background: var(--bg-elev);
+    border-right: 1px solid var(--line);
+    transform: translateX(-100%);
+    transition: transform 0.22s cubic-bezier(0.32, 0.72, 0.32, 1);
+    box-shadow: 0 24px 60px -24px rgba(0, 0, 0, 0.25);
+    overflow-y: auto;
+  }
+  .sidebar.mobile-open { transform: translateX(0); }
+  .sidebar-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(10, 10, 10, 0.42);
+    z-index: 89;
+    -webkit-backdrop-filter: blur(2px);
+    backdrop-filter: blur(2px);
+    animation: modalScrimIn 180ms ease-out both;
+  }
+
+  .topbar-menu-btn { display: inline-flex; }
+
+  /* Topbar: tighten paddings, hide search, hide all crumbs except the leaf. */
+  .topbar {
+    padding: 0 12px;
+    gap: 10px;
+    height: 56px;
+  }
+  .search { display: none; }
+  .crumbs {
+    font-size: 13.5px;
+    overflow: hidden;
+  }
+  .crumbs .sep, .crumbs .muted { display: none; }
+  .crumbs .leaf {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  .topbar-actions { gap: 6px; }
+  /* Autopilot pill: drop the prefix label, keep dot + state. */
+  .autopilot-pill .kicker { display: none; }
+  .autopilot-pill { padding: 0 10px 0 10px; }
+
+  /* Page padding: pull in tighter. */
+  .page {
+    padding: 16px 14px 64px;
+  }
+  .page-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .page-head h1 { font-size: 22px; }
+  .page-head .sub { font-size: 13px; }
+  .page-head-actions { flex-wrap: wrap; }
+
+  /* Two-col + multi-col stacks. */
+  .two-col,
+  .composer,
+  .briefing,
+  .hero-grid,
+  .agent-show,
+  .voice-train,
+  .final-cta,
+  .lp-section-head,
+  .pp-body,
+  .pp-briefing {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  /* Stat cards: 2-up on phones, single-col at very narrow. */
+  .stat-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  .stat-value { font-size: 22px; }
+  .stat { padding: 12px; }
+  .stat .spark { display: none; }
+
+  /* Briefing card: smaller, padding tightened. */
+  .briefing { padding: 18px; border-radius: var(--r-lg); }
+  .briefing h2 { font-size: 18px; }
+  .briefing p { font-size: 13px; margin-bottom: 14px; }
+  .briefing-meter { padding: 12px; }
+
+  /* Variant cards: single column so 5-line clamp stays readable. */
+  .variants { grid-template-columns: 1fr; }
+
+  /* Tap targets — bigger icon buttons on touch. */
+  .icon-btn {
+    width: 36px;
+    height: 36px;
+  }
+  .icon-btn svg { width: 16px; height: 16px; }
+
+  /* Queue: time row above content (sit on top), actions become always-visible. */
+  .queue-item {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    padding: 14px;
+  }
+  .queue-actions { opacity: 1; }
+  .queue-time {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .queue-time strong { display: inline; margin: 0; }
+
+  /* Trend list: tighter, hover actions become visible. */
+  .trend-action { opacity: 1; }
+  .trend-item { padding: 12px 14px; }
+
+  /* Calendar week grid: hide (calendar component forces list view on mobile,
+     this is a safety net for stale state or any callers that still render it). */
+  .calendar .cal-head,
+  .calendar .cal-grid {
+    grid-template-columns: 44px repeat(7, minmax(64px, 1fr));
+  }
+  /* Allow horizontal scroll so the week grid doesn't break the layout. */
+  .calendar {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Composer: phone preview shrinks. */
+  .phone { max-width: 280px; }
+
+  /* Modal sheets: tighter padding so content has room to breathe. */
+  .modal-sheet {
+    padding: 18px;
+    border-radius: 14px;
+    width: min(92vw, 560px);
+  }
+
+  /* Onboarding: tighter padding, single-col grids. */
+  .onboard-inner { padding: 28px 18px 56px; }
+  .onboard h1 { font-size: 26px; }
+  .onboard .lede { font-size: 14px; margin-bottom: 24px; }
+  .onboard-stepper {
+    gap: 4px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+  }
+  /* Hide the labels in the stepper — only the numbered dots survive on mobile. */
+  .onboard-stepper .step span:not(.num) { display: none; }
+  .onboard-stepper .bar { flex: 0 0 12px; }
+  .connect-grid { grid-template-columns: 1fr; }
+  .topic-grid { grid-template-columns: repeat(2, 1fr); }
+  .voice-grid { grid-template-columns: 1fr; }
+
+  /* Onboarding plan step */
+  .plan-card { padding: 14px; }
+  .plan-card-head { flex-direction: column; }
+
+  /* Billing */
+  .billing-page { padding: 4px 0 32px; }
+  .billing-current { padding: 18px; border-radius: 14px; margin-bottom: 24px; }
+  .billing-tier-grid { grid-template-columns: 1fr; gap: 12px; }
+  .billing-balance-row { flex-direction: column; align-items: flex-start; }
+  .billing-balance-row .big-num { font-size: 36px; }
+  .billing-meta { text-align: left; }
+  .billing-tier-card { padding: 18px 16px; }
+  .billing-tier-card .tier-price { font-size: 26px; }
+
+  /* Usage */
+  .usage-hero { grid-template-columns: 1fr; }
+  .usage-card .num { font-size: 28px; }
+  .usage-ledger-head, .usage-ledger-row {
+    grid-template-columns: 1fr 70px 90px;
+    padding: 10px 14px;
+    font-size: 12px;
+  }
+
+  /* Notifications popover: stay on-screen on phones. */
+  .credit-popover {
+    width: min(320px, calc(100vw - 24px));
+    right: -8px;
+  }
+  .insufficient-credits-banner {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .insufficient-credits-banner .actions {
+    justify-content: flex-end;
+  }
+
+  /* Landing page tightening. */
+  .lp { padding: 0 18px; }
+  .lp-section { padding: 56px 0; }
+  .lp-section-head { margin-bottom: 32px; }
+  .lp-section-head h2 { font-size: 30px; }
+  .lp-section-head .blurb { font-size: 14px; }
+
+  .lp-nav { height: 56px; gap: 16px; }
+  .lp-nav-links { display: none; }
+  .lp-nav-status { display: none; }
+
+  .hero { padding: 48px 0 8px; }
+  .hero h1 { font-size: clamp(34px, 9vw, 56px); margin-bottom: 16px; max-width: none; line-height: 1.05; }
+  .hero-lede { font-size: 15px; margin-bottom: 24px; }
+  .hero-eyebrow { font-size: 10.5px; margin-bottom: 18px; }
+  .btn-lg { padding: 11px 16px; font-size: 13.5px; }
+
+  .feature-grid { grid-template-columns: 1fr; }
+  .feature-cell {
+    padding: 24px 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .feature-cell:last-child { border-bottom: 0; }
+  .feature-cell:not(:first-child) { padding-left: 0; }
+  .feature-cell h3 { font-size: 18px; }
+
+  .pricing { grid-template-columns: 1fr; }
+  .price-card { padding: 24px 20px; }
+  .price-amt { font-size: 36px; }
+
+  .faq-item {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    padding: 18px 0;
+  }
+
+  .final-cta {
+    padding: 40px 24px;
+    border-radius: 20px;
+    margin: 0 0 56px;
+  }
+  .final-cta h2 { font-size: 32px; }
+
+  .lp-foot-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 32px;
+  }
+  .lp-foot-brand { grid-column: 1 / -1; }
+  .lp-foot-bottom {
+    flex-direction: column;
+    gap: 12px;
+    align-items: flex-start;
+  }
+
+  /* Product preview chrome: hide internal "browser" sidebar to give the
+     preview some breathing room on phones. */
+  .pp-side { display: none; }
+  .pp-stats { grid-template-columns: repeat(2, 1fr); }
+
+  /* Auth page padding */
+  .auth-card { padding: 24px 20px 22px; border-radius: 14px; }
+  .auth-h1 { font-size: 21px; }
+}
+
+/* Phone-specific (≤ 480px): drop stat grid to one column, even tighter. */
+@media (max-width: 480px) {
+  .stat-grid { grid-template-columns: 1fr; }
+  .page { padding: 12px 12px 56px; }
+  .briefing { padding: 16px; }
+  .briefing h2 { font-size: 17px; }
+
+  /* Topic/voice grids fully stack. */
+  .topic-grid { grid-template-columns: 1fr; }
+
+  /* Calendar list-view date headings shrink. */
+  .cal-list-day-head { font-size: 13px !important; }
+
+  /* Notifications dropdown takes nearly full width. */
+}
+
+/* Touch devices (no hover): always show interaction affordances that
+   are normally hover-revealed, and bump icon buttons to 40px. */
+@media (hover: none) {
+  .queue-actions,
+  .trend-action {
+    opacity: 1 !important;
+  }
+  .icon-btn {
+    width: 36px;
+    height: 36px;
+  }
+}

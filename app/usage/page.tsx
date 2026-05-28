@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
 import { Sidebar, Topbar } from '../../components/shell';
 import { Icon } from '../../components/icons';
@@ -13,6 +13,7 @@ const TIER_LABEL = { starter: 'Starter · $30/mo', pro: 'Pro · $80/mo', busines
 
 export default function UsagePage() {
   const { data, isLoading } = useApi<CreditsPayload>('/api/credits', { refreshInterval: 30_000 });
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const balance = data?.balance ?? 0;
   const allocation = data?.monthlyAllocation ?? 0;
@@ -26,9 +27,17 @@ export default function UsagePage() {
 
   return (
     <div className="app">
-      <Sidebar page={'dashboard' as Page} onNav={() => {}} />
+      <Sidebar
+        page={'dashboard' as Page}
+        onNav={() => {}}
+        mobileOpen={sidebarOpen}
+        onMobileClose={() => setSidebarOpen(false)}
+      />
       <div className="main">
-        <Topbar crumbs={['Sociafy', 'Account', 'Usage']}>
+        <Topbar
+          crumbs={['Sociafy', 'Account', 'Usage']}
+          onMenuClick={() => setSidebarOpen(true)}
+        >
           <Link href="/dashboard" className="btn ghost">
             <Icon name="home" size={13} /> Dashboard
           </Link>

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useSyncExternalStore } from 'react';
 import { Icon } from './icons';
 import { apiDelete, apiPatch, apiPost, useApi } from '../lib/ui/fetcher';
 import { PLATFORM_TO_SHORT } from '../lib/ui/platforms';
@@ -73,7 +73,21 @@ interface CalendarPageProps {
 
 const CalendarPage: React.FC<CalendarPageProps> = ({ onCompose }) => {
   const slotH = 48;
-  const [view, setView] = useState<CalView>('week');
+  // Week-grid is unusable below ~900px (7 columns + time gutter don't fit).
+  // We subscribe to the viewport so flipping the phone orientation re-evaluates.
+  // SSR snapshot is `false` so server output always matches first client paint.
+  const isNarrow = useSyncExternalStore(
+    (cb) => {
+      const m = window.matchMedia('(max-width: 900px)');
+      m.addEventListener('change', cb);
+      return () => m.removeEventListener('change', cb);
+    },
+    () => window.matchMedia('(max-width: 900px)').matches,
+    () => false,
+  );
+  const [viewOverride, setViewOverride] = useState<CalView | null>(null);
+  const view: CalView = viewOverride ?? (isNarrow ? 'list' : 'week');
+  const setView = setViewOverride;
   const [cursor, setCursor] = useState(() => startOfWeek(new Date()));
   const weekStart = cursor;
   const weekEnd = new Date(cursor);

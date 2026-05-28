@@ -62,9 +62,13 @@ interface SidebarProps {
   mode?: Mode;
   onMode?: (m: Mode) => void;
   showTTS?: boolean;
+  /** When true on mobile, the sidebar slides in from the left as a drawer. */
+  mobileOpen?: boolean;
+  /** Called when the drawer should close (scrim click, nav, or Esc). */
+  onMobileClose?: () => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ page, onNav, showTTS = true }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ page, onNav, showTTS = true, mobileOpen = false, onMobileClose }) => {
   const items = [
     { id: 'dashboard' as Page, label: 'Dashboard', icon: 'home' as const, kbd: '1' },
     { id: 'compose' as Page, label: 'Compose', icon: 'sparkle' as const, kbd: '2', badge: 'AI', accent: true },
@@ -73,47 +77,58 @@ export const Sidebar: React.FC<SidebarProps> = ({ page, onNav, showTTS = true })
     { id: 'connections' as Page, label: 'Connections', icon: 'globe' as const, kbd: '5' },
   ];
 
+  // Auto-close drawer on Esc so a thumb-friendly escape exists alongside scrim tap.
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onMobileClose?.(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [mobileOpen, onMobileClose]);
+
   return (
-    <aside className="sidebar">
-      <Link href="/" className="brand" style={{ textDecoration: 'none', color: 'inherit' }}>
-        <div className="brand-mark">S</div>
-        <span className="brand-name">sociafy<span className="dot">.</span></span>
-      </Link>
+    <>
+      {mobileOpen && <div className="sidebar-scrim" onClick={onMobileClose} aria-hidden="true" />}
+      <aside className={`sidebar${mobileOpen ? ' mobile-open' : ''}`}>
+        <Link href="/" className="brand" style={{ textDecoration: 'none', color: 'inherit' }} onClick={onMobileClose}>
+          <div className="brand-mark">S</div>
+          <span className="brand-name">sociafy<span className="dot">.</span></span>
+        </Link>
 
-      <div className="nav-section">
-        <div className="nav-label">Workspace</div>
-        {items.map((it) => (
-          <div
-            key={it.id}
-            className={`nav-item ${page === it.id ? 'active' : ''}`}
-            onClick={() => onNav(it.id)}
-          >
-            <Icon name={it.icon} className="ic" />
-            {it.label}
-            {it.badge && (
-              <span className={`badge ${it.accent ? 'accent' : ''}`}>{it.badge}</span>
-            )}
-            {!it.badge && <span className="kbd">⌘{it.kbd}</span>}
-          </div>
-        ))}
-      </div>
-
-      <div className="sidebar-foot">
-        {showTTS && (
-          <div className="tts-card">
-            <span className="pill">Soon</span>
-            <h4>Voice posts</h4>
-            <p>Turn any draft into a podcast clip with our TTS engine.</p>
-            <div className="wave">
-              {[6, 10, 4, 12, 8, 14, 7, 11, 5, 9, 13, 6, 10, 4, 8].map((h, i) => (
-                <span key={i} style={{ height: h }} />
-              ))}
+        <div className="nav-section">
+          <div className="nav-label">Workspace</div>
+          {items.map((it) => (
+            <div
+              key={it.id}
+              className={`nav-item ${page === it.id ? 'active' : ''}`}
+              onClick={() => { onNav(it.id); onMobileClose?.(); }}
+            >
+              <Icon name={it.icon} className="ic" />
+              {it.label}
+              {it.badge && (
+                <span className={`badge ${it.accent ? 'accent' : ''}`}>{it.badge}</span>
+              )}
+              {!it.badge && <span className="kbd">⌘{it.kbd}</span>}
             </div>
-          </div>
-        )}
-        <UserCard />
-      </div>
-    </aside>
+          ))}
+        </div>
+
+        <div className="sidebar-foot">
+          {showTTS && (
+            <div className="tts-card">
+              <span className="pill">Soon</span>
+              <h4>Voice posts</h4>
+              <p>Turn any draft into a podcast clip with our TTS engine.</p>
+              <div className="wave">
+                {[6, 10, 4, 12, 8, 14, 7, 11, 5, 9, 13, 6, 10, 4, 8].map((h, i) => (
+                  <span key={i} style={{ height: h }} />
+                ))}
+              </div>
+            </div>
+          )}
+          <UserCard />
+        </div>
+      </aside>
+    </>
   );
 };
 
@@ -151,14 +166,32 @@ interface TopbarProps {
    *  navigates to the Auto-pilot tab. When omitted the pill becomes a
    *  Link to /dashboard?tab=agent. */
   onAutopilotClick?: () => void;
+  /** Mobile hamburger handler — when provided, shows a menu button visible
+   *  only at narrow viewports. The dashboard shell wires this to its
+   *  sidebar-drawer open state. */
+  onMenuClick?: () => void;
   /** Legacy mode props — accepted for backward compat, ignored. */
   mode?: Mode;
   onMode?: (m: Mode) => void;
   children?: React.ReactNode;
 }
 
-export const Topbar: React.FC<TopbarProps> = ({ crumbs, onAutopilotClick, children }) => (
+export const Topbar: React.FC<TopbarProps> = ({ crumbs, onAutopilotClick, onMenuClick, children }) => (
   <div className="topbar">
+    {onMenuClick && (
+      <button
+        type="button"
+        className="topbar-menu-btn"
+        onClick={onMenuClick}
+        aria-label="Open menu"
+      >
+        <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <line x1="3" y1="6" x2="21" y2="6" />
+          <line x1="3" y1="12" x2="21" y2="12" />
+          <line x1="3" y1="18" x2="21" y2="18" />
+        </svg>
+      </button>
+    )}
     <div className="crumbs">
       {crumbs.map((c, i) => (
         <Fragment key={i}>

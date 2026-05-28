@@ -93,6 +93,7 @@ function BillingPageInner() {
   const [topupOpen, setTopupOpen] = useState(false);
   const [topupBusy, setTopupBusy] = useState(false);
   const [cancelBusy, setCancelBusy] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   async function apiFetch<T>(url: string, init: RequestInit): Promise<T> {
     const r = await fetch(url, { ...init, headers: { 'content-type': 'application/json', ...(init.headers ?? {}) } });
@@ -215,9 +216,17 @@ function BillingPageInner() {
 
   return (
     <div className="app">
-      <Sidebar page={'dashboard' as Page} onNav={() => {}} />
+      <Sidebar
+        page={'dashboard' as Page}
+        onNav={() => {}}
+        mobileOpen={sidebarOpen}
+        onMobileClose={() => setSidebarOpen(false)}
+      />
       <div className="main">
-        <Topbar crumbs={['Sociafy', 'Account', 'Billing']}>
+        <Topbar
+          crumbs={['Sociafy', 'Account', 'Billing']}
+          onMenuClick={() => setSidebarOpen(true)}
+        >
           <Link href="/dashboard" className="btn ghost">
             <Icon name="home" size={13} /> Dashboard
           </Link>
