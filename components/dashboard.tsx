@@ -675,7 +675,7 @@ const FacebookPageCard: React.FC<{ data: FacebookMe }> = ({ data }) => (
         )}
       </div>
     </div>
-    <div className="card-body" style={{ display: 'grid', gridTemplateColumns: data.recentPosts.length > 0 ? '1fr 1fr 1fr' : '1fr', gap: 12 }}>
+    <div className="card-body m-stack" style={{ display: 'grid', gridTemplateColumns: data.recentPosts.length > 0 ? '1fr 1fr 1fr' : '1fr', gap: 12 }}>
       {data.recentPosts.length === 0 ? (
         <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>
           No posts on this Page yet. Use Compose → Post Now to publish your first.

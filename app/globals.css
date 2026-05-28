@@ -3312,6 +3312,14 @@ a { color: inherit; text-decoration: none; }
   .distribution-row .dist-spacer { display: none; }
   .distribution-row input[type="datetime-local"] { flex: 1 1 100%; min-width: 0; }
 
+  /* Generic responsive grid utilities for inline-styled grids elsewhere.
+     m-stack → single column; m-2col → two columns. */
+  .m-stack { grid-template-columns: 1fr !important; }
+  .m-2col { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+
+  /* Hide non-essential inline content on mobile (e.g. secondary button text). */
+  .hide-mobile { display: none !important; }
+
   /* Stat cards: 2-up on phones, single-col at very narrow. */
   .stat-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; }
   .stat-value { font-size: 22px; }

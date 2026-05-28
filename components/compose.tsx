@@ -1098,7 +1098,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
           Uses the post topic above
         </span>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, marginTop: 4 }}>
+      <div className="m-2col" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 14, marginTop: 4 }}>
         <div>
           <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>How many</div>
           <div style={{ display: 'flex', gap: 4 }}>
@@ -1157,7 +1157,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
           {videoDuration}s · {videoQuality} · {videoAspect} · uses topic above
         </span>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginTop: 4 }}>
+      <div className="m-2col" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 14, marginTop: 4 }}>
         <div>
           <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>How many</div>
           <div style={{ display: 'flex', gap: 4 }}>
@@ -1219,7 +1219,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
       {/* Generation type — drives which inputs render below. */}
       <div style={{ marginTop: 14 }}>
         <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>How to generate</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+        <div className="m-2col" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8 }}>
           {VIDEO_GEN_MODES.map((m) => {
             const isActive = videoGenMode === m.id;
             return (
@@ -1276,7 +1276,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
           )}
 
           {videoGenMode === 'reference' && (
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 14 }}>
+            <div className="m-stack" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 14 }}>
               <div>
                 <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Reference images ({referenceImageUrls.length}/9)</div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6 }}>

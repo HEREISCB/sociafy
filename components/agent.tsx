@@ -132,7 +132,7 @@ const HowItWorksCard: React.FC<{ expanded: boolean }> = ({ expanded: initialExpa
       </div>
       {expanded && (
         <div className="card-body">
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 14 }}>
+          <div className="m-stack" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 14 }}>
             {HOW_IT_WORKS_STEPS.map((s) => (
               <div key={s.title} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: 12, background: 'var(--bg-sunk)', borderRadius: 10 }}>
                 <div style={{ width: 28, height: 28, borderRadius: 8, background: 'var(--bg-elev)', color: 'var(--accent)', display: 'grid', placeItems: 'center', flexShrink: 0 }}>

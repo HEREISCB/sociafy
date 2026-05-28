@@ -329,6 +329,7 @@ const ConnectionsPage: React.FC = () => {
             </p>
           </div>
           <div
+            className="m-2col"
             style={{
               display: 'grid',
               gridTemplateColumns: 'repeat(3, auto)',
@@ -377,7 +378,7 @@ const ConnectionsPage: React.FC = () => {
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 340px), 1fr))',
           gap: 16,
           alignItems: 'stretch',
         }}

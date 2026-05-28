@@ -39,7 +39,7 @@ export default function UsagePage() {
           onMenuClick={() => setSidebarOpen(true)}
         >
           <Link href="/dashboard" className="btn ghost">
-            <Icon name="home" size={13} /> Dashboard
+            <Icon name="home" size={13} /> <span className="hide-mobile">Dashboard</span>
           </Link>
         </Topbar>
         <div className="page">
