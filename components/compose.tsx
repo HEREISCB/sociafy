@@ -1563,9 +1563,10 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
 
         {/* Mode selector — drives which media panel shows below the prompt. */}
         <div
+          className="compose-modes"
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(3, 1fr)',
+            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
             gap: 8,
             marginBottom: 12,
           }}
@@ -1761,7 +1762,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
               </button>
             </div>
             <div className="card-body" style={{ paddingTop: 4 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+              <div className="compose-variant-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
                 {variants.map((v) => {
                   const isActive = active === v.id;
                   return (
@@ -1820,7 +1821,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
             <h3><Icon name="globe" size={14} /> Distribution</h3>
             <span className="meta">{platforms.length} platforms · adapts per channel</span>
           </div>
-          <div className="card-body" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div className="card-body distribution-row" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             {PLATFORM_LIST.map((p) => {
               const isConnected = connectedShorts.includes(p.id);
               const isSelected = platforms.includes(p.id);
@@ -1857,7 +1858,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                 </span>
               );
             })}
-            <div style={{ flex: 1 }} />
+            <div className="dist-spacer" style={{ flex: 1 }} />
             <input
               type="datetime-local"
               value={customSchedule}
@@ -1903,7 +1904,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                 </div>
               </div>
               <div className="card-body">
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
+                <div className="compose-media-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10 }}>
                   {modeMedia.map((m, i) => {
                     const isHero = i === Math.min(selectedMediaIdx, Math.max(modeMedia.length - 1, 0));
                     return (

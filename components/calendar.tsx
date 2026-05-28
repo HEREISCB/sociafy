@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useMemo, useState, useSyncExternalStore } from 'react';
+import Link from 'next/link';
 import { Icon } from './icons';
 import { apiDelete, apiPatch, apiPost, useApi } from '../lib/ui/fetcher';
 import { PLATFORM_TO_SHORT } from '../lib/ui/platforms';
@@ -290,6 +291,12 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onCompose }) => {
     ai: all.filter((e) => e.type === 'ai').length,
     draft: all.filter((e) => e.type === 'draft').length,
   };
+
+  // On phones/tablets the 7-column week grid can't fit — render a fit-to-width
+  // month grid instead. (Hooks above always run; this branch has none.)
+  if (isNarrow) {
+    return <CalendarMobileMonth onCompose={onCompose} />;
+  }
 
   return (
     <>
@@ -728,6 +735,282 @@ function toLocalInputValue(iso: string): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
+
+function ymd(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+type MonthCellEvent = {
+  row: ScheduledRow;
+  type: CalEvent['type'];
+  plats: string[];
+  time: string;
+  title: string;
+};
+
+const TYPE_DOT: Record<CalEvent['type'], string> = {
+  posted: 'oklch(0.42 0.16 155)',
+  scheduled: 'var(--ink)',
+  ai: 'var(--accent)',
+  draft: 'var(--ink-4)',
+};
+
+/**
+ * Mobile calendar — a fit-to-width month grid of square day cells. Each day
+ * shows colored dots for its posts; tapping a day reveals that day's posts
+ * below. Self-contained (own month-range fetch + reschedule/cancel) so it
+ * doesn't entangle with the week-scoped desktop grid above.
+ */
+interface CalendarMobileMonthProps {
+  onCompose?: () => void;
+}
+
+const CalendarMobileMonth: React.FC<CalendarMobileMonthProps> = ({ onCompose }) => {
+  const [monthCursor, setMonthCursor] = useState(() => {
+    const d = new Date();
+    d.setDate(1);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  });
+  const [selectedDay, setSelectedDay] = useState<string>(() => ymd(new Date()));
+  const [selected, setSelected] = useState<ScheduledRow | null>(null);
+  const [savingId, setSavingId] = useState<string | null>(null);
+
+  // 6-week grid: Monday on/before the 1st through the following 41 days.
+  const gridStart = useMemo(() => startOfWeek(monthCursor), [monthCursor]);
+  const gridEnd = useMemo(() => {
+    const d = new Date(gridStart);
+    d.setDate(d.getDate() + 42);
+    return d;
+  }, [gridStart]);
+
+  const url = `/api/schedule?from=${gridStart.toISOString()}&to=${gridEnd.toISOString()}`;
+  const { data, unauth, mutate } = useApi<ScheduledRow[]>(url);
+
+  const byDate = useMemo(() => {
+    const m = new Map<string, MonthCellEvent[]>();
+    for (const s of data ?? []) {
+      const d = new Date(s.scheduledAt);
+      const key = ymd(d);
+      const type: CalEvent['type'] =
+        s.status === 'published' ? 'posted' :
+        s.status === 'pending' || s.status === 'publishing' ? 'scheduled' :
+        'draft';
+      const list = m.get(key) ?? [];
+      list.push({
+        row: s,
+        type,
+        plats: [PLATFORM_TO_SHORT[s.platform]],
+        title: s.text.slice(0, 80),
+        time: d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false }),
+      });
+      m.set(key, list);
+    }
+    return m;
+  }, [data]);
+
+  const cells = useMemo(() => Array.from({ length: 42 }).map((_, i) => {
+    const d = new Date(gridStart);
+    d.setDate(d.getDate() + i);
+    return d;
+  }), [gridStart]);
+
+  const todayKey = ymd(new Date());
+  const monthLabel = monthCursor.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  const selectedEvents = (byDate.get(selectedDay) ?? []).slice().sort((a, b) => a.time.localeCompare(b.time));
+  const selectedDate = useMemo(() => {
+    const [y, mo, da] = selectedDay.split('-').map(Number);
+    return new Date(y, mo - 1, da);
+  }, [selectedDay]);
+
+  const stepMonth = (dir: number) => {
+    const d = new Date(monthCursor);
+    d.setMonth(d.getMonth() + dir);
+    setMonthCursor(d);
+  };
+
+  const cancelScheduled = async (id: string) => {
+    if (!confirm('Cancel this scheduled post? It will not be published.')) return;
+    setSavingId(id);
+    try {
+      await apiDelete(`/api/schedule/${id}`);
+      await mutate();
+      setSelected(null);
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const rescheduleScheduled = async (id: string, whenIso: string) => {
+    setSavingId(id);
+    try {
+      await apiPatch(`/api/schedule/${id}`, { scheduledAt: whenIso });
+      await mutate();
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const weekdayLabels = useMemo(() => {
+    const base = startOfWeek(new Date());
+    return Array.from({ length: 7 }).map((_, i) => {
+      const d = new Date(base);
+      d.setDate(d.getDate() + i);
+      return d.toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 2);
+    });
+  }, []);
+
+  return (
+    <>
+      {/* Month nav header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+        <button className="btn sm" onClick={() => stepMonth(-1)} aria-label="Previous month">
+          <Icon name="chevron_left" size={12} />
+        </button>
+        <div className="mono" style={{ flex: 1, textAlign: 'center', fontSize: 14, fontWeight: 600, letterSpacing: '-0.01em' }}>
+          {monthLabel}
+        </div>
+        <button className="btn sm" onClick={() => stepMonth(1)} aria-label="Next month">
+          <Icon name="chevron_right" size={12} />
+        </button>
+        <button
+          className="btn sm"
+          onClick={() => {
+            const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0);
+            setMonthCursor(d);
+            setSelectedDay(ymd(new Date()));
+          }}
+        >
+          Today
+        </button>
+      </div>
+
+      {unauth && (
+        <div style={{ padding: 12, background: 'rgba(124,77,255,0.05)', border: '1px solid rgba(124,77,255,0.2)', borderRadius: 10, fontSize: 12.5, marginBottom: 12 }}>
+          Demo calendar — <Link href="/sign-in?next=/dashboard" style={{ textDecoration: 'underline', color: 'var(--ink)' }}>sign in</Link> to see your real schedule.
+        </div>
+      )}
+
+      {/* Month grid */}
+      <div className="cal-month">
+        <div className="cal-month-dow">
+          {weekdayLabels.map((w, i) => <div key={i} className="mono">{w}</div>)}
+        </div>
+        <div className="cal-month-grid">
+          {cells.map((d, i) => {
+            const key = ymd(d);
+            const inMonth = d.getMonth() === monthCursor.getMonth();
+            const isToday = key === todayKey;
+            const isSel = key === selectedDay;
+            const evs = byDate.get(key) ?? [];
+            return (
+              <button
+                key={i}
+                className={`cal-month-cell${inMonth ? '' : ' out'}${isToday ? ' today' : ''}${isSel ? ' sel' : ''}`}
+                onClick={() => setSelectedDay(key)}
+              >
+                <span className="dnum">{d.getDate()}</span>
+                {evs.length > 0 && (
+                  <span className="dots">
+                    {evs.slice(0, 4).map((e, j) => (
+                      <span key={j} className="dot" style={{ background: TYPE_DOT[e.type] }} />
+                    ))}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Selected-day detail */}
+      <div className="cal-month-day">
+        <div className="cal-month-day-head">
+          <span style={{ fontWeight: 600, fontSize: 14 }}>
+            {selectedDate.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
+          </span>
+          <button
+            className="btn sm primary"
+            onClick={() => { if (onCompose) onCompose(); else window.location.href = '/dashboard?tab=compose'; }}
+          >
+            <Icon name="plus" size={11} /> New post
+          </button>
+        </div>
+        {selectedEvents.length === 0 ? (
+          <div style={{ padding: '20px 4px', fontSize: 13, color: 'var(--ink-4)', textAlign: 'center' }}>
+            Nothing scheduled for this day.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
+            {selectedEvents.map((e) => (
+              <button
+                key={e.row.id}
+                className="cal-month-event"
+                onClick={() => setSelected(e.row)}
+              >
+                <span className="mono" style={{ fontSize: 12, color: 'var(--ink-3)', flexShrink: 0 }}>{e.time}</span>
+                <span style={{ flex: 1, minWidth: 0, textAlign: 'left', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: 13 }}>
+                  {e.title || '(empty)'}
+                </span>
+                <span style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
+                  {e.plats.map((p) => (
+                    <span key={p} className={`pglyph ${p}`} style={{ width: 16, height: 16, fontSize: 9, borderRadius: 3 }}>
+                      {platGlyphs[p]}
+                    </span>
+                  ))}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Detail / reschedule modal — mirrors the desktop one. */}
+      {selected && (
+        <div className="modal-scrim" onClick={() => setSelected(null)}>
+          <div className="modal-sheet" onClick={(e) => e.stopPropagation()} style={{ width: 'min(520px, 92vw)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+              <span className={`pglyph ${PLATFORM_TO_SHORT[selected.platform]}`} style={{ width: 22, height: 22 }}>
+                {platGlyphs[PLATFORM_TO_SHORT[selected.platform]]}
+              </span>
+              <h3 style={{ margin: 0, fontSize: 15, letterSpacing: '-0.01em' }}>
+                {selected.platform} · {new Date(selected.scheduledAt).toLocaleString()}
+              </h3>
+              <button className="icon-btn" style={{ marginLeft: 'auto' }} onClick={() => setSelected(null)}>
+                <Icon name="x" size={14} />
+              </button>
+            </div>
+            <div style={{ fontSize: 13.5, lineHeight: 1.55, whiteSpace: 'pre-wrap', padding: 14, background: 'var(--bg-sunk)', borderRadius: 10, marginBottom: 14, color: 'var(--ink-2)' }}>
+              {selected.text}
+            </div>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              <label style={{ fontSize: 12, color: 'var(--ink-3)' }}>Reschedule</label>
+              <input
+                type="datetime-local"
+                defaultValue={toLocalInputValue(selected.scheduledAt)}
+                onChange={(e) => {
+                  const v = new Date(e.target.value);
+                  if (!Number.isNaN(v.getTime())) rescheduleScheduled(selected.id, v.toISOString());
+                }}
+                style={{ padding: '6px 8px', border: '1px solid var(--line-2)', borderRadius: 6, fontFamily: 'var(--mono)', fontSize: 12 }}
+              />
+              <div style={{ flex: 1 }} />
+              {selected.platformPostUrl && (
+                <a className="btn sm ghost" href={selected.platformPostUrl} target="_blank" rel="noreferrer">
+                  <Icon name="arrow_right" size={11} /> View
+                </a>
+              )}
+              <button className="btn sm" onClick={() => cancelScheduled(selected.id)} disabled={savingId === selected.id}>
+                <Icon name="x" size={11} /> Cancel post
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
 
 function sameWeek(a: Date, weekStart: Date) {
   const ws = startOfWeek(a).getTime();

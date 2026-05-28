@@ -791,6 +791,100 @@ a { color: inherit; text-decoration: none; }
   left: -4px; top: -4px;
 }
 
+/* Mobile month grid (CalendarMobileMonth) — fit-to-width square day cells. */
+.cal-month {
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  overflow: hidden;
+}
+.cal-month-dow {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+.cal-month-dow > div {
+  padding: 8px 0;
+  text-align: center;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-4);
+}
+.cal-month-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+}
+.cal-month-cell {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 3px;
+  padding: 6px 0 0;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-elev);
+  cursor: pointer;
+  color: var(--ink);
+  font: inherit;
+}
+.cal-month-cell:nth-child(7n) { border-right: 0; }
+.cal-month-cell .dnum {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  line-height: 1;
+}
+.cal-month-cell.out { background: var(--bg-sunk); }
+.cal-month-cell.out .dnum { color: var(--ink-4); }
+.cal-month-cell.today .dnum { color: var(--accent-ink); font-weight: 600; }
+.cal-month-cell.sel .dnum { background: var(--ink); color: var(--bg); font-weight: 600; }
+.cal-month-cell.sel.today .dnum { background: var(--accent); color: white; }
+.cal-month-cell .dots {
+  display: flex;
+  gap: 2px;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: 80%;
+}
+.cal-month-cell .dots .dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+.cal-month-day {
+  margin-top: 16px;
+}
+.cal-month-day-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.cal-month-event {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--bg-elev);
+  cursor: pointer;
+  text-align: left;
+  color: var(--ink);
+  font: inherit;
+}
+.cal-month-event:active { background: var(--bg-sunk); }
+
 /* Composer layout */
 .composer {
   display: grid;
@@ -3148,7 +3242,16 @@ a { color: inherit; text-decoration: none; }
   .topbar-actions { gap: 6px; }
   /* Autopilot pill: drop the prefix label, keep dot + state. */
   .autopilot-pill .kicker { display: none; }
-  .autopilot-pill { padding: 0 10px 0 10px; }
+  .autopilot-pill { padding: 0 10px; height: 32px; }
+  /* Credit meter: drop the progress bar, keep the icon + number compact. */
+  .credit-meter .credit-meter-bar { display: none; }
+  .credit-meter { padding: 0 10px; height: 32px; }
+  /* The standalone "Compose" button in the topbar is redundant on mobile
+     (sidebar nav + briefing CTA both reach it) and it overflows the row.
+     Only the dashboard passes a primary button here; ghost links stay. */
+  .topbar-actions .btn.primary { display: none; }
+  /* Bell button: shrink to a clean square. */
+  .topbar-actions .btn.ghost { padding: 6px 8px; }
 
   /* Page padding: pull in tighter. */
   .page {
@@ -3164,7 +3267,9 @@ a { color: inherit; text-decoration: none; }
   .page-head .sub { font-size: 13px; }
   .page-head-actions { flex-wrap: wrap; }
 
-  /* Two-col + multi-col stacks. */
+  /* Two-col + multi-col stacks. minmax(0, 1fr) (not 1fr) so the single
+     column can shrink below its content's intrinsic width — otherwise wide
+     children (mode-card grids, flex toolbars) force horizontal overflow. */
   .two-col,
   .composer,
   .briefing,
@@ -3175,9 +3280,37 @@ a { color: inherit; text-decoration: none; }
   .lp-section-head,
   .pp-body,
   .pp-briefing {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     gap: 16px;
   }
+  /* Grid/flex children need an explicit min-width:0 to actually shrink. */
+  .composer,
+  .composer-left,
+  .composer-right,
+  .two-col > * {
+    min-width: 0;
+  }
+  .composer { height: auto; }
+
+  /* Compose toolbar (preset chips + toggles + Generate) must wrap, and the
+     flex spacer that pushes the button right on desktop must collapse. */
+  .prompt-foot {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .prompt-foot .prompt-spacer { display: none; }
+  .prompt-foot .btn.accent { width: 100%; justify-content: center; }
+
+  /* Inline grids inside compose (mode cards, variants, media gallery) — these
+     carry inline grid-template-columns, so the component sets a className we
+     override here at the media-query level. */
+  .compose-modes { grid-template-columns: 1fr !important; }
+  .compose-variant-grid { grid-template-columns: 1fr !important; }
+  .compose-media-grid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+
+  /* Distribution row: let the datetime picker + buttons wrap full width. */
+  .distribution-row .dist-spacer { display: none; }
+  .distribution-row input[type="datetime-local"] { flex: 1 1 100%; min-width: 0; }
 
   /* Stat cards: 2-up on phones, single-col at very narrow. */
   .stat-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; }
