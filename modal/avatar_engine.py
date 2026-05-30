@@ -95,7 +95,7 @@ def build_ltx_ia2v_prompt(img_name, audio_name, prompt_text, w, h, length, fps, 
     neg = "blurry, low quality, distorted, deformed, static frame, watermark, text, subtitles"
     g = {
         "ckpt": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": CKPT}},
-        "te": {"class_type": "LTXAVTextEncoderLoader", "inputs": {"text_encoder": TEXT_ENCODER, "ckpt_name": CKPT}},
+        "te": {"class_type": "LTXAVTextEncoderLoader", "inputs": {"text_encoder": TEXT_ENCODER, "ckpt_name": CKPT, "device": "default"}},
         "lora": {"class_type": "LoraLoaderModelOnly", "inputs": {"model": _ref("ckpt", 0), "lora_name": DISTILL_LORA, "strength_model": 0.5}},
         "avae": {"class_type": "LTXVAudioVAELoader", "inputs": {"ckpt_name": CKPT}},
         "pos": {"class_type": "CLIPTextEncode", "inputs": {"clip": _ref("te", 0), "text": prompt_text}},
