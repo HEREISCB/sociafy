@@ -1,11 +1,11 @@
 import { NextRequest } from 'next/server';
 import { and, eq } from 'drizzle-orm';
-import * as https from 'node:https';
 import { withUser, jsonError } from '../../../../../lib/api';
 import { db } from '../../../../../lib/db';
 import { videoJobs, mediaAssets } from '../../../../../lib/db/schema';
 import { getSeedanceTask } from '../../../../../lib/ai/piapi';
 import { makeMediaKey, publicUrlFor, uploadBuffer } from '../../../../../lib/storage/r2';
+import { downloadToBuffer } from '../../../../../lib/media/finalize';
 import { refund } from '../../../../../lib/credits/ledger';
 
 export const runtime = 'nodejs';
@@ -134,54 +134,4 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ jobId: stri
 
     return { status: 'completed' as const, asset, rewrittenPrompt: job.rewrittenPrompt };
   }, req);
-}
-
-// PiAPI hands back a signed URL (currently on tos2d-cdn / Bytedance CDN).
-// Same TLS hardening as our other outbound HTTPS — TLS 1.2 + http/1.1 + IPv4
-// — so the AV / proxy class of failures can't bite during the download.
-const dlAgent = new https.Agent({
-  keepAlive: false,
-  minVersion: 'TLSv1.2',
-  maxVersion: 'TLSv1.2',
-  ALPNProtocols: ['http/1.1'],
-  family: 4,
-});
-
-function downloadToBuffer(rawUrl: string, redirectsLeft = 5): Promise<{ buffer: Buffer; contentType?: string }> {
-  return new Promise((resolve, reject) => {
-    let url: URL;
-    try { url = new URL(rawUrl); } catch (e) { reject(e); return; }
-    const req = https.request(
-      {
-        hostname: url.hostname,
-        port: url.port || 443,
-        path: url.pathname + url.search,
-        method: 'GET',
-        headers: { 'User-Agent': 'sociafy/1.0', 'Accept': '*/*' },
-        agent: dlAgent,
-      },
-      (res) => {
-        // Follow redirects (PiAPI CDN often 302s)
-        if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          res.resume();
-          if (redirectsLeft <= 0) { reject(new Error('too_many_redirects')); return; }
-          const next = new URL(res.headers.location, url).toString();
-          downloadToBuffer(next, redirectsLeft - 1).then(resolve, reject);
-          return;
-        }
-        if (!res.statusCode || res.statusCode >= 400) {
-          res.resume();
-          reject(new Error(`download_${res.statusCode}`));
-          return;
-        }
-        const chunks: Buffer[] = [];
-        res.on('data', (c: Buffer) => chunks.push(c));
-        res.on('end', () => resolve({ buffer: Buffer.concat(chunks), contentType: res.headers['content-type'] }));
-        res.on('error', reject);
-      },
-    );
-    req.setTimeout(60_000, () => req.destroy(new Error('ETIMEDOUT')));
-    req.on('error', reject);
-    req.end();
-  });
 }

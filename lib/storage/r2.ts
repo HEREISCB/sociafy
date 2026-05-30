@@ -80,6 +80,18 @@ export async function deleteObject(key: string) {
   await client.send(new DeleteObjectCommand({ Bucket: env.r2.bucket!, Key: key }));
 }
 
+/** Inverse of publicUrlFor: recover the object key from a public URL. Returns
+ *  the decoded key, or the input unchanged if it doesn't match our base (e.g.
+ *  a foreign URL). Used when a job's artifact already lives in R2 and we only
+ *  need to record the key alongside the URL. */
+export function keyFromPublicUrl(url: string): string {
+  const base = (env.r2.publicBase || `https://${env.r2.bucket}.r2.dev`).replace(/\/$/, '');
+  if (url.startsWith(base + '/')) {
+    return decodeURIComponent(url.slice(base.length + 1));
+  }
+  return url;
+}
+
 export function makeMediaKey(userId: string, fileName: string): string {
   const safe = fileName.toLowerCase().replace(/[^a-z0-9._-]/g, '-').slice(0, 80);
   const stamp = Date.now().toString(36);
