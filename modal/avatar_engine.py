@@ -68,7 +68,7 @@ MODELS = [
 image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install("git", "ffmpeg", "libsndfile1")
-    .pip_install("comfy-cli", "huggingface_hub", "boto3", "soundfile", "requests")
+    .pip_install("comfy-cli", "huggingface_hub", "boto3", "soundfile", "requests", "fastapi")
     .run_commands(
         "comfy --skip-prompt install --nvidia --version latest --cuda-version 12.4 || comfy --skip-prompt install --nvidia",
         # LTX nodes are largely in ComfyUI core now; add the official node pack as
