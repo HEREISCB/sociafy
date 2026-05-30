@@ -141,6 +141,12 @@ export const connectedAccounts = pgTable(
     scope: text('scope'),
     meta: jsonb('meta').$type<Record<string, unknown>>().default({}),
     isStub: boolean('is_stub').notNull().default(false),
+    // Token-refresh health. ensureFreshToken() writes here on both success
+    // and failure so the Connections UI can show "Reconnect needed" without
+    // waiting for the next publish attempt to fail.
+    lastRefreshAt: timestamp('last_refresh_at', { withTimezone: true }),
+    lastRefreshError: text('last_refresh_error'),
+    lastRefreshErrorAt: timestamp('last_refresh_error_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -288,6 +294,7 @@ export const agentSettings = pgTable('agent_settings', {
 export type ActivityKind =
   | 'platform_connected'
   | 'platform_disconnected'
+  | 'platform_refresh_failed'
   | 'draft_created'
   | 'draft_scheduled'
   | 'manual_publish'
@@ -404,5 +411,66 @@ export const videoJobs = pgTable(
   (t) => [
     index('video_jobs_user_idx').on(t.userId),
     index('video_jobs_task_idx').on(t.providerTaskId),
+  ],
+);
+
+// =====================================================
+// voices — cloned "Voice Twin" profiles + consent record.
+//
+// The underlying model is zero-shot, so a "voice" is not a trained artifact:
+// it's just (a clean reference clip in R2 + its transcript). Both are passed
+// to the voice engine at synthesis time. The consent columns are an audit
+// trail — version of the agreement, the user's typed signature, and when.
+// =====================================================
+export const voices = pgTable(
+  'voices',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id').notNull(),
+    name: text('name').notNull(),
+    status: text('status').notNull().default('preparing'), // preparing | ready | failed
+    refStorageKey: text('ref_storage_key').notNull(),
+    refPublicUrl: text('ref_public_url').notNull(),
+    refDurationS: numeric('ref_duration_s'),
+    transcript: text('transcript'),
+    language: text('language'),
+    consentVersion: text('consent_version').notNull(),
+    consentSignature: text('consent_signature').notNull(),
+    consentAcceptedAt: timestamp('consent_accepted_at', { withTimezone: true }).notNull(),
+    error: text('error'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index('voices_user_idx').on(t.userId)],
+);
+
+// =====================================================
+// gen_jobs — generic async Modal job (kind = 'tts' | 'avatar').
+//
+// videoJobs stays dedicated to PiAPI Seedance (it downloads from PiAPI's CDN).
+// Modal jobs are different: the GPU function uploads its output straight to R2
+// and returns the public URL, so the poller only records the asset. Same
+// charge/refund lifecycle as videoJobs. `inputJson` holds the original request
+// params (voiceId, script, imageUrl, options…) for debugging + finalization.
+// =====================================================
+export const genJobs = pgTable(
+  'gen_jobs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id').notNull(),
+    kind: text('kind').notNull(),                  // 'tts' | 'avatar'
+    provider: text('provider').notNull(),          // 'modal-voice' | 'modal-avatar'
+    providerCallId: text('provider_call_id').notNull(),
+    status: text('status').notNull().default('pending'), // pending | completed | failed
+    inputJson: jsonb('input_json'),
+    mediaAssetId: uuid('media_asset_id'),
+    error: text('error'),
+    creditLedgerId: uuid('credit_ledger_id'),
+    creditsCharged: integer('credits_charged'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('gen_jobs_user_idx').on(t.userId),
+    index('gen_jobs_call_idx').on(t.providerCallId),
   ],
 );
