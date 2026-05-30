@@ -34,7 +34,11 @@ image = (
         "omnivoice",  # zero-shot TTS package (name not exposed to users)
     )
 )
-secrets = [modal.Secret.from_name("sociafy-r2"), modal.Secret.from_name("sociafy-engine")]
+secrets = [
+    modal.Secret.from_name("sociafy-r2"),
+    modal.Secret.from_name("sociafy-engine"),
+    modal.Secret.from_name("huggingface"),  # authenticated HF model downloads
+]
 
 
 @app.cls(gpu="L4", image=image, volumes={"/weights": weights}, secrets=secrets, scaledown_window=120)

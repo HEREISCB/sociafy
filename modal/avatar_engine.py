@@ -52,7 +52,11 @@ image = (
         "pip install flash-attn==2.7.4.post1 --no-build-isolation",
     )
 )
-secrets = [modal.Secret.from_name("sociafy-r2"), modal.Secret.from_name("sociafy-engine")]
+secrets = [
+    modal.Secret.from_name("sociafy-r2"),
+    modal.Secret.from_name("sociafy-engine"),
+    modal.Secret.from_name("huggingface"),  # authenticated HF model downloads
+]
 
 CKPT = "/weights/avatar-1.5"
 
