@@ -148,7 +148,7 @@ class AvatarEngine:
         }
         input_json = f"{work}/input.json"
         with open(input_json, "w") as f:
-            json.dump([spec], f)
+            json.dump(spec, f)  # the demo script reads a single object, not a list
 
         # Segments roughly track audio length so longer scripts aren't truncated.
         try:
@@ -162,7 +162,7 @@ class AvatarEngine:
         # Distilled 8-step int8 path (single H100). If this OOMs, switch the
         # class to gpu="A100-80GB:2" and add --context_parallel_size=2 (and run
         # via torchrun --nproc_per_node=2).
-        subprocess.run(
+        proc = subprocess.run(
             [
                 "python", "/opt/engine/run_demo_avatar_single_audio_to_video.py",
                 "--checkpoint_dir", CKPT,
@@ -175,9 +175,13 @@ class AvatarEngine:
                 "--use_distill",
                 "--use_int8",
             ],
-            check=True,
             cwd="/opt/engine",
+            capture_output=True,
+            text=True,
         )
+        if proc.returncode != 0:
+            # Surface the tail of stderr so failures aren't opaque to the poller.
+            raise RuntimeError(f"inference_failed: {(proc.stderr or proc.stdout)[-600:]}")
 
         # save_video_ffmpeg writes ai2v_demo_1.mp4 (it appends the extension).
         mp4 = next(
