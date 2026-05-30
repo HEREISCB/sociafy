@@ -205,7 +205,12 @@ class AvatarEngine:
 
         for _ in range(360):
             time.sleep(5)
-            h_resp = requests.get(f"http://127.0.0.1:8188/history/{pid}", timeout=15).json()
+            try:
+                # ComfyUI's server is single-threaded; while it's loading the
+                # 22B model or sampling it won't answer, so tolerate timeouts.
+                h_resp = requests.get(f"http://127.0.0.1:8188/history/{pid}", timeout=30).json()
+            except Exception:
+                continue
             if pid in h_resp:
                 entry = h_resp[pid]
                 st = entry.get("status", {})
