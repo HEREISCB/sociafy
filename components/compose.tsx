@@ -553,6 +553,9 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
   const [avatarScript, setAvatarScript] = useState<string>('');
   const [avatarVoiceId, setAvatarVoiceId] = useState<string | null>(null);
   const [avatarAudioMode, setAvatarAudioMode] = useState<'voice' | 'audio'>('voice');
+  // Voice preview (hear the cloned voice say the script before committing to a video).
+  const [voicePreviewBusy, setVoicePreviewBusy] = useState(false);
+  const [voicePreviewUrl, setVoicePreviewUrl] = useState<string | null>(null);
   const { voices: myVoices } = useVoices();
   const refUploadRef = useRef<HTMLInputElement | null>(null);
   type AnchorTarget = 'start' | 'end' | 'reference' | 'refVideo' | 'audio' | 'avatarFace';
@@ -940,6 +943,55 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
       setToast(`Video generation failed: ${msg}`);
     } finally {
       setVideoBusy(false);
+    }
+  };
+
+  /** Synthesize the script in the selected Voice Twin and play it back, so the
+   *  user can hear the voice before generating the (slow, costly) video. */
+  const previewVoice = async () => {
+    if (!(avatarVoiceId && avatarScript.trim())) {
+      setToast('Pick a voice and type a script to preview.');
+      return;
+    }
+    setVoicePreviewBusy(true);
+    setVoicePreviewUrl(null);
+    try {
+      const r = await fetch('/api/tts', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ voiceId: avatarVoiceId, text: avatarScript.trim().slice(0, 600) }),
+      });
+      const data = await r.json().catch(() => ({} as Record<string, unknown>));
+      if (r.status === 402 && (data as { error?: string })?.error === 'insufficient_credits') {
+        const body = data as { balance?: number; needed?: number };
+        setCreditError({ balance: Number(body.balance ?? 0), needed: Number(body.needed ?? 0) });
+        return;
+      }
+      if (!r.ok) { setToast(`Voice preview failed: ${r.status}`); return; }
+      refreshCredits();
+      const jobId = (data as { job?: { id: string } }).job?.id;
+      if (!jobId) { setToast('Voice preview returned no job.'); return; }
+      // TTS resolves fast — poll up to 90s.
+      const startedAt = Date.now();
+      let interval = 2_000;
+      while (Date.now() - startedAt < 90_000) {
+        await new Promise((res) => setTimeout(res, interval));
+        interval = Math.min(interval + 500, 5_000);
+        let pr: Response;
+        try { pr = await fetch(`/api/media/gen-job/${jobId}`, { credentials: 'include' }); } catch { continue; }
+        if (!pr.ok) continue;
+        const pd = await pr.json().catch(() => ({} as Record<string, unknown>)) as {
+          status?: 'pending' | 'completed' | 'failed';
+          asset?: { publicUrl: string };
+        };
+        if (pd.status === 'completed' && pd.asset) { setVoicePreviewUrl(pd.asset.publicUrl); break; }
+        if (pd.status === 'failed') { setToast('Voice preview failed to render.'); break; }
+      }
+    } catch (e) {
+      setToast(`Voice preview failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setVoicePreviewBusy(false);
     }
   };
 
@@ -1514,13 +1566,25 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                       <VoicePicker value={avatarVoiceId} onChange={setAvatarVoiceId} />
                       <textarea
                         value={avatarScript}
-                        onChange={(e) => setAvatarScript(e.target.value)}
+                        onChange={(e) => { setAvatarScript(e.target.value); setVoicePreviewUrl(null); }}
                         placeholder="What should the avatar say?"
                         rows={3}
                         maxLength={2000}
                         style={{ width: '100%', padding: 10, borderRadius: 8, border: '1px solid var(--line)', background: 'var(--bg-sunk)', color: 'var(--ink)', fontSize: 12.5, resize: 'vertical' }}
                       />
-                      <span style={{ fontSize: 10, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>{avatarScript.length}/2000 · clip length follows your script</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          className="btn sm ghost"
+                          disabled={voicePreviewBusy || !(avatarVoiceId && avatarScript.trim())}
+                          onClick={previewVoice}
+                          title="Hear this voice say your script before generating the video"
+                        >
+                          <Icon name="play" size={11} /> {voicePreviewBusy ? 'Synthesizing…' : 'Preview voice'}
+                        </button>
+                        {voicePreviewUrl && <audio src={voicePreviewUrl} controls style={{ flex: 1, minWidth: 180, height: 30 }} />}
+                        <span style={{ fontSize: 10, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>{avatarScript.length}/2000 · clip length follows your script</span>
+                      </div>
                     </div>
                   )
                 ) : (
