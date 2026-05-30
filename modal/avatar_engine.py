@@ -216,16 +216,22 @@ class AvatarEngine:
                 st = entry.get("status", {})
                 if st.get("status_str") == "error":
                     raise RuntimeError(f"comfy_error: {json.dumps(st)[:700]}")
-                for _node, out in entry.get("outputs", {}).items():
-                    vids = out.get("videos") or out.get("gifs") or []
-                    if vids:
-                        fn = vids[0]["filename"]
-                        sub = vids[0].get("subfolder", "")
-                        path = os.path.join(COMFY, "output", sub, fn)
-                        if os.path.exists(path):
-                            return upload_r2(path, f"avatar/{uuid.uuid4().hex}.mp4", "video/mp4")
                 if st.get("completed"):
-                    raise RuntimeError("avatar_completed_without_video")
+                    # Find the saved video on disk by prefix — most robust across
+                    # SaveVideo / VHS output-metadata formats.
+                    found = None
+                    out_root = os.path.join(COMFY, "output")
+                    for root, _dirs, files in os.walk(out_root):
+                        for fn in files:
+                            if fn.startswith("sociafy_avatar") and fn.lower().endswith((".mp4", ".webm", ".mkv")):
+                                p = os.path.join(root, fn)
+                                if not found or os.path.getmtime(p) > os.path.getmtime(found):
+                                    found = p
+                    if found:
+                        ct = "video/webm" if found.endswith(".webm") else "video/mp4"
+                        ext = "webm" if found.endswith(".webm") else "mp4"
+                        return upload_r2(found, f"avatar/{uuid.uuid4().hex}.{ext}", ct)
+                    raise RuntimeError(f"completed_without_video; outputs={json.dumps(entry.get('outputs', {}))[:500]}")
         raise RuntimeError("avatar_timeout")
 
 
