@@ -162,10 +162,14 @@ class AvatarEngine:
         # Distilled 8-step int8 path (single H100). If this OOMs, switch the
         # class to gpu="A100-80GB:2" and add --context_parallel_size=2 (and run
         # via torchrun --nproc_per_node=2).
+        # The demo script reads torch.distributed env vars (RANK/WORLD_SIZE),
+        # so it must be launched via torchrun even for a single GPU.
         proc = subprocess.run(
             [
-                "python", "/opt/engine/run_demo_avatar_single_audio_to_video.py",
+                "torchrun", "--nproc_per_node=1", "--master_port=29501",
+                "/opt/engine/run_demo_avatar_single_audio_to_video.py",
                 "--checkpoint_dir", CKPT,
+                "--context_parallel_size", "1",
                 "--stage_1", "ai2v",
                 "--input_json", input_json,
                 "--output_dir", out_dir,
