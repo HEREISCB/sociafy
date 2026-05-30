@@ -72,11 +72,16 @@ image = (
         "boto3",
         "fastapi[standard]",
     )
+    # Prebuilt flash-attn wheel (matches torch 2.6 / cu12 / py310) — avoids a
+    # from-source build that would need the CUDA toolkit at image-build time.
+    .pip_install(
+        "https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/"
+        "flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-cp310-cp310-linux_x86_64.whl"
+    )
     .run_commands(
         "git clone --depth 1 https://github.com/meituan-longcat/LongCat-Video /opt/engine",
         "pip install -r /opt/engine/requirements.txt",
         "pip install -r /opt/engine/requirements_avatar.txt",
-        "pip install flash-attn==2.7.4.post1 --no-build-isolation",
     )
 )
 secrets = [
