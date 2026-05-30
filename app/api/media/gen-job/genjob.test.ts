@@ -37,7 +37,7 @@ vi.mock('../../../../lib/ai/modal', () => ({
 import { GET } from './[id]/route';
 
 function call() {
-  return GET({} as never, { params: Promise.resolve({ id: 'job_1' }) }) as Promise<Record<string, unknown>>;
+  return GET({} as never, { params: Promise.resolve({ id: 'job_1' }) }) as unknown as Promise<Record<string, unknown>>;
 }
 
 beforeEach(() => {
