@@ -8,8 +8,9 @@ import { PLATFORM_TO_SHORT, SHORT_TO_PLATFORM } from '../lib/ui/platforms';
 import type { Platform } from '../lib/db/schema';
 import { useSWRConfig } from 'swr';
 import { InsufficientCreditsBanner } from './credits';
-import { priceForImage, priceForVideo, priceForCompose, ACTION_LABELS } from '../lib/credits/pricing';
+import { priceForImage, priceForVideo, priceForCompose, priceForAvatar, ACTION_LABELS } from '../lib/credits/pricing';
 import type { CreditsPayload } from './credits';
+import { VoicePicker, useVoices } from './voice-studio';
 
 type ComposeMode = 'text' | 'image' | 'video';
 type MediaKind = 'image' | 'carousel' | 'video';
@@ -53,13 +54,14 @@ type ImageSize = '1024x1024' | '1536x1024' | '1024x1536';
 type ImageQuality = 'low' | 'medium' | 'high';
 type VideoQuality = '480p' | '720p' | '1080p';
 type VideoAspect = '9:16' | '1:1' | '16:9';
-type VideoGenMode = 'text' | 'image-to-video' | 'reference' | 'audio-driven';
+type VideoGenMode = 'text' | 'image-to-video' | 'reference' | 'audio-driven' | 'avatar';
 
-const VIDEO_GEN_MODES: { id: VideoGenMode; label: string; sub: string; icon: 'edit' | 'image' | 'grid' | 'bolt' }[] = [
+const VIDEO_GEN_MODES: { id: VideoGenMode; label: string; sub: string; icon: 'edit' | 'image' | 'grid' | 'bolt' | 'mic' }[] = [
   { id: 'text',           label: 'Text only',       sub: 'Just a prompt',           icon: 'edit'  },
   { id: 'image-to-video', label: 'Image → video',   sub: 'Start frame + prompt',    icon: 'image' },
   { id: 'reference',      label: 'Reference',       sub: 'Up to 9 refs + a video',  icon: 'grid'  },
   { id: 'audio-driven',   label: 'Audio-driven',    sub: 'Sync motion to a track',  icon: 'bolt'  },
+  { id: 'avatar',         label: 'Avatar',          sub: 'A face speaks in your voice', icon: 'mic' },
 ];
 
 // Per-platform capability matrix — which modes that platform's API actually
@@ -546,8 +548,14 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
   const [referenceImageUrls, setReferenceImageUrls] = useState<string[]>([]);
   const [referenceVideoUrl, setReferenceVideoUrl] = useState<string | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  // Avatar mode: a face photo + a script spoken in a Voice Twin (or uploaded audio).
+  const [avatarImageUrl, setAvatarImageUrl] = useState<string | null>(null);
+  const [avatarScript, setAvatarScript] = useState<string>('');
+  const [avatarVoiceId, setAvatarVoiceId] = useState<string | null>(null);
+  const [avatarAudioMode, setAvatarAudioMode] = useState<'voice' | 'audio'>('voice');
+  const { voices: myVoices } = useVoices();
   const refUploadRef = useRef<HTMLInputElement | null>(null);
-  type AnchorTarget = 'start' | 'end' | 'reference' | 'refVideo' | 'audio';
+  type AnchorTarget = 'start' | 'end' | 'reference' | 'refVideo' | 'audio' | 'avatarFace';
   const [refUploadTarget, setRefUploadTarget] = useState<AnchorTarget | null>(null);
 
   const uploadAnchor = async (file: File): Promise<string | null> => {
@@ -573,6 +581,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
         : target === 'refVideo'
           ? 'video/mp4,video/webm,video/quicktime'
           : 'image/png,image/jpeg,image/webp';
+      // 'avatarFace' shares the image accept set above (falls through to else).
       refUploadRef.current.click();
     }
   };
@@ -588,6 +597,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
     else if (target === 'end') setEndFrameUrl(url);
     else if (target === 'refVideo') setReferenceVideoUrl(url);
     else if (target === 'audio') setAudioUrl(url);
+    else if (target === 'avatarFace') setAvatarImageUrl(url);
     else setReferenceImageUrls((cur) => [...cur, url].slice(0, 9));
     setRefUploadTarget(null);
   };
@@ -609,6 +619,10 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
       const { credits: unit, action } = priceForImage(imageSize, imageQuality);
       const total = unit * imageCount;
       setPreviewCost({ credits: total, action, label: ACTION_LABELS[action] });
+    } else if (mode === 'video' && videoGenMode === 'avatar') {
+      const q = videoQuality === '1080p' ? '720p' : videoQuality;
+      const per = priceForAvatar(q);
+      setPreviewCost({ credits: per.credits, action: per.action, label: ACTION_LABELS[per.action] });
     } else if (mode === 'video') {
       const per = priceForVideo({ durationSec: videoDuration, quality: videoQuality, fast: false });
       const total = per.credits * videoCount;
@@ -618,7 +632,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
       const p = priceForCompose({ withTools: withResearch, extraSearches: 0 });
       setPreviewCost({ credits: p.credits, action: p.action, label: ACTION_LABELS[p.action] });
     }
-  }, [mode, imageSize, imageQuality, imageCount, videoDuration, videoQuality, videoCount, withResearch]);
+  }, [mode, imageSize, imageQuality, imageCount, videoDuration, videoQuality, videoCount, videoGenMode, withResearch]);
 
   /** Full-screen media preview. null = closed. Handles both images and videos. */
   const [lightbox, setLightbox] = useState<{ url: string; label?: string; kind?: 'image' | 'video' } | null>(null);
@@ -929,6 +943,99 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
     }
   };
 
+  const generateAvatar = async () => {
+    if (!avatarImageUrl) { setToast('Add a face photo for the avatar.'); return; }
+    const useVoice = avatarAudioMode === 'voice';
+    if (useVoice && !(avatarVoiceId && avatarScript.trim())) {
+      setToast('Pick a Voice Twin and type what the avatar should say.');
+      return;
+    }
+    if (!useVoice && !audioUrl) { setToast('Upload an audio track to drive the avatar.'); return; }
+
+    const quality = videoQuality === '1080p' ? '720p' : videoQuality;
+    setVideoBusy(true);
+    setToast('Bringing your avatar to life — this takes a couple of minutes…');
+    try {
+      const r = await fetch('/api/media/generate-avatar', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          imageUrl: avatarImageUrl,
+          aspect: videoAspect,
+          quality,
+          prompt: prompt.trim() || undefined,
+          ...(useVoice
+            ? { voiceId: avatarVoiceId, script: avatarScript.trim() }
+            : { audioUrl: audioUrl ?? undefined }),
+        }),
+      });
+      const data = await r.json().catch(() => ({} as Record<string, unknown>));
+      if (r.status === 402 && (data as { error?: string })?.error === 'insufficient_credits') {
+        const body = data as { balance?: number; needed?: number };
+        setCreditError({ balance: Number(body.balance ?? 0), needed: Number(body.needed ?? 0) });
+        setToast(null);
+        refreshCredits();
+        return;
+      }
+      if (!r.ok) {
+        if (r.status === 429) setToast('Slow down — too many avatar generations. Try again shortly.');
+        else if (r.status === 400) setToast('Avatar needs a face photo plus a voice + script (or an audio track).');
+        else setToast(`Avatar generation failed: ${r.status}`);
+        return;
+      }
+      setCreditError(null);
+      refreshCredits();
+
+      const jobId = (data as { job?: { id: string } }).job?.id;
+      if (!jobId) { setToast('Avatar queue returned no job.'); return; }
+
+      // Poll the single gen-job. Avatar renders take minutes; cap at 8.
+      const startedAt = Date.now();
+      const maxMs = 8 * 60_000;
+      let interval = 5_000;
+      let asset: { id: string; publicUrl: string; mimeType: string; label?: string } | null = null;
+      while (Date.now() - startedAt < maxMs) {
+        await new Promise((res) => setTimeout(res, interval));
+        interval = Math.min(interval + 1_000, 12_000);
+        let pr: Response;
+        try { pr = await fetch(`/api/media/gen-job/${jobId}`, { credentials: 'include' }); } catch { continue; }
+        if (!pr.ok) continue;
+        const pd = await pr.json().catch(() => ({} as Record<string, unknown>)) as {
+          status?: 'pending' | 'completed' | 'failed';
+          asset?: { id: string; publicUrl: string; mimeType: string; label?: string };
+          error?: string;
+        };
+        if (pd.status === 'completed' && pd.asset) { asset = pd.asset; break; }
+        if (pd.status === 'failed') { console.warn('[generateAvatar] failed:', pd.error); break; }
+      }
+      refreshCredits();
+      if (asset) {
+        setMedia((m) => [...m, {
+          kind: 'video',
+          label: asset!.label || (useVoice ? avatarScript.slice(0, 60) : 'Avatar'),
+          tag: 'Avatar',
+          id: asset!.id,
+          url: asset!.publicUrl,
+          mimeType: asset!.mimeType,
+          aspect: videoAspect.replace(':', '/'),
+        }]);
+        setToast('Avatar video ready.');
+        setTimeout(() => {
+          generatedMediaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 80);
+      } else {
+        setToast('Avatar generation timed out or failed. Try a shorter script or 480p.');
+      }
+      setTimeout(() => setToast(null), 5000);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setToast(`Avatar generation failed: ${msg}`);
+    } finally {
+      setVideoBusy(false);
+    }
+  };
+
   const { data: accounts, unauth } = useApi<Account[]>('/api/accounts');
   const connectedShorts = useMemo(
     () => (accounts ?? []).map((a) => PLATFORM_TO_SHORT[a.platform]),
@@ -983,7 +1090,8 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
     return () => { cancelled = true; };
   }, [draftId]);
 
-  // Load existing draft when editing
+  // Load existing draft when editing. Intentionally syncs prop → state so
+  // the form repopulates when ?draft=… changes.
   useEffect(() => {
     if (!draftId) {
       setLoadedDraftId(null);
@@ -1047,7 +1155,9 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
     return () => { cancelled = true; };
   }, [draftId]);
 
-  // Default platform selection to whatever the user has connected (cap at 3)
+  // Default platform selection to whatever the user has connected (cap at 3).
+  // Syncs from the accounts API response; setState updaters guard against
+  // overwriting an explicit user selection.
   useEffect(() => {
     if (accounts && accounts.length > 0) {
       const initial = accounts.slice(0, 3).map((a) => PLATFORM_TO_SHORT[a.platform]);
@@ -1082,7 +1192,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
   const generateAll = async () => {
     const tasks: Promise<unknown>[] = [generate({ withTools: withResearch })];
     if (mode === 'image') tasks.push(generateImage());
-    if (mode === 'video') tasks.push(generateVideo());
+    if (mode === 'video') tasks.push(videoGenMode === 'avatar' ? generateAvatar() : generateVideo());
     await Promise.allSettled(tasks);
   };
 
@@ -1173,6 +1283,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
             ))}
           </div>
         </div>
+        {videoGenMode !== 'avatar' && (
         <div>
           <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Duration</div>
           <input
@@ -1186,10 +1297,11 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
           />
           <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-2)', marginTop: 2 }}>{videoDuration}s</div>
         </div>
+        )}
         <div>
           <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Quality</div>
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-            {(['480p', '720p', '1080p'] as VideoQuality[]).map((q) => (
+            {((videoGenMode === 'avatar' ? ['480p', '720p'] : ['480p', '720p', '1080p']) as VideoQuality[]).map((q) => (
               <span
                 key={q}
                 className={`prompt-chip ${videoQuality === q ? 'active' : ''}`}
@@ -1255,6 +1367,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
               {videoGenMode === 'image-to-video' && 'Start frame seeds the clip. End frame is optional.'}
               {videoGenMode === 'reference'      && 'Up to 9 images + optionally a reference video.'}
               {videoGenMode === 'audio-driven'   && 'Motion synced to your audio track.'}
+              {videoGenMode === 'avatar'         && 'A face photo speaks your script in your own voice.'}
             </span>
           </div>
 
@@ -1356,6 +1469,82 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
             </div>
           )}
 
+          {videoGenMode === 'avatar' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {/* Step 1 — Face */}
+              <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr', gap: 14, alignItems: 'start' }} className="m-stack">
+                <FrameSlot
+                  label="Face photo *"
+                  url={avatarImageUrl}
+                  onUpload={() => onPickFrame('avatarFace')}
+                  onClear={() => setAvatarImageUrl(null)}
+                />
+                <div style={{ fontSize: 11, color: 'var(--ink-3)', lineHeight: 1.6, paddingTop: 4 }}>
+                  Use a clear, front-facing photo with one face and even lighting. Looking at the camera works best.
+                </div>
+              </div>
+
+              {/* Step 2 — Voice & script */}
+              <div>
+                <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                  <span
+                    className={`prompt-chip ${avatarAudioMode === 'voice' ? 'active' : ''}`}
+                    onClick={() => setAvatarAudioMode('voice')}
+                  >
+                    Your Voice Twin
+                  </span>
+                  <span
+                    className={`prompt-chip ${avatarAudioMode === 'audio' ? 'active' : ''}`}
+                    onClick={() => setAvatarAudioMode('audio')}
+                  >
+                    Upload audio
+                  </span>
+                </div>
+
+                {avatarAudioMode === 'voice' ? (
+                  myVoices.length === 0 ? (
+                    <div style={{ padding: 14, borderRadius: 10, border: '1px dashed var(--line-2)', background: 'var(--bg-sunk)', fontSize: 12, color: 'var(--ink-2)', lineHeight: 1.6 }}>
+                      Create your Voice Twin so the avatar can speak in your voice — or switch to “Upload audio”.
+                      <div style={{ marginTop: 8 }}>
+                        <VoicePicker value={avatarVoiceId} onChange={setAvatarVoiceId} />
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      <VoicePicker value={avatarVoiceId} onChange={setAvatarVoiceId} />
+                      <textarea
+                        value={avatarScript}
+                        onChange={(e) => setAvatarScript(e.target.value)}
+                        placeholder="What should the avatar say?"
+                        rows={3}
+                        maxLength={2000}
+                        style={{ width: '100%', padding: 10, borderRadius: 8, border: '1px solid var(--line)', background: 'var(--bg-sunk)', color: 'var(--ink)', fontSize: 12.5, resize: 'vertical' }}
+                      />
+                      <span style={{ fontSize: 10, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>{avatarScript.length}/2000 · clip length follows your script</span>
+                    </div>
+                  )
+                ) : (
+                  audioUrl ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 12, borderRadius: 10, border: '1px solid var(--line-2)', background: 'var(--bg-sunk)' }}>
+                      <Icon name="waveform" size={16} style={{ color: 'var(--accent)' }} />
+                      <audio src={audioUrl} controls style={{ flex: 1, height: 32 }} />
+                      <button onClick={() => setAudioUrl(null)} className="btn sm ghost" aria-label="Remove audio"><Icon name="x" size={11} /></button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => onPickFrame('audio')}
+                      style={{ width: '100%', padding: 20, borderRadius: 10, border: '1px dashed var(--line-2)', background: 'var(--bg-sunk)', color: 'var(--ink-2)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, cursor: 'pointer', fontSize: 12, fontFamily: 'var(--mono)' }}
+                    >
+                      <Icon name="upload" size={18} />
+                      <span style={{ textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: 10.5 }}>Upload audio track</span>
+                      <span style={{ fontSize: 10, color: 'var(--ink-4)' }}>MP3 / WAV / M4A / OGG · up to 50 MB</span>
+                    </button>
+                  )
+                )}
+              </div>
+            </div>
+          )}
+
           <input ref={refUploadRef} type="file" hidden onChange={onFrameChange} />
         </div>
       )}
@@ -1437,7 +1626,8 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
   };
 
   // When mode flips, drop any selected platforms that don't accept the new
-  // mode (e.g. switching to Text drops Instagram).
+  // mode (e.g. switching to Text drops Instagram). Updater short-circuits
+  // when the filter is a no-op so it doesn't trigger an extra render.
   useEffect(() => {
     setPlatforms((prev) => {
       const filtered = prev.filter((p) => PLATFORM_BY_SHORT[p]?.supports[mode]);
@@ -1742,7 +1932,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
         )}
         {unauth && (
           <div style={{ padding: 12, fontSize: 12.5, background: 'var(--bg-elev)', border: '1px solid var(--line)', borderRadius: 10, marginBottom: 12 }}>
-            <strong>Demo mode.</strong> <a href="/sign-in?next=/dashboard" style={{ textDecoration: 'underline', color: 'var(--ink)' }}>Sign in</a> to generate, draft, and schedule for real.
+            <strong>Demo mode.</strong> <Link href="/sign-in?next=/dashboard" style={{ textDecoration: 'underline', color: 'var(--ink)' }}>Sign in</Link> to generate, draft, and schedule for real.
           </div>
         )}
 
