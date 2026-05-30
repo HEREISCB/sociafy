@@ -13,6 +13,7 @@ Routes (one base URL):
 """
 
 import os
+import urllib.error
 import urllib.request
 import uuid
 
@@ -43,8 +44,16 @@ def upload_r2(local_path: str, key: str, content_type: str) -> str:
 
 
 def download_tmp(url: str, suffix: str) -> str:
+    # Send a browser UA — Cloudflare r2.dev 403s the default Python-urllib UA.
+    import shutil
+
     path = f"/tmp/{uuid.uuid4().hex}.{suffix}"
-    urllib.request.urlretrieve(url, path)
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (sociafy-engine)"})
+    try:
+        with urllib.request.urlopen(req, timeout=180) as r, open(path, "wb") as f:
+            shutil.copyfileobj(r, f)
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"download_failed {e.code} for {url[:160]}")
     return path
 
 app = modal.App("sociafy-voice-engine")

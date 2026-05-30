@@ -14,6 +14,7 @@ Routes:  POST /avatar/submit {imageUrl, voice?{refAudioUrl,refText}, script?,
 import json
 import os
 import time
+import urllib.error
 import urllib.request
 import uuid
 
@@ -49,8 +50,20 @@ def upload_r2(local_path: str, key: str, content_type: str) -> str:
 
 
 def download_tmp(url: str, suffix: str) -> str:
+    # Cloudflare r2.dev (and others) 403 the default Python-urllib UA, so send a
+    # browser UA. Convert HTTPError to a clean string (urllib's HTTPError can't
+    # be pickled back through Modal).
+    import shutil
+
     path = f"/tmp/{uuid.uuid4().hex}.{suffix}"
-    urllib.request.urlretrieve(url, path)
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (sociafy-engine)"})
+    try:
+        with urllib.request.urlopen(req, timeout=180) as r, open(path, "wb") as f:
+            shutil.copyfileobj(r, f)
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"download_failed {e.code} for {url[:160]}")
+    except Exception as e:  # noqa: BLE001
+        raise RuntimeError(f"download_error {type(e).__name__} for {url[:160]}")
     return path
 
 
