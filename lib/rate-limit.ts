@@ -23,6 +23,9 @@ export const LIMITS = {
   oauthStart: { capacity: 20, refillPerSecond: 20 / 60 },  // 20/min
   webhook: { capacity: 120, refillPerSecond: 120 / 60 },   // 2/sec sustained per IP
   general: { capacity: 60, refillPerSecond: 60 / 60 },     // 1/sec sustained
+  voiceCreate: { capacity: 5, refillPerSecond: 5 / 3600 }, // 5/hour — voice clone creation
+  tts: { capacity: 10, refillPerSecond: 10 / 60 },         // 10/min — text-to-speech
+  avatarGen: { capacity: 2, refillPerSecond: 2 / 60 },     // 2/min — avatar video gen
 } as const satisfies Record<string, Limit>;
 
 type LimitKey = keyof typeof LIMITS;
