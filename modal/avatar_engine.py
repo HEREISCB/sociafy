@@ -61,7 +61,7 @@ weights = modal.Volume.from_name("sociafy-avatar-weights", create_if_missing=Tru
 
 image = (
     modal.Image.debian_slim(python_version="3.10")
-    .apt_install("git", "ffmpeg")
+    .apt_install("git", "ffmpeg", "libsndfile1")
     .pip_install(
         "torch==2.6.0",
         "torchvision==0.21.0",
@@ -80,8 +80,11 @@ image = (
     )
     .run_commands(
         "git clone --depth 1 https://github.com/meituan-longcat/LongCat-Video /opt/engine",
-        "pip install -r /opt/engine/requirements.txt",
-        "pip install -r /opt/engine/requirements_avatar.txt",
+        # The repo's requirement files list system libs (e.g. libsndfile1) and
+        # flash-attn as pip deps; strip those — we provide them via apt + the
+        # prebuilt wheel above.
+        "grep -ivE 'libsndfile1|flash[-_]attn' /opt/engine/requirements.txt > /tmp/req.txt || true; pip install -r /tmp/req.txt",
+        "grep -ivE 'libsndfile1|flash[-_]attn' /opt/engine/requirements_avatar.txt > /tmp/req_av.txt || true; pip install -r /tmp/req_av.txt",
     )
 )
 secrets = [
