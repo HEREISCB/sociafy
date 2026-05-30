@@ -80,11 +80,16 @@ image = (
     )
     .run_commands(
         "git clone --depth 1 https://github.com/meituan-longcat/LongCat-Video /opt/engine",
-        # The repo's requirement files list system libs (e.g. libsndfile1) and
-        # flash-attn as pip deps; strip those — we provide them via apt + the
-        # prebuilt wheel above.
-        "grep -ivE 'libsndfile1|flash[-_]attn' /opt/engine/requirements.txt > /tmp/req.txt || true; pip install -r /tmp/req.txt",
-        "grep -ivE 'libsndfile1|flash[-_]attn' /opt/engine/requirements_avatar.txt > /tmp/req_av.txt || true; pip install -r /tmp/req_av.txt",
+        # The repo's requirement files include system libs (libsndfile1, via apt)
+        # flash-attn (prebuilt wheel above), and serving-only packages that
+        # aren't on PyPI (e.g. tritonserverclient). Install line-by-line and
+        # tolerate failures so one unresolvable serving extra can't kill the
+        # build — the core inference deps (torch/diffusers/transformers/…)
+        # install fine, and a genuinely-missing dep will surface at render time.
+        "cat /opt/engine/requirements.txt /opt/engine/requirements_avatar.txt "
+        "| sed 's/#.*//' | grep -viE 'libsndfile1|flash[-_]attn|tritonserverclient' "
+        "| sed '/^[[:space:]]*$/d' "
+        "| while read -r pkg; do pip install \"$pkg\" || echo \"SKIP $pkg\"; done",
     )
 )
 secrets = [
