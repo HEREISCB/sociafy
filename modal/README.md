@@ -22,10 +22,20 @@ modal secret create sociafy-r2 \
 
 ## Deploy
 
+On Windows, force UTF-8 so Modal's progress output doesn't crash the console
+(`'charmap' codec` error):
+
 ```bash
-modal deploy modal/voice_engine.py
-modal deploy modal/avatar_engine.py
+PYTHONIOENCODING=utf-8 PYTHONUTF8=1 modal deploy modal/voice_engine.py
+PYTHONIOENCODING=utf-8 PYTHONUTF8=1 modal deploy modal/avatar_engine.py
 ```
+
+Notes:
+- Each engine is a single self-contained file (helpers are inlined, because
+  Modal only mounts the entrypoint file — a shared `common.py` would not be
+  importable in the container).
+- The web/router layer runs on a light image (`fastapi` only) so endpoints
+  cold-start in seconds; only the GPU class pulls the heavy ML image.
 
 Each prints a `fastapi_app` base URL. Put them in the web app's env:
 

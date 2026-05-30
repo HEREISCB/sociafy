@@ -12,12 +12,40 @@ Routes (one base URL):
   GET  /tts/result?callId=...                            -> { status, audioUrl?, error? }
 """
 
+import os
+import urllib.request
 import uuid
 
 import modal
-from fastapi import FastAPI, Header
+from fastapi import FastAPI, Header, HTTPException
 
-from common import require_secret, upload_r2, download_tmp
+
+# --- inlined helpers (Modal mounts only this entrypoint file) ---
+def require_secret(x_engine_secret):
+    expected = os.environ.get("ENGINE_SECRET")
+    if not expected or x_engine_secret != expected:
+        raise HTTPException(status_code=401, detail="bad_secret")
+
+
+def upload_r2(local_path: str, key: str, content_type: str) -> str:
+    import boto3
+
+    client = boto3.client(
+        "s3",
+        endpoint_url=f"https://{os.environ['R2_ACCOUNT_ID']}.r2.cloudflarestorage.com",
+        aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"],
+        aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
+        region_name="auto",
+    )
+    client.upload_file(local_path, os.environ["R2_BUCKET_NAME"], key, ExtraArgs={"ContentType": content_type})
+    base = os.environ["R2_PUBLIC_URL_BASE"].rstrip("/")
+    return f"{base}/{key}"
+
+
+def download_tmp(url: str, suffix: str) -> str:
+    path = f"/tmp/{uuid.uuid4().hex}.{suffix}"
+    urllib.request.urlretrieve(url, path)
+    return path
 
 app = modal.App("sociafy-voice-engine")
 weights = modal.Volume.from_name("sociafy-voice-weights", create_if_missing=True)
@@ -39,6 +67,10 @@ secrets = [
     modal.Secret.from_name("sociafy-engine"),
     modal.Secret.from_name("huggingface"),  # authenticated HF model downloads
 ]
+
+# Light image for the web/router layer so endpoints cold-start in ~seconds.
+# Only the GPU class below needs torch + the model packages.
+web_image = modal.Image.debian_slim(python_version="3.11").pip_install("fastapi[standard]")
 
 
 @app.cls(gpu="L4", image=image, volumes={"/weights": weights}, secrets=secrets, scaledown_window=120)
@@ -108,7 +140,7 @@ def tts_result(callId: str, x_engine_secret: str = Header(None)):
         return {"status": "failed", "error": str(e)[:300]}
 
 
-@app.function(image=image, secrets=secrets)
+@app.function(image=web_image, secrets=secrets)
 @modal.asgi_app()
 def fastapi_app():
     return web_app
