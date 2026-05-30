@@ -31,7 +31,11 @@ export type CreditAction =
   | 'video_15s_1080p_quality'
   | 'variant_regenerate'
   | 'agent_draft'
-  | 'publish_x';
+  | 'publish_x'
+  | 'voice_twin_create'
+  | 'tts_synthesis'
+  | 'avatar_video_480p'
+  | 'avatar_video_720p';
 
 /** Single source-of-truth credit cost per action. */
 export const CREDIT_PRICES: Record<CreditAction, number> = {
@@ -54,6 +58,10 @@ export const CREDIT_PRICES: Record<CreditAction, number> = {
   variant_regenerate: 1,
   agent_draft: 1,
   publish_x: 0,                       // X cost is amortized in subscription
+  voice_twin_create: 5,               // one-time: Whisper transcribe + validate; small fee deters throwaway clones
+  tts_synthesis: 4,                   // one TTS render (≤60s out)
+  avatar_video_480p: 50,              // CALIBRATE: ceil(measured_cost*1.10/0.009) after Modal benchmark
+  avatar_video_720p: 90,              // CALIBRATE: ditto
 };
 
 export function creditsFor(action: CreditAction): number {
@@ -131,6 +139,19 @@ export function priceForVideo(args: {
 }
 
 // =====================================================
+// Avatar-gen price helper
+// =====================================================
+
+/** Maps avatar quality to a credit price + stable action key. Avatar is
+ *  capped to 480p/720p (the engine does not offer 1080p). */
+export function priceForAvatar(
+  quality: '480p' | '720p',
+): { action: CreditAction; credits: number } {
+  const action: CreditAction = quality === '720p' ? 'avatar_video_720p' : 'avatar_video_480p';
+  return { action, credits: CREDIT_PRICES[action] };
+}
+
+// =====================================================
 // Text-post price helper
 // =====================================================
 
@@ -171,6 +192,10 @@ export const ACTION_LABELS: Record<CreditAction, string> = {
   variant_regenerate: 'Variant regenerated',
   agent_draft: 'Agent draft',
   publish_x: 'Posted to X',
+  voice_twin_create: 'Voice Twin created',
+  tts_synthesis: 'Text-to-speech',
+  avatar_video_480p: 'Avatar video · 480p',
+  avatar_video_720p: 'Avatar video · 720p',
 };
 
 // Suppress unused-import warning while keeping the type available to consumers.
