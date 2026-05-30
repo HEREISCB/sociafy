@@ -129,36 +129,48 @@ class AvatarEngine:
 
     @modal.method()
     def render(self, payload: dict) -> str:
+        import soundfile as sf
+
         img = download_tmp(payload["imageUrl"], "png")
         audio = self._audio_for(payload)
         quality = payload.get("quality", "720p")
-        resolution = "720P" if quality == "720p" else "480P"
+        resolution = "720p" if quality == "720p" else "480p"
 
+        # Match the repo's input-JSON schema (assets/avatar/single_example_1.json):
+        # { prompt, cond_image, cond_audio: { person1 } }. We always have a face
+        # photo, so this is the audio-image-to-video (ai2v) path.
         work = f"/tmp/{uuid.uuid4().hex}"
         os.makedirs(work, exist_ok=True)
         spec = {
-            "image_path": img,
-            "audio_path": audio,
-            "prompt": payload.get("prompt") or "A person speaking naturally to the camera.",
-            "resolution": resolution,
-            "aspect_ratio": payload.get("aspect", "9:16"),
-            "expressive": bool(payload.get("expressive", False)),
+            "prompt": payload.get("prompt") or "A person speaking naturally to the camera, looking ahead.",
+            "cond_image": img,
+            "cond_audio": {"person1": audio},
         }
         input_json = f"{work}/input.json"
         with open(input_json, "w") as f:
             json.dump([spec], f)
 
+        # Segments roughly track audio length so longer scripts aren't truncated.
+        try:
+            dur = sf.info(audio).frames / float(sf.info(audio).samplerate)
+        except Exception:
+            dur = 5.0
+        num_segments = max(1, min(8, round(dur / 5.0)))
+
         out_dir = f"{work}/out"
         os.makedirs(out_dir, exist_ok=True)
         # Distilled 8-step int8 path (single H100). If this OOMs, switch the
-        # class to gpu="A100-80GB:2" and add --context_parallel_size=2.
+        # class to gpu="A100-80GB:2" and add --context_parallel_size=2 (and run
+        # via torchrun --nproc_per_node=2).
         subprocess.run(
             [
                 "python", "/opt/engine/run_demo_avatar_single_audio_to_video.py",
                 "--checkpoint_dir", CKPT,
-                "--stage_1", "at2v",
+                "--stage_1", "ai2v",
                 "--input_json", input_json,
                 "--output_dir", out_dir,
+                "--resolution", resolution,
+                "--num_segments", str(num_segments),
                 "--model_type", "avatar-v1.5",
                 "--use_distill",
                 "--use_int8",
@@ -167,7 +179,11 @@ class AvatarEngine:
             cwd="/opt/engine",
         )
 
-        mp4 = next((os.path.join(out_dir, f) for f in os.listdir(out_dir) if f.endswith(".mp4")), None)
+        # save_video_ffmpeg writes ai2v_demo_1.mp4 (it appends the extension).
+        mp4 = next(
+            (os.path.join(out_dir, f) for f in sorted(os.listdir(out_dir)) if f.endswith(".mp4")),
+            None,
+        )
         if not mp4:
             raise RuntimeError("avatar_no_output")
         return upload_r2(mp4, f"avatar/{uuid.uuid4().hex}.mp4", "video/mp4")
