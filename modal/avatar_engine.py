@@ -1,16 +1,14 @@
 """Sociafy Avatar engine — audio-driven talking-head video via headless ComfyUI
-with the GGUF-quantized avatar model (runs on a mid-range GPU, not an H100).
+running LTX-2.3 (image + audio -> lip-synced video). Runs on an L40S (no H100).
 
-The underlying model is never named to users; only this internal module
-references the repos. Single-pipeline: given a voice reference + script it first
-synthesizes speech via the (already-deployed) voice engine, then animates the
-face photo to that audio with the official WanVideoWrapper LongCat-avatar graph.
+The underlying model is never named to users. Single-pipeline: given a voice
+reference + script it first synthesizes speech via the (already-deployed) voice
+engine, then animates the face photo to that audio with LTX-2.3 ia2v.
 
 Deploy:  PYTHONIOENCODING=utf-8 PYTHONUTF8=1 modal deploy modal/avatar_engine.py
-Routes (one base URL):
-  POST /avatar/submit  {imageUrl, voice?{refAudioUrl,refText}, script?, audioUrl?,
-                        prompt?, aspect, quality}  -> {callId}
-  GET  /avatar/result?callId=...                  -> {status, videoUrl?, error?}
+Routes:  POST /avatar/submit {imageUrl, voice?{refAudioUrl,refText}, script?,
+         audioUrl?, prompt?, aspect, quality} -> {callId}
+         GET  /avatar/result?callId=... -> {status, videoUrl?, error?}
 """
 
 import json
@@ -23,10 +21,10 @@ import modal
 from fastapi import FastAPI, Header, HTTPException
 
 app = modal.App("sociafy-avatar-engine")
-# Models live in a Volume so they download once and persist across cold starts.
 models_vol = modal.Volume.from_name("sociafy-comfy-models", create_if_missing=True)
 MODELS_DIR = "/models"
 COMFY = "/root/comfy/ComfyUI"
+
 
 # --- inlined helpers (Modal mounts only the entrypoint file) ---
 def require_secret(x_engine_secret):
@@ -56,37 +54,28 @@ def download_tmp(url: str, suffix: str) -> str:
     return path
 
 
-# Support models + where each lands under ComfyUI/models. Paths are best-known;
-# if a loader reports "not in list", fix the (repo, file, dest) here.
-GGUF_FILE = "LongCat-Avatar-15_comfy-Q4_K_M.gguf"
+# LTX-2.3 models. (repo, repo_filename, comfy_subfolder). repo_filename may
+# include a subpath; we store under the basename in the comfy subfolder.
+CKPT = "ltx-2.3-22b-dev-fp8.safetensors"
+TEXT_ENCODER = "gemma_3_12B_it_fp4_mixed.safetensors"
+DISTILL_LORA = "ltx_2.3_22b_distilled_1.1_lora_dynamic_fro09_avg_rank_111_bf16.safetensors"
 MODELS = [
-    ("vantagewithai/LongCat-Video-Avatar-1.5-GGUF-ComfyUI", GGUF_FILE, "diffusion_models"),
-    ("Kijai/WanVideo_comfy", "Wan2_1_VAE_bf16.safetensors", "vae"),
-    ("Kijai/WanVideo_comfy", "umt5-xxl-enc-bf16.safetensors", "text_encoders"),
-    ("Kijai/WanVideo_comfy", "LongCat_distill_lora_rank128_bf16.safetensors", "loras"),
-    ("Kijai/WanVideo_comfy", "MelBandRoformer_fp32.safetensors", "diffusion_models"),
-    ("Kijai/WanVideo_comfy", "wav2vec2-chinese-base_fp16.safetensors", "wav2vec2"),
+    ("Lightricks/LTX-2.3-fp8", CKPT, "checkpoints"),
+    ("Comfy-Org/ltx-2", f"split_files/text_encoders/{TEXT_ENCODER}", "text_encoders"),
+    ("Comfy-Org/ltx-2.3", f"split_files/loras/{DISTILL_LORA}", "loras"),
 ]
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
-    .apt_install("git", "ffmpeg", "libsndfile1", "build-essential")
-    .pip_install("torch==2.6.0", "torchvision==0.21.0", "torchaudio==2.6.0", index_url="https://download.pytorch.org/whl/cu124")
+    .apt_install("git", "ffmpeg", "libsndfile1")
     .pip_install("comfy-cli", "huggingface_hub", "boto3", "soundfile", "requests")
-    # ComfyUI + the custom nodes the LongCat avatar workflow needs.
     .run_commands(
         "comfy --skip-prompt install --nvidia --version latest --cuda-version 12.4 || comfy --skip-prompt install --nvidia",
-        f"git clone --depth 1 https://github.com/kijai/ComfyUI-WanVideoWrapper {COMFY}/custom_nodes/ComfyUI-WanVideoWrapper",
-        f"git clone --depth 1 https://github.com/kijai/ComfyUI-KJNodes {COMFY}/custom_nodes/ComfyUI-KJNodes",
-        f"git clone --depth 1 https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite {COMFY}/custom_nodes/ComfyUI-VideoHelperSuite",
-        f"git clone --depth 1 https://github.com/city96/ComfyUI-GGUF {COMFY}/custom_nodes/ComfyUI-GGUF",
-        f"pip install -r {COMFY}/custom_nodes/ComfyUI-WanVideoWrapper/requirements.txt || true",
-        f"pip install -r {COMFY}/custom_nodes/ComfyUI-KJNodes/requirements.txt || true",
-        f"pip install -r {COMFY}/custom_nodes/ComfyUI-VideoHelperSuite/requirements.txt || true",
-        f"pip install -r {COMFY}/custom_nodes/ComfyUI-GGUF/requirements.txt || true",
+        # LTX nodes are largely in ComfyUI core now; add the official node pack as
+        # a safety net for any ia2v node not yet in core.
+        f"git clone --depth 1 https://github.com/Lightricks/ComfyUI-LTXVideo {COMFY}/custom_nodes/ComfyUI-LTXVideo",
+        f"pip install -r {COMFY}/custom_nodes/ComfyUI-LTXVideo/requirements.txt || true",
     )
-    # Bundle the official workflow JSON into the image.
-    .add_local_file("comfy/longcat_avatar_workflow.json", "/root/workflow_ui.json", copy=True)
 )
 
 secrets = [
@@ -94,8 +83,46 @@ secrets = [
     modal.Secret.from_name("sociafy-engine"),
     modal.Secret.from_name("huggingface"),
 ]
-
 web_image = modal.Image.debian_slim(python_version="3.12").pip_install("fastapi[standard]")
+
+
+def _ref(node_id, slot=0):
+    return [str(node_id), slot]
+
+
+def build_ltx_ia2v_prompt(img_name, audio_name, prompt_text, w, h, length, fps, duration):
+    """Hand-authored minimal LTX-2.3 image+audio->video API graph."""
+    neg = "blurry, low quality, distorted, deformed, static frame, watermark, text, subtitles"
+    g = {
+        "ckpt": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": CKPT}},
+        "te": {"class_type": "LTXAVTextEncoderLoader", "inputs": {"text_encoder": TEXT_ENCODER, "ckpt_name": CKPT}},
+        "lora": {"class_type": "LoraLoaderModelOnly", "inputs": {"model": _ref("ckpt", 0), "lora_name": DISTILL_LORA, "strength_model": 0.5}},
+        "avae": {"class_type": "LTXVAudioVAELoader", "inputs": {"ckpt_name": CKPT}},
+        "pos": {"class_type": "CLIPTextEncode", "inputs": {"clip": _ref("te", 0), "text": prompt_text}},
+        "neg": {"class_type": "CLIPTextEncode", "inputs": {"clip": _ref("te", 0), "text": neg}},
+        "cond": {"class_type": "LTXVConditioning", "inputs": {"positive": _ref("pos", 0), "negative": _ref("neg", 0), "frame_rate": float(fps)}},
+        "img": {"class_type": "LoadImage", "inputs": {"image": img_name}},
+        "pre": {"class_type": "LTXVPreprocess", "inputs": {"image": _ref("img", 0), "img_compression": 18}},
+        "emptyvid": {"class_type": "EmptyLTXVLatentVideo", "inputs": {"width": w, "height": h, "length": length, "batch_size": 1}},
+        "vid_guide": {"class_type": "LTXVImgToVideoInplace", "inputs": {"vae": _ref("ckpt", 2), "image": _ref("pre", 0), "latent": _ref("emptyvid", 0), "strength": 1.0, "bypass": False}},
+        "trim": {"class_type": "TrimAudioDuration", "inputs": {"audio": _ref("loadaudio", 0), "start_index": 0.0, "duration": float(duration)}},
+        "aenc": {"class_type": "LTXVAudioVAEEncode", "inputs": {"audio": _ref("trim", 0), "audio_vae": _ref("avae", 0)}},
+        "mask": {"class_type": "SolidMask", "inputs": {"value": 0.0, "width": w, "height": h}},
+        "amask": {"class_type": "SetLatentNoiseMask", "inputs": {"samples": _ref("aenc", 0), "mask": _ref("mask", 0)}},
+        "concat": {"class_type": "LTXVConcatAVLatent", "inputs": {"video_latent": _ref("vid_guide", 0), "audio_latent": _ref("amask", 0)}},
+        "loadaudio": {"class_type": "LoadAudio", "inputs": {"audio": audio_name}},
+        "noise": {"class_type": "RandomNoise", "inputs": {"noise_seed": 42}},
+        "guider": {"class_type": "CFGGuider", "inputs": {"model": _ref("lora", 0), "positive": _ref("cond", 0), "negative": _ref("cond", 1), "cfg": 1.0}},
+        "sampler": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler"}},
+        "sigmas": {"class_type": "ManualSigmas", "inputs": {"sigmas": "1.0, 0.99375, 0.9875, 0.975, 0.909375, 0.725, 0.421875, 0.0"}},
+        "sample": {"class_type": "SamplerCustomAdvanced", "inputs": {"noise": _ref("noise", 0), "guider": _ref("guider", 0), "sampler": _ref("sampler", 0), "sigmas": _ref("sigmas", 0), "latent_image": _ref("concat", 0)}},
+        "sep": {"class_type": "LTXVSeparateAVLatent", "inputs": {"av_latent": _ref("sample", 0)}},
+        "vdec": {"class_type": "VAEDecode", "inputs": {"samples": _ref("sep", 0), "vae": _ref("ckpt", 2)}},
+        "adec": {"class_type": "LTXVAudioVAEDecode", "inputs": {"samples": _ref("sep", 1), "audio_vae": _ref("avae", 0)}},
+        "mkvid": {"class_type": "CreateVideo", "inputs": {"images": _ref("vdec", 0), "audio": _ref("adec", 0), "fps": float(fps)}},
+        "save": {"class_type": "SaveVideo", "inputs": {"video": _ref("mkvid", 0), "filename_prefix": "sociafy_avatar", "format": "auto", "codec": "auto"}},
+    }
+    return g
 
 
 @app.cls(gpu="L40S", image=image, volumes={MODELS_DIR: models_vol}, secrets=secrets, timeout=1800, scaledown_window=180)
@@ -103,36 +130,32 @@ class AvatarEngine:
     @modal.enter()
     def start(self):
         import subprocess
+        import requests
         from huggingface_hub import hf_hub_download
 
-        # 1) Ensure models exist in the Volume, then symlink them into ComfyUI/models.
         for repo, fname, sub in MODELS:
             dest_dir = os.path.join(MODELS_DIR, sub)
             os.makedirs(dest_dir, exist_ok=True)
-            dest = os.path.join(dest_dir, fname)
+            dest = os.path.join(dest_dir, os.path.basename(fname))
             if not os.path.exists(dest):
                 print(f"[models] downloading {repo}/{fname} -> {sub}")
-                hf_hub_download(repo_id=repo, filename=fname, local_dir=os.path.join(MODELS_DIR, "_dl", sub))
-                src = os.path.join(MODELS_DIR, "_dl", sub, fname)
-                os.replace(src, dest)
+                p = hf_hub_download(repo_id=repo, filename=fname, local_dir=os.path.join(MODELS_DIR, "_dl"))
+                os.replace(p, dest)
             comfy_dir = os.path.join(COMFY, "models", sub)
             os.makedirs(comfy_dir, exist_ok=True)
-            link = os.path.join(comfy_dir, fname)
+            link = os.path.join(comfy_dir, os.path.basename(fname))
             if not os.path.exists(link):
                 os.symlink(dest, link)
         models_vol.commit()
 
-        # 2) Launch ComfyUI headless and wait until its HTTP API answers.
         self.proc = subprocess.Popen(
             ["python", "main.py", "--listen", "127.0.0.1", "--port", "8188", "--disable-auto-launch"],
             cwd=COMFY,
         )
-        import requests
-
         for _ in range(120):
             try:
                 if requests.get("http://127.0.0.1:8188/system_stats", timeout=2).ok:
-                    print("[comfy] server up")
+                    print("[comfy] up")
                     break
             except Exception:
                 time.sleep(2)
@@ -148,106 +171,55 @@ class AvatarEngine:
             return download_tmp(audio_url, "wav")
         return download_tmp(payload["audioUrl"], "wav")
 
-    def _ui_to_api(self, ui: dict) -> dict:
-        """Convert a ComfyUI UI-format workflow to the /prompt API graph using
-        the running server's /object_info for per-node input ordering."""
-        import requests
-
-        info = requests.get("http://127.0.0.1:8188/object_info", timeout=30).json()
-        # link_id -> (from_node_id, from_output_slot)
-        links = {l[0]: (l[1], l[2]) for l in ui.get("links", [])}
-        prompt = {}
-        for node in ui["nodes"]:
-            ctype = node.get("type")
-            if ctype in ("Note", "MarkdownNote", "Reroute", "PreviewAny", "GetNode", "SetNode"):
-                continue
-            spec = info.get(ctype, {})
-            in_spec = spec.get("input", {})
-            ordered = list(in_spec.get("required", {}).keys()) + list(in_spec.get("optional", {}).keys())
-            connected = {}
-            for inp in node.get("inputs", []) or []:
-                if inp.get("link") is not None and inp["link"] in links:
-                    connected[inp["name"]] = list(links[inp["link"]])
-            inputs = {}
-            widget_names = [n for n in ordered if n not in connected]
-            wv = node.get("widgets_values", []) or []
-            for i, name in enumerate(widget_names):
-                if i < len(wv):
-                    inputs[name] = wv[i]
-            inputs.update(connected)
-            prompt[str(node["id"])] = {"class_type": ctype, "inputs": inputs}
-        return prompt
-
-    def _patch(self, prompt: dict, img: str, audio: str, prompt_text: str, resolution: str):
-        """Point LoadImage/LoadAudio at our files, select the GGUF unet, set size."""
-        w, h = (480, 854) if resolution == "480p" else (720, 1280)
-        for nid, n in prompt.items():
-            ct = n["class_type"]
-            ins = n["inputs"]
-            if ct == "LoadImage":
-                ins["image"] = os.path.basename(img)
-            elif ct == "LoadAudio":
-                ins["audio"] = os.path.basename(audio)
-            elif ct == "WanVideoModelLoader" and "model" in ins:
-                ins["model"] = GGUF_FILE
-            elif ct == "WanVideoTextEncodeCached":
-                for k in ("positive_prompt", "prompt", "text"):
-                    if k in ins and isinstance(ins[k], str):
-                        ins[k] = prompt_text
-            elif ct == "ImageResizeKJv2":
-                if "width" in ins:
-                    ins["width"] = w
-                if "height" in ins:
-                    ins["height"] = h
-
     @modal.method()
     def render(self, payload: dict) -> str:
         import shutil
         import requests
+        import soundfile as sf
 
         img = download_tmp(payload["imageUrl"], "png")
         audio = self._audio_for(payload)
-        resolution = "720p" if payload.get("quality") == "720p" else "480p"
-        prompt_text = payload.get("prompt") or "A person speaking naturally to the camera, looking ahead."
+        aspect = payload.get("aspect", "9:16")
+        w, h = {"9:16": (512, 768), "1:1": (640, 640), "16:9": (768, 512)}.get(aspect, (512, 768))
 
-        # ComfyUI reads inputs from its input dir by basename.
+        try:
+            dur = min(10.0, sf.info(audio).frames / float(sf.info(audio).samplerate))
+        except Exception:
+            dur = 5.0
+        fps = 24
+        length = (int(round(dur * fps)) // 8) * 8 + 1
+
         in_dir = os.path.join(COMFY, "input")
         os.makedirs(in_dir, exist_ok=True)
         shutil.copy(img, os.path.join(in_dir, os.path.basename(img)))
         shutil.copy(audio, os.path.join(in_dir, os.path.basename(audio)))
 
-        with open("/root/workflow_ui.json") as f:
-            ui = json.load(f)
-        prompt = self._ui_to_api(ui)
-        self._patch(prompt, img, audio, prompt_text, resolution)
+        prompt_text = payload.get("prompt") or "A person speaking naturally to the camera, looking ahead, subtle head movement."
+        graph = build_ltx_ia2v_prompt(os.path.basename(img), os.path.basename(audio), prompt_text, w, h, length, fps, dur)
 
         cid = uuid.uuid4().hex
-        r = requests.post("http://127.0.0.1:8188/prompt", json={"prompt": prompt, "client_id": cid}, timeout=60)
+        r = requests.post("http://127.0.0.1:8188/prompt", json={"prompt": graph, "client_id": cid}, timeout=60)
         if not r.ok:
-            raise RuntimeError(f"prompt_rejected: {r.text[:500]}")
+            raise RuntimeError(f"prompt_rejected: {r.text[:600]}")
         pid = r.json()["prompt_id"]
 
-        # Poll history until this prompt completes.
-        for _ in range(360):  # up to ~30 min
+        for _ in range(360):
             time.sleep(5)
-            h = requests.get(f"http://127.0.0.1:8188/history/{pid}", timeout=15).json()
-            if pid in h:
-                entry = h[pid]
-                status = entry.get("status", {})
-                if status.get("status_str") == "error" or status.get("completed") is False and status.get("messages"):
-                    # surface the first error message
-                    raise RuntimeError(f"comfy_error: {json.dumps(status)[:600]}")
-                outs = entry.get("outputs", {})
-                # Find a video output (VHS_VideoCombine).
-                for _node, out in outs.items():
-                    vids = out.get("gifs") or out.get("videos") or []
+            h_resp = requests.get(f"http://127.0.0.1:8188/history/{pid}", timeout=15).json()
+            if pid in h_resp:
+                entry = h_resp[pid]
+                st = entry.get("status", {})
+                if st.get("status_str") == "error":
+                    raise RuntimeError(f"comfy_error: {json.dumps(st)[:700]}")
+                for _node, out in entry.get("outputs", {}).items():
+                    vids = out.get("videos") or out.get("gifs") or []
                     if vids:
                         fn = vids[0]["filename"]
                         sub = vids[0].get("subfolder", "")
                         path = os.path.join(COMFY, "output", sub, fn)
                         if os.path.exists(path):
                             return upload_r2(path, f"avatar/{uuid.uuid4().hex}.mp4", "video/mp4")
-                if status.get("completed"):
+                if st.get("completed"):
                     raise RuntimeError("avatar_completed_without_video")
         raise RuntimeError("avatar_timeout")
 
@@ -271,7 +243,7 @@ def avatar_result(callId: str, x_engine_secret: str = Header(None)):
     except TimeoutError:
         return {"status": "pending"}
     except Exception as e:  # noqa: BLE001
-        return {"status": "failed", "error": str(e)[:600]}
+        return {"status": "failed", "error": str(e)[:700]}
 
 
 @app.function(image=web_image, secrets=secrets)
