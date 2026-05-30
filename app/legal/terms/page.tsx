@@ -59,32 +59,37 @@ export default function TermsPage() {
         Generated text, images, and video may contain inaccuracies, biases, or factual errors. You are responsible for reviewing all AI output before publishing it under your name or brand. The Service is not a substitute for professional advice.
       </p>
 
-      <h2>8. Third-party services</h2>
+      <h2>8. Voice cloning &amp; avatars</h2>
       <p>
-        The Service interoperates with third-party platforms (X, LinkedIn, Meta, TikTok, YouTube, Razorpay, OpenAI, PiAPI). Your use of those platforms is governed by their respective terms. We are not responsible for outages or policy changes on their side.
+        Voice Twin lets you create a synthetic copy of a voice, and Avatar lets you generate talking-video from a face photo. When you create a Voice Twin you confirm, by checkbox and typed signature recorded with your account, that the audio is a recording of <strong>your own voice</strong> and that you have the full right to clone it. You agree not to use these features to impersonate any person, or to create deceptive, fraudulent, harassing, unlawful, or misleading content. You are solely and fully responsible for everything you create with a cloned voice or avatar. We retain a record of your consent and may suspend or terminate accounts, and cooperate with authorities, in cases of misuse.
       </p>
 
-      <h2>9. Disclaimers &amp; liability</h2>
+      <h2>9. Third-party services</h2>
+      <p>
+        The Service interoperates with third-party platforms (X, LinkedIn, Meta, TikTok, YouTube, Razorpay, OpenAI, PiAPI) and GPU infrastructure providers. Your use of those platforms is governed by their respective terms. We are not responsible for outages or policy changes on their side.
+      </p>
+
+      <h2>10. Disclaimers &amp; liability</h2>
       <p>
         The Service is provided &ldquo;as is&rdquo; without warranties of any kind to the maximum extent permitted by law. Our aggregate liability for any claim arising out of or relating to the Service is limited to the fees you paid to us in the twelve months preceding the claim.
       </p>
 
-      <h2>10. Termination</h2>
+      <h2>11. Termination</h2>
       <p>
         You may cancel your subscription at any time from the Billing page. We may suspend or terminate accounts that violate these terms. On termination, your credits expire and your data may be deleted after a reasonable grace period.
       </p>
 
-      <h2>11. Governing law</h2>
+      <h2>12. Governing law</h2>
       <p>
         These terms are governed by the laws of India. Any dispute will be subject to the exclusive jurisdiction of the courts at the registered office of {COMPANY}.
       </p>
 
-      <h2>12. Changes</h2>
+      <h2>13. Changes</h2>
       <p>
         We may update these terms; material changes will be communicated by email. Continued use of the Service after the change date constitutes acceptance.
       </p>
 
-      <h2>13. Contact</h2>
+      <h2>14. Contact</h2>
       <p>
         <strong>{COMPANY}</strong><br />
         Email: <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a><br />
