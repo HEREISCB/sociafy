@@ -180,7 +180,13 @@ class AvatarEngine:
         img = download_tmp(payload["imageUrl"], "png")
         audio = self._audio_for(payload)
         aspect = payload.get("aspect", "9:16")
-        w, h = {"9:16": (512, 768), "1:1": (640, 640), "16:9": (768, 512)}.get(aspect, (512, 768))
+        quality = payload.get("quality", "720p")
+        # LTX requires width/height divisible by 32. Quality picks the tier.
+        dims = {
+            "480p": {"9:16": (480, 832), "1:1": (576, 576), "16:9": (832, 480)},
+            "720p": {"9:16": (704, 1280), "1:1": (768, 768), "16:9": (1280, 704)},
+        }
+        w, h = dims.get(quality, dims["720p"]).get(aspect, dims["720p"]["9:16"])
 
         try:
             dur = min(10.0, sf.info(audio).frames / float(sf.info(audio).samplerate))
