@@ -6,7 +6,7 @@
   --ink: #0A0A0A;
   --ink-2: #2A2A28;
   --ink-3: #6B6B66;
-  --ink-4: #9C9C96;
+  --ink-4: #76766F; /* darkened for text contrast on cream (~4:1); was #9C9C96 */
   --line: #E8E7E1;
   --line-2: #D8D7D0;
   --accent: oklch(0.72 0.18 55);
@@ -15,6 +15,7 @@
   --good: oklch(0.68 0.14 155);
   --warn: oklch(0.72 0.16 75);
   --bad:  oklch(0.62 0.20 25);
+  --danger: oklch(0.62 0.20 25); /* alias of --bad for components referencing var(--danger) */
 
   --ig: #E1306C;
   --fb: #1877F2;
@@ -516,6 +517,8 @@ a { color: inherit; text-decoration: none; }
               0 4px 14px -4px rgba(0, 0, 0, 0.12);
   animation: modalSheetIn 320ms cubic-bezier(0.32, 1.18, 0.42, 1) both;
   transform-origin: 50% 30%;
+  max-height: 90dvh;       /* never trap action buttons off-screen on phones */
+  overflow-y: auto;
 }
 .briefing h2 {
   margin: 0 0 12px;
@@ -2274,7 +2277,6 @@ a { color: inherit; text-decoration: none; }
   font-family: inherit;
 }
 .auth-field input:focus {
-  outline: none;
   border-color: var(--ink);
   box-shadow: 0 0 0 3px rgba(0,0,0,0.04);
 }
@@ -3542,4 +3544,20 @@ a { color: inherit; text-decoration: none; }
     width: 36px;
     height: 36px;
   }
+  /* Comfortable tap targets on touch devices (44px guideline). */
+  .btn { min-height: 44px; }
+  .btn.sm { min-height: 38px; }
+  .prompt-chip { min-height: 36px; display: inline-flex; align-items: center; }
+}
+
+/* Keyboard focus visibility across the whole app (was missing entirely). */
+:where(a, button, input, textarea, select, [role="button"], [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* On very narrow phones, let the composer's option grids stack fully. */
+@media (max-width: 430px) {
+  .m-2col { grid-template-columns: 1fr !important; }
 }
