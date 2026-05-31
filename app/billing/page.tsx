@@ -93,7 +93,12 @@ function BillingPageInner() {
   const [topupOpen, setTopupOpen] = useState(false);
   const [topupBusy, setTopupBusy] = useState(false);
   const [cancelBusy, setCancelBusy] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Persistent "confirming payment" state after a checkout redirect. Stays up
+  // with a manual Refresh fallback until the balance/subscription actually
+  // updates, instead of an optimistic toast that disappears.
+  const [confirmingPayment, setConfirmingPayment] = useState(false);
 
   async function apiFetch<T>(url: string, init: RequestInit): Promise<T> {
     const r = await fetch(url, { ...init, headers: { 'content-type': 'application/json', ...(init.headers ?? {}) } });
@@ -102,12 +107,12 @@ function BillingPageInner() {
   }
 
   const cancelSubscription = async () => {
-    if (!confirm('Cancel your subscription? Credits stay usable until your renewal date.')) return;
     setCancelBusy(true);
     try {
       const r = await apiPost<{ periodEnd: string | null }>('/api/billing/cancel', {});
       const end = r.periodEnd ? new Date(r.periodEnd).toLocaleDateString() : 'your renewal date';
       setToast(`Subscription will end on ${end}.`);
+      setCancelOpen(false);
       await mutate();
     } catch (e) {
       setToast(`Couldn't cancel: ${e instanceof Error ? e.message.slice(0, 160) : String(e)}`);
@@ -133,8 +138,10 @@ function BillingPageInner() {
   useEffect(() => {
     const result = params.get('checkout');
     if (result === 'success') {
-      setToast('Upgrade in progress — your credits will land within a few seconds.');
-      // Re-fetch a few times because webhook may lag the redirect.
+      // Keep a persistent "Confirming payment…" state (with a manual Refresh
+      // fallback below) until the balance/subscription actually updates. The
+      // webhook can lag the redirect, so we also re-fetch a few times.
+      setConfirmingPayment(true);
       const t1 = setTimeout(() => mutate(), 2000);
       const t2 = setTimeout(() => mutate(), 6000);
       const t3 = setTimeout(() => mutate(), 12000);
@@ -145,9 +152,32 @@ function BillingPageInner() {
     }
   }, [params, mutate]);
 
+  // Clear the confirming banner once the subscription/balance reflects the
+  // payment. Snapshot the status when confirming starts; clear when it flips
+  // to an active subscription (covers both new subscribe + upgrade).
+  const confirmSnapshotRef = React.useRef<{ status: string | null; balance: number } | null>(null);
+  useEffect(() => {
+    if (!confirmingPayment) { confirmSnapshotRef.current = null; return; }
+    if (!data) return;
+    if (confirmSnapshotRef.current === null) {
+      confirmSnapshotRef.current = { status: data.subscriptionStatus, balance: data.balance };
+      return;
+    }
+    const snap = confirmSnapshotRef.current;
+    const changed =
+      (data.hasActiveSubscription && data.subscriptionStatus !== snap.status) ||
+      data.balance !== snap.balance;
+    if (changed) {
+      setConfirmingPayment(false);
+      setToast('Payment confirmed — your plan and credits are up to date.');
+    }
+  }, [confirmingPayment, data]);
+
   const dispatchHandoff = async (handoff: CheckoutHandoff) => {
     if (handoff.kind === 'redirect') {
-      window.location.href = handoff.url;
+      if (typeof window !== 'undefined') {
+        window.location.assign(handoff.url);
+      }
       return;
     }
     await openRazorpayModal(handoff, {
@@ -209,7 +239,17 @@ function BillingPageInner() {
   };
 
   const cycleEnd = data?.subscriptionCurrentPeriodEnd ? new Date(data.subscriptionCurrentPeriodEnd) : null;
-  const daysLeft = cycleEnd ? Math.max(0, Math.ceil((cycleEnd.getTime() - Date.now()) / (24 * 60 * 60 * 1000))) : null;
+  // Use a ticking "now" so this stays pure during render and stays accurate
+  // as the page is left open through midnight UTC.
+  const [now, setNow] = useState<number>(0);
+  useEffect(() => {
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+  const daysLeft = cycleEnd && now > 0
+    ? Math.max(0, Math.ceil((cycleEnd.getTime() - now) / (24 * 60 * 60 * 1000)))
+    : null;
   const pct = data && data.monthlyAllocation > 0
     ? Math.min(100, Math.round((data.balance / data.monthlyAllocation) * 100))
     : 0;
@@ -251,6 +291,24 @@ function BillingPageInner() {
             }}>{toast}</div>
           )}
 
+          {confirmingPayment && (
+            <div className="insufficient-credits-banner" style={{ background: 'var(--accent-soft)', borderColor: 'oklch(0.86 0.08 70)' }}>
+              <div className="icon" style={{ background: 'oklch(0.92 0.06 70)', color: 'var(--accent-ink)' }}>
+                <Icon name="refresh" size={14} />
+              </div>
+              <div className="copy" style={{ flex: 1 }}>
+                <strong>Confirming payment…</strong>
+                <span className="muted"> We&apos;re waiting for the payment provider to confirm. Your plan and credits will update automatically — this usually takes a few seconds.</span>
+              </div>
+              <div className="actions">
+                <button className="btn ghost" onClick={() => mutate()}>
+                  <Icon name="refresh" size={12} /> Refresh
+                </button>
+                <button className="btn ghost icon-only" onClick={() => setConfirmingPayment(false)} aria-label="Dismiss">✕</button>
+              </div>
+            </div>
+          )}
+
           {data && !data.billingConfigured && (
             <div className="insufficient-credits-banner" style={{ background: '#fff8eb', borderColor: '#f0d68a' }}>
               <div className="icon" style={{ background: '#fbe9c8', color: '#6b4408' }}>!</div>
@@ -281,11 +339,21 @@ function BillingPageInner() {
                 </div>
               </div>
               <div style={{ marginTop: 12 }}>
-                <button className="btn" onClick={() => setTopupOpen(true)} disabled={!data?.hasActiveSubscription}>
-                  <span aria-hidden style={{ marginRight: 4 }}>+</span> Top up credits
-                </button>
-                {!data?.hasActiveSubscription && (
-                  <span className="muted" style={{ marginLeft: 8, fontSize: 12 }}>Subscribe first to enable top-ups.</span>
+                {data?.hasActiveSubscription ? (
+                  <button className="btn" onClick={() => setTopupOpen(true)}>
+                    <span aria-hidden style={{ marginRight: 4 }}>+</span> Top up credits
+                  </button>
+                ) : (
+                  <button
+                    className="btn primary"
+                    onClick={() => {
+                      if (typeof document !== 'undefined') {
+                        document.getElementById('billing-plans')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      }
+                    }}
+                  >
+                    <Icon name="bolt" size={12} /> Subscribe to enable top-ups
+                  </button>
                 )}
               </div>
               <div className="billing-bar">
@@ -300,7 +368,7 @@ function BillingPageInner() {
               </div>
               {data?.hasActiveSubscription && (
                 <div style={{ marginTop: 12 }}>
-                  <button className="btn ghost" onClick={cancelSubscription} disabled={cancelBusy}>
+                  <button className="btn ghost" onClick={() => setCancelOpen(true)} disabled={cancelBusy}>
                     {cancelBusy ? 'Canceling…' : 'Cancel subscription'}
                   </button>
                 </div>
@@ -362,7 +430,7 @@ function BillingPageInner() {
               </div>
             )}
 
-            <section className="billing-tiers">
+            <section className="billing-tiers" id="billing-plans">
               <h2 className="billing-section-head">Switch plan</h2>
               <div className="billing-tier-grid">
                 {(data?.tiers ?? []).map((t) => (
@@ -380,8 +448,13 @@ function BillingPageInner() {
                         <Icon name="check" size={12} /> Current plan
                       </button>
                     ) : data?.currency === 'USD' ? (
-                      <button className="btn" disabled style={{ width: '100%', justifyContent: 'center' }}>
-                        USD billing coming soon
+                      <button
+                        className="btn ghost"
+                        disabled
+                        title="Card billing in USD via Stripe is coming soon. Switch to ₹ INR via Razorpay to subscribe today."
+                        style={{ width: '100%', justifyContent: 'center', cursor: 'not-allowed', fontStyle: 'italic', color: 'var(--muted)' }}
+                      >
+                        <Icon name="lock" size={12} /> Coming soon — card billing
                       </button>
                     ) : data?.hasActiveSubscription ? (
                       <button
@@ -465,6 +538,43 @@ function BillingPageInner() {
             <button className="btn ghost" style={{ marginTop: 12, width: '100%' }} onClick={() => setTopupOpen(false)}>
               Cancel
             </button>
+          </div>
+        </div>
+      )}
+      {cancelOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          onClick={() => { if (!cancelBusy) setCancelOpen(false); }}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'var(--surface)', borderRadius: 12, padding: 20,
+              width: 'min(420px, 92vw)', boxShadow: '0 20px 60px rgba(0,0,0,.3)',
+            }}
+          >
+            <h3 style={{ marginTop: 0 }}>Cancel subscription?</h3>
+            <p className="muted" style={{ fontSize: 13, lineHeight: 1.55 }}>
+              Your subscription stays active until {cycleEnd ? cycleEnd.toLocaleDateString() : 'your renewal date'}, and your remaining credits stay usable until then. After that it won&apos;t renew and autopilot features turn off. You can resubscribe anytime.
+            </p>
+            <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+              <button className="btn ghost" style={{ flex: 1, justifyContent: 'center' }} onClick={() => setCancelOpen(false)} disabled={cancelBusy}>
+                Keep subscription
+              </button>
+              <button
+                className="btn"
+                style={{ flex: 1, justifyContent: 'center', background: 'var(--bad)', borderColor: 'var(--bad)', color: 'white' }}
+                onClick={cancelSubscription}
+                disabled={cancelBusy}
+              >
+                {cancelBusy ? 'Canceling…' : 'Cancel subscription'}
+              </button>
+            </div>
           </div>
         </div>
       )}

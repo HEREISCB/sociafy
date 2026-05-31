@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Sidebar, Topbar } from '../../components/shell';
 import { Icon } from '../../components/icons';
 import { useApi } from '../../lib/ui/fetcher';
@@ -12,8 +13,16 @@ type Page = 'dashboard' | 'compose' | 'agent' | 'calendar' | 'connections' | 'on
 const TIER_LABEL = { starter: 'Starter · $30/mo', pro: 'Pro · $80/mo', business: 'Business · $299/mo' };
 
 export default function UsagePage() {
+  const router = useRouter();
   const { data, isLoading } = useApi<CreditsPayload>('/api/credits', { refreshInterval: 30_000 });
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Ticking "now" so daysLeft stays pure during render.
+  const [now, setNow] = useState<number>(0);
+  useEffect(() => {
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   const balance = data?.balance ?? 0;
   const allocation = data?.monthlyAllocation ?? 0;
@@ -21,15 +30,18 @@ export default function UsagePage() {
   const tier = data?.tier ?? 'starter';
   const cycleStart = data?.creditCycleStart ? new Date(data.creditCycleStart) : null;
   const nextReset = cycleStart ? new Date(cycleStart.getTime() + 30 * 24 * 60 * 60 * 1000) : null;
-  const daysLeft = nextReset ? Math.max(0, Math.ceil((nextReset.getTime() - Date.now()) / (24 * 60 * 60 * 1000))) : null;
+  const daysLeft = nextReset && now > 0
+    ? Math.max(0, Math.ceil((nextReset.getTime() - now) / (24 * 60 * 60 * 1000)))
+    : null;
 
   const used30d = (data?.ledger ?? []).reduce((sum, row) => row.credits < 0 ? sum + Math.abs(row.credits) : sum, 0);
 
   return (
     <div className="app">
       <Sidebar
-        page={'dashboard' as Page}
-        onNav={() => {}}
+        // Usage isn't one of the sidebar destinations, so no item is highlighted.
+        page={'onboarding' as Page}
+        onNav={(p) => router.push(p === 'dashboard' ? '/dashboard' : `/dashboard?tab=${p}`)}
         mobileOpen={sidebarOpen}
         onMobileClose={() => setSidebarOpen(false)}
       />

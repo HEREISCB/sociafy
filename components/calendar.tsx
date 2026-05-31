@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { Icon } from './icons';
 import { apiDelete, apiPatch, apiPost, useApi } from '../lib/ui/fetcher';
@@ -9,7 +9,7 @@ import type { Platform } from '../lib/db/schema';
 
 type QuickMode = 'text' | 'image' | 'video';
 type QuickSlot = { day: number; hour: number };
-type CalView = 'week' | 'list';
+type CalView = 'week' | 'month' | 'list';
 
 const HOURS = ['7 AM', '8 AM', '9 AM', '10 AM', '11 AM', '12 PM', '1 PM', '2 PM', '3 PM', '4 PM', '5 PM', '6 PM', '7 PM', '8 PM'];
 
@@ -22,16 +22,41 @@ type ScheduledRow = {
   platformPostUrl?: string | null;
 };
 
+type CalEventType = 'posted' | 'scheduled' | 'ai' | 'draft' | 'failed' | 'canceled';
 type CalEvent = {
   id: string;
   day: number;
   start: number;
   span: number;
-  type: 'posted' | 'scheduled' | 'ai' | 'draft';
+  type: CalEventType;
   plats: string[];
   title: string;
   time: string;
 };
+
+/** Label + dot color for each event type. failed/canceled are surfaced
+ *  distinctly (var(--bad)) so a failed publish isn't mistaken for a draft. */
+const TYPE_LABEL: Record<CalEventType, string> = {
+  posted: 'Posted',
+  scheduled: 'Scheduled',
+  ai: 'Agent draft',
+  draft: 'Draft',
+  failed: 'Failed',
+  canceled: 'Canceled',
+};
+
+/** Maps a schedule row status to a calendar event type. Keeps failed/canceled
+ *  distinct instead of collapsing them into a generic 'draft'. */
+function statusToType(status: ScheduledRow['status']): CalEventType {
+  switch (status) {
+    case 'published': return 'posted';
+    case 'pending':
+    case 'publishing': return 'scheduled';
+    case 'failed': return 'failed';
+    case 'canceled': return 'canceled';
+    default: return 'draft';
+  }
+}
 
 const platGlyphs: Record<string, string> = { ig: 'I', fb: 'f', x: 'X', li: 'in', tt: 'T', yt: 'Y' };
 
@@ -109,6 +134,10 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onCompose }) => {
   const accountsApi = useApi<{ platform: Platform }[]>('/api/accounts');
   const [selected, setSelected] = useState<ScheduledRow | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
+  // Reschedule is an explicit confirm — we hold the edited datetime-local
+  // value here and only PATCH when the user clicks Reschedule, so partial
+  // typing never moves a post mid-keystroke.
+  const [rescheduleVal, setRescheduleVal] = useState<string>('');
 
   // Quick-compose-from-slot state.
   const [quickSlot, setQuickSlot] = useState<QuickSlot | null>(null);
@@ -140,14 +169,24 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onCompose }) => {
     return d.toISOString();
   };
 
+  // Ticking "now" so isSlotPast stays pure during render. Re-evaluates each
+  // minute, which is plenty for "is this slot still in the future" decisions.
+  const [now, setNow] = useState<number>(() => 0);
+  useEffect(() => {
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+
   /** True when the slot's start time is in the past — the API would reject
    *  with `scheduledAt_in_past`, and the user can't fix that from a modal.
    *  We block the click upstream. */
   const isSlotPast = (slot: QuickSlot): boolean => {
+    if (now === 0) return false; // pre-mount: don't pre-grey slots, avoid hydration mismatch
     const d = new Date(weekStart);
     d.setDate(d.getDate() + slot.day);
     d.setHours(7 + slot.hour, 0, 0, 0);
-    return d.getTime() <= Date.now();
+    return d.getTime() <= now;
   };
 
   /** Step 1: turn the prompt into variants. The user then picks which one
@@ -230,13 +269,21 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onCompose }) => {
     }
   };
 
+  // Seed the reschedule input whenever a different post is selected.
+  useEffect(() => {
+    setRescheduleVal(selected ? toLocalInputValue(selected.scheduledAt) : '');
+  }, [selected]);
+
+  // In-app confirm (replaces native confirm()) — mirrors the .modal-sheet pattern.
+  const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
+
   const cancelScheduled = async (id: string) => {
-    if (!confirm('Cancel this scheduled post? It will not be published.')) return;
     setSavingId(id);
     try {
       await apiDelete(`/api/schedule/${id}`);
       await mutate();
       setSelected(null);
+      setConfirmCancelId(null);
     } finally {
       setSavingId(null);
     }
@@ -258,10 +305,7 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onCompose }) => {
       const d = new Date(s.scheduledAt);
       const dayIdx = Math.floor((d.getTime() - weekStart.getTime()) / (24 * 60 * 60 * 1000));
       const start = Math.max(0, Math.min(13, d.getHours() - 7));
-      const type: CalEvent['type'] =
-        s.status === 'published' ? 'posted' :
-        s.status === 'pending' || s.status === 'publishing' ? 'scheduled' :
-        'draft';
+      const type = statusToType(s.status);
       return {
         id: s.id,
         day: dayIdx,
@@ -290,6 +334,7 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onCompose }) => {
     scheduled: all.filter((e) => e.type === 'scheduled').length,
     ai: all.filter((e) => e.type === 'ai').length,
     draft: all.filter((e) => e.type === 'draft').length,
+    failed: all.filter((e) => e.type === 'failed' || e.type === 'canceled').length,
   };
 
   // On phones/tablets the 7-column week grid can't fit — render a fit-to-width
@@ -321,9 +366,9 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onCompose }) => {
             Week
           </span>
           <span
-            className="opt"
-            style={{ fontSize: 11, padding: '3px 10px', cursor: 'not-allowed', opacity: 0.5 }}
-            title="Month view coming soon"
+            className={`opt ${view === 'month' ? 'active' : ''}`}
+            style={{ fontSize: 11, padding: '3px 10px', cursor: 'pointer' }}
+            onClick={() => setView('month')}
           >
             Month
           </span>
@@ -348,7 +393,7 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onCompose }) => {
 
       {unauth && (
         <div style={{ padding: 12, background: 'rgba(124,77,255,0.05)', border: '1px solid rgba(124,77,255,0.2)', borderRadius: 10, fontSize: 13, marginBottom: 14 }}>
-          Demo calendar — <a href="/sign-in?next=/dashboard" style={{ textDecoration: 'underline', color: 'var(--ink)' }}>sign in</a> to see your real schedule.
+          Demo calendar — <Link href="/sign-in?next=/dashboard" style={{ textDecoration: 'underline', color: 'var(--ink)' }}>sign in</Link> to see your real schedule.
         </div>
       )}
 
@@ -357,9 +402,14 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onCompose }) => {
         <span className="chip"><span className="dot" style={{ background: 'var(--ink)' }} />Scheduled ({counts.scheduled})</span>
         <span className="chip accent"><span className="dot" />Agent draft ({counts.ai})</span>
         <span className="chip"><span className="dot" style={{ background: 'var(--ink-4)' }} />Drafts ({counts.draft})</span>
+        {counts.failed > 0 && (
+          <span className="chip"><span className="dot" style={{ background: 'var(--bad)' }} />Failed / canceled ({counts.failed})</span>
+        )}
       </div>
 
-      {view === 'list' ? (
+      {view === 'month' ? (
+        <CalendarMobileMonth onCompose={onCompose} />
+      ) : view === 'list' ? (
         <CalendarListView events={all} weekStart={weekStart} data={data ?? null} onSelect={setSelected} />
       ) : (
       <div className="calendar">
@@ -388,34 +438,47 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onCompose }) => {
                 const past = isSlotPast({ day: dayIdx, hour: hi });
                 const clickable = !unauth && !past;
                 return (
-                  <div
+                  <button
+                    type="button"
                     key={hi}
                     className="cal-slot"
+                    disabled={!clickable}
                     onClick={() => { if (clickable) { setQuickSlot({ day: dayIdx, hour: hi }); setQuickMsg(null); } }}
                     style={{
                       cursor: clickable ? 'pointer' : 'default',
                       background: past ? 'repeating-linear-gradient(135deg, transparent 0 6px, var(--bg-sunk) 6px 7px)' : undefined,
                       opacity: past ? 0.55 : 1,
                     }}
+                    aria-label={past ? 'Past time' : unauth ? 'Slot' : 'Schedule a post in this slot'}
                     title={past ? 'Past time' : unauth ? '' : 'Click to schedule a post'}
                   />
                 );
               })}
               {all.filter((e) => e.day === dayIdx).map((e) => {
                 const real = data?.find((s) => s.id === e.id) ?? null;
+                const bad = e.type === 'failed' || e.type === 'canceled';
                 return (
-                  <div
+                  <button
+                    type="button"
                     key={e.id}
                     className={`cal-event ${e.type}`}
+                    disabled={!real}
                     style={{
                       top: e.start * slotH + 2,
                       height: e.span * slotH - 6,
                       cursor: real ? 'pointer' : 'default',
                       opacity: savingId === e.id ? 0.5 : 1,
+                      ...(bad ? {
+                        background: 'color-mix(in oklch, var(--bad) 10%, var(--bg-elev))',
+                        borderColor: 'var(--bad)',
+                        color: 'var(--bad)',
+                        textDecoration: e.type === 'canceled' ? 'line-through' : undefined,
+                      } : null),
                     }}
+                    title={`${TYPE_LABEL[e.type]} · ${e.title}`}
                     onClick={() => real && setSelected(real)}
                   >
-                    <div className="ev-time">{e.time}</div>
+                    <div className="ev-time">{e.time} · {TYPE_LABEL[e.type]}</div>
                     <div className="ev-title">{e.title}</div>
                     <div style={{ display: 'flex', gap: 2, marginTop: 3 }}>
                       {e.plats.map((p) => (
@@ -424,7 +487,7 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onCompose }) => {
                         </span>
                       ))}
                     </div>
-                  </div>
+                  </button>
                 );
               })}
               {dayIdx === todayIdx && sameWeek(today, weekStart) && <div className="cal-now" style={{ top: nowOffset }} />}
@@ -630,21 +693,50 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onCompose }) => {
               <label style={{ fontSize: 12, color: 'var(--ink-3)' }}>Reschedule</label>
               <input
                 type="datetime-local"
-                defaultValue={toLocalInputValue(selected.scheduledAt)}
-                onChange={(e) => {
-                  const v = new Date(e.target.value);
-                  if (!Number.isNaN(v.getTime())) rescheduleScheduled(selected.id, v.toISOString());
-                }}
+                value={rescheduleVal}
+                onChange={(e) => setRescheduleVal(e.target.value)}
                 style={{ padding: '6px 8px', border: '1px solid var(--line-2)', borderRadius: 6, fontFamily: 'var(--mono)', fontSize: 12 }}
               />
+              <button
+                className="btn sm"
+                disabled={
+                  savingId === selected.id ||
+                  !rescheduleVal ||
+                  rescheduleVal === toLocalInputValue(selected.scheduledAt) ||
+                  Number.isNaN(new Date(rescheduleVal).getTime())
+                }
+                onClick={() => {
+                  const v = new Date(rescheduleVal);
+                  if (!Number.isNaN(v.getTime())) rescheduleScheduled(selected.id, v.toISOString());
+                }}
+              >
+                <Icon name="calendar" size={11} /> {savingId === selected.id ? 'Saving…' : 'Reschedule'}
+              </button>
               <div style={{ flex: 1 }} />
               {selected.platformPostUrl && (
                 <a className="btn sm ghost" href={selected.platformPostUrl} target="_blank" rel="noreferrer">
                   <Icon name="arrow_right" size={11} /> View
                 </a>
               )}
-              <button className="btn sm" onClick={() => cancelScheduled(selected.id)} disabled={savingId === selected.id}>
+              <button className="btn sm" onClick={() => setConfirmCancelId(selected.id)} disabled={savingId === selected.id}>
                 <Icon name="x" size={11} /> Cancel post
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmCancelId && (
+        <div className="modal-scrim" onClick={() => { if (!savingId) setConfirmCancelId(null); }}>
+          <div className="modal-sheet" onClick={(e) => e.stopPropagation()} style={{ width: 'min(420px, 92vw)' }}>
+            <h3 style={{ margin: '0 0 8px', fontSize: 15, letterSpacing: '-0.01em' }}>Cancel this scheduled post?</h3>
+            <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--ink-3)', lineHeight: 1.5 }}>
+              It will not be published. This can&apos;t be undone.
+            </p>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button className="btn" onClick={() => setConfirmCancelId(null)} disabled={!!savingId}>Keep it</button>
+              <button className="btn primary" onClick={() => cancelScheduled(confirmCancelId)} disabled={!!savingId}>
+                {savingId ? 'Canceling…' : 'Cancel post'}
               </button>
             </div>
           </div>
@@ -689,18 +781,25 @@ const CalendarListView: React.FC<CalendarListViewProps> = ({ events, weekStart, 
               ) : (
                 list.map((e) => {
                   const real = data?.find((s) => s.id === e.id) ?? null;
+                  const bad = e.type === 'failed' || e.type === 'canceled';
                   return (
-                    <div
+                    <button
+                      type="button"
                       key={e.id}
+                      disabled={!real}
                       onClick={() => real && onSelect(real)}
                       style={{
                         display: 'grid',
                         gridTemplateColumns: '64px 1fr auto',
                         gap: 12,
                         padding: '10px 16px',
+                        width: '100%',
+                        textAlign: 'left',
+                        background: 'transparent',
                         cursor: real ? 'pointer' : 'default',
                         alignItems: 'center',
                         borderTop: '1px solid var(--line)',
+                        borderLeft: 0, borderRight: 0, borderBottom: 0,
                       }}
                     >
                       <span className="mono" style={{ fontSize: 12, color: 'var(--ink-3)' }}>{e.time}</span>
@@ -712,13 +811,14 @@ const CalendarListView: React.FC<CalendarListViewProps> = ({ events, weekStart, 
                               {platGlyphs[p]}
                             </span>
                           ))}
-                          <span className={`chip ${e.type === 'ai' ? 'accent' : ''}`} style={{ fontSize: 10 }}>
-                            {e.type === 'posted' ? 'Posted' : e.type === 'scheduled' ? 'Scheduled' : e.type === 'ai' ? 'Agent draft' : 'Draft'}
+                          <span className={`chip ${e.type === 'ai' ? 'accent' : ''}`} style={{ fontSize: 10, color: bad ? 'var(--bad)' : undefined }}>
+                            {bad && <span className="dot" style={{ background: 'var(--bad)' }} />}
+                            {TYPE_LABEL[e.type]}
                           </span>
                         </div>
                       </div>
                       {real && <Icon name="arrow_right" size={12} style={{ color: 'var(--ink-3)' }} />}
-                    </div>
+                    </button>
                   );
                 })
               )}
@@ -749,11 +849,13 @@ type MonthCellEvent = {
   title: string;
 };
 
-const TYPE_DOT: Record<CalEvent['type'], string> = {
+const TYPE_DOT: Record<CalEventType, string> = {
   posted: 'oklch(0.42 0.16 155)',
   scheduled: 'var(--ink)',
   ai: 'var(--accent)',
   draft: 'var(--ink-4)',
+  failed: 'var(--bad)',
+  canceled: 'var(--bad)',
 };
 
 /**
@@ -776,6 +878,12 @@ const CalendarMobileMonth: React.FC<CalendarMobileMonthProps> = ({ onCompose }) 
   const [selectedDay, setSelectedDay] = useState<string>(() => ymd(new Date()));
   const [selected, setSelected] = useState<ScheduledRow | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [rescheduleVal, setRescheduleVal] = useState<string>('');
+  const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setRescheduleVal(selected ? toLocalInputValue(selected.scheduledAt) : '');
+  }, [selected]);
 
   // 6-week grid: Monday on/before the 1st through the following 41 days.
   const gridStart = useMemo(() => startOfWeek(monthCursor), [monthCursor]);
@@ -793,10 +901,7 @@ const CalendarMobileMonth: React.FC<CalendarMobileMonthProps> = ({ onCompose }) 
     for (const s of data ?? []) {
       const d = new Date(s.scheduledAt);
       const key = ymd(d);
-      const type: CalEvent['type'] =
-        s.status === 'published' ? 'posted' :
-        s.status === 'pending' || s.status === 'publishing' ? 'scheduled' :
-        'draft';
+      const type = statusToType(s.status);
       const list = m.get(key) ?? [];
       list.push({
         row: s,
@@ -831,12 +936,12 @@ const CalendarMobileMonth: React.FC<CalendarMobileMonthProps> = ({ onCompose }) 
   };
 
   const cancelScheduled = async (id: string) => {
-    if (!confirm('Cancel this scheduled post? It will not be published.')) return;
     setSavingId(id);
     try {
       await apiDelete(`/api/schedule/${id}`);
       await mutate();
       setSelected(null);
+      setConfirmCancelId(null);
     } finally {
       setSavingId(null);
     }
@@ -951,6 +1056,9 @@ const CalendarMobileMonth: React.FC<CalendarMobileMonthProps> = ({ onCompose }) 
               >
                 <span className="mono" style={{ fontSize: 12, color: 'var(--ink-3)', flexShrink: 0 }}>{e.time}</span>
                 <span style={{ flex: 1, minWidth: 0, textAlign: 'left', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: 13 }}>
+                  {(e.type === 'failed' || e.type === 'canceled') && (
+                    <span style={{ color: 'var(--bad)', fontFamily: 'var(--mono)', fontSize: 10, marginRight: 6, textTransform: 'uppercase' }}>{TYPE_LABEL[e.type]}</span>
+                  )}
                   {e.title || '(empty)'}
                 </span>
                 <span style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
@@ -988,21 +1096,50 @@ const CalendarMobileMonth: React.FC<CalendarMobileMonthProps> = ({ onCompose }) 
               <label style={{ fontSize: 12, color: 'var(--ink-3)' }}>Reschedule</label>
               <input
                 type="datetime-local"
-                defaultValue={toLocalInputValue(selected.scheduledAt)}
-                onChange={(e) => {
-                  const v = new Date(e.target.value);
-                  if (!Number.isNaN(v.getTime())) rescheduleScheduled(selected.id, v.toISOString());
-                }}
+                value={rescheduleVal}
+                onChange={(e) => setRescheduleVal(e.target.value)}
                 style={{ padding: '6px 8px', border: '1px solid var(--line-2)', borderRadius: 6, fontFamily: 'var(--mono)', fontSize: 12 }}
               />
+              <button
+                className="btn sm"
+                disabled={
+                  savingId === selected.id ||
+                  !rescheduleVal ||
+                  rescheduleVal === toLocalInputValue(selected.scheduledAt) ||
+                  Number.isNaN(new Date(rescheduleVal).getTime())
+                }
+                onClick={() => {
+                  const v = new Date(rescheduleVal);
+                  if (!Number.isNaN(v.getTime())) rescheduleScheduled(selected.id, v.toISOString());
+                }}
+              >
+                <Icon name="calendar" size={11} /> {savingId === selected.id ? 'Saving…' : 'Reschedule'}
+              </button>
               <div style={{ flex: 1 }} />
               {selected.platformPostUrl && (
                 <a className="btn sm ghost" href={selected.platformPostUrl} target="_blank" rel="noreferrer">
                   <Icon name="arrow_right" size={11} /> View
                 </a>
               )}
-              <button className="btn sm" onClick={() => cancelScheduled(selected.id)} disabled={savingId === selected.id}>
+              <button className="btn sm" onClick={() => setConfirmCancelId(selected.id)} disabled={savingId === selected.id}>
                 <Icon name="x" size={11} /> Cancel post
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmCancelId && (
+        <div className="modal-scrim" onClick={() => { if (!savingId) setConfirmCancelId(null); }}>
+          <div className="modal-sheet" onClick={(e) => e.stopPropagation()} style={{ width: 'min(420px, 92vw)' }}>
+            <h3 style={{ margin: '0 0 8px', fontSize: 15, letterSpacing: '-0.01em' }}>Cancel this scheduled post?</h3>
+            <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--ink-3)', lineHeight: 1.5 }}>
+              It will not be published. This can&apos;t be undone.
+            </p>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button className="btn" onClick={() => setConfirmCancelId(null)} disabled={!!savingId}>Keep it</button>
+              <button className="btn primary" onClick={() => cancelScheduled(confirmCancelId)} disabled={!!savingId}>
+                {savingId ? 'Canceling…' : 'Cancel post'}
               </button>
             </div>
           </div>

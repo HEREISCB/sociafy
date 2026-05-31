@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { Icon, Pglyph } from './icons';
 import { apiDelete, useApi } from '../lib/ui/fetcher';
 import type { Platform } from '../lib/db/schema';
@@ -16,6 +17,9 @@ type Account = {
   scope: string | null;
   tokenExpiresAt: string | null;
   autoRefresh: boolean;
+  lastRefreshAt: string | null;
+  lastRefreshError: string | null;
+  lastRefreshErrorAt: string | null;
   createdAt: string;
   updatedAt: string;
   meta: { pageName?: string; pageId?: string; igUserId?: string } | null;
@@ -106,13 +110,15 @@ type Health = {
   tone: 'good' | 'warn' | 'bad' | 'neutral' | 'accent';
 };
 
-function healthFor(acct: Account | null): Health {
+function healthFor(acct: Account | null, now: number): Health {
   if (!acct) return { status: 'offline', label: 'Not connected', detail: '—', pct: 0, tone: 'neutral' };
-  if (acct.isStub) return { status: 'stub', label: 'Stub', detail: 'placeholder credentials', pct: 100, tone: 'warn' };
+  if (acct.isStub) return { status: 'stub', label: 'Demo only', detail: 'won\'t post — placeholder account', pct: 100, tone: 'warn' };
+  if (acct.lastRefreshError) {
+    return { status: 'expired', label: 'Reconnect needed', detail: 'last refresh failed', pct: 100, tone: 'bad' };
+  }
   if (!acct.tokenExpiresAt) {
     return { status: 'persistent', label: 'Long-lived', detail: 'token does not expire', pct: 100, tone: 'good' };
   }
-  const now = Date.now();
   const exp = new Date(acct.tokenExpiresAt).getTime();
   const diff = exp - now;
   if (diff <= 0) return { status: 'expired', label: 'Token expired', detail: 'reconnect to resume publishing', pct: 100, tone: 'bad' };
@@ -170,6 +176,24 @@ type Flash =
   | { kind: 'success'; platform: string; handle: string | null }
   | { kind: 'error'; platform: string; detail: string };
 
+// Map known OAuth callback error codes to plain-English copy. Unknown codes
+// fall back to a generic line so we never surface a raw machine string.
+const OAUTH_ERROR_COPY: Record<string, string> = {
+  access_denied: 'You declined the permission request. Sociafy needs publish access to post for you.',
+  invalid_scope: 'The app is missing a required permission. Try connecting again, or contact support if it persists.',
+  invalid_request: 'The connection request was malformed. Please try connecting again.',
+  invalid_grant: 'The authorization expired before we could finish. Please try connecting again.',
+  server_error: 'The platform had a temporary error. Please try connecting again in a moment.',
+  temporarily_unavailable: 'The platform is temporarily unavailable. Please try again shortly.',
+  state_mismatch: 'The connection couldn\'t be verified (session expired). Please try connecting again.',
+  token_exchange_failed: 'We couldn\'t complete the handshake with the platform. Please try connecting again.',
+  missing_code: 'The platform didn\'t return an authorization code. Please try connecting again.',
+};
+
+function oauthErrorCopy(detail: string): string {
+  return OAUTH_ERROR_COPY[detail] ?? 'Something went wrong while connecting. Please try again.';
+}
+
 const PLATFORM_LABELS: Record<string, string> = {
   facebook: 'Facebook',
   instagram: 'Instagram',
@@ -185,28 +209,42 @@ const ConnectionsPage: React.FC = () => {
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [flash, setFlash] = useState<Flash | null>(null);
+  // A monotonically-ticking "now" so token-expiry math is pure during render.
+  // Refreshes once a minute — enough granularity for the "expires in Xh Ym"
+  // labels and avoids the React-19 purity warning on Date.now() in render.
+  const [now, setNow] = useState<number>(0);
+  useEffect(() => {
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
+  // Read OAuth callback query params once on mount. Stable referential to
+  // satisfy react-hooks/set-state-in-effect: we batch the URL parse + state
+  // set + history rewrite into a single mount-time microtask.
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const params = new URLSearchParams(window.location.search);
-    const connected = params.get('connected');
-    const errorDetail = params.get('oauth_error');
-    const platform = params.get('platform') ?? connected;
-    if (connected) {
-      setFlash({ kind: 'success', platform: connected, handle: params.get('handle') });
-      void mutate();
-    } else if (errorDetail && platform) {
-      setFlash({ kind: 'error', platform, detail: errorDetail });
-    }
-    if (connected || errorDetail) {
-      params.delete('connected');
-      params.delete('handle');
-      params.delete('oauth_error');
-      params.delete('platform');
-      const qs = params.toString();
-      const url = window.location.pathname + (qs ? `?${qs}` : '');
-      window.history.replaceState(null, '', url);
-    }
+    queueMicrotask(() => {
+      const params = new URLSearchParams(window.location.search);
+      const connected = params.get('connected');
+      const errorDetail = params.get('oauth_error');
+      const platform = params.get('platform') ?? connected;
+      if (connected) {
+        setFlash({ kind: 'success', platform: connected, handle: params.get('handle') });
+        void mutate();
+      } else if (errorDetail && platform) {
+        setFlash({ kind: 'error', platform, detail: errorDetail });
+      }
+      if (connected || errorDetail) {
+        params.delete('connected');
+        params.delete('handle');
+        params.delete('oauth_error');
+        params.delete('platform');
+        const qs = params.toString();
+        const url = window.location.pathname + (qs ? `?${qs}` : '');
+        window.history.replaceState(null, '', url);
+      }
+    });
   }, [mutate]);
 
   useEffect(() => {
@@ -219,7 +257,9 @@ const ConnectionsPage: React.FC = () => {
 
   const connect = (p: Platform) => {
     const next = encodeURIComponent('/dashboard?tab=connections');
-    window.location.href = `/api/oauth/${p}/start?next=${next}`;
+    if (typeof window !== 'undefined') {
+      window.location.assign(`/api/oauth/${p}/start?next=${next}`);
+    }
   };
 
   const disconnect = async (id: string) => {
@@ -233,17 +273,22 @@ const ConnectionsPage: React.FC = () => {
     }
   };
 
-  const live = (accounts ?? []).filter((a) => !a.isStub);
-  const stubs = (accounts ?? []).filter((a) => a.isStub);
-  const expiring = live.filter((a) => {
-    if (!a.tokenExpiresAt) return false;
-    const diff = new Date(a.tokenExpiresAt).getTime() - Date.now();
-    return diff > 0 && diff < 24 * 3_600_000;
-  });
-  const expired = live.filter((a) => {
-    if (!a.tokenExpiresAt) return false;
-    return new Date(a.tokenExpiresAt).getTime() - Date.now() <= 0;
-  });
+  const { live, stubs, expiring, expired, refreshFailed } = useMemo(() => {
+    const all = accounts ?? [];
+    const live = all.filter((a) => !a.isStub);
+    const stubs = all.filter((a) => a.isStub);
+    const expiring = live.filter((a) => {
+      if (!a.tokenExpiresAt) return false;
+      const diff = new Date(a.tokenExpiresAt).getTime() - now;
+      return diff > 0 && diff < 24 * 3_600_000;
+    });
+    const expired = live.filter((a) => {
+      if (!a.tokenExpiresAt) return false;
+      return new Date(a.tokenExpiresAt).getTime() - now <= 0;
+    });
+    const refreshFailed = live.filter((a) => !!a.lastRefreshError);
+    return { live, stubs, expiring, expired, refreshFailed };
+  }, [accounts, now]);
 
   const publishedByPlatform = new Map<Platform, number>();
   const queuedByPlatform = new Map<Platform, number>();
@@ -342,15 +387,64 @@ const ConnectionsPage: React.FC = () => {
             <StatCell label="Posts shipped" value={totalPublished} sub="across all channels" />
             <StatCell
               label="Needs attention"
-              value={expiring.length + expired.length + stubs.length}
-              sub={expired.length ? `${expired.length} expired` : expiring.length ? `${expiring.length} expiring <24h` : stubs.length ? `${stubs.length} stub` : 'all healthy'}
-              warn={expired.length > 0 || expiring.length > 0}
+              value={expiring.length + expired.length + stubs.length + refreshFailed.length}
+              sub={
+                refreshFailed.length
+                  ? `${refreshFailed.length} refresh failed`
+                  : expired.length
+                  ? `${expired.length} expired`
+                  : expiring.length
+                  ? `${expiring.length} expiring <24h`
+                  : stubs.length
+                  ? `${stubs.length} demo only`
+                  : 'all healthy'
+              }
+              warn={expired.length > 0 || expiring.length > 0 || refreshFailed.length > 0}
             />
           </div>
         </div>
       </div>
 
-      {flash && <FlashBanner flash={flash} onDismiss={() => setFlash(null)} />}
+      {flash && (
+        <FlashBanner
+          flash={flash}
+          onDismiss={() => setFlash(null)}
+          onRetry={() => {
+            const p = flash.platform as Platform;
+            setFlash(null);
+            connect(p);
+          }}
+        />
+      )}
+
+      {refreshFailed.length > 0 && (
+        <div
+          role="alert"
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 12,
+            padding: '12px 16px',
+            background: 'oklch(0.96 0.045 25)',
+            border: '1px solid var(--bad)',
+            borderRadius: 10,
+            marginBottom: 14,
+            color: 'var(--ink)',
+          }}
+        >
+          <Icon name="alert" size={14} />
+          <div style={{ flex: 1, fontSize: 13, lineHeight: 1.5 }}>
+            <strong>Reconnect needed.</strong>{' '}
+            Sociafy tried to refresh{' '}
+            {refreshFailed.length === 1
+              ? `your ${PLATFORM_LABELS[refreshFailed[0].platform] ?? refreshFailed[0].platform} token`
+              : `${refreshFailed.length} tokens (${refreshFailed.map((a) => PLATFORM_LABELS[a.platform] ?? a.platform).join(', ')})`}
+            {' '}and failed. Until you reconnect, scheduled posts to{' '}
+            {refreshFailed.length === 1 ? 'that account' : 'these accounts'}{' '}
+            will not publish.
+          </div>
+        </div>
+      )}
 
       {unauth && (
         <div
@@ -368,9 +462,9 @@ const ConnectionsPage: React.FC = () => {
           <Icon name="lock" size={14} />
           <span style={{ fontSize: 13, color: 'var(--ink-2)' }}>Sign in to connect or disconnect accounts.</span>
           <div style={{ flex: 1 }} />
-          <a className="btn primary" href="/sign-in?next=/dashboard">
+          <Link className="btn primary" href="/sign-in?next=/dashboard">
             <Icon name="arrow_right" size={12} /> Sign in
-          </a>
+          </Link>
         </div>
       )}
 
@@ -385,7 +479,7 @@ const ConnectionsPage: React.FC = () => {
       >
         {PLATFORMS.map((p) => {
           const acct = accountFor(p.id);
-          const health = healthFor(acct);
+          const health = healthFor(acct, now);
           const isLive = health.status === 'live' || health.status === 'persistent' || health.status === 'expiring';
           const published = publishedByPlatform.get(p.id) ?? 0;
           const queued = queuedByPlatform.get(p.id) ?? 0;
@@ -572,29 +666,38 @@ const ConnectionsPage: React.FC = () => {
                     </div>
 
                     {confirming ? (
-                      <div style={{ display: 'flex', gap: 8, marginTop: 'auto' }}>
-                        <button
-                          className="btn"
-                          onClick={() => setConfirmId(null)}
-                          disabled={busy === acct.id}
-                          style={{ flex: 1, justifyContent: 'center' }}
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          className="btn"
-                          onClick={() => disconnect(acct.id)}
-                          disabled={busy === acct.id}
-                          style={{
-                            flex: 1,
-                            justifyContent: 'center',
-                            background: 'var(--bad)',
-                            borderColor: 'var(--bad)',
-                            color: 'white',
-                          }}
-                        >
-                          {busy === acct.id ? 'Removing…' : `Disconnect ${p.name}`}
-                        </button>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 'auto' }}>
+                        <div style={{ fontSize: 12, color: 'var(--ink-2)', lineHeight: 1.5 }}>
+                          {queued > 0 ? (
+                            <><strong style={{ color: 'var(--bad)' }}>{queued} queued post{queued === 1 ? '' : 's'} to {p.name} will stop publishing.</strong> Drafts are kept — reconnect anytime to resume.</>
+                          ) : (
+                            <>No queued posts to {p.name}. Drafts are kept — reconnect anytime to resume.</>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <button
+                            className="btn"
+                            onClick={() => setConfirmId(null)}
+                            disabled={busy === acct.id}
+                            style={{ flex: 1, justifyContent: 'center' }}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            className="btn"
+                            onClick={() => disconnect(acct.id)}
+                            disabled={busy === acct.id}
+                            style={{
+                              flex: 1,
+                              justifyContent: 'center',
+                              background: 'var(--bad)',
+                              borderColor: 'var(--bad)',
+                              color: 'white',
+                            }}
+                          >
+                            {busy === acct.id ? 'Removing…' : `Disconnect ${p.name}`}
+                          </button>
+                        </div>
                       </div>
                     ) : (
                       <button
@@ -743,7 +846,7 @@ const ConnectionsPage: React.FC = () => {
   );
 };
 
-const FlashBanner: React.FC<{ flash: Flash; onDismiss: () => void }> = ({ flash, onDismiss }) => {
+const FlashBanner: React.FC<{ flash: Flash; onDismiss: () => void; onRetry: () => void }> = ({ flash, onDismiss, onRetry }) => {
   const isSuccess = flash.kind === 'success';
   const label = PLATFORM_LABELS[flash.platform] ?? flash.platform;
   return (
@@ -799,9 +902,18 @@ const FlashBanner: React.FC<{ flash: Flash; onDismiss: () => void }> = ({ flash,
             ? flash.handle
               ? `Signed in as @${flash.handle.replace(/^@/, '')} · tokens stored, ready to post`
               : 'Tokens stored, ready to post'
-            : flash.detail}
+            : oauthErrorCopy(flash.detail)}
         </div>
       </div>
+      {!isSuccess && (
+        <button
+          onClick={onRetry}
+          className="btn sm"
+          style={{ flexShrink: 0, color: 'inherit', borderColor: 'currentColor', background: 'transparent' }}
+        >
+          <Icon name="refresh" size={12} /> Retry connection
+        </button>
+      )}
       <button
         onClick={onDismiss}
         title="Dismiss"

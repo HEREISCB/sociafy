@@ -157,7 +157,9 @@ interface AgentPageProps {
 
 const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
   const { data: settings, mutate: refetchSettings, unauth } = useApi<AgentSettings>('/api/agent/settings');
-  const { data: activity, mutate: refetchActivity } = useApi<Activity[]>('/api/activity?limit=30');
+  // Poll the activity feed so the "Live" badge is honest — drafts created by
+  // the background autopilot loop appear without a manual refresh.
+  const { data: activity, mutate: refetchActivity } = useApi<Activity[]>('/api/activity?limit=30', { refreshInterval: 30_000 });
   const { data: trendsNew, mutate: refetchTrends } = useApi<Trend[]>('/api/trends?status=new&limit=20');
   const { data: trendsUsed } = useApi<Trend[]>('/api/trends?status=used&limit=10');
 
@@ -609,7 +611,7 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
 
         {unauth && (
           <div style={{ padding: 12, background: 'rgba(124,77,255,0.06)', border: '1px solid rgba(124,77,255,0.2)', borderRadius: 10, fontSize: 13 }}>
-            Demo mode. <a href="/sign-in?next=/dashboard" style={{ textDecoration: 'underline', color: 'var(--ink)' }}>Sign in</a> to configure a real autopilot.
+            Demo mode. <Link href="/sign-in?next=/dashboard" style={{ textDecoration: 'underline', color: 'var(--ink)' }}>Sign in</Link> to configure a real autopilot.
           </div>
         )}
 
@@ -887,6 +889,34 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
               <div style={{ fontSize: 10.5, color: 'var(--ink-4)', marginTop: 6, fontFamily: 'var(--mono)' }}>
                 Total: {contentTypeMix.text + contentTypeMix.image + contentTypeMix.video} / week
               </div>
+            </div>
+
+            {/* Reconciled summary — ties the per-platform caps above and the
+                content mix together so the consequence of both controls is
+                explicit. Autopilot fans the content mix across enabled
+                platforms, capped by each platform's weekly limit. */}
+            <div style={{ padding: '10px 12px', background: 'var(--bg-sunk)', border: '1px solid var(--line)', borderRadius: 8, fontSize: 12, color: 'var(--ink-2)', lineHeight: 1.5 }}>
+              <Icon name="bolt" size={11} style={{ color: 'var(--accent)', marginRight: 6 }} />
+              {(() => {
+                const mixTotal = contentTypeMix.text + contentTypeMix.image + contentTypeMix.video;
+                const capTotal = enabledPlatforms.reduce((s, p) => s + (postsPerPlatform[p] ?? 0), 0);
+                // Per-platform caps cap the per-platform volume; the content
+                // mix sets how many of each kind get drafted. Effective weekly
+                // output is the smaller of "mix total" and "sum of caps" when
+                // caps are set, else just the mix total.
+                const effective = capTotal > 0 ? Math.min(mixTotal, capTotal) : mixTotal;
+                if (enabledPlatforms.length === 0) {
+                  return <>No platforms enabled — autopilot won&apos;t post anything yet.</>;
+                }
+                return (
+                  <>
+                    Autopilot will post <strong>~{effective}/week</strong> across {enabledPlatforms.length} platform{enabledPlatforms.length === 1 ? '' : 's'} (<strong>~{burnEstimate.weekly.toLocaleString()} credits/week</strong>).
+                    {capTotal > 0 && mixTotal > capTotal && (
+                      <span style={{ color: 'var(--ink-4)' }}> Your per-platform caps ({capTotal}/wk) limit the {mixTotal}/wk content mix.</span>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           </div>
         </div>

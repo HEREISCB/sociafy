@@ -1,6 +1,7 @@
 'use client';
 
 import React, { Fragment, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { Icon, Pglyph } from './icons';
 import { apiPatch, useApi } from '../lib/ui/fetcher';
 import { PLATFORM_TO_SHORT, SHORT_TO_PLATFORM } from '../lib/ui/platforms';
@@ -55,6 +56,10 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
   const [savingTopics, setSavingTopics] = useState(false);
   const [savingVoice, setSavingVoice] = useState(false);
   const [enabling, setEnabling] = useState(false);
+  // Non-blocking save error surfaced in the footer. Cleared on the next
+  // save attempt. When a PATCH rejects we keep the user on the current step
+  // instead of silently advancing past an unsaved change.
+  const [saveError, setSaveError] = useState<string | null>(null);
   // Brand profile — flows into every AI surface (image, video, text).
   // The richer these fields are, the more on-brand the output. The same
   // fields are editable later from Auto-pilot → Brand profile.
@@ -94,6 +99,9 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
   // Pulled into the Plan step's runway estimate.
   const { data: credits } = useApi<CreditsPayload>('/api/credits');
 
+  // Hydrate form fields from the user's saved agent_settings on first load
+  // (and when the settings object identity changes after a save). Intentional
+  // sync from external store → React state.
   useEffect(() => {
     if (settings?.niches?.length) setTopics(settings.niches);
     if (settings?.voiceTemplate) setVoice(settings.voiceTemplate);
@@ -114,13 +122,13 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
   }, [settings]);
 
   // First time we have connected accounts, pre-check them for autopilot.
+  // Only re-run on accounts change so we don't overwrite the user's
+  // selection if they uncheck something after the initial seed.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (planPlatforms.length === 0 && accounts && accounts.length > 0) {
       setPlanPlatforms(accounts.map((a) => a.platform));
     }
-    // Intentionally only re-runs when accounts changes — we don't want to
-    // overwrite the user's selection if they uncheck something.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accounts]);
 
   const estimate = useMemo(() => estimateWeeklyBurn({
@@ -141,22 +149,27 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
   const connectedShorts = (accounts ?? []).map((a) => PLATFORM_TO_SHORT[a.platform]);
 
   const startConnect = (platform: Platform) => {
-    window.location.href = `/api/oauth/${platform}/start?next=/onboarding`;
+    if (typeof window !== 'undefined') {
+      window.location.assign(`/api/oauth/${platform}/start?next=/onboarding`);
+    }
   };
 
   const toggleTopic = (id: string) => {
     setTopics((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   };
 
+  const errText = (e: unknown) => (e instanceof Error ? e.message.slice(0, 140) : 'Something went wrong saving your changes.');
+
   const saveTopicsAndContinue = async () => {
     setSavingTopics(true);
+    setSaveError(null);
     try {
       await apiPatch('/api/agent/settings', { niches: topics });
       await refetchSettings();
       setStep(2);
-    } catch {
-      // ignore — keep them in flow
-      setStep(2);
+    } catch (e) {
+      // Surface the failure and stay on this step — don't lose the change.
+      setSaveError(`Couldn't save your niches: ${errText(e)}`);
     } finally {
       setSavingTopics(false);
     }
@@ -164,12 +177,13 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
 
   const saveVoiceAndContinue = async () => {
     setSavingVoice(true);
+    setSaveError(null);
     try {
       await apiPatch('/api/agent/settings', { voiceTemplate: voice });
       await refetchSettings();
       setStep(3);
-    } catch {
-      setStep(3);
+    } catch (e) {
+      setSaveError(`Couldn't save your style: ${errText(e)}`);
     } finally {
       setSavingVoice(false);
     }
@@ -177,6 +191,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
 
   const saveBrandAndContinue = async () => {
     setSavingBrand(true);
+    setSaveError(null);
     try {
       await apiPatch('/api/agent/settings', {
         companyName: companyName.trim() || undefined,
@@ -185,8 +200,8 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
       });
       await refetchSettings();
       setStep(4);
-    } catch {
-      setStep(4);
+    } catch (e) {
+      setSaveError(`Couldn't save your brand profile: ${errText(e)}`);
     } finally {
       setSavingBrand(false);
     }
@@ -194,6 +209,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
 
   const savePlanAndContinue = async () => {
     setSavingPlan(true);
+    setSaveError(null);
     try {
       // We don't yet split per-platform caps in the Plan step — that's a
       // fine-tuning surface on the /agent page. For now we save the total
@@ -213,8 +229,8 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
       });
       await refetchSettings();
       setStep(5);
-    } catch {
-      setStep(5);
+    } catch (e) {
+      setSaveError(`Couldn't save your plan: ${errText(e)}`);
     } finally {
       setSavingPlan(false);
     }
@@ -262,7 +278,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
 
         {unauth && (
           <div style={{ padding: 12, background: 'rgba(124,77,255,0.05)', border: '1px solid rgba(124,77,255,0.2)', borderRadius: 10, fontSize: 13, marginBottom: 18 }}>
-            You aren&apos;t signed in. <a href="/sign-in?next=/onboarding" style={{ textDecoration: 'underline', color: 'var(--ink)' }}>Sign in</a> to connect your accounts.
+            You aren&apos;t signed in. <Link href="/sign-in?next=/onboarding" style={{ textDecoration: 'underline', color: 'var(--ink)' }}>Sign in</Link> to connect your accounts.
           </div>
         )}
 
@@ -270,30 +286,32 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
           <>
             <h1>Connect the channels.<br />I&apos;ll handle the <em>rest</em>.</h1>
             <p className="lede">
-              Sociafy needs publish access so it can schedule on your behalf. You can revoke any time. If a platform isn&apos;t configured yet, we&apos;ll connect a stub account so you can keep exploring.
+              Sociafy needs publish access so it can schedule on your behalf. You can revoke any time. If a platform isn&apos;t configured yet, we&apos;ll connect a demo-only account (won&apos;t post) so you can keep exploring.
             </p>
             <div className="connect-grid">
               {ONBOARD_PLATFORMS.map((p) => {
                 const isConnected = connectedShorts.includes(p.short);
                 const acct = accounts?.find((a) => a.platform === p.id);
                 return (
-                  <div
+                  <button
+                    type="button"
                     key={p.id}
                     className={`connect-tile ${isConnected ? 'connected' : ''}`}
                     onClick={() => !isConnected && startConnect(p.id)}
+                    disabled={isConnected}
                   >
                     <Pglyph p={p.short} size="xl" />
                     <div className="connect-tile-meta">
                       <div className="connect-tile-name">{p.name}</div>
                       <div className="connect-tile-handle">
                         {isConnected ? (acct?.handle ? `@${acct.handle}` : 'Connected') : 'Not connected'}
-                        {acct?.isStub && <span className="chip ghost mono" style={{ marginLeft: 6 }}>stub</span>}
+                        {acct?.isStub && <span className="chip ghost mono" style={{ marginLeft: 6 }}>Demo only</span>}
                       </div>
                     </div>
                     <div className="connect-tile-action">
                       {isConnected ? <><Icon name="check" size={12} /> Connected</> : <>Connect <Icon name="arrow_right" size={12} /></>}
                     </div>
-                  </div>
+                  </button>
                 );
               })}
             </div>
@@ -308,20 +326,22 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
             </p>
             <div className="topic-grid">
               {TOPICS.map((t) => (
-                <div
+                <button
+                  type="button"
                   key={t.id}
                   className={`topic ${topics.includes(t.id) ? 'active' : ''}`}
                   onClick={() => toggleTopic(t.id)}
+                  aria-pressed={topics.includes(t.id)}
                 >
                   <span className="topic-label">{t.label}</span>
                   <span className="topic-sub">{t.sub}</span>
-                </div>
+                </button>
               ))}
               {topics.filter((t) => !TOPICS.some((p) => p.id === t)).map((custom) => (
-                <div key={custom} className="topic active" onClick={() => toggleTopic(custom)}>
+                <button type="button" key={custom} className="topic active" onClick={() => toggleTopic(custom)} aria-pressed>
                   <span className="topic-label">{custom}</span>
                   <span className="topic-sub">custom</span>
-                </div>
+                </button>
               ))}
             </div>
             <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
@@ -362,14 +382,16 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
             </p>
             <div className="voice-grid">
               {VOICES.map((v) => (
-                <div
+                <button
+                  type="button"
                   key={v.id}
                   className={`voice ${voice === v.id ? 'active' : ''}`}
                   onClick={() => setVoice(v.id)}
+                  aria-pressed={voice === v.id}
                 >
                   <div className="voice-name">{v.name}</div>
                   <div className="voice-desc">{v.desc}</div>
-                </div>
+                </button>
               ))}
             </div>
           </>
@@ -397,10 +419,11 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
                 <textarea
                   value={brandBio}
                   onChange={(e) => setBrandBio(e.target.value)}
+                  maxLength={2000}
                   placeholder="We help solo founders turn one idea into on-brand posts, images, and Shorts across every platform. Voice is calm and direct — never hype-y, never corporate. We sell a $19/mo SaaS that automates the whole social media loop."
                   style={{ width: '100%', minHeight: 160, padding: 14, border: '1px solid var(--line-2)', borderRadius: 10, fontSize: 13.5, background: 'var(--bg-elev)', color: 'var(--ink)', outline: 'none', fontFamily: 'inherit', resize: 'vertical', lineHeight: 1.55 }}
                 />
-                <div style={{ fontSize: 11, color: 'var(--ink-4)', fontFamily: 'var(--mono)', marginTop: 4, textAlign: 'right' }}>
+                <div style={{ fontSize: 11, color: brandBio.length >= 1800 ? 'var(--bad)' : 'var(--ink-4)', fontFamily: 'var(--mono)', marginTop: 4, textAlign: 'right' }}>
                   {brandBio.length} / 2000
                 </div>
               </div>
@@ -472,20 +495,23 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
                 </div>
                 <div className="plan-sliders">
                   <PlanSlider
-                    label="Text posts" sub="1 credit each · cheapest"
+                    label="Text posts" sub="caption only · cheapest"
                     value={planTextPerWeek} min={0} max={14}
                     onChange={setPlanTextPerWeek}
                   />
                   <PlanSlider
-                    label="Image posts" sub="~5 credits each (caption + medium image)"
+                    label="Image posts" sub="caption + one generated image"
                     value={planImagePerWeek} min={0} max={14}
                     onChange={setPlanImagePerWeek}
                   />
                   <PlanSlider
-                    label="Video posts" sub="~181 credits each (caption + 8s 720p reel)"
+                    label="Video posts" sub="caption + one short reel · priciest"
                     value={planVideoPerWeek} min={0} max={7}
                     onChange={setPlanVideoPerWeek}
                   />
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 10, lineHeight: 1.5 }}>
+                  Exact credit cost depends on the post type — see the live estimate below. Autopilot fans each post out across your selected platforms.
                 </div>
               </section>
 
@@ -529,6 +555,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
                 <div className="plan-estimate-num mono">
                   <span className="big">{estimate.weekly.toLocaleString()}</span>
                   <span className="muted"> credits / week</span>
+                  <span className="muted" style={{ fontSize: 11 }}> · across {planPlatforms.length || 0} platform{planPlatforms.length === 1 ? '' : 's'}</span>
                 </div>
                 <div className="plan-estimate-meta mono">
                   {credits ? (
@@ -576,6 +603,16 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
           </>
         )}
 
+        {saveError && (
+          <div role="alert" style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 14px', background: 'oklch(0.97 0.05 25)', border: '1px solid var(--bad)', borderRadius: 10, fontSize: 12.5, color: 'var(--ink)', marginBottom: 14 }}>
+            <Icon name="alert" size={14} style={{ color: 'var(--bad)', flexShrink: 0, marginTop: 1 }} />
+            <span style={{ flex: 1, lineHeight: 1.5 }}>{saveError} Your changes weren&apos;t saved — try Continue again.</span>
+            <button className="btn ghost sm" onClick={() => setSaveError(null)} aria-label="Dismiss" style={{ padding: '2px 6px' }}>
+              <Icon name="x" size={12} />
+            </button>
+          </div>
+        )}
+
         <div className="onboard-foot">
           <button className="btn ghost" onClick={() => step > 0 && setStep(step - 1)} disabled={step === 0}>
             <Icon name="chevron_left" size={12} /> Back
@@ -598,6 +635,23 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
               'Continue'} <Icon name="arrow_right" size={12} />
           </button>
         </div>
+
+        {/* Persistent escape hatch — a new user shouldn't be forced through
+            6 steps + OAuth before seeing any value. Available on every step
+            except the final "Ready" step (where the primary CTA already
+            enters the app). */}
+        {step < 5 && (
+          <div style={{ textAlign: 'center', marginTop: 16 }}>
+            <button
+              type="button"
+              className="btn ghost sm"
+              onClick={onDone}
+              style={{ color: 'var(--ink-3)' }}
+            >
+              Skip setup <Icon name="arrow_right" size={11} />
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
