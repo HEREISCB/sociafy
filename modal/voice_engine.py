@@ -98,9 +98,40 @@ class VoiceEngine:
         import soundfile as sf
 
         ref = download_tmp(ref_audio_url, "wav")
-        audio = self.tts.generate(text=text, ref_audio=ref, ref_text=ref_text)
+
+        # OmniVoice wants a 3-10s reference: longer clips degrade cloning AND
+        # throw off the internal duration estimate (producing very long, garbled
+        # output). Trim to the first 10s and re-transcribe THAT segment so the
+        # reference audio and reference text always match.
+        data, sr = sf.read(ref)
+        if getattr(data, "ndim", 1) > 1:
+            data = data[:, 0]  # to mono
+        max_samples = 10 * sr
+        if len(data) > max_samples:
+            data = data[:max_samples]
+            ref = f"/tmp/{uuid.uuid4().hex}.wav"
+            sf.write(ref, data, sr)
+            segs, _ = self.whisper.transcribe(ref)
+            ref_text = " ".join(s.text for s in segs).strip()
+
+        # Bound the output length with an explicit target derived from the script
+        # (~2.7 words/sec natural pace) as a safety net against runaway duration.
+        words = max(1, len(text.split()))
+        target = min(30.0, max(2.0, words / 2.3))  # ~140 wpm natural pace
+
+        audio = self.tts.generate(
+            text=text,
+            ref_audio=ref,
+            ref_text=ref_text,
+            num_step=32,
+            guidance_scale=2.0,
+            duration=target,
+        )
         out = f"/tmp/{uuid.uuid4().hex}.wav"
-        sf.write(out, audio[0], 24000)
+        wav = audio[0] if hasattr(audio, "__len__") and not hasattr(audio, "ndim") else audio
+        if getattr(wav, "ndim", 1) > 1:
+            wav = wav[0]
+        sf.write(out, wav, 24000)
         return upload_r2(out, f"tts/{uuid.uuid4().hex}.wav", "audio/wav")
 
     @modal.method()
