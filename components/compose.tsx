@@ -219,6 +219,114 @@ const FrameSlot: React.FC<{ label: string; url: string | null; onUpload: () => v
   </div>
 );
 
+/**
+ * Crop-to-fit modal for the avatar face photo. Locks the crop frame to the
+ * chosen output aspect (9:16 / 1:1 / 16:9) so the avatar engine receives a photo
+ * that already matches — no letterboxing or distortion. Drag to pan, slider to
+ * zoom; on apply we render the visible frame to a canvas at the engine's tier
+ * dimensions and hand back a Blob. Uses the local File (object URL) so the
+ * canvas is never cross-origin-tainted.
+ */
+const ASPECT_WH: Record<string, { w: number; h: number; out: [number, number] }> = {
+  '9:16': { w: 9, h: 16, out: [720, 1280] },
+  '1:1': { w: 1, h: 1, out: [768, 768] },
+  '16:9': { w: 16, h: 9, out: [1280, 720] },
+};
+
+const AvatarCropModal: React.FC<{
+  file: File;
+  aspect: string;
+  onApply: (blob: Blob) => void;
+  onUseOriginal: () => void;
+  onCancel: () => void;
+}> = ({ file, aspect, onApply, onUseOriginal, onCancel }) => {
+  const spec = ASPECT_WH[aspect] ?? ASPECT_WH['9:16'];
+  const LONG = 300;
+  const [vw, vh] = spec.h >= spec.w ? [Math.round((LONG * spec.w) / spec.h), LONG] : [LONG, Math.round((LONG * spec.h) / spec.w)];
+
+  const [src, setSrc] = useState<string>('');
+  const [nat, setNat] = useState<{ w: number; h: number } | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const [off, setOff] = useState({ x: 0, y: 0 });
+  const drag = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
+  const imgRef = useRef<HTMLImageElement | null>(null);
+
+  useEffect(() => {
+    const url = URL.createObjectURL(file);
+    setSrc(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+
+  // "cover" base scale so the image always fills the frame, then user zoom on top.
+  const base = nat ? Math.max(vw / nat.w, vh / nat.h) : 1;
+  const scale = base * zoom;
+  const dispW = nat ? nat.w * scale : 0;
+  const dispH = nat ? nat.h * scale : 0;
+  const maxX = Math.max(0, (dispW - vw) / 2);
+  const maxY = Math.max(0, (dispH - vh) / 2);
+  const clamp = (v: number, m: number) => Math.max(-m, Math.min(m, v));
+  const ox = clamp(off.x, maxX);
+  const oy = clamp(off.y, maxY);
+
+  const onDown = (e: React.PointerEvent) => {
+    drag.current = { x: e.clientX, y: e.clientY, ox, oy };
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  };
+  const onMove = (e: React.PointerEvent) => {
+    if (!drag.current) return;
+    setOff({ x: drag.current.ox + (e.clientX - drag.current.x), y: drag.current.oy + (e.clientY - drag.current.y) });
+  };
+  const onUp = () => { drag.current = null; };
+
+  const apply = () => {
+    if (!nat) return;
+    const [outW, outH] = spec.out;
+    const canvas = document.createElement('canvas');
+    canvas.width = outW; canvas.height = outH;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    // Frame top-left in source pixels: image is centered in the frame then panned.
+    const imgLeft = vw / 2 - dispW / 2 + ox;
+    const imgTop = vh / 2 - dispH / 2 + oy;
+    const sx = (0 - imgLeft) / scale;
+    const sy = (0 - imgTop) / scale;
+    const sw = vw / scale;
+    const sh = vh / scale;
+    ctx.drawImage(imgRef.current!, sx, sy, sw, sh, 0, 0, outW, outH);
+    canvas.toBlob((b) => { if (b) onApply(b); }, 'image/png');
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'grid', placeItems: 'center', zIndex: 1000 }} onClick={onCancel}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--bg-elev)', border: '1px solid var(--line)', borderRadius: 14, padding: 18, width: 'min(92vw, 420px)', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ fontSize: 13, fontWeight: 600 }}>Crop to fit <span style={{ fontFamily: 'var(--mono)' }}>{aspect}</span></div>
+        <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>Drag to reposition, slider to zoom. The avatar uses exactly this frame.</div>
+        <div style={{ display: 'grid', placeItems: 'center', padding: 8, background: 'var(--bg-sunk)', borderRadius: 10 }}>
+          <div
+            style={{ width: vw, height: vh, position: 'relative', overflow: 'hidden', borderRadius: 8, background: '#000', cursor: 'grab', touchAction: 'none', boxShadow: '0 0 0 1px var(--line-2)' }}
+            onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            {src && (
+              <img
+                ref={imgRef} src={src} alt="crop" draggable={false}
+                onLoad={(e) => setNat({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
+                style={{ position: 'absolute', left: '50%', top: '50%', width: dispW || 'auto', height: dispH || 'auto', transform: `translate(calc(-50% + ${ox}px), calc(-50% + ${oy}px))`, userSelect: 'none', pointerEvents: 'none', maxWidth: 'none' }}
+              />
+            )}
+          </div>
+        </div>
+        <input type="range" min={1} max={3} step={0.01} value={zoom} onChange={(e) => setZoom(Number(e.target.value))} aria-label="Zoom" style={{ width: '100%' }} />
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+          <button className="btn sm ghost" onClick={onCancel}>Cancel</button>
+          <button className="btn sm ghost" onClick={onUseOriginal} title="Upload the photo without cropping">Use original</button>
+          <button className="btn sm" onClick={apply} disabled={!nat}>Apply crop</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const MediaPlaceholder: React.FC<MediaPlaceholderProps> = ({ kind, ratio = '16/9', count = 1, url, onUpload, onGenerate, onExpand }) => {
   if (kind === 'video') {
     if (url) {
@@ -550,6 +658,10 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   // Avatar mode: a face photo + a script spoken in a Voice Twin (or uploaded audio).
   const [avatarImageUrl, setAvatarImageUrl] = useState<string | null>(null);
+  // Avatar face crop: keep the local File so the user can (re)crop to the chosen
+  // aspect — cropping a fresh File avoids cross-origin canvas tainting.
+  const [avatarFaceFile, setAvatarFaceFile] = useState<File | null>(null);
+  const [cropOpen, setCropOpen] = useState(false);
   const [avatarScript, setAvatarScript] = useState<string>('');
   const [avatarVoiceId, setAvatarVoiceId] = useState<string | null>(null);
   const [avatarAudioMode, setAvatarAudioMode] = useState<'voice' | 'audio'>('voice');
@@ -594,15 +706,29 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
     const target = refUploadTarget;
     e.target.value = '';
     if (!file || !target) return;
+    // Avatar face: don't upload raw — open the crop-to-aspect modal first.
+    if (target === 'avatarFace') {
+      setAvatarFaceFile(file);
+      setCropOpen(true);
+      setRefUploadTarget(null);
+      return;
+    }
     const url = await uploadAnchor(file);
     if (!url) return;
     if (target === 'start') setStartFrameUrl(url);
     else if (target === 'end') setEndFrameUrl(url);
     else if (target === 'refVideo') setReferenceVideoUrl(url);
     else if (target === 'audio') setAudioUrl(url);
-    else if (target === 'avatarFace') setAvatarImageUrl(url);
     else setReferenceImageUrls((cur) => [...cur, url].slice(0, 9));
     setRefUploadTarget(null);
+  };
+
+  /** Upload a (possibly cropped) avatar face image and set it as the photo. */
+  const applyAvatarFace = async (data: Blob) => {
+    const file = data instanceof File ? data : new File([data], 'avatar-face.png', { type: data.type || 'image/png' });
+    const url = await uploadAnchor(file);
+    if (url) setAvatarImageUrl(url);
+    setCropOpen(false);
   };
 
   /** The media item the user has marked as the "hero" for the preview. */
@@ -1525,14 +1651,30 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               {/* Step 1 — Face */}
               <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr', gap: 14, alignItems: 'start' }} className="m-stack">
-                <FrameSlot
-                  label="Face photo *"
-                  url={avatarImageUrl}
-                  onUpload={() => onPickFrame('avatarFace')}
-                  onClear={() => setAvatarImageUrl(null)}
-                />
+                <div>
+                  <FrameSlot
+                    label="Face photo *"
+                    url={avatarImageUrl}
+                    onUpload={() => onPickFrame('avatarFace')}
+                    onClear={() => { setAvatarImageUrl(null); setAvatarFaceFile(null); }}
+                  />
+                  {avatarFaceFile && (
+                    <button
+                      type="button"
+                      className="btn sm ghost"
+                      style={{ marginTop: 6, width: '100%' }}
+                      onClick={() => setCropOpen(true)}
+                      title={`Re-crop to ${videoAspect}`}
+                    >
+                      <Icon name="grid" size={11} /> Crop to {videoAspect}
+                    </button>
+                  )}
+                </div>
                 <div style={{ fontSize: 11, color: 'var(--ink-3)', lineHeight: 1.6, paddingTop: 4 }}>
                   Use a clear, front-facing photo with one face and even lighting. Looking at the camera works best.
+                  <div style={{ marginTop: 6, color: 'var(--ink-4)' }}>
+                    Tip: the photo is cropped to <span style={{ fontFamily: 'var(--mono)' }}>{videoAspect}</span> to match your video — change the aspect above before cropping.
+                  </div>
                 </div>
               </div>
 
@@ -1785,6 +1927,15 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
 
   return (
     <div className="composer">
+      {cropOpen && avatarFaceFile && (
+        <AvatarCropModal
+          file={avatarFaceFile}
+          aspect={videoAspect}
+          onApply={applyAvatarFace}
+          onUseOriginal={async () => { await applyAvatarFace(avatarFaceFile); }}
+          onCancel={() => setCropOpen(false)}
+        />
+      )}
       <div className="composer-left">
         {creditError && (
           <InsufficientCreditsBanner
