@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { Icon, Pglyph, Spark } from './icons';
+import { Icon, Pglyph } from './icons';
 import { apiDelete, apiPost, useApi } from '../lib/ui/fetcher';
 import { PLATFORM_TO_SHORT } from '../lib/ui/platforms';
 import type { Platform } from '../lib/db/schema';
@@ -85,12 +85,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose, onEditDraft }) => {
   const { data: trends } = useApi<TrendRow[]>('/api/trends?limit=5');
   const { data: accounts, mutate: refetchAccounts } = useApi<AccountRow[]>('/api/accounts');
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
+  // In-app confirm (replaces native confirm()) — consistent with .modal-sheet.
+  const [confirmDisconnect, setConfirmDisconnect] = useState<AccountRow | null>(null);
   const disconnect = async (id: string) => {
-    if (!confirm('Disconnect this account? You can reconnect anytime.')) return;
     setDisconnecting(id);
     try {
       await apiDelete(`/api/accounts/${id}`);
       await refetchAccounts();
+      setConfirmDisconnect(null);
     } finally {
       setDisconnecting(null);
     }
@@ -174,34 +176,31 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose, onEditDraft }) => {
   const realConnected = (accounts ?? []).filter((a) => !a.isStub).length;
   const totalConnected = (accounts ?? []).length;
 
+  const pendingCount = (scheduled ?? []).filter((s) => s.status === 'pending').length;
+  const pendingConnected = totalConnected - realConnected;
+
   const stats = [
     {
-      label: 'Scheduled this week',
-      value: String((scheduled ?? []).filter((s) => s.status === 'pending').length),
-      delta: 'live',
-      up: true,
-      spark: [4, 6, 5, 8, 7, 9, 11, 12, 14],
+      label: 'Scheduled (pending)',
+      value: String(pendingCount),
+      hint: 'awaiting publish',
     },
     {
       label: 'Drafts in queue',
       value: String((drafts ?? []).filter((d) => d.status === 'draft').length),
-      delta: 'live',
-      up: true,
-      spark: [3, 4, 3, 6, 5, 7, 6, 9, 8],
+      hint: 'not yet scheduled',
     },
     {
       label: 'Trends watching',
       value: String((trends ?? []).length),
-      delta: 'live',
-      up: true,
-      spark: [80, 90, 85, 110, 105, 125, 120, 135, 142],
+      hint: 'in your niches',
     },
     {
       label: 'Connected platforms',
-      value: `${realConnected}${totalConnected > realConnected ? ` (+${totalConnected - realConnected} stub)` : ''}`,
-      delta: 'live',
-      up: true,
-      spark: [40, 45, 50, 55, 52, 58, 60, 62, 64],
+      value: String(realConnected),
+      hint: pendingConnected > 0
+        ? `${realConnected} live · ${pendingConnected} pending`
+        : `${realConnected} live`,
     },
   ];
 
@@ -232,14 +231,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose, onEditDraft }) => {
           </div>
         </div>
         <div className="briefing-meter">
-          <div className="meter-tiny">Today&apos;s posting plan</div>
-          <div className="meter-row"><span>Posts queued</span><strong>{(scheduled ?? []).filter((s) => s.status === 'pending').length} / 7</strong></div>
-          <div className="meter-bar"><div className="fill" style={{ width: `${Math.min(100, (((scheduled ?? []).filter((s) => s.status === 'pending').length) / 7) * 100)}%` }} /></div>
+          <div className="meter-tiny">Your queue</div>
+          <div className="meter-row"><span>Scheduled (pending)</span><strong>{pendingCount}</strong></div>
+          <div className="meter-row"><span>Drafts in queue</span><strong>{(drafts ?? []).filter((d) => d.status === 'draft').length}</strong></div>
           <div className="meter-divider" />
           <div className="meter-tiny">Best windows today</div>
-          <div className="meter-row mono"><span>X · 09:15</span><span>+34%</span></div>
-          <div className="meter-row mono"><span>LinkedIn · 12:30</span><span>+28%</span></div>
-          <div className="meter-row mono"><span>Instagram · 18:00</span><span>+19%</span></div>
+          <div style={{ fontSize: 12, color: 'var(--ink-4)', lineHeight: 1.5 }}>
+            Posting-time insights are coming soon — they&apos;ll surface here once we have enough of your engagement data.
+          </div>
         </div>
       </div>
 
@@ -248,11 +247,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose, onEditDraft }) => {
           <div className="stat" key={s.label}>
             <div className="stat-label">{s.label}</div>
             <div className="stat-value">{s.value}</div>
-            <div className={`stat-delta ${s.up ? 'up' : 'down'}`}>
-              <Icon name={s.up ? 'arrow_up' : 'arrow_down'} size={11} />
-              {s.delta}
-            </div>
-            <Spark data={s.spark} color="var(--ink-4)" />
+            <div className="stat-delta" style={{ color: 'var(--ink-4)' }}>{s.hint}</div>
           </div>
         ))}
       </div>
@@ -338,8 +333,13 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose, onEditDraft }) => {
               <div
                 className="queue-item"
                 key={q.id}
+                role={editable ? 'button' : undefined}
+                tabIndex={editable ? 0 : undefined}
                 style={editable ? { cursor: 'pointer' } : undefined}
                 onClick={editable ? () => onEditDraft!(q.id) : undefined}
+                onKeyDown={editable ? (e) => {
+                  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onEditDraft!(q.id); }
+                } : undefined}
               >
                 <div className="queue-time">
                   <strong>{q.when}</strong>
@@ -468,7 +468,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose, onEditDraft }) => {
                     <button
                       className="icon-btn"
                       title="Disconnect"
-                      onClick={() => disconnect(a.id)}
+                      onClick={() => setConfirmDisconnect(a)}
                       disabled={disconnecting === a.id}
                       style={{ marginLeft: 4 }}
                     >
@@ -481,6 +481,23 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose, onEditDraft }) => {
           )}
         </div>
       </div>
+
+      {confirmDisconnect && (
+        <div className="modal-scrim" onClick={() => { if (!disconnecting) setConfirmDisconnect(null); }}>
+          <div className="modal-sheet" onClick={(e) => e.stopPropagation()} style={{ width: 'min(420px, 92vw)' }}>
+            <h3 style={{ margin: '0 0 8px', fontSize: 15, letterSpacing: '-0.01em' }}>Disconnect this account?</h3>
+            <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--ink-3)', lineHeight: 1.5 }}>
+              {confirmDisconnect.displayName || confirmDisconnect.meta?.pageName || confirmDisconnect.handle || confirmDisconnect.platform} will be disconnected. You can reconnect anytime.
+            </p>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button className="btn" onClick={() => setConfirmDisconnect(null)} disabled={!!disconnecting}>Keep connected</button>
+              <button className="btn primary" onClick={() => disconnect(confirmDisconnect.id)} disabled={!!disconnecting}>
+                {disconnecting ? 'Disconnecting…' : 'Disconnect'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 };

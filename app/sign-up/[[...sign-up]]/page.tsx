@@ -7,9 +7,9 @@ export default function Page() {
   return (
     <div className="auth-shell">
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 24 }}>
-        <Link href="/" className="auth-brand">
-          <div className="brand-mark">S</div>
-          <span className="brand-name">sociafy<span className="dot">.</span></span>
+        <Link href="/" className="auth-brand" aria-label="Sociafy home">
+          <div className="brand-mark" aria-hidden="true">S</div>
+          <span className="brand-name">Sociafy<span className="dot">.</span></span>
         </Link>
         <SignUp
           appearance={{

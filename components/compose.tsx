@@ -43,12 +43,9 @@ const PROMPT_TEMPLATES: Array<{ label: string; prompt: string; preset: string; m
 
 type Variant = { id: string; name: string; score: number; text: string; rationale?: string };
 
-const DEFAULT_VARIANTS: Variant[] = [
-  { id: 'A', name: 'Variant A · Conversational', score: 88, text: "Most founders I know are spending 6+ hours a week on social — and most of it is invisible work that doesn't compound.\n\nWe built Sociafy because the cost of being absent is finally higher than the cost of being mediocre.\n\nThree things changed our approach this quarter:" },
-  { id: 'B', name: 'Variant B · Punchy', score: 92, text: "Stop posting. Start compounding.\n\n6 hours a week → 30 minutes.\nGuesswork → signal.\nSilence → conversations.\n\nSociafy isn't a scheduler. It's the agent that runs your content brain while you build the thing." },
-  { id: 'C', name: 'Variant C · Story-led', score: 84, text: "Last March I missed a launch window because I forgot to schedule three posts.\n\n€48k of pipeline, gone. Not because the product wasn't ready — because I wasn't.\n\nThat's why we're shipping Sociafy. Here's what changed:" },
-  { id: 'D', name: 'Variant D · Data-led', score: 79, text: "Founders who post 4+ times/week grow 3.2x faster than those who don't.\n\nThe problem: nobody can sustain that without burning out.\n\nWe trained an agent on 12k creator workflows to fix exactly this. Sociafy is now in private beta." },
-];
+// First load starts empty — no fabricated pre-generated copy or fake scores.
+// Variants populate after the user hits Generate.
+const DEFAULT_VARIANTS: Variant[] = [];
 
 type ImageSize = '1024x1024' | '1536x1024' | '1024x1536';
 type ImageQuality = 'low' | 'medium' | 'high';
@@ -513,7 +510,7 @@ const PostTT: React.FC<{ text: string; mediaUrl?: string; onUpload?: () => void;
   const handle = (author.handle ?? author.name).toLowerCase().replace(/\s+/g, '');
   return (
     <div
-      style={{ position: 'relative', height: '100%', minHeight: 360, aspectRatio: mediaAspect ?? '9/16', background: '#000', cursor: mediaUrl && onExpand ? 'zoom-in' : 'default' }}
+      style={{ position: 'relative', width: '100%', height: '100%', aspectRatio: mediaAspect ?? '9/16', background: '#000', cursor: mediaUrl && onExpand ? 'zoom-in' : 'default' }}
       onClick={mediaUrl && onExpand ? onExpand : undefined}
       role={mediaUrl && onExpand ? 'button' : undefined}
       aria-label={mediaUrl && onExpand ? 'Play video full-screen' : undefined}
@@ -529,7 +526,7 @@ const PostTT: React.FC<{ text: string; mediaUrl?: string; onUpload?: () => void;
           [ vertical video ]
         </div>
       )}
-      <div style={{ position: 'absolute', bottom: 60, left: 12, right: 70, color: '#fff', textShadow: '0 1px 4px rgba(0,0,0,0.5)', pointerEvents: 'none' }}>
+      <div style={{ position: 'absolute', bottom: '12%', left: '4%', right: '18%', color: '#fff', textShadow: '0 1px 4px rgba(0,0,0,0.5)', pointerEvents: 'none' }}>
         <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 6 }}>@{handle}</div>
         <div style={{ fontSize: 11.5, lineHeight: 1.4, whiteSpace: 'pre-wrap', opacity: 0.95 }}>{text.slice(0, 90)}…</div>
       </div>
@@ -603,7 +600,7 @@ interface ComposeProps {
 const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
   const [mode, setMode] = useState<ComposeMode>('text');
   const [withResearch, setWithResearch] = useState<boolean>(false);
-  const [prompt, setPrompt] = useState('Announcement post for Sociafy private beta — talk about agentic content workflow, voice friendly, hopeful but grounded.');
+  const [prompt, setPrompt] = useState('');
   const [preset, setPreset] = useState('announcement');
   const [active, setActive] = useState('B');
   const [platforms, setPlatforms] = useState<string[]>(['x', 'li']);
@@ -665,6 +662,9 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
   const [avatarScript, setAvatarScript] = useState<string>('');
   const [avatarVoiceId, setAvatarVoiceId] = useState<string | null>(null);
   const [avatarAudioMode, setAvatarAudioMode] = useState<'voice' | 'audio'>('voice');
+  // Inline validation flag — set when an avatar generate attempt is missing
+  // inputs, so we can highlight the specific control instead of only toasting.
+  const [avatarTouched, setAvatarTouched] = useState(false);
   // Voice preview (hear the cloned voice say the script before committing to a video).
   const [voicePreviewBusy, setVoicePreviewBusy] = useState(false);
   const [voicePreviewUrl, setVoicePreviewUrl] = useState<string | null>(null);
@@ -727,7 +727,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
   const applyAvatarFace = async (data: Blob) => {
     const file = data instanceof File ? data : new File([data], 'avatar-face.png', { type: data.type || 'image/png' });
     const url = await uploadAnchor(file);
-    if (url) setAvatarImageUrl(url);
+    if (url) { setAvatarImageUrl(url); setAvatarTouched(false); }
     setCropOpen(false);
   };
 
@@ -1122,13 +1122,18 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
   };
 
   const generateAvatar = async () => {
-    if (!avatarImageUrl) { setToast('Add a face photo for the avatar.'); return; }
     const useVoice = avatarAudioMode === 'voice';
-    if (useVoice && !(avatarVoiceId && avatarScript.trim())) {
-      setToast('Pick a Voice Twin and type what the avatar should say.');
+    const missingFace = !avatarImageUrl;
+    const missingVoice = useVoice && !(avatarVoiceId && avatarScript.trim());
+    const missingAudio = !useVoice && !audioUrl;
+    if (missingFace || missingVoice || missingAudio) {
+      setAvatarTouched(true);
+      if (missingFace) setToast('Add a face photo for the avatar.');
+      else if (missingVoice) setToast('Pick a Voice Twin and type what the avatar should say.');
+      else setToast('Upload an audio track to drive the avatar.');
       return;
     }
-    if (!useVoice && !audioUrl) { setToast('Upload an audio track to drive the avatar.'); return; }
+    setAvatarTouched(false);
 
     const quality = videoQuality === '1080p' ? '720p' : videoQuality;
     setVideoBusy(true);
@@ -1347,6 +1352,16 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
   const variant = variants.find((v) => v.id === active) ?? variants[0];
   const charCount = variant?.text.length ?? 0;
   const limit = PLATFORM_LIST.find((p) => p.id === previewPlat)?.limit ?? 3000;
+  // Validate the caption against EVERY selected platform's limit, not just the
+  // one currently previewed — X (280) is much stricter than LinkedIn (3000),
+  // and a user editing on the LinkedIn tab shouldn't silently blow past X.
+  const overLimitPlatforms = useMemo(
+    () =>
+      platforms
+        .map((s) => PLATFORM_BY_SHORT[s])
+        .filter((p): p is PlatformMeta => Boolean(p) && charCount > p.limit),
+    [platforms, charCount],
+  );
 
   // Build the Author for the currently-previewed platform from the user's
   // connected accounts. Falls back to "You" when not connected.
@@ -1391,14 +1406,16 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
           <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>How many</div>
           <div style={{ display: 'flex', gap: 4 }}>
             {[1, 2, 3, 4].map((n) => (
-              <span
+              <button
                 key={n}
+                type="button"
+                aria-pressed={imageCount === n}
                 className={`prompt-chip ${imageCount === n ? 'active' : ''}`}
                 onClick={() => setImageCount(n)}
                 style={{ minWidth: 28, justifyContent: 'center', textAlign: 'center' }}
               >
                 {n}
-              </span>
+              </button>
             ))}
           </div>
         </div>
@@ -1406,14 +1423,16 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
           <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Ratio</div>
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
             {IMAGE_SIZE_OPTIONS.map((s) => (
-              <span
+              <button
                 key={s.id}
+                type="button"
+                aria-pressed={imageSize === s.id}
                 className={`prompt-chip ${imageSize === s.id ? 'active' : ''}`}
                 onClick={() => setImageSize(s.id)}
                 title={s.id}
               >
                 {s.ratio}
-              </span>
+              </button>
             ))}
           </div>
         </div>
@@ -1421,14 +1440,16 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
           <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Quality</div>
           <div style={{ display: 'flex', gap: 4 }}>
             {(['low', 'medium', 'high'] as ImageQuality[]).map((q) => (
-              <span
+              <button
                 key={q}
+                type="button"
+                aria-pressed={imageQuality === q}
                 className={`prompt-chip ${imageQuality === q ? 'active' : ''}`}
                 onClick={() => setImageQuality(q)}
                 title={q === 'low' ? 'Fastest' : q === 'high' ? 'Highest fidelity' : 'Balanced'}
               >
                 {q}
-              </span>
+              </button>
             ))}
           </div>
         </div>
@@ -1446,21 +1467,25 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
         </span>
       </div>
       <div className="m-2col" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 14, marginTop: 4 }}>
+        {videoGenMode !== 'avatar' && (
         <div>
           <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>How many</div>
           <div style={{ display: 'flex', gap: 4 }}>
             {[1, 2, 3].map((n) => (
-              <span
+              <button
                 key={n}
+                type="button"
+                aria-pressed={videoCount === n}
                 className={`prompt-chip ${videoCount === n ? 'active' : ''}`}
                 onClick={() => setVideoCount(n)}
                 style={{ minWidth: 28, justifyContent: 'center', textAlign: 'center' }}
               >
                 {n}
-              </span>
+              </button>
             ))}
           </div>
         </div>
+        )}
         {videoGenMode !== 'avatar' && (
         <div>
           <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Duration</div>
@@ -1480,13 +1505,15 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
           <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Quality</div>
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
             {((videoGenMode === 'avatar' ? ['480p', '720p'] : ['480p', '720p', '1080p']) as VideoQuality[]).map((q) => (
-              <span
+              <button
                 key={q}
+                type="button"
+                aria-pressed={videoQuality === q}
                 className={`prompt-chip ${videoQuality === q ? 'active' : ''}`}
                 onClick={() => setVideoQuality(q)}
               >
                 {q}
-              </span>
+              </button>
             ))}
           </div>
         </div>
@@ -1494,13 +1521,15 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
           <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Aspect</div>
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
             {(['9:16', '1:1', '16:9'] as VideoAspect[]).map((a) => (
-              <span
+              <button
                 key={a}
+                type="button"
+                aria-pressed={videoAspect === a}
                 className={`prompt-chip ${videoAspect === a ? 'active' : ''}`}
                 onClick={() => setVideoAspect(a)}
               >
                 {a}
-              </span>
+              </button>
             ))}
           </div>
         </div>
@@ -1512,22 +1541,39 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
         <div className="m-2col" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8 }}>
           {VIDEO_GEN_MODES.map((m) => {
             const isActive = videoGenMode === m.id;
+            const isAvatar = m.id === 'avatar';
             return (
               <button
                 key={m.id}
+                type="button"
+                aria-pressed={isActive}
                 onClick={() => setVideoGenMode(m.id)}
                 style={{
                   textAlign: 'left', padding: '10px 12px', borderRadius: 10,
-                  border: isActive ? '1px solid var(--ink)' : '1px solid var(--line)',
-                  background: isActive ? 'var(--ink)' : 'var(--bg-elev)',
-                  color: isActive ? 'var(--bg)' : 'var(--ink)',
+                  border: isActive
+                    ? '1px solid var(--ink)'
+                    : isAvatar ? '1px solid var(--accent)' : '1px solid var(--line)',
+                  background: isActive ? 'var(--ink)' : isAvatar ? 'var(--accent-soft)' : 'var(--bg-elev)',
+                  color: isActive ? 'var(--bg)' : isAvatar ? 'var(--accent-ink)' : 'var(--ink)',
                   cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 4,
                   transition: 'background 0.15s, border-color 0.15s',
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                   <Icon name={m.icon} size={11} />
                   <span style={{ fontSize: 11.5, fontWeight: 600 }}>{m.label}</span>
+                  {isAvatar && (
+                    <span
+                      style={{
+                        marginLeft: 'auto', fontSize: 8.5, fontWeight: 700, letterSpacing: '0.06em',
+                        textTransform: 'uppercase', padding: '2px 6px', borderRadius: 100,
+                        background: isActive ? 'rgba(255,255,255,0.18)' : 'var(--accent)',
+                        color: isActive ? 'var(--bg)' : 'white',
+                      }}
+                    >
+                      Talking head
+                    </span>
+                  )}
                 </div>
                 <span style={{ fontSize: 10, opacity: 0.7, fontFamily: 'var(--mono)' }}>{m.sub}</span>
               </button>
@@ -1576,10 +1622,14 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={url} alt={`ref ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                       <button
+                        type="button"
+                        aria-label={`Remove reference image ${i + 1}`}
                         onClick={() => setReferenceImageUrls((cur) => cur.filter((_, j) => j !== i))}
-                        style={{ position: 'absolute', top: 2, right: 2, width: 14, height: 14, borderRadius: 3, background: 'rgba(10,10,10,0.7)', color: 'white', border: 0, display: 'grid', placeItems: 'center', cursor: 'pointer' }}
+                        style={{ position: 'absolute', top: 0, right: 0, minWidth: 32, minHeight: 32, padding: 4, background: 'transparent', border: 0, display: 'grid', placeItems: 'center', cursor: 'pointer' }}
                       >
-                        <Icon name="x" size={8} />
+                        <span style={{ width: 16, height: 16, borderRadius: 3, background: 'rgba(10,10,10,0.7)', color: 'white', display: 'grid', placeItems: 'center' }}>
+                          <Icon name="x" size={9} />
+                        </span>
                       </button>
                     </div>
                   ))}
@@ -1669,6 +1719,11 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                       <Icon name="grid" size={11} /> Crop to {videoAspect}
                     </button>
                   )}
+                  {avatarTouched && !avatarImageUrl && (
+                    <div role="status" style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 4, fontSize: 10.5, color: 'var(--danger)' }}>
+                      <Icon name="alert" size={10} /> Add a face photo
+                    </div>
+                  )}
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--ink-3)', lineHeight: 1.6, paddingTop: 4 }}>
                   Use a clear, front-facing photo with one face and even lighting. Looking at the camera works best.
@@ -1681,18 +1736,22 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
               {/* Step 2 — Voice & script */}
               <div>
                 <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-                  <span
+                  <button
+                    type="button"
+                    aria-pressed={avatarAudioMode === 'voice'}
                     className={`prompt-chip ${avatarAudioMode === 'voice' ? 'active' : ''}`}
                     onClick={() => setAvatarAudioMode('voice')}
                   >
                     Your Voice Twin
-                  </span>
-                  <span
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={avatarAudioMode === 'audio'}
                     className={`prompt-chip ${avatarAudioMode === 'audio' ? 'active' : ''}`}
                     onClick={() => setAvatarAudioMode('audio')}
                   >
                     Upload audio
-                  </span>
+                  </button>
                 </div>
 
                 {avatarAudioMode === 'voice' ? (
@@ -1727,6 +1786,11 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                         {voicePreviewUrl && <audio src={voicePreviewUrl} controls style={{ flex: 1, minWidth: 180, height: 30 }} />}
                         <span style={{ fontSize: 10, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>{avatarScript.length}/2000 · clip length follows your script</span>
                       </div>
+                      {avatarTouched && !(avatarVoiceId && avatarScript.trim()) && (
+                        <div role="status" style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10.5, color: 'var(--danger)' }}>
+                          <Icon name="alert" size={10} /> Pick a voice and write a script
+                        </div>
+                      )}
                     </div>
                   )
                 ) : (
@@ -1746,6 +1810,11 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                       <span style={{ fontSize: 10, color: 'var(--ink-4)' }}>MP3 / WAV / M4A / OGG · up to 50 MB</span>
                     </button>
                   )
+                )}
+                {avatarTouched && avatarAudioMode === 'audio' && !audioUrl && (
+                  <div role="status" style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 4, fontSize: 10.5, color: 'var(--danger)' }}>
+                    <Icon name="alert" size={10} /> Upload an audio track
+                  </div>
                 )}
               </div>
             </div>
@@ -2059,13 +2128,15 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
           <div className="prompt-foot">
             <div className="prompt-chips">
               {COMPOSE_PRESETS.filter((p) => p.modes.includes(mode)).map((p) => (
-                <span
+                <button
                   key={p.id}
+                  type="button"
+                  aria-pressed={preset === p.id}
                   className={`prompt-chip ${preset === p.id ? 'active' : ''}`}
                   onClick={() => setPreset(p.id)}
                 >
                   {p.label}
-                </span>
+                </button>
               ))}
             </div>
             <div className="prompt-spacer" />
@@ -2116,7 +2187,10 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                     {mode === 'image' && `Generate post${imageCount > 1 ? ` + ${imageCount} images` : ' + image'}`}
                     {mode === 'video' && `Generate post${videoCount > 1 ? ` + ${videoCount} clips` : ' + clip'}`}
                     {previewCost && (
-                      <span className={`cost-pill ${balance < previewCost.credits ? 'cant-afford' : ''}`}>
+                      <span
+                        className={`cost-pill ${balance < previewCost.credits ? 'cant-afford' : ''}`}
+                        style={{ background: 'rgba(255,255,255,0.28)', color: 'white' }}
+                      >
                         <Icon name="bolt" size={9} /> {previewCost.credits.toLocaleString()}
                       </span>
                     )}
@@ -2141,7 +2215,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
         </div>
 
         {toast && (
-          <div style={{ padding: 12, fontSize: 12.5, background: 'rgba(124,77,255,0.06)', border: '1px solid rgba(124,77,255,0.2)', borderRadius: 10, marginBottom: 12 }}>
+          <div role="status" aria-live="polite" style={{ padding: 12, fontSize: 12.5, background: 'rgba(124,77,255,0.06)', border: '1px solid rgba(124,77,255,0.2)', borderRadius: 10, marginBottom: 12 }}>
             {toast}
           </div>
         )}
@@ -2167,6 +2241,12 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
               </button>
             </div>
             <div className="card-body" style={{ paddingTop: 4 }}>
+              {variants.length === 0 ? (
+                <div style={{ padding: '20px 12px', textAlign: 'center', fontSize: 12.5, color: 'var(--ink-3)', lineHeight: 1.6 }}>
+                  <Icon name="sparkle" size={16} style={{ color: 'var(--accent)' }} />
+                  <div style={{ marginTop: 6 }}>Add a topic above and hit Generate to see caption variants here.</div>
+                </div>
+              ) : (
               <div className="compose-variant-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
                 {variants.map((v) => {
                   const isActive = active === v.id;
@@ -2185,6 +2265,11 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                     >
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
                         <span style={{ fontSize: 11.5, fontWeight: 600, color: isActive ? 'var(--accent-ink)' : 'var(--ink)' }}>{v.name}</span>
+                        {isActive && (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 9.5, fontFamily: 'var(--mono)', color: 'var(--accent-ink)', textTransform: 'uppercase', letterSpacing: '0.04em' }} title="This caption is editable">
+                            <Icon name="edit" size={9} /> Edit
+                          </span>
+                        )}
                         <span style={{ marginLeft: 'auto', fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
                           <Icon name={v.score >= 85 ? 'fire' : 'chart'} size={10} style={{ verticalAlign: -1 }} /> {v.score}
                         </span>
@@ -2217,6 +2302,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                   );
                 })}
               </div>
+              )}
             </div>
           </div>
         )}
@@ -2240,8 +2326,10 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                   ? 'Connected'
                   : 'Not connected — connect in Onboarding to actually post';
               return (
-                <span
+                <button
                   key={p.id}
+                  type="button"
+                  aria-pressed={isSelected}
                   className={`prompt-chip ${isSelected ? 'active' : ''}`}
                   onClick={() => togglePlat(p.id)}
                   style={{
@@ -2260,7 +2348,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                       ·
                     </span>
                   )}
-                </span>
+                </button>
               );
             })}
             <div className="dist-spacer" style={{ flex: 1 }} />
@@ -2301,10 +2389,10 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                 <h3><Icon name="image" size={14} /> Your images <span className="chip ghost mono">{modeMedia.length}</span></h3>
                 <div className="media-tabs">
                   {(['image', 'carousel'] as MediaKind[]).map((k) => (
-                    <span key={k} className={`opt ${mediaKind === k ? 'active' : ''}`} onClick={() => setMediaKind(k)}>
+                    <button key={k} type="button" aria-pressed={mediaKind === k} className={`opt ${mediaKind === k ? 'active' : ''}`} onClick={() => setMediaKind(k)}>
                       <Icon name={k === 'image' ? 'image' : 'grid'} size={11} />
                       {k.charAt(0).toUpperCase() + k.slice(1)}
-                    </span>
+                    </button>
                   ))}
                 </div>
               </div>
@@ -2337,20 +2425,26 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                         )}
                         {m.url && (
                           <button
+                            type="button"
                             onClick={(e) => { e.stopPropagation(); setLightbox({ url: m.url!, label: m.label, kind: m.mimeType?.startsWith('video/') ? 'video' : 'image' }); }}
-                            style={{ position: 'absolute', top: 4, right: 26, width: 18, height: 18, borderRadius: 4, background: 'rgba(10,10,10,0.6)', color: 'white', display: 'grid', placeItems: 'center', border: 0, cursor: 'pointer' }}
+                            style={{ position: 'absolute', top: 0, right: 30, minWidth: 32, minHeight: 32, padding: 4, background: 'transparent', display: 'grid', placeItems: 'center', border: 0, cursor: 'pointer' }}
                             aria-label="Expand image"
                             title="View full size"
                           >
-                            <Icon name="maximize" size={10} />
+                            <span style={{ width: 22, height: 22, borderRadius: 4, background: 'rgba(10,10,10,0.6)', color: 'white', display: 'grid', placeItems: 'center' }}>
+                              <Icon name="maximize" size={11} />
+                            </span>
                           </button>
                         )}
                         <button
+                          type="button"
                           onClick={(e) => { e.stopPropagation(); setMedia(media.filter((it) => it !== m)); }}
-                          style={{ position: 'absolute', top: 4, right: 4, width: 18, height: 18, borderRadius: 4, background: 'rgba(10,10,10,0.6)', color: 'white', display: 'grid', placeItems: 'center', border: 0, cursor: 'pointer' }}
+                          style={{ position: 'absolute', top: 0, right: 0, minWidth: 32, minHeight: 32, padding: 4, background: 'transparent', display: 'grid', placeItems: 'center', border: 0, cursor: 'pointer' }}
                           aria-label="Remove image"
                         >
-                          <Icon name="x" size={10} />
+                          <span style={{ width: 22, height: 22, borderRadius: 4, background: 'rgba(10,10,10,0.6)', color: 'white', display: 'grid', placeItems: 'center' }}>
+                            <Icon name="x" size={11} />
+                          </span>
                         </button>
                       </div>
                     );
@@ -2457,11 +2551,14 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                         <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: 'white' }}><Icon name="play" size={14} /></div>
                       )}
                       <button
+                        type="button"
                         onClick={(e) => { e.stopPropagation(); setMedia(media.filter((it) => it !== m)); }}
-                        style={{ position: 'absolute', top: 2, right: 2, width: 16, height: 16, borderRadius: 4, background: 'rgba(10,10,10,0.7)', color: 'white', display: 'grid', placeItems: 'center', border: 0, cursor: 'pointer' }}
+                        style={{ position: 'absolute', top: 0, right: 0, minWidth: 32, minHeight: 32, padding: 4, background: 'transparent', display: 'grid', placeItems: 'center', border: 0, cursor: 'pointer' }}
                         aria-label="Remove clip"
                       >
-                        <Icon name="x" size={9} />
+                        <span style={{ width: 18, height: 18, borderRadius: 4, background: 'rgba(10,10,10,0.7)', color: 'white', display: 'grid', placeItems: 'center' }}>
+                          <Icon name="x" size={10} />
+                        </span>
                       </button>
                     </div>
                   );
@@ -2496,19 +2593,34 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                 </span>
               )}
             </h3>
-            <span className="meta mono">{charCount} / {limit}</span>
+            <span className="meta mono" style={overLimitPlatforms.length ? { color: 'var(--danger)' } : undefined}>
+              {charCount} / {limit}
+            </span>
           </div>
           <div className="card-body">
+            {overLimitPlatforms.length > 0 && (
+              <div
+                role="status"
+                style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginBottom: 12, padding: '8px 10px', borderRadius: 8, fontSize: 11.5, lineHeight: 1.5, color: 'var(--danger)', background: 'color-mix(in oklch, var(--danger) 8%, transparent)', border: '1px solid color-mix(in oklch, var(--danger) 30%, transparent)' }}
+              >
+                <Icon name="alert" size={12} style={{ flexShrink: 0, marginTop: 1 }} />
+                <span>
+                  Caption is too long for {overLimitPlatforms.map((p) => `${p.label} (${charCount}/${p.limit})`).join(', ')}. Trim it or deselect {overLimitPlatforms.length === 1 ? 'that platform' : 'those platforms'}.
+                </span>
+              </div>
+            )}
             <div className="preview-tabs" style={{ marginBottom: 16 }}>
               {platforms.map((p) => (
-                <div
+                <button
                   key={p}
+                  type="button"
+                  aria-pressed={previewPlat === p}
                   className={`preview-tab ${previewPlat === p ? 'active' : ''}`}
                   onClick={() => setPreviewPlat(p)}
                   title={PLATFORM_BY_SHORT[p] ? platformLabel(PLATFORM_BY_SHORT[p], mode) : p}
                 >
                   <Pglyph p={p} />
-                </div>
+                </button>
               ))}
             </div>
             <PhonePreview

@@ -30,19 +30,59 @@ const LockIcon = () => (
 );
 
 const PG = ({ k }: { k: string }) => (
-  <span className={`pglyph ${k}`}>
+  <span className={`pglyph ${k}`} aria-hidden="true">
     {({ ig: 'I', fb: 'f', x: 'X', li: 'in', tt: 'T', yt: 'Y', th: '@' } as Record<string, string>)[k]}
   </span>
 );
 
+const SkipLink = () => {
+  const [focused, setFocused] = React.useState(false);
+  return (
+    <a
+      href="#main"
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      style={
+        focused
+          ? {
+              position: 'fixed',
+              top: 12,
+              left: 12,
+              zIndex: 1000,
+              background: 'var(--ink)',
+              color: 'var(--bg)',
+              padding: '10px 16px',
+              borderRadius: 8,
+              fontSize: 13,
+              fontFamily: 'var(--sans)',
+              textDecoration: 'none',
+            }
+          : {
+              position: 'absolute',
+              width: 1,
+              height: 1,
+              padding: 0,
+              margin: -1,
+              overflow: 'hidden',
+              clip: 'rect(0 0 0 0)',
+              whiteSpace: 'nowrap',
+              border: 0,
+            }
+      }
+    >
+      Skip to content
+    </a>
+  );
+};
+
 const LPNav = () => (
-  <div className="lp-nav-wrap">
+  <header className="lp-nav-wrap">
     <div className="lp lp-nav">
-      <Link href="/" className="brand" style={{ textDecoration: 'none', color: 'inherit' }}>
-        <div className="brand-mark">S</div>
+      <Link href="/" className="brand" style={{ textDecoration: 'none', color: 'inherit' }} aria-label="Sociafy home">
+        <div className="brand-mark" aria-hidden="true">S</div>
         <div className="brand-name">Sociafy<span className="dot">.</span></div>
       </Link>
-      <nav className="lp-nav-links">
+      <nav className="lp-nav-links" aria-label="Primary">
         <a href="#agent">Agent</a>
         <a href="#workflow">Workflow</a>
         <a href="#voice">Voice</a>
@@ -50,14 +90,14 @@ const LPNav = () => (
       </nav>
       <div className="lp-nav-spacer" />
       <div className="lp-nav-actions">
-        <span className="lp-nav-status"><span className="dot" /> 1,284 founders posting today</span>
+        <span className="lp-nav-status"><span className="dot" /> Built for founders who&apos;d rather be building</span>
         <Link className="btn" href="/sign-in">Log in</Link>
         <Link className="btn primary" href="/sign-up">
-          Start free <ArrowIcon />
+          Get started <ArrowIcon />
         </Link>
       </div>
     </div>
-  </div>
+  </header>
 );
 
 const Hero = () => (
@@ -71,7 +111,7 @@ const Hero = () => (
             <span className="arrow">→</span>
           </span>
           <h1>
-            Your social presence,<br />
+            Your social presence,{' '}
             <em>without</em> the second <span className="accent">full-time job</span>.
           </h1>
           <p className="hero-lede">
@@ -81,7 +121,7 @@ const Hero = () => (
           </p>
           <div className="hero-cta">
             <Link className="btn btn-lg primary" href="/sign-up">
-              <SparkleIcon /> Get started <span className="kbd">⌘ ↵</span>
+              <SparkleIcon /> Get started
             </Link>
             <a className="btn btn-lg" href="#workflow">
               <PlayIcon /> Watch 90s demo
@@ -90,13 +130,13 @@ const Hero = () => (
           <div className="hero-meta">
             <span className="dotted">From $30 / month</span>
             <span className="dotted">Cancel anytime</span>
-            <span className="dotted">SOC&nbsp;2 Type II</span>
+            <span className="dotted">No free trial</span>
           </div>
         </div>
 
         <aside className="hero-side">
           <div className="hero-side-head">
-            <span className="agent-mark">S</span>
+            <span className="agent-mark" aria-hidden="true">S</span>
             <span>Agent feed · live</span>
             <span className="live"><span className="pulse" /> watching</span>
           </div>
@@ -104,8 +144,8 @@ const Hero = () => (
           <div className="feed-row">
             <span className="ts">2 min ago · trend</span>
             <div className="body">
-              <strong>Spotted a +312% spike</strong> in <em>&quot;agentic content&quot;</em>.
-              Your last 3 posts on this topic averaged 2.1k impressions.
+              <strong>Spotted a rising trend</strong> in <em>&quot;agentic content&quot;</em>.
+              It lines up with the topics your audience engages with most.
             </div>
           </div>
           <div className="feed-row">
@@ -124,8 +164,8 @@ const Hero = () => (
           </div>
 
           <div className="hero-side-foot">
-            <Link className="btn accent" href="/dashboard">Review drafts</Link>
-            <Link className="btn" href="/dashboard">See full briefing</Link>
+            <Link className="btn accent" href="/sign-up">Review drafts</Link>
+            <a className="btn" href="#workflow">See full briefing</a>
           </div>
         </aside>
       </div>
@@ -133,12 +173,17 @@ const Hero = () => (
 
     <div className="lp">
       <div className="lp-logos">
-        <div className="lp-logos-label">Trusted by 4,200+ solo founders, indie studios &amp; small marketing teams</div>
-        <div className="lp-logos-row">
-          {[['LD', 'Linden'], ['HC', 'Halcyon'], ['NV', 'Northvane'], ['QO', 'Quoram'], ['FL', 'Flint & Co'], ['SR', 'Strider']].map(([g, n]) => (
-            <span className="lp-logo" key={n}>
-              <span className="glyph">{g}</span>
-              <span>{n}</span>
+        <div className="lp-logos-label">Built for solo founders, indie studios &amp; small marketing teams</div>
+        <div className="lp-logos-row" style={{ gridTemplateColumns: 'repeat(4, auto)', gap: '20px 28px', flexWrap: 'wrap' }}>
+          {[
+            'One agent, every platform',
+            'Posts in your own voice',
+            'You approve before it ships',
+            'Cancel anytime',
+          ].map((t) => (
+            <span className="lp-logo" key={t} style={{ fontSize: 14 }}>
+              <span className="glyph" aria-hidden="true">✓</span>
+              <span>{t}</span>
             </span>
           ))}
         </div>
@@ -479,7 +524,7 @@ const Pricing = () => {
           </ul>
           <div className="price-cta">
             <button className="btn" onClick={() => startCheckoutFromLanding('starter', setBusy)} disabled={busy !== null}>
-              {busy === 'starter' ? 'Redirecting…' : 'Get Starter'}
+              {busy === 'starter' ? 'Redirecting…' : 'Get started'}
             </button>
           </div>
         </div>
@@ -499,7 +544,7 @@ const Pricing = () => {
           </ul>
           <div className="price-cta">
             <button className="btn primary" onClick={() => startCheckoutFromLanding('pro', setBusy)} disabled={busy !== null}>
-              {busy === 'pro' ? 'Redirecting…' : 'Get Pro'}
+              {busy === 'pro' ? 'Redirecting…' : 'Get started'}
             </button>
           </div>
         </div>
@@ -519,7 +564,7 @@ const Pricing = () => {
           </ul>
           <div className="price-cta">
             <button className="btn" onClick={() => startCheckoutFromLanding('business', setBusy)} disabled={busy !== null}>
-              {busy === 'business' ? 'Redirecting…' : 'Get Business'}
+              {busy === 'business' ? 'Redirecting…' : 'Get started'}
             </button>
           </div>
         </div>
@@ -538,11 +583,11 @@ const Pricing = () => {
 };
 
 const FAQ_ITEMS = [
-  ['Does the agent post without my approval?', 'Only if you tell it to. Auto-publish is off by default. When you turn it on, you set a confidence threshold (e.g. ≥ 90/100) and a quiet-hours window — anything below the bar lands in your inbox.'],
+  ['How does pricing actually work?', 'Every plan is credit-based: Starter is $30/mo (2,000 credits), Pro is $80/mo (6,000 credits), and Business is $299/mo (25,000 credits). Each action costs credits — a text post is 1 credit, an AI image is 4, a 720p video reel is 180. There is no free trial; you can top up anytime at $15 per 1,000 credits and cancel in one click.'],
+  ['Does the agent post without my approval?', 'Only if you tell it to. Autopilot is a Pro and Business feature, and it is off by default. When you turn it on you set a confidence threshold (e.g. ≥ 90/100) and a quiet-hours window — anything below the bar lands in your inbox for review.'],
   ['What does “voice training” actually use?', 'Whatever you give it: pasted essays, a public profile URL, your last 30–90 days of posts, or three short voice memos. Nothing leaves your workspace, and we never use your writing to train other accounts.'],
-  ['Which platforms are supported?', 'Today: X, LinkedIn, Instagram, Facebook, TikTok, YouTube Shorts and Threads. Each platform gets a native draft — not a copy-paste with #hashtags slapped on.'],
-  ['What happens to scheduled posts if I cancel?', 'Anything already scheduled keeps publishing through your billing period. You can export every draft, scheduled post, and analytics record as a single CSV from settings.'],
-  ['Is there a way to keep a human in the loop on Studio plans?', 'Yes — approval routing lets a teammate (or your ghostwriter) sign off before anything posts, and every action is logged with a diff.'],
+  ['Which platforms are supported?', 'X, LinkedIn, Instagram, Facebook, TikTok, and YouTube — on every plan. Each platform gets a native draft, not a copy-paste with #hashtags slapped on.'],
+  ['What happens to my credits and posts if I cancel?', 'Cancellation takes effect at the end of your current billing cycle, so anything already scheduled keeps publishing until then and your remaining cycle credits stay usable. Unused monthly credits roll over for one month (two months on Business). See the Refund & Cancellation policy for details.'],
 ] as const;
 
 const FAQSection = () => (
@@ -576,14 +621,14 @@ const FinalCTA = () => (
           <h2>Stop posting on willpower.<br /><em>Start shipping on auto-pilot.</em></h2>
           <p>Connect two accounts in under three minutes. The agent will have your first morning briefing ready by tomorrow at 6 AM.</p>
           <div className="final-cta-actions">
-            <Link className="btn primary" href="/sign-up"><SparkleIcon /> Get started — from $30/mo</Link>
+            <Link className="btn primary" href="/sign-up"><SparkleIcon /> Get started</Link>
             <a className="btn" href="#workflow">Watch the 90s tour</a>
-            <a className="btn" href="#"><LockIcon /> Read security note</a>
+            <a className="btn" href="#pricing"><LockIcon /> See pricing</a>
           </div>
         </div>
         <div className="final-cta-side">
           <div className="lbl">What you get on day one</div>
-          <div className="row"><span>Connected channels</span><strong>up to 7</strong></div>
+          <div className="row"><span>Connected channels</span><strong>up to 6</strong></div>
           <div className="row"><span>Voice profile training</span><strong>~ 4 min</strong></div>
           <div className="row"><span>First briefing arrives</span><strong>06:00 local</strong></div>
           <div className="row"><span>Time to first post</span><strong className="accent">~ 12 min</strong></div>
@@ -600,7 +645,7 @@ const Footer = () => (
       <div className="lp-foot-grid">
         <div className="lp-foot-brand">
           <div className="brand">
-            <div className="brand-mark">S</div>
+            <div className="brand-mark" aria-hidden="true">S</div>
             <div className="brand-name">Sociafy<span className="dot">.</span></div>
           </div>
           <p>The AI social agent for founders who&apos;d rather be building.</p>
@@ -657,14 +702,17 @@ const Footer = () => (
 export default function LandingPage() {
   return (
     <>
+      <SkipLink />
       <LPNav />
-      <Hero />
-      <PreviewSection />
-      <AgentShowcase />
-      <VoiceSection />
-      <Pricing />
-      <FAQSection />
-      <FinalCTA />
+      <main id="main">
+        <Hero />
+        <PreviewSection />
+        <AgentShowcase />
+        <VoiceSection />
+        <Pricing />
+        <FAQSection />
+        <FinalCTA />
+      </main>
       <Footer />
     </>
   );

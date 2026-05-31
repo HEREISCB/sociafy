@@ -14,12 +14,15 @@ const LAST_UPDATED = '2026-05-23';
 export default function PrivacyPolicyPage() {
   return (
     <main style={{ maxWidth: 820, margin: '0 auto', padding: '48px 24px', fontFamily: 'var(--font-geist-sans)', lineHeight: 1.6 }}>
-      <header style={{ marginBottom: 32, borderBottom: '1px solid #e5e5e5', paddingBottom: 16 }}>
+      <p style={{ marginBottom: 24 }}>
+        <a href="/" style={{ color: 'var(--ink-3)', fontSize: 13, textDecoration: 'none' }}>&larr; Back to site</a>
+      </p>
+      <header style={{ marginBottom: 32, borderBottom: '1px solid var(--line)', paddingBottom: 16 }}>
         <h1 style={{ marginBottom: 8 }}>Privacy Policy</h1>
-        <p style={{ color: '#666', fontSize: 14, margin: 0 }}>
+        <p style={{ color: 'var(--ink-3)', fontSize: 14, margin: 0 }}>
           {COMPANY} (&ldquo;we&rdquo;, &ldquo;us&rdquo;, &ldquo;our&rdquo;) operates the Sociafy product available at sociafy.co.
         </p>
-        <p style={{ color: '#666', fontSize: 13, marginTop: 8 }}>Last updated: {LAST_UPDATED}</p>
+        <p style={{ color: 'var(--ink-3)', fontSize: 13, marginTop: 8 }}>Last updated: {LAST_UPDATED}</p>
       </header>
 
       <p style={{ background: '#fff8eb', border: '1px solid #f0d68a', padding: '12px 16px', borderRadius: 8, color: '#6b4408', fontSize: 13 }}>

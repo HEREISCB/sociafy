@@ -97,9 +97,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ page, onNav, showTTS = true, m
         <div className="nav-section">
           <div className="nav-label">Workspace</div>
           {items.map((it) => (
-            <div
+            <button
+              type="button"
               key={it.id}
               className={`nav-item ${page === it.id ? 'active' : ''}`}
+              aria-current={page === it.id ? 'page' : undefined}
               onClick={() => { onNav(it.id); onMobileClose?.(); }}
             >
               <Icon name={it.icon} className="ic" />
@@ -108,7 +110,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ page, onNav, showTTS = true, m
                 <span className={`badge ${it.accent ? 'accent' : ''}`}>{it.badge}</span>
               )}
               {!it.badge && <span className="kbd">⌘{it.kbd}</span>}
-            </div>
+            </button>
           ))}
         </div>
 
@@ -270,7 +272,7 @@ const NotificationsBell: React.FC = () => {
       {open && (
         <div style={{
           position: 'absolute', top: 'calc(100% + 8px)', right: 0,
-          width: 360, maxHeight: 480, overflow: 'auto',
+          width: 'min(360px, calc(100vw - 24px))', maxHeight: 480, overflow: 'auto',
           background: 'var(--bg-elev)',
           border: '1px solid var(--line)',
           borderRadius: 12,

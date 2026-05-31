@@ -30,7 +30,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <ClerkProvider>
+    <ClerkProvider
+      appearance={{
+        variables: {
+          // Match the brand: amber accent (--accent) and Geist type.
+          colorPrimary: "oklch(0.72 0.18 55)",
+          fontFamily: "var(--font-geist-sans), Geist, sans-serif",
+        },
+      }}
+    >
       <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
         <body>{children}</body>
       </html>
