@@ -90,48 +90,31 @@ class VoiceEngine:
         from omnivoice import OmniVoice
         from faster_whisper import WhisperModel
 
-        self.tts = OmniVoice.from_pretrained("k2-fsa/OmniVoice", device_map="cuda:0", dtype=torch.float16)
+        # load_asr=True lets create_voice_clone_prompt auto-transcribe the
+        # reference (matching the official Space), so ref audio/text always agree.
+        self.tts = OmniVoice.from_pretrained(
+            "k2-fsa/OmniVoice", device_map="cuda", dtype=torch.float16, load_asr=True
+        )
         self.whisper = WhisperModel("large-v3", device="cuda", compute_type="float16")
 
     @modal.method()
     def synth(self, ref_audio_url: str, ref_text: str, text: str) -> str:
         import soundfile as sf
+        from omnivoice import OmniVoiceGenerationConfig
 
         ref = download_tmp(ref_audio_url, "wav")
 
-        # OmniVoice wants a 3-10s reference: longer clips degrade cloning AND
-        # throw off the internal duration estimate (producing very long, garbled
-        # output). Trim to the first 10s and re-transcribe THAT segment so the
-        # reference audio and reference text always match.
-        data, sr = sf.read(ref)
-        if getattr(data, "ndim", 1) > 1:
-            data = data[:, 0]  # to mono
-        max_samples = 10 * sr
-        if len(data) > max_samples:
-            data = data[:max_samples]
-            ref = f"/tmp/{uuid.uuid4().hex}.wav"
-            sf.write(ref, data, sr)
-            segs, _ = self.whisper.transcribe(ref)
-            ref_text = " ".join(s.text for s in segs).strip()
+        # Canonical clone path (matches the official OmniVoice Space):
+        # create_voice_clone_prompt auto-trims long references and auto-transcribes
+        # via the model's ASR (ref_text=None), so audio/text always match and the
+        # model estimates output duration correctly — no manual trimming or forced
+        # duration needed.
+        prompt = self.tts.create_voice_clone_prompt(ref_audio=ref, ref_text=None)
+        cfg = OmniVoiceGenerationConfig(num_step=32, guidance_scale=2.0, denoise=True)
+        audio = self.tts.generate(text=text, voice_clone_prompt=prompt, generation_config=cfg)
 
-        # Bound the output length with an explicit target derived from the script
-        # (~2.7 words/sec natural pace) as a safety net against runaway duration.
-        words = max(1, len(text.split()))
-        target = min(30.0, max(2.0, words / 2.3))  # ~140 wpm natural pace
-
-        audio = self.tts.generate(
-            text=text,
-            ref_audio=ref,
-            ref_text=ref_text,
-            num_step=32,
-            guidance_scale=2.0,
-            duration=target,
-        )
         out = f"/tmp/{uuid.uuid4().hex}.wav"
-        wav = audio[0] if hasattr(audio, "__len__") and not hasattr(audio, "ndim") else audio
-        if getattr(wav, "ndim", 1) > 1:
-            wav = wav[0]
-        sf.write(out, wav, 24000)
+        sf.write(out, audio[0], self.tts.sampling_rate)
         return upload_r2(out, f"tts/{uuid.uuid4().hex}.wav", "audio/wav")
 
     @modal.method()
