@@ -59,12 +59,6 @@ const RefreshIcon = () => (
   </svg>
 );
 
-const UploadIcon = () => (
-  <svg width={13} height={13} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M8 11V2M4.5 5.5L8 2l3.5 3.5M3 13.5h10" />
-  </svg>
-);
-
 const SparkleIcon = () => (
   <svg width={13} height={13} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
     <path d="M8 2v3M8 11v3M2 8h3M11 8h3M4.5 4.5l2 2M9.5 9.5l2 2M11.5 4.5l-2 2M6.5 9.5l-2 2" />
@@ -156,7 +150,6 @@ export default function Home() {
                   <button className="btn" onClick={refreshAll} disabled={refreshing}>
                     <RefreshIcon /> {refreshing ? 'Refreshing…' : 'Refresh briefing'}
                   </button>
-                  <button className="btn"><UploadIcon /> Export</button>
                 </>
               )}
             </div>
