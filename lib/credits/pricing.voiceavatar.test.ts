@@ -3,8 +3,8 @@ import { creditsFor, priceForAvatar, CREDIT_PRICES, ACTION_LABELS } from './pric
 
 describe('voice/avatar pricing', () => {
   it('has voice + tts action prices', () => {
-    expect(creditsFor('voice_twin_create')).toBe(5);
-    expect(creditsFor('tts_synthesis')).toBe(4);
+    expect(creditsFor('voice_twin_create')).toBe(10);
+    expect(creditsFor('tts_synthesis')).toBe(8);
   });
 
   it('prices avatar by quality', () => {

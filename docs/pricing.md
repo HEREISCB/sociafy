@@ -99,6 +99,25 @@ Subscription tiers offer slight discounts off this base rate as you upgrade.
 
 All per-action margins are now **positive at all tier discount levels** — including at the Business-tier $0.012/credit rate. No bleed scenarios.
 
+### 3.3 Voice & Avatar (Modal GPU-hosted)
+
+Voice cloning (clone-TTS) and the talking-avatar video run on our own Modal GPU
+containers, not a per-call API. Cost = container time billed per second
+(**L4 $0.000222/s ≈ $0.80/hr**, **L40S $0.000542/s ≈ $1.95/hr**), dominated by
+model load + scaledown idle. Priced off measured worst-case (isolated, cold)
+cost. Idle windows trimmed to avatar 90s / voice 60s to cut launch-volume waste.
+
+| Action | Credits | Cust. value (top-up $0.015) | Our cost (worst-case) | Margin @ Business ($0.012) |
+|---|---:|---:|---:|---:|
+| Voice Twin create (one-time) | **10** | $0.150 | ~$0.05 (L4) | $0.07 → 58% |
+| Text-to-speech (clone) | **8** | $0.120 | ~$0.05 (L4) | $0.046 → 48% |
+| Avatar video · 480p | **50** | $0.750 | ~$0.30 (L40S+L4) | $0.30 → 50% |
+| Avatar video · 720p | **90** | $1.350 | ~$0.50 (L40S+L4) | $0.58 → 54% |
+
+> Avatar in "Voice Twin" mode runs the clone-TTS step internally on the L4 and
+> the LTX render on the L40S; the avatar credit price covers BOTH (no separate
+> TTS charge). Avatar is our highest-margin media action.
+
 ---
 
 ## 4. Subscription tiers (v3)

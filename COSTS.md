@@ -121,6 +121,23 @@ Adjusted for Seedance's higher video cost.
 - Pro $59 → provider cost ~$22 → 63% gross margin
 - Scale $199 → provider cost ~$80 → 60% gross margin
 
+## Voice & Avatar — Modal GPU-hosted (added 2026-06)
+
+These run on our own Modal containers, not a per-call API. Cost = container
+seconds billed (load + inference + scaledown idle). Rates verified at modal.com/pricing:
+**L4 $0.000222/s (~$0.80/hr)**, **L40S $0.000542/s (~$1.95/hr)**.
+
+| Action | GPU | Worst-case billed time | Cost | Credits | Margin @ Business |
+|---|---|---|---:|---:|---:|
+| Voice Twin create | L4 | ~180s (load+work+60s idle) | ~$0.05 | 10 | 58% |
+| Clone TTS render | L4 | ~180s | ~$0.05 | 8 | 48% |
+| Avatar 480p | L40S (+L4 voice) | ~380s + voice | ~$0.30 | 50 | 50% |
+| Avatar 720p | L40S (+L4 voice) | ~440s + voice | ~$0.50 | 90 | 54% |
+
+Levers if margin slips: lower `scaledown_window` further (idle is pure waste at
+low volume), use a smaller GGUF avatar quant, or move avatar to A10 ($0.000306/s)
+if the smaller GPU holds the model. Avatar is the **highest-margin** media action.
+
 ## Server-side hard caps (already enforced or to add)
 
 In place:

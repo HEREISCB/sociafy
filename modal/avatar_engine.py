@@ -138,7 +138,7 @@ def build_ltx_ia2v_prompt(img_name, audio_name, prompt_text, w, h, length, fps, 
     return g
 
 
-@app.cls(gpu="L40S", image=image, volumes={MODELS_DIR: models_vol}, secrets=secrets, timeout=1800, scaledown_window=180)
+@app.cls(gpu="L40S", image=image, volumes={MODELS_DIR: models_vol}, secrets=secrets, timeout=1800, scaledown_window=90)
 class AvatarEngine:
     @modal.enter()
     def start(self):

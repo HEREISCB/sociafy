@@ -58,10 +58,14 @@ export const CREDIT_PRICES: Record<CreditAction, number> = {
   variant_regenerate: 1,
   agent_draft: 1,
   publish_x: 0,                       // X cost is amortized in subscription
-  voice_twin_create: 5,               // one-time: Whisper transcribe + validate; small fee deters throwaway clones
-  tts_synthesis: 4,                   // one TTS render (≤60s out)
-  avatar_video_480p: 50,              // CALIBRATE: ceil(measured_cost*1.10/0.009) after Modal benchmark
-  avatar_video_720p: 90,              // CALIBRATE: ditto
+  // Voice/avatar run on Modal GPUs (L4 $0.000222/s, L40S $0.000542/s). Cost is
+  // dominated by container load + scaledown idle, so we price off measured
+  // worst-case (isolated, cold) cost on the same $0.009 cost-basis as every
+  // other action. Verified profitable at the Business rate ($0.012/credit).
+  voice_twin_create: 10,              // L4 prepare (transcribe+validate) ~$0.05; one-time, also deters throwaway clones
+  tts_synthesis: 8,                   // L4 clone-TTS render ~$0.05 → 8 cr ≈ $0.096 @business (~48% margin)
+  avatar_video_480p: 50,              // L40S+L4 ~$0.30 → 50 cr ≈ $0.60 @business (~50% margin)
+  avatar_video_720p: 90,              // L40S+L4 ~$0.50 → 90 cr ≈ $1.08 @business (~54% margin)
 };
 
 export function creditsFor(action: CreditAction): number {

@@ -82,7 +82,7 @@ secrets = [
 web_image = modal.Image.debian_slim(python_version="3.11").pip_install("fastapi[standard]")
 
 
-@app.cls(gpu="L4", image=image, volumes={"/weights": weights}, secrets=secrets, scaledown_window=120)
+@app.cls(gpu="L4", image=image, volumes={"/weights": weights}, secrets=secrets, scaledown_window=60)
 class VoiceEngine:
     @modal.enter()
     def load(self):
