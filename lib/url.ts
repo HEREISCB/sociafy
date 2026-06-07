@@ -17,6 +17,14 @@ const IS_PROD = process.env.NODE_ENV === 'production';
  */
 function isAllowedForwardedHost(host: string): boolean {
   if (!IS_PROD) return true;
+  // On Vercel, x-forwarded-host is set by the platform to the actual domain the
+  // request came in on (a domain bound to THIS project), not arbitrary client
+  // input — Vercel overwrites it. Trusting it lets OAuth/redirects use whichever
+  // bound domain the user is on (e.g. sociafy.app vs winqc.velinaai.in) instead
+  // of a single hardcoded NEXT_PUBLIC_APP_URL. Meta's redirect_uri allow-list is
+  // the security backstop. (Host-header poisoning only matters behind untrusted
+  // proxies, which is the non-Vercel path handled below.)
+  if (process.env.VERCEL) return true;
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL;
   if (!appUrl) return false;
   try {
