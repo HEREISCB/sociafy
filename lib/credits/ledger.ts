@@ -11,20 +11,34 @@
  * indexed (user_id, created_at) it's fast at our scale, and avoiding the
  * write removes a race between balance update and ledger insert.
  *
- * Atomicity: a "charge" is two ops (SUM-check + INSERT). At small scale,
- * we accept the tiny race window where two parallel requests can each see
- * "enough balance" and both insert charges → slight overspend. Acceptable
- * for MVP because per-request costs are small; tighter locking is a
- * Stripe-era follow-up.
+ * Atomicity: `charge` opens a transaction, takes a row-level lock on the
+ * user's profiles row (SELECT … FOR UPDATE), re-reads the balance under
+ * that lock, and inserts the debit row only if the balance covers it.
+ * Two concurrent charges for the same user serialize on the profile lock,
+ * which closes the SUM-then-INSERT race that would otherwise let parallel
+ * requests both pass the check and overspend.
  */
 
 import { sql, eq, desc, and } from 'drizzle-orm';
 import { db } from '../db';
 import {
   creditLedger,
+  profiles,
   type CreditLedgerKind,
 } from '../db/schema';
 import type { CreditAction } from './pricing';
+
+/** Thrown by `charge` when the user's locked balance is below the cost. */
+export class InsufficientCreditsError extends Error {
+  readonly balance: number;
+  readonly needed: number;
+  constructor(balance: number, needed: number) {
+    super(`insufficient_credits: balance=${balance} needed=${needed}`);
+    this.name = 'InsufficientCreditsError';
+    this.balance = balance;
+    this.needed = needed;
+  }
+}
 
 /** Sum SUM(credits) for a user. Returns 0 for users with no ledger rows. */
 export async function getBalance(userId: string): Promise<number> {
@@ -55,6 +69,12 @@ export async function ensureBalance(
  * Record a charge. `credits` should be the cost (positive number), it gets
  * stored as a negative ledger entry. Returns the inserted row id so the
  * caller can use it as the related_ledger_id on a later refund.
+ *
+ * Atomic: opens a transaction, takes a row-level lock on the user's profile,
+ * re-checks balance under the lock, and only inserts if balance >= cost.
+ * Throws `InsufficientCreditsError` otherwise — callers that pre-flighted
+ * with `ensureBalance` shouldn't see this in normal use, but it closes the
+ * parallel-request overspend race.
  */
 export async function charge(args: {
   userId: string;
@@ -62,19 +82,39 @@ export async function charge(args: {
   credits: number;
   meta?: Record<string, unknown>;
 }): Promise<{ ledgerId: string; balanceAfter: number }> {
-  const amount = -Math.abs(args.credits);
-  const [row] = await db()
-    .insert(creditLedger)
-    .values({
-      userId: args.userId,
-      kind: 'charge',
-      action: args.action,
-      credits: amount,
-      meta: args.meta ?? {},
-    })
-    .returning({ id: creditLedger.id });
-  const balanceAfter = await getBalance(args.userId);
-  return { ledgerId: row.id, balanceAfter };
+  const cost = Math.abs(args.credits);
+  return db().transaction(async (tx) => {
+    // Lock the profile row. Concurrent charges for the same user serialize
+    // here; one txn must commit/rollback before the next reads balance.
+    await tx
+      .select({ id: profiles.id })
+      .from(profiles)
+      .where(eq(profiles.id, args.userId))
+      .for('update');
+
+    const [bal] = await tx
+      .select({ total: sql<number>`COALESCE(SUM(${creditLedger.credits}), 0)::int` })
+      .from(creditLedger)
+      .where(eq(creditLedger.userId, args.userId));
+    const balance = Number(bal?.total ?? 0);
+
+    if (balance < cost) {
+      throw new InsufficientCreditsError(balance, cost);
+    }
+
+    const [row] = await tx
+      .insert(creditLedger)
+      .values({
+        userId: args.userId,
+        kind: 'charge',
+        action: args.action,
+        credits: -cost,
+        meta: args.meta ?? {},
+      })
+      .returning({ id: creditLedger.id });
+
+    return { ledgerId: row.id, balanceAfter: balance - cost };
+  });
 }
 
 /**

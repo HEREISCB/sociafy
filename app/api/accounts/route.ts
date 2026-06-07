@@ -58,6 +58,9 @@ export async function GET(req: NextRequest) {
         meta: row.meta,
         isStub: row.isStub,
         autoRefresh,
+        lastRefreshAt: row.lastRefreshAt,
+        lastRefreshError: row.lastRefreshError,
+        lastRefreshErrorAt: row.lastRefreshErrorAt,
         createdAt: row.createdAt,
         updatedAt: row.updatedAt,
       };

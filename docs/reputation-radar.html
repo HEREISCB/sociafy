@@ -1,0 +1,656 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sociafy Pulse — Brand Reputation Radar · Product Brief</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..600;1,9..144,300..400&family=Geist:wght@300..600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --paper:#FAFAF7; --elev:#FFFFFF; --sunk:#F4F3EE; --ink:#0A0A0A; --ink-2:#2A2A28;
+    --ink-3:#6B6B66; --ink-4:#9C9C96; --line:#E8E7E1; --line-2:#D8D7D0;
+    --accent: oklch(0.72 0.18 55); --accent-ink: oklch(0.42 0.16 55); --accent-soft: oklch(0.96 0.04 70);
+    --good: oklch(0.62 0.13 155); --good-soft: oklch(0.95 0.04 155);
+    --warn: oklch(0.70 0.15 75);  --warn-soft: oklch(0.95 0.05 85);
+    --bad:  oklch(0.58 0.20 25);  --bad-soft:  oklch(0.95 0.04 25);
+    --ig:#E1306C; --fb:#1877F2; --x:#0A0A0A; --li:#0A66C2; --tt:#000; --yt:#FF0000; --rd:#FF4500; --tp:#00B67A; --gg:#4285F4;
+    --sans:"Geist", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    --serif:"Fraunces", Georgia, "Times New Roman", serif;
+    --mono:"Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    --r:12px; --r-lg:18px;
+  }
+  *{box-sizing:border-box;}
+  html{ -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:var(--sans); font-size:15px; line-height:1.6; font-weight:350;
+  }
+  .doc{ max-width:880px; margin:0 auto; }
+  section{ padding:0 56px; }
+  p{ color:var(--ink-2); }
+  strong{ font-weight:550; color:var(--ink); }
+  em{ font-style:italic; }
+  a{ color:var(--accent-ink); }
+
+  /* ---- type ---- */
+  h1,h2,h3,h4{ margin:0; letter-spacing:-0.02em; }
+  .eyebrow{
+    font-family:var(--mono); font-size:11px; font-weight:500; text-transform:uppercase;
+    letter-spacing:0.16em; color:var(--accent-ink); display:flex; align-items:center; gap:12px; margin-bottom:18px;
+  }
+  .eyebrow::before{ content:""; width:24px; height:1.5px; background:var(--accent); flex:0 0 24px; }
+  .eyebrow .num{ color:var(--ink-4); margin-left:auto; letter-spacing:0.1em; }
+  .h-sec{ font-family:var(--serif); font-weight:380; font-size:40px; line-height:1.04; letter-spacing:-0.015em; margin-bottom:14px; }
+  .h-sec .accent{ color:var(--accent-ink); font-style:italic; }
+  .lede{ font-size:17px; line-height:1.6; color:var(--ink-3); max-width:60ch; }
+  .mono{ font-family:var(--mono); }
+  .small{ font-size:12.5px; }
+  .muted{ color:var(--ink-3); }
+
+  /* ---- cover ---- */
+  .cover{
+    background:#0C0C0A; color:var(--paper); padding:64px 56px 52px; position:relative; overflow:hidden;
+    border-radius:0 0 var(--r-lg) var(--r-lg);
+  }
+  .cover::before{
+    content:""; position:absolute; inset:0; pointer-events:none;
+    background:
+      radial-gradient(circle at 92% 4%, oklch(0.55 0.17 55 / 0.55), transparent 46%),
+      radial-gradient(circle at 6% 96%, oklch(0.40 0.12 25 / 0.40), transparent 55%);
+  }
+  .cover > *{ position:relative; z-index:1; }
+  .cover .kicker{
+    font-family:var(--mono); font-size:11.5px; letter-spacing:0.22em; text-transform:uppercase;
+    color:oklch(0.78 0.10 60); display:flex; align-items:center; gap:10px; margin-bottom:40px;
+  }
+  .cover .kicker .dot{ width:7px; height:7px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 4px oklch(0.55 0.17 55 / 0.30); }
+  .wordmark{ font-family:var(--mono); font-size:13px; letter-spacing:-0.01em; font-weight:500; color:oklch(0.86 0 0); }
+  .wordmark .dot{ color:var(--accent); }
+  .cover h1{ font-family:var(--serif); font-weight:340; font-size:104px; line-height:0.92; letter-spacing:-0.04em; margin:6px 0 4px; }
+  .cover h1 .stop{ color:var(--accent); }
+  .cover .subtitle{ font-family:var(--serif); font-style:italic; font-weight:300; font-size:30px; letter-spacing:-0.01em; color:oklch(0.82 0.04 60); margin-bottom:26px; }
+  .cover .promise{ font-size:17px; line-height:1.55; color:oklch(0.80 0 0); max-width:48ch; margin:0 0 34px; }
+  .cover .promise b{ color:var(--paper); font-weight:500; }
+
+  .feed{
+    border:1px solid oklch(0.26 0 0); border-radius:14px; background:oklch(0.12 0 0 / 0.6);
+    padding:14px 16px; margin-bottom:34px; backdrop-filter:blur(2px);
+  }
+  .feed .feed-head{
+    font-family:var(--mono); font-size:9.5px; letter-spacing:0.18em; text-transform:uppercase; color:oklch(0.62 0 0);
+    display:flex; align-items:center; gap:8px; margin-bottom:10px;
+  }
+  .feed .live{ margin-left:auto; color:var(--accent); display:flex; align-items:center; gap:6px; }
+  .feed .live .p{ width:6px;height:6px;border-radius:50%; background:var(--accent); }
+  .feed-row{ display:flex; gap:10px; align-items:baseline; padding:5px 0; font-size:12.5px; line-height:1.45; border-top:1px solid oklch(0.20 0 0); }
+  .feed-row:first-of-type{ border-top:0; }
+  .feed-row .t{ font-family:var(--mono); font-size:10.5px; color:oklch(0.55 0 0); flex:0 0 42px; }
+  .feed-row .b{ color:oklch(0.84 0 0); }
+  .feed-row .b b{ color:var(--paper); font-weight:500; }
+  .stars{ color:var(--warn); letter-spacing:1px; }
+  .cover .meta{ display:flex; flex-wrap:wrap; gap:8px 28px; font-family:var(--mono); font-size:10.5px; letter-spacing:0.06em; color:oklch(0.66 0 0); text-transform:uppercase; }
+  .cover .meta b{ color:oklch(0.88 0 0); font-weight:500; }
+
+  /* ---- generic blocks ---- */
+  .gap{ height:64px; }
+  .gap-sm{ height:40px; }
+  .rule{ height:1px; background:var(--line); margin:0 56px; }
+
+  .stat-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:14px; }
+  .stat{ border:1px solid var(--line); border-radius:var(--r); background:var(--elev); padding:16px 16px 14px; }
+  .stat .v{ font-family:var(--serif); font-weight:400; font-size:34px; line-height:1; letter-spacing:-0.02em; }
+  .stat .v .u{ font-size:15px; color:var(--ink-3); font-family:var(--sans); margin-left:2px; }
+  .stat .l{ font-family:var(--mono); font-size:10px; letter-spacing:0.08em; text-transform:uppercase; color:var(--ink-3); margin-top:10px; }
+
+  .cols-2{ display:grid; grid-template-columns:1fr 1fr; gap:22px; }
+  .cols-3{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+
+  .card{ border:1px solid var(--line); border-radius:var(--r); background:var(--elev); padding:20px; }
+  .card h4{ font-size:16px; font-weight:550; letter-spacing:-0.01em; margin-bottom:6px; }
+  .card p{ font-size:13.5px; line-height:1.55; color:var(--ink-3); margin:0; }
+  .card .tag{ font-family:var(--mono); font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:var(--accent-ink); display:block; margin-bottom:12px; }
+
+  .pain{ display:flex; gap:18px; padding:18px 0; border-top:1px solid var(--line); align-items:flex-start; }
+  .pain:last-child{ border-bottom:1px solid var(--line); }
+  .pain .pn{ font-family:var(--serif); font-size:30px; font-weight:340; color:var(--accent); line-height:1; flex:0 0 46px; }
+  .pain h4{ font-size:16px; font-weight:550; margin-bottom:3px; }
+  .pain p{ font-size:13.5px; color:var(--ink-3); margin:0; }
+
+  /* flow loop */
+  .flow{ display:grid; grid-template-columns:repeat(4,1fr); gap:0; border:1px solid var(--line); border-radius:var(--r); overflow:hidden; }
+  .flow .step{ padding:18px 16px; border-right:1px solid var(--line); position:relative; background:var(--elev); }
+  .flow .step:last-child{ border-right:0; }
+  .flow .step .n{ font-family:var(--mono); font-size:10px; letter-spacing:0.1em; color:var(--ink-4); }
+  .flow .step h4{ font-family:var(--serif); font-weight:420; font-size:20px; margin:8px 0 6px; letter-spacing:-0.01em; }
+  .flow .step p{ font-size:12px; line-height:1.5; color:var(--ink-3); margin:0; }
+  .flow .step .arr{ position:absolute; right:-9px; top:24px; z-index:2; width:18px; height:18px; border-radius:50%; background:var(--ink); color:var(--paper); display:grid; place-items:center; font-size:10px; }
+  .flow .step:last-child .arr{ display:none; }
+
+  /* source rows */
+  .src{ display:grid; grid-template-columns:200px 1fr; gap:20px; padding:18px 0; border-top:1px solid var(--line); align-items:flex-start; }
+  .src:last-of-type{ border-bottom:1px solid var(--line); }
+  .src .src-name{ font-weight:550; font-size:15px; display:flex; align-items:center; gap:8px; }
+  .src .src-sub{ font-family:var(--mono); font-size:10.5px; color:var(--ink-3); margin-top:10px; line-height:1.7; }
+  .src ul{ margin:0; padding:0; list-style:none; }
+  .src li{ font-size:13.5px; color:var(--ink-2); padding:3px 0 3px 18px; position:relative; }
+  .src li::before{ content:""; position:absolute; left:2px; top:10px; width:5px; height:5px; border-radius:50%; background:var(--accent); }
+  .glyphs{ display:inline-flex; gap:4px; }
+  .g{ width:18px; height:18px; border-radius:5px; color:#fff; font-size:9.5px; font-weight:600; display:inline-grid; place-items:center; font-family:var(--mono); }
+  .g.ig{ background:linear-gradient(135deg,#F58529,#DD2A7B 55%,#8134AF); } .g.fb{ background:var(--fb); }
+  .g.x{ background:var(--x); } .g.li{ background:var(--li); } .g.tt{ background:#000; } .g.yt{ background:var(--yt); }
+  .g.rd{ background:var(--rd); } .g.tp{ background:var(--tp); } .g.gg{ background:var(--gg); } .g.th{ background:#000; }
+
+  /* tiers */
+  .tier{ border:1px solid var(--line); border-left-width:4px; border-radius:10px; background:var(--elev); padding:16px 18px; margin-bottom:12px; }
+  .tier.green{ border-left-color:var(--good); }
+  .tier.amber{ border-left-color:var(--warn); }
+  .tier.red{ border-left-color:var(--bad); }
+  .tier .th{ display:flex; align-items:center; gap:10px; margin-bottom:6px; }
+  .tier .badge{ font-family:var(--mono); font-size:9.5px; letter-spacing:0.1em; text-transform:uppercase; padding:3px 8px; border-radius:100px; font-weight:500; }
+  .tier.green .badge{ background:var(--good-soft); color:var(--good); }
+  .tier.amber .badge{ background:var(--warn-soft); color:oklch(0.48 0.13 70); }
+  .tier.red .badge{ background:var(--bad-soft); color:var(--bad); }
+  .tier h4{ font-size:15.5px; font-weight:550; }
+  .tier p{ font-size:13.5px; color:var(--ink-3); margin:0; }
+  .tier .ex{ font-family:var(--mono); font-size:11.5px; color:var(--ink-3); margin-top:8px; padding-top:8px; border-top:1px dashed var(--line); }
+  .tier .ex b{ color:var(--ink-2); font-weight:500; }
+
+  /* ---- dashboard mock ---- */
+  .frame{ border:1px solid var(--line-2); border-radius:14px; overflow:hidden; box-shadow:0 1px 0 rgba(0,0,0,0.03), 0 18px 40px -28px rgba(0,0,0,0.22); background:var(--elev); }
+  .frame .chrome{ display:flex; align-items:center; gap:8px; padding:9px 12px; background:var(--sunk); border-bottom:1px solid var(--line); }
+  .frame .lights{ display:flex; gap:6px; } .frame .lights i{ width:9px; height:9px; border-radius:50%; background:var(--line-2); display:block; }
+  .frame .lights i:nth-child(1){ background:oklch(0.78 0.16 25);} .frame .lights i:nth-child(2){ background:oklch(0.85 0.13 80);} .frame .lights i:nth-child(3){ background:oklch(0.78 0.13 145);}
+  .frame .url{ margin:0 auto; font-family:var(--mono); font-size:11px; color:var(--ink-3); background:var(--paper); border:1px solid var(--line); padding:3px 12px; border-radius:6px; }
+  .dash{ padding:16px; background:var(--paper); display:flex; flex-direction:column; gap:12px; }
+  .dash-row{ display:grid; gap:12px; }
+  .panel{ border:1px solid var(--line); border-radius:10px; background:var(--elev); padding:14px; }
+  .panel .pt{ font-family:var(--mono); font-size:9.5px; letter-spacing:0.1em; text-transform:uppercase; color:var(--ink-3); margin-bottom:12px; display:flex; align-items:center; gap:8px; }
+  .panel .pt .pill{ margin-left:auto; font-size:9px; color:var(--good); }
+
+  .score-wrap{ display:flex; align-items:center; gap:16px; }
+  .ring{ --p:78; width:74px; height:74px; border-radius:50%; flex:0 0 74px;
+    background:conic-gradient(var(--accent) calc(var(--p)*1%), var(--line) 0); display:grid; place-items:center; position:relative; }
+  .ring::after{ content:""; position:absolute; inset:7px; background:var(--elev); border-radius:50%; }
+  .ring b{ position:relative; z-index:1; font-family:var(--serif); font-size:24px; font-weight:430; }
+  .score-meta .big{ font-family:var(--serif); font-size:15px; font-weight:500; }
+  .score-meta .d{ font-family:var(--mono); font-size:11px; color:var(--good); margin-top:2px; }
+  .score-meta .s{ font-size:11.5px; color:var(--ink-3); margin-top:6px; line-height:1.4; }
+
+  .ministat{ display:flex; flex-direction:column; gap:2px; }
+  .ministat .mv{ font-family:var(--serif); font-size:22px; font-weight:430; letter-spacing:-0.01em; }
+  .ministat .ml{ font-family:var(--mono); font-size:9px; letter-spacing:0.06em; text-transform:uppercase; color:var(--ink-3); }
+
+  .plat-row{ display:grid; grid-template-columns:74px 1fr 38px; gap:10px; align-items:center; padding:7px 0; border-top:1px solid var(--line); }
+  .plat-row:first-of-type{ border-top:0; }
+  .plat-row .pl{ display:flex; align-items:center; gap:7px; font-size:12px; font-weight:500; }
+  .sbar{ height:9px; border-radius:100px; overflow:hidden; display:flex; background:var(--sunk); }
+  .sbar i{ display:block; height:100%; }
+  .sbar .pos{ background:var(--good); } .sbar .neu{ background:var(--line-2); } .sbar .neg{ background:var(--bad); }
+  .plat-row .net{ font-family:var(--mono); font-size:11px; text-align:right; font-weight:500; }
+  .net.up{ color:var(--good); } .net.dn{ color:var(--bad); } .net.fl{ color:var(--ink-3); }
+
+  .theme{ display:inline-flex; align-items:center; gap:6px; padding:5px 10px; border:1px solid var(--line); border-radius:100px; font-size:12px; margin:0 6px 6px 0; background:var(--elev); }
+  .theme .c{ font-family:var(--mono); font-size:10px; color:var(--ink-4); }
+  .theme .d{ width:7px; height:7px; border-radius:50%; }
+  .theme .d.p{ background:var(--good);} .theme .d.n{ background:var(--bad);} .theme .d.m{ background:var(--warn);}
+
+  .feedm{ display:grid; grid-template-columns:22px 1fr auto; gap:10px; padding:9px 0; border-top:1px solid var(--line); align-items:start; }
+  .feedm:first-of-type{ border-top:0; }
+  .feedm .body{ font-size:12px; line-height:1.4; color:var(--ink-2); }
+  .feedm .body .src-tag{ font-family:var(--mono); font-size:9.5px; color:var(--ink-4); display:block; margin-top:2px; }
+  .feedm .st{ font-family:var(--mono); font-size:9px; letter-spacing:0.04em; text-transform:uppercase; padding:2px 7px; border-radius:100px; white-space:nowrap; height:fit-content; }
+  .st.auto{ background:var(--good-soft); color:var(--good); }
+  .st.draft{ background:var(--warn-soft); color:oklch(0.48 0.13 70); }
+  .st.esc{ background:var(--bad-soft); color:var(--bad); }
+
+  /* fit / packaging */
+  .fit{ display:flex; gap:12px; padding:13px 0; border-top:1px solid var(--line); align-items:baseline; }
+  .fit:last-child{ border-bottom:1px solid var(--line); }
+  .fit .k{ font-family:var(--mono); font-size:11px; letter-spacing:0.04em; color:var(--accent-ink); flex:0 0 150px; text-transform:uppercase; }
+  .fit .v{ font-size:13.5px; color:var(--ink-2); }
+  .fit .v b{ font-weight:550; }
+
+  .price-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+  .pc{ border:1px solid var(--line); border-radius:var(--r); padding:18px; background:var(--elev); }
+  .pc.feat{ background:#0C0C0A; color:var(--paper); border-color:#0C0C0A; }
+  .pc .pcl{ font-family:var(--mono); font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:var(--ink-3); }
+  .pc.feat .pcl{ color:oklch(0.78 0.10 60); }
+  .pc .pcv{ font-family:var(--serif); font-size:26px; font-weight:430; margin:8px 0 4px; letter-spacing:-0.01em; }
+  .pc .pcs{ font-size:12.5px; color:var(--ink-3); }
+  .pc.feat .pcs{ color:oklch(0.80 0 0); }
+
+  /* roadmap */
+  .phase{ display:grid; grid-template-columns:120px 1fr; gap:20px; padding:18px 0; border-top:1px solid var(--line); }
+  .phase:last-child{ border-bottom:1px solid var(--line); }
+  .phase .pl{ font-family:var(--mono); font-size:11px; letter-spacing:0.06em; text-transform:uppercase; color:var(--accent-ink); }
+  .phase .pl b{ display:block; font-family:var(--serif); font-size:22px; color:var(--ink); letter-spacing:-0.01em; margin-bottom:4px; text-transform:none; font-weight:400; }
+  .phase ul{ margin:0; padding:0; list-style:none; columns:2; column-gap:24px; }
+  .phase li{ font-size:13px; color:var(--ink-2); padding:2px 0 2px 16px; position:relative; break-inside:avoid; }
+  .phase li::before{ content:"→"; position:absolute; left:0; color:var(--accent); font-size:11px; }
+
+  /* closing */
+  .closing{ background:#0C0C0A; color:var(--paper); padding:54px 56px; border-radius:var(--r-lg) var(--r-lg) 0 0; position:relative; overflow:hidden; }
+  .closing::before{ content:""; position:absolute; inset:0; background:radial-gradient(circle at 10% 0%, oklch(0.50 0.16 55 / 0.45), transparent 50%); pointer-events:none; }
+  .closing > *{ position:relative; z-index:1; }
+  .closing h2{ font-family:var(--serif); font-weight:340; font-size:38px; line-height:1.08; letter-spacing:-0.02em; margin-bottom:14px; }
+  .closing h2 .a{ color:var(--accent); font-style:italic; }
+  .closing p{ color:oklch(0.82 0 0); font-size:15px; max-width:54ch; }
+  .foot{ display:flex; flex-wrap:wrap; gap:6px 24px; margin-top:34px; padding-top:20px; border-top:1px solid oklch(0.24 0 0); font-family:var(--mono); font-size:10px; letter-spacing:0.06em; text-transform:uppercase; color:oklch(0.60 0 0); }
+
+  .printbtn{
+    position:fixed; top:18px; right:18px; z-index:99; font-family:var(--mono); font-size:11px; letter-spacing:0.08em; text-transform:uppercase;
+    background:var(--ink); color:var(--paper); border:0; border-radius:100px; padding:10px 16px; cursor:pointer; box-shadow:0 6px 20px -6px rgba(0,0,0,0.4);
+  }
+  .printbtn:hover{ background:var(--ink-2); }
+
+  @media (max-width:720px){
+    section,.cover,.closing{ padding-left:24px; padding-right:24px; }
+    .rule{ margin:0 24px; }
+    .cover h1{ font-size:64px; } .cover .subtitle{ font-size:22px; }
+    .h-sec{ font-size:30px; }
+    .stat-grid,.cols-2,.cols-3,.flow,.price-grid{ grid-template-columns:1fr; }
+    .flow .step{ border-right:0; border-bottom:1px solid var(--line); } .flow .step .arr{ display:none; }
+    .src,.phase{ grid-template-columns:1fr; gap:8px; } .phase ul{ columns:1; }
+    .dash-row{ grid-template-columns:1fr !important; }
+  }
+
+  @media print{
+    @page{ size:A4; margin:14mm; }
+    body{ background:#fff; font-size:11px; }
+    .doc{ max-width:none; }
+    section,.rule{ padding-left:0; padding-right:0; margin-left:0; margin-right:0; }
+    .printbtn{ display:none; }
+    .cover,.closing,.pc.feat,.tier{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+    *{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+    .cover{ border-radius:0; padding:34px 0; }
+    .cover h1{ font-size:74px; }
+    .closing{ border-radius:0; padding:34px 0; }
+    .gap{ height:30px; } .gap-sm{ height:20px; }
+    .h-sec{ font-size:26px; }
+    section,.card,.flow,.frame,.tier,.pain,.src,.phase,.stat{ break-inside:avoid; }
+    .sheet{ break-before:page; }
+    .frame{ box-shadow:none; }
+  }
+</style>
+</head>
+<body>
+<button class="printbtn" onclick="window.print()">↧ Print / Save as PDF</button>
+<div class="doc">
+
+  <!-- ============ COVER ============ -->
+  <section class="cover">
+    <div class="kicker"><span class="dot"></span> Sociafy · Product Brief · Confidential</div>
+    <div class="wordmark">sociafy<span class="dot">.</span></div>
+    <h1>Pulse<span class="stop">.</span></h1>
+    <div class="subtitle">Brand Reputation Radar</div>
+    <p class="promise">Hear <b>every mention</b> of your brand — across your own posts, the review sites, and Reddit. Understand the mood in one glance. <b>Answer the ones that matter</b> in your voice, before a bad day becomes a bad week.</p>
+
+    <div class="feed">
+      <div class="feed-head">Live mention stream <span class="live"><span class="p"></span> watching</span></div>
+      <div class="feed-row"><span class="t">09:41</span><span class="b"><span class="stars">★★☆☆☆</span> &nbsp;<b>Trustpilot</b> — “support never got back to me” · flagged for reply</span></div>
+      <div class="feed-row"><span class="t">09:42</span><span class="b"><b>r/SaaS</b> — a thread is comparing your pricing to a competitor</span></div>
+      <div class="feed-row"><span class="t">09:43</span><span class="b"><b>Instagram</b> — “finally a tool that actually gets it 🔥” · auto-thanked</span></div>
+      <div class="feed-row"><span class="t">09:44</span><span class="b"><b>Google</b> — new ★★★★★ review · 4 themes extracted</span></div>
+    </div>
+
+    <div class="meta">
+      <span>Version <b>1.0 — Draft</b></span>
+      <span>Prepared for <b>Founding team</b></span>
+      <span>Status <b>Proposal</b></span>
+      <span>GNIX Semiconductors Pvt. Ltd.</span>
+    </div>
+  </section>
+
+  <div class="gap"></div>
+
+  <!-- ============ EXEC SUMMARY ============ -->
+  <section>
+    <div class="eyebrow">The one-liner <span class="num">01 — Summary</span></div>
+    <h2 class="h-sec">A brand's reputation is being written right now — <span class="accent">whether you're watching or not.</span></h2>
+    <p class="lede">Pulse turns Sociafy from a tool that <em>publishes</em> your content into one that also <em>defends</em> it. It continuously listens wherever people talk about you, scores the sentiment, and lets your AI reply on the brand's behalf — automatically for the easy stuff, with you in the loop for anything sensitive. One dashboard tells you, at a glance, what every platform thinks of you and what customers actually keep saying.</p>
+
+    <div class="gap-sm"></div>
+    <div class="stat-grid">
+      <div class="stat"><div class="v">3</div><div class="l">Source classes watched at launch</div></div>
+      <div class="stat"><div class="v">&lt;5<span class="u">min</span></div><div class="l">Target median time-to-reply</div></div>
+      <div class="stat"><div class="v">~70<span class="u">%</span></div><div class="l">Replies AI can handle alone</div></div>
+      <div class="stat"><div class="v">1</div><div class="l">Reputation score to rule them</div></div>
+    </div>
+  </section>
+
+  <div class="gap"></div>
+  <div class="rule"></div>
+  <div class="gap"></div>
+
+  <!-- ============ PROBLEM ============ -->
+  <section>
+    <div class="eyebrow">Why it matters <span class="num">02 — Problem</span></div>
+    <h2 class="h-sec">Reputation is everywhere, all at once — and founders can't be.</h2>
+    <p class="lede" style="margin-bottom:8px;">Sociafy's users are solo founders and small teams. They already can't keep up with posting — keeping up with what people <em>say back</em> is hopeless. So the moments that decide a brand's reputation slip by unanswered.</p>
+
+    <div class="gap-sm"></div>
+    <div class="pain">
+      <div class="pn">01</div>
+      <div><h4>It's scattered across a dozen places.</h4><p>Comments and DMs on six networks, a Google review here, a Trustpilot star there, a Reddit thread you never even saw. No single inbox. No single mood.</p></div>
+    </div>
+    <div class="pain">
+      <div class="pn">02</div>
+      <div><h4>Speed is the whole game.</h4><p>A complaint answered in five minutes is a save. The same complaint answered next week is a screenshot in someone's "avoid this brand" thread. Silence is the worst possible reply.</p></div>
+    </div>
+    <div class="pain">
+      <div class="pn">03</div>
+      <div><h4>The tools that do this cost like enterprise.</h4><p>Social-listening suites are priced for marketing departments, not founders. Pulse brings the capability to the people who feel each review most — at Sociafy prices.</p></div>
+    </div>
+  </section>
+
+  <div class="gap"></div>
+
+  <!-- ============ SOLUTION / LOOP ============ -->
+  <section class="sheet">
+    <div class="eyebrow">What it is <span class="num">03 — The loop</span></div>
+    <h2 class="h-sec">One continuous loop: <span class="accent">listen, understand, respond, report.</span></h2>
+    <p class="lede" style="margin-bottom:26px;">Pulse runs the same agentic loop Sociafy already runs for publishing — pointed in the other direction. Every few minutes it sweeps your sources, reasons about what it found, acts within the guardrails you set, and folds the result back into your dashboard.</p>
+
+    <div class="flow">
+      <div class="step"><div class="n">01</div><h4>Listen</h4><p>Sweep every connected source for new mentions, comments, DMs, reviews and threads. De-duplicate, attach context.</p><div class="arr">→</div></div>
+      <div class="step"><div class="n">02</div><h4>Understand</h4><p>Score sentiment, detect intent, estimate reach, and rate how much each mention could hurt the brand.</p><div class="arr">→</div></div>
+      <div class="step"><div class="n">03</div><h4>Respond</h4><p>Reply in your brand voice — instantly for safe items, as a one-tap draft for sensitive ones, escalate the rest.</p><div class="arr">→</div></div>
+      <div class="step"><div class="n">04</div><h4>Report</h4><p>Roll every signal into a per-platform consensus, theme list, and a single moving reputation score.</p></div>
+    </div>
+  </section>
+
+  <div class="gap"></div>
+
+  <!-- ============ SOURCES ============ -->
+  <section>
+    <div class="eyebrow">Where we listen <span class="num">04 — Sources</span></div>
+    <h2 class="h-sec">Three source classes at launch — the ones that move reputation.</h2>
+    <p class="lede" style="margin-bottom:10px;">Pulse reuses the platform connections Sociafy already has, so most of this is wiring, not new plumbing.</p>
+
+    <div class="src">
+      <div>
+        <div class="src-name">Own social — comments &amp; DMs</div>
+        <div class="glyphs" style="margin-top:8px;">
+          <span class="g ig">I</span><span class="g fb">f</span><span class="g x">X</span><span class="g li">in</span><span class="g tt">t</span><span class="g yt">Y</span><span class="g th">@</span>
+        </div>
+        <div class="src-sub">Via existing adapters + webhooks · near-real-time</div>
+      </div>
+      <ul>
+        <li>Replies and comments on every post Sociafy publishes or schedules.</li>
+        <li>@-mentions and tags of the brand handle.</li>
+        <li>Direct messages, where the platform's API allows.</li>
+        <li>Already authenticated — Pulse simply subscribes to the inbound side of channels you've connected.</li>
+      </ul>
+    </div>
+
+    <div class="src">
+      <div>
+        <div class="src-name">Review sites</div>
+        <div class="glyphs" style="margin-top:8px;">
+          <span class="g gg">G</span><span class="g tp">★</span><span class="g x">App</span>
+        </div>
+        <div class="src-sub">Google · Trustpilot · App Store · Play · G2 · polled</div>
+      </div>
+      <ul>
+        <li>New star ratings and written reviews, with the rating attached to the sentiment.</li>
+        <li>Review edits and deletions (a 5★ quietly dropped to 1★ is its own signal).</li>
+        <li>Owner-response support where the platform allows replying to a review.</li>
+        <li>Severity weighted by rating — a 1★ jumps the queue ahead of a neutral comment.</li>
+      </ul>
+    </div>
+
+    <div class="src">
+      <div>
+        <div class="src-name">Reddit &amp; forums</div>
+        <div class="glyphs" style="margin-top:8px;">
+          <span class="g rd">r</span><span class="g x">Q</span><span class="g x">∞</span>
+        </div>
+        <div class="src-sub">Subreddits · keywords · Quora · communities · polled</div>
+      </div>
+      <ul>
+        <li>Threads and comments that name the brand, its product, or its founders.</li>
+        <li>Keyword + subreddit watchlists you define (e.g. <span class="mono">r/SaaS</span>, "your-brand pricing").</li>
+        <li>Thread reach and upvote velocity feed the threat score — a rising thread gets noticed early.</li>
+        <li>Replies here are <em>always</em> draft-first; community spaces punish anything that reads as a bot.</li>
+      </ul>
+    </div>
+
+    <p class="small muted" style="margin-top:16px;"><span class="mono" style="color:var(--accent-ink);">PHASE 2 →</span> &nbsp;Open-web &amp; news mentions (X firehose, blogs, press, YouTube transcripts) extend the same pipeline once the first three classes are proven.</p>
+  </section>
+
+  <div class="gap"></div>
+  <div class="rule"></div>
+  <div class="gap"></div>
+
+  <!-- ============ UNDERSTAND ============ -->
+  <section>
+    <div class="eyebrow">Make sense of it <span class="num">05 — Understand</span></div>
+    <h2 class="h-sec">Every mention gets read, scored, and triaged.</h2>
+    <p class="lede" style="margin-bottom:24px;">Before anything is shown to you, each item passes through the same model layer Sociafy uses for composing — only here it's reading instead of writing.</p>
+    <div class="cols-2">
+      <div class="card"><span class="tag">Signal 01 · Sentiment</span><h4>Positive, neutral, or negative</h4><p>With a confidence and a short reason, so the dashboard math is honest and you can trust the rollups.</p></div>
+      <div class="card"><span class="tag">Signal 02 · Intent</span><h4>Praise · question · complaint · crisis</h4><p>What does this person actually want? A thank-you, an answer, a fix, or a fire to be put out — each routes differently.</p></div>
+      <div class="card"><span class="tag">Signal 03 · Reach &amp; severity</span><h4>How loud, how dangerous</h4><p>Follower count, upvotes, review weight and thread velocity combine into a single reputation-threat score per mention.</p></div>
+      <div class="card"><span class="tag">Signal 04 · Theme</span><h4>What it's <em>about</em></h4><p>Clustered into recurring topics — pricing, support, onboarding, a specific bug — so patterns surface, not just one-offs.</p></div>
+    </div>
+  </section>
+
+  <div class="gap"></div>
+
+  <!-- ============ RESPOND / TIERS ============ -->
+  <section class="sheet">
+    <div class="eyebrow">Answer in your voice <span class="num">06 — Respond</span></div>
+    <h2 class="h-sec">Tiered by risk — the same dial you already trust on Autopilot.</h2>
+    <p class="lede" style="margin-bottom:24px;">Pulse inherits Sociafy's brand voice, knowledge base, and the same threshold model that governs auto-publishing. You set how much you trust it; it never crosses the line you draw.</p>
+
+    <div class="tier green">
+      <div class="th"><span class="badge">Auto · green</span><h4>Replies on its own, instantly</h4></div>
+      <p>Low-risk, high-confidence items — genuine praise, simple repeat questions, "where do I sign up?" Pulse answers in brand voice within seconds and logs it.</p>
+      <div class="ex"><b>e.g.</b> &nbsp;★★★★★ review · "love the new dashboard" &nbsp;→&nbsp; warm thank-you, posted automatically.</div>
+    </div>
+    <div class="tier amber">
+      <div class="th"><span class="badge">Draft · amber</span><h4>Writes the reply, you approve in one tap</h4></div>
+      <p>Anything nuanced — a complaint, a refund ask, a factual correction. Pulse drafts the best response it can and waits for your tap. Edit or send.</p>
+      <div class="ex"><b>e.g.</b> &nbsp;"support never replied" &nbsp;→&nbsp; apology + concrete next step drafted, held for your OK.</div>
+    </div>
+    <div class="tier red">
+      <div class="th"><span class="badge">Escalate · red</span><h4>Stops, alerts you, suggests a holding line</h4></div>
+      <p>Legal threats, a viral thread, a safety claim, anything high-reach and hostile. Pulse never auto-sends these — it pings you, proposes a careful holding response, and the human decides.</p>
+      <div class="ex"><b>e.g.</b> &nbsp;rising r/SaaS thread alleging a billing scam &nbsp;→&nbsp; instant alert + suggested first response.</div>
+    </div>
+
+    <p class="small muted" style="margin-top:18px;"><span class="mono" style="color:var(--accent-ink);">GUARDRAILS</span> &nbsp; Brand-safety filters, a never-promise list, tone matching, and per-source caps. One slider sets the threshold — drafts-only at one end, fully autonomous at the other — exactly like Autopilot's <span class="mono">autoPublishThreshold</span>.</p>
+  </section>
+
+  <div class="gap"></div>
+
+  <!-- ============ DASHBOARD ============ -->
+  <section>
+    <div class="eyebrow">See the whole picture <span class="num">07 — Dashboard</span></div>
+    <h2 class="h-sec">"What's the consensus?" — answered in one screen.</h2>
+    <p class="lede" style="margin-bottom:22px;">The home of Pulse: a single reputation score up top, where each platform stands, what people keep bringing up, and a live feed of everything as it lands.</p>
+
+    <div class="frame">
+      <div class="chrome"><span class="lights"><i></i><i></i><i></i></span><span class="url">sociafy.app/pulse</span></div>
+      <div class="dash">
+
+        <!-- top row: score + ministats -->
+        <div class="dash-row" style="grid-template-columns:1.4fr 1fr 1fr 1fr;">
+          <div class="panel">
+            <div class="pt">Reputation score <span class="pill">▲ live</span></div>
+            <div class="score-wrap">
+              <div class="ring" style="--p:78;"><b>78</b></div>
+              <div class="score-meta">
+                <div class="big">Healthy</div>
+                <div class="d">▲ 6 pts this week</div>
+                <div class="s">Weighted blend of every source, recency-tilted.</div>
+              </div>
+            </div>
+          </div>
+          <div class="panel" style="display:flex;align-items:center;"><div class="ministat"><span class="mv">4m 12s</span><span class="ml">Median reply time</span></div></div>
+          <div class="panel" style="display:flex;align-items:center;"><div class="ministat"><span class="mv">71%</span><span class="ml">Auto-handled</span></div></div>
+          <div class="panel" style="display:flex;align-items:center;"><div class="ministat"><span class="mv">312</span><span class="ml">Mentions · 7d</span></div></div>
+        </div>
+
+        <!-- mid row: per-platform consensus + trend -->
+        <div class="dash-row" style="grid-template-columns:1.25fr 1fr;">
+          <div class="panel">
+            <div class="pt">Consensus by platform</div>
+            <div class="plat-row"><span class="pl"><span class="g ig">I</span> Instagram</span><span class="sbar"><i class="pos" style="width:72%"></i><i class="neu" style="width:20%"></i><i class="neg" style="width:8%"></i></span><span class="net up">+64</span></div>
+            <div class="plat-row"><span class="pl"><span class="g gg">G</span> Google</span><span class="sbar"><i class="pos" style="width:66%"></i><i class="neu" style="width:16%"></i><i class="neg" style="width:18%"></i></span><span class="net up">+48</span></div>
+            <div class="plat-row"><span class="pl"><span class="g x">X</span> X</span><span class="sbar"><i class="pos" style="width:44%"></i><i class="neu" style="width:33%"></i><i class="neg" style="width:23%"></i></span><span class="net fl">+21</span></div>
+            <div class="plat-row"><span class="pl"><span class="g tp">★</span> Trustpilot</span><span class="sbar"><i class="pos" style="width:52%"></i><i class="neu" style="width:15%"></i><i class="neg" style="width:33%"></i></span><span class="net fl">+19</span></div>
+            <div class="plat-row"><span class="pl"><span class="g rd">r</span> Reddit</span><span class="sbar"><i class="pos" style="width:34%"></i><i class="neu" style="width:30%"></i><i class="neg" style="width:36%"></i></span><span class="net dn">−2</span></div>
+          </div>
+          <div class="panel">
+            <div class="pt">Sentiment · 30 days</div>
+            <svg viewBox="0 0 320 120" width="100%" height="120" preserveAspectRatio="none" style="display:block;">
+              <defs>
+                <linearGradient id="ga" x1="0" x2="0" y1="0" y2="1">
+                  <stop offset="0%" stop-color="oklch(0.72 0.18 55)" stop-opacity="0.35"/>
+                  <stop offset="100%" stop-color="oklch(0.72 0.18 55)" stop-opacity="0"/>
+                </linearGradient>
+              </defs>
+              <path d="M0,86 L26,80 L52,84 L78,66 L104,72 L130,58 L156,62 L182,48 L208,54 L234,40 L260,44 L286,30 L320,34 L320,120 L0,120 Z" fill="url(#ga)"/>
+              <path d="M0,86 L26,80 L52,84 L78,66 L104,72 L130,58 L156,62 L182,48 L208,54 L234,40 L260,44 L286,30 L320,34" fill="none" stroke="oklch(0.62 0.18 50)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+            </svg>
+            <div class="small muted mono" style="display:flex;justify-content:space-between;margin-top:6px;font-size:9.5px;letter-spacing:0.06em;"><span>30d ago</span><span style="color:var(--good);">net sentiment ▲ trending up</span><span>today</span></div>
+          </div>
+        </div>
+
+        <!-- themes -->
+        <div class="panel">
+          <div class="pt">What customers keep saying</div>
+          <div>
+            <span class="theme"><span class="d p"></span> Easy onboarding <span class="c">48</span></span>
+            <span class="theme"><span class="d p"></span> Love autopilot <span class="c">41</span></span>
+            <span class="theme"><span class="d m"></span> Pricing questions <span class="c">33</span></span>
+            <span class="theme"><span class="d n"></span> Support response time <span class="c">27</span></span>
+            <span class="theme"><span class="d p"></span> Great captions <span class="c">22</span></span>
+            <span class="theme"><span class="d n"></span> Video render bug <span class="c">14</span></span>
+            <span class="theme"><span class="d m"></span> Wants more platforms <span class="c">11</span></span>
+          </div>
+        </div>
+
+        <!-- live feed -->
+        <div class="panel">
+          <div class="pt">Live mentions</div>
+          <div class="feedm">
+            <span class="g gg">G</span>
+            <div class="body">★★★★★ "Set it up in ten minutes, posting for me already."<span class="src-tag">Google review · 2m ago · positive</span></div>
+            <span class="st auto">AI replied</span>
+          </div>
+          <div class="feedm">
+            <span class="g tp">★</span>
+            <div class="body">★★☆☆☆ "Support never got back to me about the failed charge."<span class="src-tag">Trustpilot · 6m ago · complaint</span></div>
+            <span class="st draft">Draft ready</span>
+          </div>
+          <div class="feedm">
+            <span class="g rd">r</span>
+            <div class="body">"Is &lt;brand&gt; actually worth it over doing it manually?"<span class="src-tag">r/SaaS · 11m ago · rising thread</span></div>
+            <span class="st esc">Needs you</span>
+          </div>
+          <div class="feedm">
+            <span class="g ig">I</span>
+            <div class="body">"finally a tool that actually gets it 🔥"<span class="src-tag">Instagram comment · 14m ago · positive</span></div>
+            <span class="st auto">AI replied</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+    <p class="small muted" style="margin-top:12px;">Illustrative mockup. Numbers are placeholders to show the shape of the screen, not real data.</p>
+  </section>
+
+  <div class="gap"></div>
+  <div class="rule"></div>
+  <div class="gap"></div>
+
+  <!-- ============ FIT ============ -->
+  <section class="sheet">
+    <div class="eyebrow">Why it's cheap to build <span class="num">08 — Fit</span></div>
+    <h2 class="h-sec">Pulse is mostly assembly, not invention.</h2>
+    <p class="lede" style="margin-bottom:22px;">Almost every piece already exists in Sociafy. Pulse points the same machinery at the inbound side.</p>
+
+    <div class="fit"><span class="k">Platform adapters</span><span class="v">The connect / token / webhook layer that already publishes is reused to <b>read</b> comments, DMs and mentions. New work is the inbound endpoints, not the auth.</span></div>
+    <div class="fit"><span class="k">Autopilot threshold</span><span class="v">The risk dial is the existing <b>autoPublishThreshold</b> model, re-skinned for replies. Same mental model your users already learned.</span></div>
+    <div class="fit"><span class="k">Compose engine</span><span class="v">Brand voice, knowledge base and the variant generator that writes posts now writes <b>replies</b> — same prompts, same guardrails.</span></div>
+    <div class="fit"><span class="k">Credits ledger</span><span class="v">Listening is near-free; classification and AI replies meter through the <b>existing credit system</b> — no new billing rails.</span></div>
+    <div class="fit"><span class="k">Cron + activity log</span><span class="v">The scheduled-publish cron becomes a scheduled-<b>sweep</b> cron; mentions and replies flow into the activity feed users already watch.</span></div>
+    <div class="fit"><span class="k">Net-new</span><span class="v">Review-site &amp; Reddit connectors, the sentiment/triage pass, the mentions data model, and the Pulse dashboard. <b>That's the build.</b></span></div>
+  </section>
+
+  <div class="gap"></div>
+
+  <!-- ============ PACKAGING ============ -->
+  <section>
+    <div class="eyebrow">How it earns <span class="num">09 — Packaging</span></div>
+    <h2 class="h-sec">A new reason to be on a bigger plan.</h2>
+    <p class="lede" style="margin-bottom:22px;">Pulse adds fresh credit sinks and a clean upsell — reputation is the feature people will <em>pay to not lose sleep over</em>.</p>
+    <div class="price-grid">
+      <div class="pc"><div class="pcl">Listen</div><div class="pcv">Free / cheap</div><div class="pcs">Monitoring &amp; sentiment included with the plan — gets users hooked on the dashboard.</div></div>
+      <div class="pc feat"><div class="pcl">Respond</div><div class="pcv">Credits / reply</div><div class="pcs">Each AI reply meters credits, like a generation. Heavy responders naturally need more.</div></div>
+      <div class="pc"><div class="pcl">Pulse add-on</div><div class="pcv">Tier upsell</div><div class="pcs">Full auto-reply + review-site &amp; Reddit coverage gated to Pro / Business, or sold as an add-on.</div></div>
+    </div>
+  </section>
+
+  <div class="gap"></div>
+
+  <!-- ============ ROADMAP ============ -->
+  <section class="sheet">
+    <div class="eyebrow">How we ship it <span class="num">10 — Roadmap</span></div>
+    <h2 class="h-sec">Prove the loop, then widen the net.</h2>
+    <div class="phase">
+      <div class="pl"><b>Phase 1</b> MVP</div>
+      <ul>
+        <li>Own social comments, DMs &amp; mentions</li>
+        <li>Google + Trustpilot + app-store reviews</li>
+        <li>Reddit / keyword watchlists</li>
+        <li>Sentiment, intent &amp; threat scoring</li>
+        <li>Tiered AI replies (auto / draft / escalate)</li>
+        <li>Pulse dashboard + reputation score</li>
+      </ul>
+    </div>
+    <div class="phase">
+      <div class="pl"><b>Phase 2</b> Widen</div>
+      <ul>
+        <li>Open-web, news &amp; X-firehose mentions</li>
+        <li>Competitor benchmarking</li>
+        <li>Weekly reputation digest (email)</li>
+        <li>Slack / email crisis alerts</li>
+        <li>Saved replies &amp; macros</li>
+        <li>Per-theme drill-downs</li>
+      </ul>
+    </div>
+    <div class="phase">
+      <div class="pl"><b>Phase 3</b> Defend</div>
+      <ul>
+        <li>Predictive crisis detection</li>
+        <li>Influencer &amp; advocate spotting</li>
+        <li>Multi-brand &amp; agency view</li>
+        <li>White-label reports for clients</li>
+        <li>Auto-routed tickets to humans</li>
+        <li>Reputation SLA guarantees</li>
+      </ul>
+    </div>
+  </section>
+
+  <div class="gap"></div>
+
+  <!-- ============ CLOSING ============ -->
+  <section class="closing">
+    <div class="eyebrow" style="color:var(--accent);">The pitch <span class="num" style="color:oklch(0.6 0 0);">11 — Why now</span></div>
+    <h2>Sociafy already runs your content brain. <span class="a">Let it guard your name too.</span></h2>
+    <p>Publishing got founders <em>seen</em>. Pulse keeps them <em>respected</em> — turning the scariest, most scattered part of being online into a calm dashboard and a few taps a day. It's the natural second act for an AI that already speaks in your voice.</p>
+    <div class="foot">
+      <span>Sociafy · Pulse — Reputation Radar</span>
+      <span>Product Brief v1.0 · Confidential</span>
+      <span>GNIX Semiconductors Private Limited</span>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

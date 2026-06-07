@@ -1,0 +1,31 @@
+# /etc/cron.d/sociafy
+#
+# Sociafy scheduled jobs. Install with:
+#
+#   sudo install -m 0644 etc/cron.d/sociafy /etc/cron.d/sociafy
+#   sudo systemctl restart cron     # or  cron reload
+#
+# Adjust SOCIAFY_DIR + the user account if your deploy differs. Stdout/stderr
+# go to /var/log/sociafy/cron-<task>.log so a failing run is grep-able without
+# wading through cron's default mail behaviour.
+#
+# Schedule (UTC by default — crond inherits the system tz; set TZ= here if
+# you want a different reference for these jobs specifically):
+#   publish         every 5 min   — picks up due scheduled_posts
+#   refresh-tokens  every 6 h     — refreshes OAuth tokens before expiry
+#   trends          hourly        — pulls fresh trend rows per niche
+#   agent           every 2 h     — autopilot drafting + auto-publish
+
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+SOCIAFY_USER=sociafy
+SOCIAFY_DIR=/opt/sociafy-app
+NODE_BIN=/usr/bin/node
+LOG_DIR=/var/log/sociafy
+
+# m  h dom mon dow user            command
+*/5  *  *   *   *   $SOCIAFY_USER  cd $SOCIAFY_DIR && $NODE_BIN scripts/cron-run.mjs publish        >> $LOG_DIR/cron-publish.log        2>&1
+0    */6 * *   *   $SOCIAFY_USER  cd $SOCIAFY_DIR && $NODE_BIN scripts/cron-run.mjs refresh-tokens >> $LOG_DIR/cron-refresh-tokens.log 2>&1
+0    *   *   *   *   $SOCIAFY_USER  cd $SOCIAFY_DIR && $NODE_BIN scripts/cron-run.mjs trends         >> $LOG_DIR/cron-trends.log         2>&1
+0    */2 * *   *   $SOCIAFY_USER  cd $SOCIAFY_DIR && $NODE_BIN scripts/cron-run.mjs agent          >> $LOG_DIR/cron-agent.log          2>&1

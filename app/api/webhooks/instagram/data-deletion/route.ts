@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../../../../../lib/db';
 import { connectedAccounts, activityLog } from '../../../../../lib/db/schema';
 import { env } from '../../../../../lib/env';
@@ -81,34 +81,50 @@ export async function POST(req: NextRequest) {
 
 /**
  * Status check for a previously-issued confirmation code. Meta and the user
- * can hit this to verify the deletion completed. We log the event id in
- * activity_log.meta.confirmationCode — if we find it, the delete happened.
+ * can hit this to verify the deletion completed. The POST handler writes the
+ * confirmation code into activity_log.meta.confirmationCode — we look it up
+ * via JSONB ->> and report whether we found a deletion record.
+ *
+ * No userId filter — anyone with the code can query; the code itself is the
+ * authorization. Codes are SHA-256(igUserId + timestamp) sliced to 16 hex
+ * chars, so brute-forcing a specific deletion is infeasible.
  */
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get('code');
   if (!code) {
     return NextResponse.json({ status: 'invalid_code' }, { status: 400 });
   }
-  // No userId filter — anyone with the code can query, the code is the auth.
-  // We just confirm a matching activity_log row exists.
-  const rows = await db()
+  // Defensive bound: confirmation codes are 16 hex chars. Reject anything
+  // wildly out of shape so we can't be tricked into expensive scans.
+  if (code.length > 64 || !/^[a-f0-9]+$/i.test(code)) {
+    return NextResponse.json({ status: 'invalid_code' }, { status: 400 });
+  }
+  // Indexed scan via the activity_kind_idx + JSONB extract. We pull the
+  // single row matching the code; codes are unique per request.
+  const [row] = await db()
     .select({ id: activityLog.id, createdAt: activityLog.createdAt })
     .from(activityLog)
-    .where(eq(activityLog.kind, 'platform_disconnected'))
-    .limit(50);
-  // Match by JSON content. activity_log.meta isn't indexed, so we scan.
-  const found = rows.find((r) => {
-    const _ = r; // keep `r.createdAt` reachable
-    return false; // refined below
-  });
-  void found;
-  // The shape of meta is checked via raw SQL would be more efficient but is
-  // less portable. For the request volume this endpoint sees, scanning the
-  // last 50 rows is fine.
+    .where(
+      and(
+        eq(activityLog.kind, 'platform_disconnected'),
+        sql`${activityLog.meta} ->> 'confirmationCode' = ${code}`,
+        sql`${activityLog.meta} ->> 'via' = 'ig_data_deletion'`,
+      ),
+    )
+    .limit(1);
+
+  if (!row) {
+    return NextResponse.json({
+      status: 'not_found',
+      confirmation_code: code,
+      note: 'No deletion record matched this code. Either the code is invalid or no Instagram account was ever connected with that id.',
+    });
+  }
   return NextResponse.json({
-    status: 'ok',
+    status: 'completed',
     confirmation_code: code,
-    note: 'If your data was associated with our app, it has been deleted from our connected accounts table. Other data (e.g. published posts) may persist in the originating platform.',
+    completed_at: row.createdAt,
+    note: 'Your data was deleted from our connected accounts table. Other data (e.g. published posts) may persist in the originating platform.',
   });
 }
 

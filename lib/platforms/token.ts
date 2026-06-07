@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { db } from '../db';
-import { connectedAccounts, type Platform } from '../db/schema';
+import { connectedAccounts, activityLog, type Platform } from '../db/schema';
 import { getAdapter } from './registry';
 import { decryptToken, encryptToken, isEncrypted } from '../crypto/tokens';
 
@@ -23,9 +23,14 @@ export function decryptAccount(acct: AccountRow): AccountRow {
 /**
  * If the account's access token is close to expiry (or expired) and the
  * adapter supports refresh, swap in a fresh token and persist it. Returns
- * a row with decrypted tokens ready for use. On refresh failure the input
- * (decrypted) row is returned and the caller will surface a 401 — the user
- * then sees "Reconnect" on the Connections page.
+ * a row with decrypted tokens ready for use.
+ *
+ * On refresh failure we log the error to activity_log and stamp
+ * lastRefreshError/lastRefreshErrorAt on the row so the Connections page
+ * can show a "Reconnect needed" badge. The returned row is still the
+ * (decrypted) input so the immediate caller can attempt a publish — if the
+ * token has any life left it might still work; if not, the publish fails
+ * cleanly and the user already has the badge.
  *
  * Accepts either an encrypted DB row or an already-decrypted row.
  */
@@ -92,11 +97,48 @@ export async function ensureFreshToken(acct: AccountRow): Promise<AccountRow> {
         refreshToken: encryptToken(next.refreshToken),
         tokenExpiresAt: next.tokenExpiresAt,
         scope: next.scope,
+        lastRefreshAt: new Date(),
+        lastRefreshError: null,
+        lastRefreshErrorAt: null,
         updatedAt: next.updatedAt,
       })
       .where(eq(connectedAccounts.id, plain.id));
-    return { ...plain, ...next };
-  } catch {
-    return plain;
+    return { ...plain, ...next, lastRefreshAt: new Date(), lastRefreshError: null, lastRefreshErrorAt: null };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const truncated = msg.slice(0, 500);
+    const now = new Date();
+    // Stamp the error onto the row so the UI can show a badge immediately,
+    // and write an activity_log entry so it appears on the dashboard feed.
+    // Only log once per (account, error) — re-stamping the column is cheap
+    // but spamming activity_log every 6 hours is noisy. Compare against the
+    // previous error and only insert when it changes.
+    try {
+      await db()
+        .update(connectedAccounts)
+        .set({
+          lastRefreshError: truncated,
+          lastRefreshErrorAt: now,
+          updatedAt: now,
+        })
+        .where(eq(connectedAccounts.id, plain.id));
+      if (plain.lastRefreshError !== truncated) {
+        await db().insert(activityLog).values({
+          userId: plain.userId,
+          kind: 'platform_refresh_failed',
+          title: `Reconnect needed: ${plain.platform}`,
+          body: truncated,
+          meta: {
+            platform: plain.platform,
+            accountId: plain.id,
+            handle: plain.handle ?? null,
+          },
+        });
+      }
+    } catch {
+      // If the DB write itself failed, drop the warning attempt and return
+      // the stale token so the caller can decide what to do.
+    }
+    return { ...plain, lastRefreshError: truncated, lastRefreshErrorAt: now };
   }
 }

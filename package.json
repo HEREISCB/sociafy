@@ -29,6 +29,7 @@
     "react-dom": "19.2.4",
     "stripe": "^18.5.0",
     "swr": "^2.4.1",
+    "tsx": "^4.21.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
