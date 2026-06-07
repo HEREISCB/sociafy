@@ -117,9 +117,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ page, onNav, showTTS = true, m
         <div className="sidebar-foot">
           {showTTS && (
             <div className="tts-card">
-              <span className="pill">Soon</span>
-              <h4>Voice posts</h4>
-              <p>Turn any draft into a podcast clip with our TTS engine.</p>
+              <span className="pill">New</span>
+              <h4>Voice cloner</h4>
+              <p>Clone your voice once — your avatar speaks every post in it.</p>
               <div className="wave">
                 {[6, 10, 4, 12, 8, 14, 7, 11, 5, 9, 13, 6, 10, 4, 8].map((h, i) => (
                   <span key={i} style={{ height: h }} />
@@ -149,8 +149,29 @@ const UserCard: React.FC = () => {
   }
   const name = user?.fullName || user?.username || user?.primaryEmailAddress?.emailAddress || 'You';
   const plan = user?.primaryEmailAddress?.emailAddress?.split('@')[1] || 'sociafy.app';
+  const cardRef = useRef<HTMLDivElement>(null);
+  // Make the WHOLE card open the Clerk account menu (not just the tiny avatar).
+  // We forward the click to the UserButton's trigger so the native menu —
+  // including Sign out — is preserved. Skip if the click already landed on it.
+  const openMenu = (e: React.SyntheticEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.closest('.cl-userButtonTrigger, .cl-userButtonBox')) return;
+    const trigger =
+      cardRef.current?.querySelector<HTMLElement>('.cl-userButtonTrigger') ??
+      cardRef.current?.querySelector<HTMLElement>('button');
+    trigger?.click();
+  };
   return (
-    <div className="user-card">
+    <div
+      className="user-card"
+      ref={cardRef}
+      role="button"
+      tabIndex={0}
+      onClick={openMenu}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openMenu(e); } }}
+      style={{ cursor: 'pointer' }}
+      aria-label="Open account menu"
+    >
       <UserButton
         appearance={{ elements: { userButtonAvatarBox: { width: 32, height: 32 } } }}
       />

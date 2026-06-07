@@ -16,12 +16,6 @@ const SparkleIcon = () => (
   </svg>
 );
 
-const PlayIcon = () => (
-  <svg width={12} height={12} viewBox="0 0 24 24" fill="currentColor" stroke="none">
-    <path d="M8 5v14l11-7z" />
-  </svg>
-);
-
 const LockIcon = () => (
   <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
     <rect x="5" y="11" width="14" height="9" rx="2" />
@@ -93,7 +87,7 @@ const LPNav = () => (
         <span className="lp-nav-status"><span className="dot" /> Built for founders who&apos;d rather be building</span>
         <Link className="btn" href="/sign-in">Log in</Link>
         <Link className="btn primary" href="/sign-up">
-          Get started <ArrowIcon />
+          Start now <ArrowIcon />
         </Link>
       </div>
     </div>
@@ -107,7 +101,7 @@ const Hero = () => (
         <div>
           <span className="hero-eyebrow">
             <span className="pill">NEW</span>
-            Voice-trained agent · v2.4
+            Voice-trained AI agent
             <span className="arrow">→</span>
           </span>
           <h1>
@@ -121,10 +115,10 @@ const Hero = () => (
           </p>
           <div className="hero-cta">
             <Link className="btn btn-lg primary" href="/sign-up">
-              <SparkleIcon /> Get started
+              <SparkleIcon /> Start now
             </Link>
-            <a className="btn btn-lg" href="#workflow">
-              <PlayIcon /> Watch 90s demo
+            <a className="btn btn-lg" href="#agent">
+              <SparkleIcon /> Build agents
             </a>
           </div>
           <div className="hero-meta">
@@ -151,8 +145,8 @@ const Hero = () => (
           <div className="feed-row">
             <span className="ts">14 min ago · drafts</span>
             <div className="body">
-              Drafted <strong>3 angles</strong> from your newsletter #47.
-              Variant B scored 92/100 against your voice.
+              Drafted <strong>a few angles</strong> from your latest newsletter.
+              Variant B matched your voice best.
             </div>
           </div>
           <div className="feed-row">
@@ -233,15 +227,15 @@ const PreviewSection = () => (
             </div>
             <div className="pp-main">
               <div>
-                <div className="pp-h">Good morning, Jordan</div>
-                <div className="pp-sub">Apr 27 · 4 posts queued · agent has 2 things for you</div>
+                <div className="pp-h">Good morning</div>
+                <div className="pp-sub">4 posts queued · your agent has 2 things for you</div>
               </div>
 
               <div className="pp-briefing">
                 <div>
                   <div className="eb"><span className="pulse" /> Morning briefing · 6:42 AM</div>
                   <h4>Two trends in your niche are spiking. <em>I drafted 3 posts and a video script for you to review.</em></h4>
-                  <p>Agentic workflows are up 312% since yesterday — your tone fits the conversation.</p>
+                  <p>A topic in your niche is gaining momentum — and your tone fits the conversation.</p>
                 </div>
                 <div className="pp-mini-meter">
                   <div className="row"><span>Posts queued</span><strong>4 / 5</strong></div>
@@ -351,7 +345,7 @@ const AgentShowcase = () => (
             <div className="who">S</div>
             <div>
               <div className="ts">07:11 · drafted</div>
-              <div className="body">Three angles on your newsletter #47. Variant B fits your last 30 days best.</div>
+              <div className="body">Three angles on your latest newsletter. Variant B fits your last 30 days best.</div>
               <div className="draft-card">
                 <div className="dh">
                   <PG k="li" /> LinkedIn · variant B
@@ -419,7 +413,7 @@ const VoiceSection = () => (
 
       <div className="voice-train">
         <div className="voice-train-mock">
-          <h5><span className="live-dot" /> Voice profile · Jordan Reyes · trained on 47 posts</h5>
+          <h5><span className="live-dot" /> Voice profile · trained on your recent posts</h5>
           {([
             ['Cadence', 'Punchy', 'Long', 78, '0.78'],
             ['Register', 'Casual', 'Formal', 32, '0.32'],
@@ -524,7 +518,7 @@ const Pricing = () => {
           </ul>
           <div className="price-cta">
             <button className="btn" onClick={() => startCheckoutFromLanding('starter', setBusy)} disabled={busy !== null}>
-              {busy === 'starter' ? 'Redirecting…' : 'Get started'}
+              {busy === 'starter' ? 'Redirecting…' : 'Start now'}
             </button>
           </div>
         </div>
@@ -544,7 +538,7 @@ const Pricing = () => {
           </ul>
           <div className="price-cta">
             <button className="btn primary" onClick={() => startCheckoutFromLanding('pro', setBusy)} disabled={busy !== null}>
-              {busy === 'pro' ? 'Redirecting…' : 'Get started'}
+              {busy === 'pro' ? 'Redirecting…' : 'Start now'}
             </button>
           </div>
         </div>
@@ -564,7 +558,7 @@ const Pricing = () => {
           </ul>
           <div className="price-cta">
             <button className="btn" onClick={() => startCheckoutFromLanding('business', setBusy)} disabled={busy !== null}>
-              {busy === 'business' ? 'Redirecting…' : 'Get started'}
+              {busy === 'business' ? 'Redirecting…' : 'Start now'}
             </button>
           </div>
         </div>
@@ -621,8 +615,8 @@ const FinalCTA = () => (
           <h2>Stop posting on willpower.<br /><em>Start shipping on auto-pilot.</em></h2>
           <p>Connect two accounts in under three minutes. The agent will have your first morning briefing ready by tomorrow at 6 AM.</p>
           <div className="final-cta-actions">
-            <Link className="btn primary" href="/sign-up"><SparkleIcon /> Get started</Link>
-            <a className="btn" href="#workflow">Watch the 90s tour</a>
+            <Link className="btn primary" href="/sign-up"><SparkleIcon /> Start now</Link>
+            <a className="btn" href="#agent">Build agents</a>
             <a className="btn" href="#pricing"><LockIcon /> See pricing</a>
           </div>
         </div>
@@ -692,8 +686,7 @@ const Footer = () => (
       </div>
       <div className="lp-foot-bottom" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
         <span>Sociafy is a product of <strong>GNIX SEMICONDUCTORS PRIVATE LIMITED</strong>.</span>
-        <span>© 2026 GNIX SEMICONDUCTORS PRIVATE LIMITED · Made for founders, in Lisbon &amp; Brooklyn</span>
-        <span style={{ opacity: 0.7 }}>v2.4.1 · all systems normal</span>
+        <span>© 2026 GNIX SEMICONDUCTORS PRIVATE LIMITED · Made for founders.</span>
       </div>
     </div>
   </footer>
