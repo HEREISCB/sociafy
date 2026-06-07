@@ -39,8 +39,12 @@ export default function RootLayout({
         },
       }}
     >
-      <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
-        <body>{children}</body>
+      {/* suppressHydrationWarning: browser extensions (password managers, etc.)
+          inject attributes like `bis_register`/`__processed_*` onto <html>/<body>
+          before React hydrates, which otherwise throws a hydration mismatch
+          (React #418) and blanks the page for those users. */}
+      <html lang="en" suppressHydrationWarning className={`${geistSans.variable} ${geistMono.variable}`}>
+        <body suppressHydrationWarning>{children}</body>
       </html>
     </ClerkProvider>
   );

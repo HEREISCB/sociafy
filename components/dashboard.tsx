@@ -208,7 +208,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose, onEditDraft }) => {
     <>
       <div className="briefing">
         <div>
-          <div className="briefing-eyebrow">
+          {/* suppressHydrationWarning: current time + locale/timezone formatting
+              differ between the server render and the client, which is a benign
+              text mismatch we don't want escalating to a hydration error. */}
+          <div className="briefing-eyebrow" suppressHydrationWarning>
             <span className="pulse" />
             Morning briefing · {new Date().toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
           </div>

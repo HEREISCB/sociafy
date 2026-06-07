@@ -135,7 +135,21 @@ export const Sidebar: React.FC<SidebarProps> = ({ page, onNav, showTTS = true, m
 };
 
 const UserCard: React.FC = () => {
-  const { user, isSignedIn } = useUser();
+  const { user, isSignedIn, isLoaded } = useUser();
+  // Until Clerk resolves auth on the client, render a stable placeholder that
+  // matches the server HTML — otherwise the server ("Sign in") vs client (user
+  // card) swap is a structural hydration mismatch (React #418).
+  if (!isLoaded) {
+    return (
+      <div className="user-card" aria-hidden="true">
+        <div className="user-avatar">·</div>
+        <div className="user-meta">
+          <span className="user-name">&nbsp;</span>
+          <span className="user-plan">&nbsp;</span>
+        </div>
+      </div>
+    );
+  }
   if (!isSignedIn) {
     return (
       <Link href="/sign-in" className="user-card" style={{ textDecoration: 'none' }}>
