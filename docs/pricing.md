@@ -83,11 +83,13 @@ Subscription tiers offer slight discounts off this base rate as you upgrade.
 |---|---:|---:|---:|---:|
 | Text post | **1** | $0.013 | $0.005 | 62% |
 | Text + research | **6** | $0.078 | $0.050 | 36% |
-| Image (low 1024) | **2** | $0.026 | $0.010 | 62% |
-| Image (medium 1024) | **4** | $0.052 | $0.035 | 33% |
-| Image (medium portrait/landscape) | **6** | $0.078 | $0.052 | 33% |
-| Image (high 1024) | **15** | $0.195 | $0.134 | 31% |
-| Image (high portrait/landscape) | **23** | $0.299 | $0.201 | 33% |
+| Image (low 1024) — gpt-image-2 | **2** | $0.030 | $0.011 | 63% |
+| Image (medium 1024) — gpt-image-2 | **6** | $0.090 | $0.058 | 36% |
+| Image (medium portrait/landscape) | **6** | $0.090 | $0.046 | 49% |
+| Image (high 1024) — gpt-image-2 | **24** | $0.360 | $0.216 | 40% |
+| Image (high portrait/landscape) | **23** | $0.345 | $0.170 | 51% |
+
+> **Image model = gpt-image-2** (`OPENAI_IMAGE_MODEL`). Unlike gpt-image-1, on gpt-image-2 the **square** medium/high tiers cost MORE than portrait/landscape, so square credit prices are now ≥ their portrait counterparts. Customer value uses the $0.015 top-up rate; margins shown stay positive at the Business $0.012/credit rate too.
 | Video 8s 480p Fast | **75** | $0.975 | $0.641 | 34% |
 | Video 8s 480p Quality | **90** | $1.170 | $0.801 | 32% |
 | Video 8s 720p Fast | **145** | $1.885 | $1.281 | 32% |

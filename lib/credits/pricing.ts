@@ -42,11 +42,15 @@ export const CREDIT_PRICES: Record<CreditAction, number> = {
   text_post: 1,
   text_post_research: 6,
   web_search_extra: 5,
-  image_low_1024: 2,
-  image_medium_1024: 4,
-  image_medium_portrait: 6,
-  image_high_1024: 15,
-  image_high_portrait: 23,
+  // Image = gpt-image-2 (env OPENAI_IMAGE_MODEL). NOTE: on gpt-image-2 the
+  // SQUARE tiers cost MORE than portrait/landscape (med sq $0.053 vs $0.041;
+  // high sq $0.211 vs $0.165), inverting the gpt-image-1 scale. Priced to stay
+  // profitable at the Business rate ($0.012/credit). Costs incl. ~$0.005 rewriter.
+  image_low_1024: 2,                  // ~$0.011 → 2cr=$0.024 @business (~54%)
+  image_medium_1024: 6,               // square med ~$0.058 → 6cr=$0.072 (~24%)
+  image_medium_portrait: 6,           // portrait/landscape med ~$0.046 → $0.072 (~57%)
+  image_high_1024: 24,                // square high ~$0.216 → 24cr=$0.288 (~33%)
+  image_high_portrait: 23,            // portrait/landscape high ~$0.170 → $0.276 (~62%)
   video_8s_480p_fast: 75,
   video_8s_480p_quality: 90,
   video_8s_720p_fast: 145,
