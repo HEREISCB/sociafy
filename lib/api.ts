@@ -6,7 +6,7 @@ import { db } from './db';
 import { profiles, TIER_CREDITS, type Tier } from './db/schema';
 import { eq } from 'drizzle-orm';
 import { getOrigin } from './url';
-import { ensureSignupBonus, InsufficientCreditsError, insufficientCreditsResponse } from './credits/ledger';
+import { ensureSignupBonus } from './credits/ledger';
 
 export type ApiUser = { id: string; email?: string | null };
 
@@ -131,13 +131,6 @@ export async function withUser<T>(
     return NextResponse.json(result);
   } catch (e) {
     if (e instanceof Response) return e as NextResponse;
-    if (e instanceof InsufficientCreditsError) {
-      // A late InsufficientCreditsError means the atomic FOR-UPDATE charge
-      // refused — either the user pre-flighted then their balance dropped
-      // (parallel request), or they skipped the pre-flight. Return the same
-      // 402 shape the pre-flight would have produced.
-      return insufficientCreditsResponse({ balance: e.balance, needed: e.needed }) as NextResponse;
-    }
     const msg = e instanceof Error ? e.message : String(e);
     // Drizzle wraps DB failures as "Failed query: ..." and stashes the real
     // Postgres reason (e.g. `column "x" does not exist`) on `.cause`. Log it so
