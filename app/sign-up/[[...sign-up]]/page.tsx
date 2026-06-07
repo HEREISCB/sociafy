@@ -1,7 +1,8 @@
 'use client';
 
-import { SignUp } from '@clerk/nextjs';
+import { SignUp, ClerkLoading, ClerkLoaded } from '@clerk/nextjs';
 import Link from 'next/link';
+import { AuthLoading } from '../../../components/auth-loading';
 
 export default function Page() {
   return (
@@ -11,21 +12,26 @@ export default function Page() {
           <div className="brand-mark" aria-hidden="true">S</div>
           <span className="brand-name">Sociafy<span className="dot">.</span></span>
         </Link>
-        <SignUp
-          appearance={{
-            elements: {
-              rootBox: { width: '100%' },
-              card: {
-                background: 'var(--bg-elev, #fff)',
-                border: '1px solid var(--line, #eaeaea)',
-                boxShadow: '0 1px 0 rgba(0,0,0,0.02), 0 24px 60px -24px rgba(0,0,0,0.12)',
-                borderRadius: 18,
+        <ClerkLoading>
+          <AuthLoading />
+        </ClerkLoading>
+        <ClerkLoaded>
+          <SignUp
+            appearance={{
+              elements: {
+                rootBox: { width: '100%' },
+                card: {
+                  background: 'var(--bg-elev, #fff)',
+                  border: '1px solid var(--line, #eaeaea)',
+                  boxShadow: '0 1px 0 rgba(0,0,0,0.02), 0 24px 60px -24px rgba(0,0,0,0.12)',
+                  borderRadius: 18,
+                },
               },
-            },
-          }}
-          signInUrl="/sign-in"
-          forceRedirectUrl="/onboarding"
-        />
+            }}
+            signInUrl="/sign-in"
+            forceRedirectUrl="/onboarding"
+          />
+        </ClerkLoaded>
       </div>
     </div>
   );
