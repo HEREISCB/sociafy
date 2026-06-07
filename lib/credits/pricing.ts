@@ -60,7 +60,10 @@ export const CREDIT_PRICES: Record<CreditAction, number> = {
   video_15s_720p_quality: 335,
   video_15s_1080p_quality: 835,
   variant_regenerate: 1,
-  agent_draft: 1,
+  // Autopilot draft = gpt-5 + web_search per run (~$0.042), up to 2 drafts/run.
+  // Worst case (1 research-backed draft) needs ≥4 cr to stay profitable at the
+  // Business floor ($0.012/cr → $0.048 vs $0.042); 2-draft runs net ~56% margin.
+  agent_draft: 4,
   publish_x: 0,                       // X cost is amortized in subscription
   // Voice/avatar run on Modal GPUs (L4 $0.000222/s, L40S $0.000542/s). Cost is
   // dominated by container load + scaledown idle, so we price off measured
