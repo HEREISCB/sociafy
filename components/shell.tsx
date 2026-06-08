@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState, Fragment } from 'react';
+import React, { useCallback, useEffect, useRef, useState, Fragment } from 'react';
 import Link from 'next/link';
 import { UserButton, useUser } from '@clerk/nextjs';
 import { Icon } from './icons';
@@ -135,7 +135,25 @@ export const Sidebar: React.FC<SidebarProps> = ({ page, onNav, showTTS = true, m
 };
 
 const UserCard: React.FC = () => {
+  // ALL hooks must run unconditionally on every render — early returns below
+  // must come AFTER every hook call. Previously `useRef` lived after the
+  // isLoaded/isSignedIn early returns, which broke the moment Clerk hydrated
+  // (a hook materialized that wasn't there on the previous render).
   const { user, isSignedIn, isLoaded } = useUser();
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  // Make the WHOLE card open the Clerk account menu (not just the tiny avatar).
+  // We forward the click to the UserButton's trigger so the native menu —
+  // including Sign out — is preserved. Skip if the click already landed on it.
+  const openMenu = useCallback((e: React.SyntheticEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.closest('.cl-userButtonTrigger, .cl-userButtonBox')) return;
+    const trigger =
+      cardRef.current?.querySelector<HTMLElement>('.cl-userButtonTrigger') ??
+      cardRef.current?.querySelector<HTMLElement>('button');
+    trigger?.click();
+  }, []);
+
   // Until Clerk resolves auth on the client, render a stable placeholder that
   // matches the server HTML — otherwise the server ("Sign in") vs client (user
   // card) swap is a structural hydration mismatch (React #418).
@@ -161,20 +179,10 @@ const UserCard: React.FC = () => {
       </Link>
     );
   }
+
   const name = user?.fullName || user?.username || user?.primaryEmailAddress?.emailAddress || 'You';
   const plan = user?.primaryEmailAddress?.emailAddress?.split('@')[1] || 'sociafy.app';
-  const cardRef = useRef<HTMLDivElement>(null);
-  // Make the WHOLE card open the Clerk account menu (not just the tiny avatar).
-  // We forward the click to the UserButton's trigger so the native menu —
-  // including Sign out — is preserved. Skip if the click already landed on it.
-  const openMenu = (e: React.SyntheticEvent) => {
-    const target = e.target as HTMLElement;
-    if (target.closest('.cl-userButtonTrigger, .cl-userButtonBox')) return;
-    const trigger =
-      cardRef.current?.querySelector<HTMLElement>('.cl-userButtonTrigger') ??
-      cardRef.current?.querySelector<HTMLElement>('button');
-    trigger?.click();
-  };
+
   return (
     <div
       className="user-card"
