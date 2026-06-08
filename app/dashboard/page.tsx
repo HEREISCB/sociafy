@@ -137,12 +137,24 @@ function ClerkLoadingScreen() {
   );
 }
 
-// Hard ceiling for the Clerk-loading spinner. If Clerk's client hasn't
-// initialized in this many ms, we stop blocking the dashboard. Common causes
-// of a stuck client: the clerk.<host> CNAME is proxied through Cloudflare
-// instead of DNS-only, a privacy browser/ad-blocker is blocking the Clerk
-// script, or the pk_live key references a domain that hasn't propagated yet.
+// Auto-recovery for the OAuth-back state. When the user hits Back from a
+// platform's OAuth page, the browser's bfcache restores the dashboard but
+// Clerk's client is often stuck in a paused/half-initialized state — the
+// user sees "Loading your workspace…" forever. Empirically, a manual page
+// refresh always fixes this (it re-initializes Clerk fresh). So if Clerk
+// hasn't loaded after this many ms, we trigger that refresh automatically.
+const CLERK_AUTOREFRESH_MS = 2_500;
+
+// Hard ceiling for the loading spinner if the auto-refresh has already been
+// attempted (and didn't help). After this we render the dashboard anyway
+// and let the diagnostic copy in ClerkLoadingScreen guide the user.
 const CLERK_LOAD_TIMEOUT_MS = 8_000;
+
+// sessionStorage key tracking the last auto-refresh attempt so we never get
+// into a reload loop when Clerk is genuinely broken. Cleared once Clerk
+// loads successfully, so each fresh session gets one recovery attempt.
+const CLERK_RELOAD_KEY = 'sociafy:clerk-reload';
+const CLERK_RELOAD_DEDUP_MS = 60_000;
 
 export default function Home() {
   const [page, setPage] = useState<Page>(initialPageFromUrl);
@@ -157,6 +169,30 @@ export default function Home() {
   useEffect(() => {
     if (isLoaded) return;
     const t = setTimeout(() => setClerkTimedOut(true), CLERK_LOAD_TIMEOUT_MS);
+    return () => clearTimeout(t);
+  }, [isLoaded]);
+
+  // Auto-refresh-once when Clerk gets stuck. This is the OAuth-back recovery:
+  // a full page reload re-initializes Clerk's client and always unsticks the
+  // dashboard. sessionStorage dedup prevents an infinite reload loop if Clerk
+  // is genuinely broken — after one attempt within CLERK_RELOAD_DEDUP_MS we
+  // stop trying and fall through to the spinner timeout + diagnostic copy.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (isLoaded) {
+      // Clerk loaded — clear the dedup flag so future sessions can retry.
+      try { sessionStorage.removeItem(CLERK_RELOAD_KEY); } catch {}
+      return;
+    }
+    let lastAttempt = 0;
+    try {
+      lastAttempt = Number(sessionStorage.getItem(CLERK_RELOAD_KEY) || 0);
+    } catch {}
+    if (Date.now() - lastAttempt < CLERK_RELOAD_DEDUP_MS) return; // already tried
+    const t = setTimeout(() => {
+      try { sessionStorage.setItem(CLERK_RELOAD_KEY, String(Date.now())); } catch {}
+      window.location.reload();
+    }, CLERK_AUTOREFRESH_MS);
     return () => clearTimeout(t);
   }, [isLoaded]);
   // `now` stays null through SSR + the first client render so meta.h1 is
