@@ -82,6 +82,68 @@ function initialPageFromUrl(): Page {
   return (valid as string[]).includes(tab ?? '') ? (tab as Page) : 'dashboard';
 }
 
+function ClerkLoadingScreen() {
+  // Surface diagnostic help after 4s — if Clerk hasn't loaded by then the
+  // user almost certainly has a CNAME/proxy/blocker problem and a blank
+  // spinner with no explanation is the worst possible UX.
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setSlow(true), 4_000);
+    return () => clearTimeout(t);
+  }, []);
+  return (
+    <div
+      className="app"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: '100vh',
+        padding: 24,
+      }}
+    >
+      <div role="status" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, maxWidth: 420, textAlign: 'center' }}>
+        <div
+          aria-hidden
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: '50%',
+            border: '2.5px solid var(--line, #e5e5e5)',
+            borderTopColor: 'var(--accent, oklch(0.72 0.18 55))',
+            animation: 'sociafy-spin 0.8s linear infinite',
+          }}
+        />
+        <span
+          style={{
+            fontSize: 12.5,
+            color: 'var(--ink-3, #888)',
+            fontFamily: 'var(--mono, monospace)',
+            letterSpacing: '0.08em',
+          }}
+        >
+          Loading your workspace…
+        </span>
+        {slow && (
+          <p style={{ fontSize: 12.5, color: 'var(--ink-3, #888)', lineHeight: 1.6, marginTop: 4 }}>
+            Taking longer than usual. The auth provider might be blocked —
+            check that browser extensions (privacy shields, ad-blockers) aren&apos;t
+            blocking <code>clerk.sociafy.app</code>, or try refreshing the page.
+          </p>
+        )}
+        <style>{`@keyframes sociafy-spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    </div>
+  );
+}
+
+// Hard ceiling for the Clerk-loading spinner. If Clerk's client hasn't
+// initialized in this many ms, we stop blocking the dashboard. Common causes
+// of a stuck client: the clerk.<host> CNAME is proxied through Cloudflare
+// instead of DNS-only, a privacy browser/ad-blocker is blocking the Clerk
+// script, or the pk_live key references a domain that hasn't propagated yet.
+const CLERK_LOAD_TIMEOUT_MS = 8_000;
+
 export default function Home() {
   const [page, setPage] = useState<Page>(initialPageFromUrl);
   const [refreshing, setRefreshing] = useState(false);
@@ -89,6 +151,14 @@ export default function Home() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { user, isLoaded, isSignedIn } = useUser();
   const { mutate } = useSWRConfig();
+  // Belt-and-suspenders timeout so we never leave the user stranded on the
+  // spinner. After CLERK_LOAD_TIMEOUT_MS we proceed to render whatever we have.
+  const [clerkTimedOut, setClerkTimedOut] = useState(false);
+  useEffect(() => {
+    if (isLoaded) return;
+    const t = setTimeout(() => setClerkTimedOut(true), CLERK_LOAD_TIMEOUT_MS);
+    return () => clearTimeout(t);
+  }, [isLoaded]);
   // `now` stays null through SSR + the first client render so meta.h1 is
   // hydration-stable. We then set it in useEffect, which upgrades the
   // greeting to the time-of-day variant on the next client render.
@@ -167,54 +237,18 @@ export default function Home() {
     null;
   const meta = usePageMeta(page === 'onboarding' ? 'dashboard' : page, displayName, now);
 
-  // Hold the dashboard render until Clerk has resolved auth on the client.
-  // Without this, the page briefly mounts with user=null, every component
-  // renders its empty/unauth state, and the user sees a "blank dashboard"
-  // for ~200-500ms — especially jarring when coming back from an OAuth
-  // round-trip via bfcache. A lightweight skeleton avoids the flash.
-  if (!isLoaded) {
-    return (
-      <div
-        className="app"
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          minHeight: '100vh',
-        }}
-      >
-        <div role="status" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-          <div
-            aria-hidden
-            style={{
-              width: 32,
-              height: 32,
-              borderRadius: '50%',
-              border: '2.5px solid var(--line, #e5e5e5)',
-              borderTopColor: 'var(--accent, oklch(0.72 0.18 55))',
-              animation: 'sociafy-spin 0.8s linear infinite',
-            }}
-          />
-          <span
-            style={{
-              fontSize: 12.5,
-              color: 'var(--ink-3, #888)',
-              fontFamily: 'var(--mono, monospace)',
-              letterSpacing: '0.08em',
-            }}
-          >
-            Loading your workspace…
-          </span>
-          <style>{`@keyframes sociafy-spin { to { transform: rotate(360deg); } }`}</style>
-        </div>
-      </div>
-    );
+  // Once Clerk confirms unauth, the redirect effect above runs. Return null in
+  // the meantime so we don't flash a half-rendered dashboard during the redirect.
+  if (isLoaded && !isSignedIn) {
+    return null;
   }
 
-  // Once Clerk confirms unauth, the useEffect above redirects. Return null in
-  // the meantime so we don't flash a half-rendered dashboard during the redirect.
-  if (!isSignedIn) {
-    return null;
+  // Loading state — shown while Clerk hydrates. Bounded by clerkTimedOut so
+  // a stuck Clerk client (proxied CNAME, ad-blocker, etc.) never leaves the
+  // user stranded; after the timeout we let the dashboard render anyway with
+  // whatever state we have, plus a banner inside the dashboard explains it.
+  if (!isLoaded && !clerkTimedOut) {
+    return <ClerkLoadingScreen />;
   }
 
   if (page === 'onboarding') {
