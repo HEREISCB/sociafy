@@ -87,7 +87,7 @@ export default function Home() {
   const [refreshing, setRefreshing] = useState(false);
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const { user } = useUser();
+  const { user, isLoaded, isSignedIn } = useUser();
   const { mutate } = useSWRConfig();
   // `now` stays null through SSR + the first client render so meta.h1 is
   // hydration-stable. We then set it in useEffect, which upgrades the
@@ -96,6 +96,31 @@ export default function Home() {
   useEffect(() => {
     setNow(new Date());
   }, []);
+
+  // When the page is restored from the browser's back/forward cache (bfcache) —
+  // e.g. the user hit Back from an OAuth provider — the dashboard JS state is
+  // restored AS IT WAS, including any stale SWR cache from before the round
+  // trip. Force a full revalidation on pageshow so we always show fresh data
+  // post-OAuth instead of a half-rendered "blank dashboard".
+  useEffect(() => {
+    const onShow = (e: PageTransitionEvent) => {
+      if (e.persisted) {
+        void mutate(() => true, undefined, { revalidate: true });
+      }
+    };
+    window.addEventListener('pageshow', onShow);
+    return () => window.removeEventListener('pageshow', onShow);
+  }, [mutate]);
+
+  // Redirect to sign-in once Clerk confirms the user isn't authed. proxy.ts
+  // already does server-side auth.protect() for /dashboard, but a client-side
+  // fallback covers the bfcache case where Clerk's local session was invalidated
+  // mid-OAuth and the user is now effectively signed-out on a cached page.
+  useEffect(() => {
+    if (isLoaded && !isSignedIn && typeof window !== 'undefined') {
+      window.location.replace('/sign-in?next=/dashboard');
+    }
+  }, [isLoaded, isSignedIn]);
 
   const goCompose = (draftId?: string | null) => {
     setEditingDraftId(draftId ?? null);
@@ -141,6 +166,56 @@ export default function Home() {
     user?.primaryEmailAddress?.emailAddress?.split('@')[0] ||
     null;
   const meta = usePageMeta(page === 'onboarding' ? 'dashboard' : page, displayName, now);
+
+  // Hold the dashboard render until Clerk has resolved auth on the client.
+  // Without this, the page briefly mounts with user=null, every component
+  // renders its empty/unauth state, and the user sees a "blank dashboard"
+  // for ~200-500ms — especially jarring when coming back from an OAuth
+  // round-trip via bfcache. A lightweight skeleton avoids the flash.
+  if (!isLoaded) {
+    return (
+      <div
+        className="app"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '100vh',
+        }}
+      >
+        <div role="status" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+          <div
+            aria-hidden
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: '50%',
+              border: '2.5px solid var(--line, #e5e5e5)',
+              borderTopColor: 'var(--accent, oklch(0.72 0.18 55))',
+              animation: 'sociafy-spin 0.8s linear infinite',
+            }}
+          />
+          <span
+            style={{
+              fontSize: 12.5,
+              color: 'var(--ink-3, #888)',
+              fontFamily: 'var(--mono, monospace)',
+              letterSpacing: '0.08em',
+            }}
+          >
+            Loading your workspace…
+          </span>
+          <style>{`@keyframes sociafy-spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      </div>
+    );
+  }
+
+  // Once Clerk confirms unauth, the useEffect above redirects. Return null in
+  // the meantime so we don't flash a half-rendered dashboard during the redirect.
+  if (!isSignedIn) {
+    return null;
+  }
 
   if (page === 'onboarding') {
     return <Onboarding onDone={() => setPage('dashboard')} />;
