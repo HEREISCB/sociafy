@@ -13,19 +13,29 @@ import Onboarding from '../../components/onboarding';
 
 type Page = 'dashboard' | 'compose' | 'agent' | 'calendar' | 'connections' | 'onboarding';
 
-function greetingFor(name: string | null | undefined): string {
-  const hour = new Date().getHours();
-  const slot = hour < 5 ? 'evening' : hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening';
+/**
+ * Time-of-day greeting. `now` MUST be null on the SSR / first-client render so
+ * the server and client produce identical HTML — the server's hour-of-day is
+ * in its own timezone (usually UTC), the client's is in the user's local zone,
+ * so reading `new Date()` during SSR is a guaranteed hydration mismatch.
+ *
+ * Pass `null` on first render → returns "Hello, $name".
+ * Pass a Date after mount → returns "Good morning/afternoon/evening, $name".
+ */
+function greetingFor(name: string | null | undefined, now: Date | null): string {
   const first = (name || '').split(' ')[0] || 'there';
+  if (!now) return `Hello, ${first}`;
+  const hour = now.getHours();
+  const slot = hour < 5 ? 'evening' : hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening';
   return `Good ${slot}, ${first}`;
 }
 
-function usePageMeta(page: Exclude<Page, 'onboarding'>, displayName: string | null | undefined) {
+function usePageMeta(page: Exclude<Page, 'onboarding'>, displayName: string | null | undefined, now: Date | null) {
   return useMemo(() => {
     const base: Record<Exclude<Page, 'onboarding'>, { crumbs: string[]; h1: string; sub: string }> = {
       dashboard: {
         crumbs: ['Sociafy', 'Workspace', 'Dashboard'],
-        h1: greetingFor(displayName),
+        h1: greetingFor(displayName, now),
         sub: "Here's what's queued for today and what your agent has been watching.",
       },
       compose: {
@@ -50,7 +60,7 @@ function usePageMeta(page: Exclude<Page, 'onboarding'>, displayName: string | nu
       },
     };
     return base[page];
-  }, [page, displayName]);
+  }, [page, displayName, now]);
 }
 
 const RefreshIcon = () => (
@@ -79,6 +89,13 @@ export default function Home() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { user } = useUser();
   const { mutate } = useSWRConfig();
+  // `now` stays null through SSR + the first client render so meta.h1 is
+  // hydration-stable. We then set it in useEffect, which upgrades the
+  // greeting to the time-of-day variant on the next client render.
+  const [now, setNow] = useState<Date | null>(null);
+  useEffect(() => {
+    setNow(new Date());
+  }, []);
 
   const goCompose = (draftId?: string | null) => {
     setEditingDraftId(draftId ?? null);
@@ -114,7 +131,7 @@ export default function Home() {
   }, []);
 
   const displayName = user?.firstName || user?.fullName || user?.username || null;
-  const meta = usePageMeta(page === 'onboarding' ? 'dashboard' : page, displayName);
+  const meta = usePageMeta(page === 'onboarding' ? 'dashboard' : page, displayName, now);
 
   if (page === 'onboarding') {
     return <Onboarding onDone={() => setPage('dashboard')} />;
