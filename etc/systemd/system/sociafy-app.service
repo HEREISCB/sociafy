@@ -1,0 +1,62 @@
+# /etc/systemd/system/sociafy-app.service
+#
+# Runs the Next.js production server (`next start`) as the sociafy user.
+# Install with:
+#   sudo install -m 0644 etc/systemd/system/sociafy-app.service \
+#     /etc/systemd/system/sociafy-app.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now sociafy-app
+#
+# View logs:  journalctl -u sociafy-app -f
+# Restart:    sudo systemctl restart sociafy-app
+# Status:     systemctl status sociafy-app
+
+[Unit]
+Description=Sociafy Next.js application
+Documentation=https://sociafy.app
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sociafy
+Group=sociafy
+WorkingDirectory=/opt/sociafy-app
+EnvironmentFile=/opt/sociafy-app/.env.local
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=HOSTNAME=127.0.0.1
+ExecStart=/usr/bin/node node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3000
+Restart=always
+RestartSec=5
+StartLimitBurst=10
+StartLimitIntervalSec=120
+
+# Logs to journald — view via `journalctl -u sociafy-app`
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sociafy-app
+
+# Resource limits — adjust based on instance size. Defaults assume t3.medium.
+LimitNOFILE=65535
+MemoryHigh=2G
+MemoryMax=3G
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/sociafy-app/.next /opt/sociafy-app/node_modules/.cache
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

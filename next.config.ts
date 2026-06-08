@@ -64,6 +64,7 @@ const nextConfig: NextConfig = {
     '*.trycloudflare.com',
     '*.ngrok-free.app',
     '*.ngrok.io',
+    '*.sociafy.app'
   ],
 
   async headers() {
