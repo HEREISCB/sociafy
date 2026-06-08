@@ -130,7 +130,16 @@ export default function Home() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  const displayName = user?.firstName || user?.fullName || user?.username || null;
+  // Same fallback order as the UserCard sidebar so the greeting and the
+  // avatar agree. Clerk users created via email-only or via an OAuth provider
+  // that didn't share a name end up with firstName/fullName/username all null;
+  // the email prefix is the next best thing.
+  const displayName =
+    user?.firstName ||
+    user?.fullName ||
+    user?.username ||
+    user?.primaryEmailAddress?.emailAddress?.split('@')[0] ||
+    null;
   const meta = usePageMeta(page === 'onboarding' ? 'dashboard' : page, displayName, now);
 
   if (page === 'onboarding') {
