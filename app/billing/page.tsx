@@ -36,6 +36,7 @@ type BillingPayload = {
   razorpayCustomerId: string | null;
   hasActiveSubscription: boolean;
   billingConfigured: boolean;
+  subscriptionsAvailable: boolean;
   currency: 'INR' | 'USD';
   provider: 'razorpay' | 'stripe' | null;
   isIndia: boolean;
@@ -339,22 +340,9 @@ function BillingPageInner() {
                 </div>
               </div>
               <div style={{ marginTop: 12 }}>
-                {data?.hasActiveSubscription ? (
-                  <button className="btn" onClick={() => setTopupOpen(true)}>
-                    <span aria-hidden style={{ marginRight: 4 }}>+</span> Top up credits
-                  </button>
-                ) : (
-                  <button
-                    className="btn primary"
-                    onClick={() => {
-                      if (typeof document !== 'undefined') {
-                        document.getElementById('billing-plans')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                      }
-                    }}
-                  >
-                    <Icon name="bolt" size={12} /> Subscribe to enable top-ups
-                  </button>
-                )}
+                <button className="btn primary" onClick={() => setTopupOpen(true)} disabled={!data?.billingConfigured}>
+                  <span aria-hidden style={{ marginRight: 4 }}>+</span> Top up credits
+                </button>
               </div>
               <div className="billing-bar">
                 <div className="fill" style={{ width: `${pct}%` }} />
@@ -455,6 +443,15 @@ function BillingPageInner() {
                         style={{ width: '100%', justifyContent: 'center', cursor: 'not-allowed', fontStyle: 'italic', color: 'var(--muted)' }}
                       >
                         <Icon name="lock" size={12} /> Coming soon — card billing
+                      </button>
+                    ) : !data?.subscriptionsAvailable ? (
+                      <button
+                        className="btn ghost"
+                        disabled
+                        title="Monthly subscriptions aren't live yet. Use Top up credits for now."
+                        style={{ width: '100%', justifyContent: 'center', cursor: 'not-allowed', fontStyle: 'italic', color: 'var(--muted)' }}
+                      >
+                        <Icon name="lock" size={12} /> Coming soon — monthly plans
                       </button>
                     ) : data?.hasActiveSubscription ? (
                       <button

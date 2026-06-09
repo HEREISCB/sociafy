@@ -4,7 +4,7 @@ import { withUser } from '../../../lib/api';
 import { db } from '../../../lib/db';
 import { profiles, TIER_CREDITS, type Tier } from '../../../lib/db/schema';
 import { getBalance } from '../../../lib/credits/ledger';
-import { isStubMode, devForcedCountry } from '../../../lib/env';
+import { env, isStubMode, devForcedCountry } from '../../../lib/env';
 import { TIER_PRICING, formatPrice, type Currency } from '../../../lib/billing/pricing';
 
 export const runtime = 'nodejs';
@@ -44,6 +44,14 @@ export async function GET(req: NextRequest) {
       ?? (currency === 'INR' ? 'razorpay' : null);
     const hasActiveSubscription = profile?.subscriptionStatus === 'active';
     const canSwitchProvider = !hasActiveSubscription;
+    // Subscriptions ride on Razorpay Plans, which require the Subscriptions
+    // product to be enabled on the merchant account. Until ops creates the 3
+    // plans and pastes the IDs in env, the Subscribe buttons can't go anywhere
+    // — show them as "Coming soon" and steer users to top-ups instead.
+    const subscriptionsAvailable =
+      currency === 'INR'
+        ? !!(env.razorpay.planStarter && env.razorpay.planPro && env.razorpay.planBusiness)
+        : !!(env.stripe.priceStarter && env.stripe.pricePro && env.stripe.priceBusiness);
 
     return {
       currentTier: tier,
@@ -56,6 +64,7 @@ export async function GET(req: NextRequest) {
       razorpayCustomerId: profile?.razorpayCustomerId ?? null,
       hasActiveSubscription,
       billingConfigured: !isStubMode.razorpay(),
+      subscriptionsAvailable,
       currency,
       provider,
       isIndia,
