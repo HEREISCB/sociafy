@@ -1,6 +1,6 @@
 'use client';
 
-import React, { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Sidebar, Topbar } from '../../components/shell';
@@ -96,10 +96,6 @@ function BillingPageInner() {
   const [cancelBusy, setCancelBusy] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  // Persistent "confirming payment" state after a checkout redirect. Stays up
-  // with a manual Refresh fallback until the balance/subscription actually
-  // updates, instead of an optimistic toast that disappears.
-  const [confirmingPayment, setConfirmingPayment] = useState(false);
 
   async function apiFetch<T>(url: string, init: RequestInit): Promise<T> {
     const r = await fetch(url, { ...init, headers: { 'content-type': 'application/json', ...(init.headers ?? {}) } });
@@ -135,44 +131,33 @@ function BillingPageInner() {
     }
   };
 
-  // Surface checkout return state from query params.
+  // Surface checkout return state from query params. We show a one-shot toast
+  // and nudge SWR a few times so the balance updates after the webhook lands.
+  // The previous "Confirming payment…" sticky banner waited for a balance
+  // delta to dismiss, but if the webhook lands BEFORE the user redirects back
+  // (fast network, fast webhook), the first SWR snapshot is already at the
+  // post-payment value — no delta is ever observed and the banner sticks
+  // forever. The one-shot toast sidesteps that entirely.
   useEffect(() => {
     const result = params.get('checkout');
+    if (!result) return;
     if (result === 'success') {
-      // Keep a persistent "Confirming payment…" state (with a manual Refresh
-      // fallback below) until the balance/subscription actually updates. The
-      // webhook can lag the redirect, so we also re-fetch a few times.
-      setConfirmingPayment(true);
+      setToast('Payment received — credits will appear within a few seconds.');
       const t1 = setTimeout(() => mutate(), 2000);
       const t2 = setTimeout(() => mutate(), 6000);
       const t3 = setTimeout(() => mutate(), 12000);
+      if (typeof window !== 'undefined') {
+        window.history.replaceState(null, '', '/billing');
+      }
       return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
     }
     if (result === 'canceled') {
       setToast('Checkout canceled — no changes to your plan.');
+      if (typeof window !== 'undefined') {
+        window.history.replaceState(null, '', '/billing');
+      }
     }
   }, [params, mutate]);
-
-  // Clear the confirming banner once the subscription/balance reflects the
-  // payment. Snapshot the status when confirming starts; clear when it flips
-  // to an active subscription (covers both new subscribe + upgrade).
-  const confirmSnapshotRef = React.useRef<{ status: string | null; balance: number } | null>(null);
-  useEffect(() => {
-    if (!confirmingPayment) { confirmSnapshotRef.current = null; return; }
-    if (!data) return;
-    if (confirmSnapshotRef.current === null) {
-      confirmSnapshotRef.current = { status: data.subscriptionStatus, balance: data.balance };
-      return;
-    }
-    const snap = confirmSnapshotRef.current;
-    const changed =
-      (data.hasActiveSubscription && data.subscriptionStatus !== snap.status) ||
-      data.balance !== snap.balance;
-    if (changed) {
-      setConfirmingPayment(false);
-      setToast('Payment confirmed — your plan and credits are up to date.');
-    }
-  }, [confirmingPayment, data]);
 
   const dispatchHandoff = async (handoff: CheckoutHandoff) => {
     if (handoff.kind === 'redirect') {
@@ -290,24 +275,6 @@ function BillingPageInner() {
               fontSize: 13,
               color: 'var(--accent-ink)',
             }}>{toast}</div>
-          )}
-
-          {confirmingPayment && (
-            <div className="insufficient-credits-banner" style={{ background: 'var(--accent-soft)', borderColor: 'oklch(0.86 0.08 70)' }}>
-              <div className="icon" style={{ background: 'oklch(0.92 0.06 70)', color: 'var(--accent-ink)' }}>
-                <Icon name="refresh" size={14} />
-              </div>
-              <div className="copy" style={{ flex: 1 }}>
-                <strong>Confirming payment…</strong>
-                <span className="muted"> We&apos;re waiting for the payment provider to confirm. Your plan and credits will update automatically — this usually takes a few seconds.</span>
-              </div>
-              <div className="actions">
-                <button className="btn ghost" onClick={() => mutate()}>
-                  <Icon name="refresh" size={12} /> Refresh
-                </button>
-                <button className="btn ghost icon-only" onClick={() => setConfirmingPayment(false)} aria-label="Dismiss">✕</button>
-              </div>
-            </div>
           )}
 
           {data && !data.billingConfigured && (
