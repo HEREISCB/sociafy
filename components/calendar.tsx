@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Icon } from './icons';
 import { apiDelete, apiPatch, apiPost, useApi } from '../lib/ui/fetcher';
 import { PLATFORM_TO_SHORT } from '../lib/ui/platforms';
@@ -98,6 +99,7 @@ interface CalendarPageProps {
 }
 
 const CalendarPage: React.FC<CalendarPageProps> = ({ onCompose }) => {
+  const router = useRouter();
   const slotH = 48;
   // Week-grid is unusable below ~900px (7 columns + time gutter don't fit).
   // We subscribe to the viewport so flipping the phone orientation re-evaluates.
@@ -384,7 +386,7 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onCompose }) => {
           className="btn sm primary"
           onClick={() => {
             if (onCompose) onCompose();
-            else window.location.href = '/dashboard?tab=compose';
+            else router.push('/dashboard?tab=compose');
           }}
         >
           <Icon name="plus" size={11} /> New post
@@ -869,6 +871,7 @@ interface CalendarMobileMonthProps {
 }
 
 const CalendarMobileMonth: React.FC<CalendarMobileMonthProps> = ({ onCompose }) => {
+  const router = useRouter();
   const [monthCursor, setMonthCursor] = useState(() => {
     const d = new Date();
     d.setDate(1);
@@ -1037,7 +1040,7 @@ const CalendarMobileMonth: React.FC<CalendarMobileMonthProps> = ({ onCompose }) 
           </span>
           <button
             className="btn sm primary"
-            onClick={() => { if (onCompose) onCompose(); else window.location.href = '/dashboard?tab=compose'; }}
+            onClick={() => { if (onCompose) onCompose(); else router.push('/dashboard?tab=compose'); }}
           >
             <Icon name="plus" size={11} /> New post
           </button>

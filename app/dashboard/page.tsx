@@ -145,6 +145,19 @@ export default function Home() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
+  // Keep the URL in sync with the active workspace tab so refresh and
+  // share-URL land on the same pane. Use replaceState (not pushState) so
+  // tab switches don't pollute browser history — Back goes to whatever
+  // page the user came from before the dashboard, not previous tab.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const target = page === 'dashboard' ? '/dashboard' : `/dashboard?tab=${page}`;
+    const current = window.location.pathname + window.location.search;
+    if (current !== target) {
+      window.history.replaceState(null, '', target);
+    }
+  }, [page]);
+
   // Same fallback order as the UserCard sidebar so the greeting and the
   // avatar agree. Clerk users created via email-only or via an OAuth provider
   // that didn't share a name end up with firstName/fullName/username all null;

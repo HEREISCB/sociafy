@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Sidebar, Topbar } from '../../../components/shell';
 import { Icon } from '../../../components/icons';
 import { apiPost, useApi } from '../../../lib/ui/fetcher';
@@ -22,6 +23,7 @@ const PACKS = [
 
 export default function DemoBillingPage() {
   const { data, mutate } = useApi<CreditsPayload>('/api/credits');
+  const router = useRouter();
   const [busy, setBusy] = useState<number | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -55,8 +57,9 @@ export default function DemoBillingPage() {
   return (
     <div className="app">
       <Sidebar
-        page={'dashboard' as Page}
-        onNav={() => {}}
+        // Demo isn't a sidebar destination — leave nothing highlighted.
+        page={'onboarding' as Page}
+        onNav={(p) => router.push(p === 'dashboard' ? '/dashboard' : `/dashboard?tab=${p}`)}
         mobileOpen={sidebarOpen}
         onMobileClose={() => setSidebarOpen(false)}
       />
