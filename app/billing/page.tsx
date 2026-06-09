@@ -179,8 +179,8 @@ function BillingPageInner() {
       await dispatchHandoff(handoff);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (msg.includes('503')) {
-        setToast('Billing isn\'t configured yet — Razorpay keys missing in .env.local.');
+      if (msg.includes('503') || msg.includes('billing_coming_soon')) {
+        setToast('USD billing isn\'t live yet — switch to ₹ INR via Razorpay to subscribe today.');
       } else {
         setToast(`Checkout failed: ${msg.slice(0, 160)}`);
       }
@@ -219,7 +219,14 @@ function BillingPageInner() {
       setTopupOpen(false);
       await dispatchHandoff(handoff);
     } catch (e) {
-      setToast(`Top-up failed: ${e instanceof Error ? e.message.slice(0, 160) : String(e)}`);
+      const msg = e instanceof Error ? e.message : String(e);
+      // The USD/Stripe path returns 503 billing_coming_soon — don't show the
+      // raw JSON to the user. Route them to Razorpay (INR) instead.
+      if (msg.includes('503') || msg.includes('billing_coming_soon')) {
+        setToast('USD billing isn\'t live yet — switch to ₹ INR via Razorpay above to top up today.');
+      } else {
+        setToast(`Top-up failed: ${msg.slice(0, 160)}`);
+      }
     } finally {
       setTopupBusy(false);
     }
@@ -453,7 +460,13 @@ function BillingPageInner() {
             </section>
 
             <section className="billing-footnote mono">
-              All prices in {data?.currency === 'INR' ? 'INR' : 'USD'}. Cancel anytime — credits remain usable until your renewal date. Billing handled by {data?.provider === 'razorpay' ? 'Razorpay' : 'Stripe'}. See our <a href="/legal/refund">Refund &amp; Cancellation Policy</a>.
+              All prices in {data?.currency === 'INR' ? 'INR' : 'USD'}. Cancel anytime — credits remain usable until your renewal date.
+              {data?.provider === 'razorpay'
+                ? <> Billing handled by Razorpay (₹ INR). USD via Stripe is coming soon.</>
+                : data?.provider === 'stripe'
+                  ? <> Billing handled by Stripe.</>
+                  : <> Card billing (USD) via Stripe is coming soon. Switch to ₹ INR via Razorpay to subscribe today.</>}
+              {' '}See our <a href="/legal/refund">Refund &amp; Cancellation Policy</a>.
               <br />
               Sociafy is a product of GNIX SEMICONDUCTORS PRIVATE LIMITED.
             </section>

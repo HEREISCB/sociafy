@@ -1911,6 +1911,9 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
   }, [mode]);
 
   const persistDraft = async () => {
+    if (!variant) {
+      throw new Error('No variant selected — generate or write a caption first.');
+    }
     const fullPlatforms = platforms.map((s) => SHORT_TO_PLATFORM[s]).filter(Boolean) as Platform[];
     const uploadedMedia = media
       .filter((m) => m.url && m.mimeType && m.id && !m.uploading)
@@ -2370,12 +2373,18 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
             />
             <button
               className="btn sm"
-              disabled={busy !== null}
+              disabled={busy !== null || !variant}
+              title={!variant ? 'Generate a caption first' : undefined}
               onClick={() => customSchedule ? schedule(new Date(customSchedule).toISOString()) : scheduleIn30()}
             >
               <Icon name="clock" size={12} /> {busy === 'schedule' ? 'Scheduling…' : customSchedule ? 'Schedule' : 'Schedule (+30m)'}
             </button>
-            <button className="btn sm primary" disabled={busy !== null} onClick={postNow}>
+            <button
+              className="btn sm primary"
+              disabled={busy !== null || !variant}
+              title={!variant ? 'Generate a caption first' : undefined}
+              onClick={postNow}
+            >
               <Icon name="send" size={12} /> {busy === 'post' ? 'Posting…' : 'Post now'}
             </button>
           </div>

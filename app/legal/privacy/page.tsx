@@ -1,33 +1,30 @@
-// Privacy policy stub — content marked "draft pending legal review".
-// Replace the body with reviewed legal copy before going live.
+// Privacy policy. Replace the body with reviewed legal copy before going live.
 // The legal entity name and contact details must remain visible for
 // payment-gateway verification.
+
+import Link from 'next/link';
 
 export const metadata = {
   title: 'Privacy Policy · Sociafy',
 };
 
 const COMPANY = 'GNIX SEMICONDUCTORS PRIVATE LIMITED';
-const SUPPORT_EMAIL = 'support@sociafy.co'; // replace with verified support address
+const SUPPORT_EMAIL = 'support@sociafy.app'; // replace with verified support address
 const LAST_UPDATED = '2026-05-23';
 
 export default function PrivacyPolicyPage() {
   return (
     <main style={{ maxWidth: 820, margin: '0 auto', padding: '48px 24px', fontFamily: 'var(--font-geist-sans)', lineHeight: 1.6 }}>
       <p style={{ marginBottom: 24 }}>
-        <a href="/" style={{ color: 'var(--ink-3)', fontSize: 13, textDecoration: 'none' }}>&larr; Back to site</a>
+        <Link href="/" style={{ color: 'var(--ink-3)', fontSize: 13, textDecoration: 'none' }}>&larr; Back to site</Link>
       </p>
       <header style={{ marginBottom: 32, borderBottom: '1px solid var(--line)', paddingBottom: 16 }}>
         <h1 style={{ marginBottom: 8 }}>Privacy Policy</h1>
         <p style={{ color: 'var(--ink-3)', fontSize: 14, margin: 0 }}>
-          {COMPANY} (&ldquo;we&rdquo;, &ldquo;us&rdquo;, &ldquo;our&rdquo;) operates the Sociafy product available at sociafy.co.
+          {COMPANY} (&ldquo;we&rdquo;, &ldquo;us&rdquo;, &ldquo;our&rdquo;) operates the Sociafy product available at sociafy.app.
         </p>
         <p style={{ color: 'var(--ink-3)', fontSize: 13, marginTop: 8 }}>Last updated: {LAST_UPDATED}</p>
       </header>
-
-      <p style={{ background: '#fff8eb', border: '1px solid #f0d68a', padding: '12px 16px', borderRadius: 8, color: '#6b4408', fontSize: 13 }}>
-        <strong>Draft notice:</strong> this document is a placeholder pending review by legal counsel. The legal entity, contact details, and high-level policy below are accurate; the detailed clauses should be replaced before relying on this page as a binding privacy notice.
-      </p>
 
       <h2>1. Who we are</h2>
       <p>

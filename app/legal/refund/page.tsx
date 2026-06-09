@@ -1,19 +1,21 @@
-// Refund & Cancellation Policy stub — required by Razorpay for verification.
+// Refund & Cancellation Policy — required by Razorpay for verification.
 // Reflects the cancel/refund behavior implemented in the billing flow.
+
+import Link from 'next/link';
 
 export const metadata = {
   title: 'Refund & Cancellation Policy · Sociafy',
 };
 
 const COMPANY = 'GNIX SEMICONDUCTORS PRIVATE LIMITED';
-const SUPPORT_EMAIL = 'support@sociafy.co'; // replace with verified support address
+const SUPPORT_EMAIL = 'support@sociafy.app';
 const LAST_UPDATED = '2026-05-23';
 
 export default function RefundPolicyPage() {
   return (
     <main style={{ maxWidth: 820, margin: '0 auto', padding: '48px 24px', fontFamily: 'var(--font-geist-sans)', lineHeight: 1.6 }}>
       <p style={{ marginBottom: 24 }}>
-        <a href="/" style={{ color: 'var(--ink-3)', fontSize: 13, textDecoration: 'none' }}>&larr; Back to site</a>
+        <Link href="/" style={{ color: 'var(--ink-3)', fontSize: 13, textDecoration: 'none' }}>&larr; Back to site</Link>
       </p>
       <header style={{ marginBottom: 32, borderBottom: '1px solid var(--line)', paddingBottom: 16 }}>
         <h1 style={{ marginBottom: 8 }}>Refund &amp; Cancellation Policy</h1>
@@ -22,10 +24,6 @@ export default function RefundPolicyPage() {
         </p>
         <p style={{ color: 'var(--ink-3)', fontSize: 13, marginTop: 8 }}>Last updated: {LAST_UPDATED}</p>
       </header>
-
-      <p style={{ background: '#fff8eb', border: '1px solid #f0d68a', padding: '12px 16px', borderRadius: 8, color: '#6b4408', fontSize: 13 }}>
-        <strong>Draft notice:</strong> this document is a placeholder pending review by legal counsel. The policy described reflects current product behavior; the wording should be reviewed before going live.
-      </p>
 
       <h2>1. Cancelling your subscription</h2>
       <p>

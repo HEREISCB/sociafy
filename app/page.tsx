@@ -530,7 +530,7 @@ const Pricing = () => {
           <div className="price-divider" />
           <ul className="price-list">
             <li><span className="check">✓</span> Everything in Starter</li>
-            <li><span className="check">✓</span> <strong>Autopilot enabled</strong> — trend → draft → schedule</li>
+            <li><span className="check">✓</span> <strong>Autopilot enabled</strong> — <span style={{ whiteSpace: 'nowrap' }}>trend &rarr; draft &rarr; schedule</span></li>
             <li><span className="check">✓</span> Web research on captions</li>
             <li><span className="check">✓</span> ~33 reels OR daily image + research</li>
             <li><span className="check">✓</span> Per-platform &amp; per-content quotas</li>
@@ -659,25 +659,21 @@ const Footer = () => (
         <div className="lp-foot-col">
           <h6>Company</h6>
           <ul>
-            <li><a href="#">About</a></li>
-            <li><a href="#">Manifesto</a></li>
-            <li><a href="#">Blog</a></li>
-            <li><a href="#">Careers</a></li>
+            <li><a href="mailto:hello@sociafy.app">Contact</a></li>
+            <li><a href="mailto:careers@sociafy.app">Careers</a></li>
           </ul>
         </div>
         <div className="lp-foot-col">
           <h6>Resources</h6>
           <ul>
-            <li><a href="#">Docs</a></li>
-            <li><a href="#">Voice guide</a></li>
-            <li><a href="#">API</a></li>
-            <li><a href="#">Status</a></li>
+            <li><a href="mailto:support@sociafy.app">Support</a></li>
+            <li><a href="#voice">Voice guide</a></li>
+            <li><a href="#pricing">Pricing</a></li>
           </ul>
         </div>
         <div className="lp-foot-col">
           <h6>Legal</h6>
           <ul>
-            <li><a href="#">Security</a></li>
             <li><a href="/legal/privacy">Privacy</a></li>
             <li><a href="/legal/terms">Terms</a></li>
             <li><a href="/legal/refund">Refund &amp; Cancellation</a></li>

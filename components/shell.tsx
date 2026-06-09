@@ -117,7 +117,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ page, onNav, showTTS = true, m
 
         <div className="sidebar-foot">
           {showTTS && (
-            <div className="tts-card">
+            <Link
+              href="/studio/voice"
+              className="tts-card"
+              style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}
+              onClick={onMobileClose}
+            >
               <span className="pill">New</span>
               <h4>Voice cloner</h4>
               <p>Clone your voice once — your avatar speaks every post in it.</p>
@@ -126,7 +131,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ page, onNav, showTTS = true, m
                   <span key={i} style={{ height: h }} />
                 ))}
               </div>
-            </div>
+            </Link>
           )}
           <UserCard />
         </div>
