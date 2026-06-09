@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Sidebar, Topbar } from '../../components/shell';
 import { Icon } from '../../components/icons';
 import { apiPost, useApi } from '../../lib/ui/fetcher';
@@ -89,6 +89,7 @@ export default function BillingPage() {
 function BillingPageInner() {
   const { data, mutate } = useApi<BillingPayload>('/api/billing');
   const params = useSearchParams();
+  const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [topupOpen, setTopupOpen] = useState(false);
@@ -243,8 +244,12 @@ function BillingPageInner() {
   return (
     <div className="app">
       <Sidebar
-        page={'dashboard' as Page}
-        onNav={() => {}}
+        // Billing isn't a sidebar destination, so no item is highlighted.
+        // Match the usage page's nav shape: dashboard goes to /dashboard,
+        // every other page goes to /dashboard?tab=X — the dashboard root
+        // routes to the correct workspace tab from there.
+        page={'onboarding' as Page}
+        onNav={(p) => router.push(p === 'dashboard' ? '/dashboard' : `/dashboard?tab=${p}`)}
         mobileOpen={sidebarOpen}
         onMobileClose={() => setSidebarOpen(false)}
       />
