@@ -3,10 +3,10 @@ import crypto from 'crypto';
 import { auth, currentUser } from '@clerk/nextjs/server';
 import { isStubMode } from './env';
 import { db } from './db';
-import { profiles, TIER_CREDITS, type Tier } from './db/schema';
+import { profiles } from './db/schema';
 import { eq } from 'drizzle-orm';
 import { getOrigin } from './url';
-import { ensureSignupBonus, InsufficientCreditsError, insufficientCreditsResponse } from './credits/ledger';
+import { InsufficientCreditsError, insufficientCreditsResponse } from './credits/ledger';
 
 export type ApiUser = { id: string; email?: string | null };
 
@@ -34,7 +34,7 @@ export function jsonOk<T>(data: T, init?: ResponseInit) {
 async function ensureProfile(userId: string) {
   if (isStubMode.database()) return;
   const [existing] = await db()
-    .select({ id: profiles.id, tier: profiles.tier })
+    .select({ id: profiles.id })
     .from(profiles)
     .where(eq(profiles.id, userId))
     .limit(1);
@@ -60,17 +60,8 @@ async function ensureProfile(userId: string) {
       avatarUrl: meta.avatarUrl ?? null,
     }).onConflictDoNothing();
   }
-
-  // Every profile gets one signup grant — idempotent, so re-runs are no-ops.
-  // The grant uses the profile's *current* tier allocation so admins can
-  // upgrade a user before they've ever hit a route and have it take effect.
-  const tier = (existing?.tier ?? 'starter') as Tier;
-  try {
-    await ensureSignupBonus(userId, TIER_CREDITS[tier]);
-  } catch (e) {
-    // Don't fail the request if the ledger insert errors out — log and move on.
-    console.warn('[ensureProfile] ensureSignupBonus failed:', e instanceof Error ? e.message : e);
-  }
+  // No automatic signup credits. Users start at 0 and must purchase (or use the
+  // demo grant endpoint) before any paid action will succeed.
 }
 
 const IS_PROD = process.env.NODE_ENV === 'production';
