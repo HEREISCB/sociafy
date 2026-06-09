@@ -38,6 +38,10 @@ type PlatformDef = {
   color: string;
   tagline: string;
   blurb: string;
+  /** One-line pre-connect tip. Shown above the Connect button so users know
+   *  what to do BEFORE they leave for OAuth — saves the "wait, why did this
+   *  fail?" round-trip. */
+  tip?: string;
   capabilities: string[];
   /** When true the card is greyed out and the Connect button is disabled. */
   comingSoon?: boolean;
@@ -51,6 +55,7 @@ const PLATFORMS: PlatformDef[] = [
     color: 'var(--fb)',
     tagline: 'Pages · scheduled posts · insights',
     blurb: 'Publish to your Facebook Page on a schedule or autopilot, with engagement read-back.',
+    tip: 'You\'ll pick which Page to connect after sign-in. Sociafy doesn\'t post to personal profiles.',
     capabilities: ['Text', 'Images', 'Insights'],
   },
   {
@@ -59,7 +64,8 @@ const PLATFORMS: PlatformDef[] = [
     name: 'Instagram',
     color: 'var(--ig)',
     tagline: 'Direct Instagram login · Business or Creator',
-    blurb: 'Sign in straight through Instagram. Requires a Professional account — no Facebook page needed.',
+    blurb: 'Sign in straight through Instagram. No Facebook page needed.',
+    tip: 'Switch your account to Professional (Business or Creator) in the Instagram app first — personal accounts can\'t publish via API.',
     capabilities: ['Carousels', 'Reels', 'Stories soon'],
   },
   {
@@ -69,6 +75,7 @@ const PLATFORMS: PlatformDef[] = [
     color: 'var(--x)',
     tagline: 'Tweets · threads · image posts',
     blurb: 'Tweet text and media. Threads orchestrated by the agent when you want a series.',
+    tip: 'Sign in to the right X account in another tab first if you manage multiple.',
     capabilities: ['Tweets', 'Threads', 'Media'],
   },
   {
@@ -78,6 +85,7 @@ const PLATFORMS: PlatformDef[] = [
     color: 'var(--li)',
     tagline: 'Member profile · share commentary',
     blurb: 'Publish to your LinkedIn profile with member-network visibility.',
+    tip: 'Personal profiles only for now — LinkedIn Company Pages are coming soon.',
     capabilities: ['Text', 'Images', 'Links'],
   },
   {
@@ -87,6 +95,7 @@ const PLATFORMS: PlatformDef[] = [
     color: 'var(--tt)',
     tagline: 'Direct video uploads via URL',
     blurb: 'Push short-form video clips straight from your media library.',
+    tip: 'TikTok requires an account in good standing. Posts upload as drafts you publish in the TikTok app.',
     capabilities: ['Video', 'Captions'],
   },
   {
@@ -96,6 +105,7 @@ const PLATFORMS: PlatformDef[] = [
     color: 'var(--yt)',
     tagline: 'Channel discovery · analytics',
     blurb: 'Connect for channel analytics. Resumable upload pipeline coming next.',
+    tip: 'You\'ll grant access to the Google account that owns your channel. Multiple channels are supported.',
     capabilities: ['Channel', 'Analytics'],
   },
 ];
@@ -741,6 +751,25 @@ const ConnectionsPage: React.FC = () => {
                       {p.blurb}
                     </p>
 
+                    {p.tip && (
+                      <div
+                        style={{
+                          display: 'flex',
+                          gap: 8,
+                          padding: '8px 10px',
+                          background: 'var(--bg-sunk)',
+                          border: '1px dashed var(--line-2)',
+                          borderRadius: 8,
+                          fontSize: 12,
+                          color: 'var(--ink-3)',
+                          lineHeight: 1.5,
+                        }}
+                      >
+                        <Icon name="bolt" size={11} />
+                        <span><strong style={{ color: 'var(--ink-2)' }}>Tip:</strong> {p.tip}</span>
+                      </div>
+                    )}
+
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                       {p.capabilities.map((c) => (
                         <span
@@ -841,6 +870,25 @@ const ConnectionsPage: React.FC = () => {
             </>
           }
         />
+      </div>
+
+      <div
+        style={{
+          marginTop: 18,
+          padding: '14px 16px',
+          border: '1px dashed var(--line-2)',
+          borderRadius: 10,
+          fontSize: 12.5,
+          color: 'var(--ink-3)',
+          textAlign: 'center',
+          lineHeight: 1.5,
+        }}
+      >
+        Stuck connecting a channel? Email{' '}
+        <a href="mailto:support@sociafy.app" style={{ color: 'var(--ink-2)', fontWeight: 500 }}>
+          support@sociafy.app
+        </a>{' '}
+        — we usually reply within a few hours.
       </div>
     </>
   );
