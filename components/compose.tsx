@@ -1879,8 +1879,20 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
           return;
         } catch { /* fall through */ }
       }
-      if (msg.startsWith('401') || msg.startsWith('503')) {
+      // 503 now carries a structured { error, hint } body for upstream AI
+      // failures (quota exhausted, provider down) — show the hint when present.
+      const hintMatch = msg.match(/^503:\s*(\{[\s\S]*\})/);
+      if (hintMatch) {
+        try {
+          const body = JSON.parse(hintMatch[1]) as { hint?: string };
+          setToast(body.hint ?? 'AI generation is temporarily unavailable. Try again shortly.');
+          return;
+        } catch { /* fall through */ }
+      }
+      if (msg.startsWith('401')) {
         setToast('Sign in to generate real variants.');
+      } else if (msg.startsWith('503')) {
+        setToast('AI generation is temporarily unavailable. Try again shortly.');
       } else if (msg.startsWith('429')) {
         setToast('Slow down — too many compose requests. Try again in a minute.');
       } else {

@@ -122,13 +122,17 @@ export async function generateCompose(args: ComposeArgs): Promise<ComposeResult>
     toolsUsed = result.toolsUsed;
   } else {
     // Fast path: no tools, single Responses API call with gpt-5-mini.
+    // gpt-5 family models spend tokens on reasoning BEFORE emitting output —
+    // keep effort low for copywriting and budget enough that the JSON answer
+    // never gets truncated (truncated JSON silently degrades to stub text).
     const resp = await openai.responses.create({
       model: MODELS.fast,
       input: [
         { role: 'system', content: sys },
         { role: 'user', content: user },
       ],
-      max_output_tokens: 1500,
+      max_output_tokens: 3000,
+      ...(MODELS.fast.startsWith('gpt-5') ? { reasoning: { effort: 'low' as const } } : {}),
     });
     text = (resp.output_text ?? '').trim();
   }

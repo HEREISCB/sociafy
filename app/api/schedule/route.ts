@@ -65,6 +65,18 @@ export async function POST(req: NextRequest) {
       .where(eq(connectedAccounts.userId, user.id));
     const accountByPlatform = new Map(accounts.map((a) => [a.platform, a]));
 
+    // Platforms the user asked for but has no connected account on. We used to
+    // silently skip these — a request where EVERY platform was unconnected
+    // returned `{ scheduled: [] }` with 200 and the UI announced "Scheduled."
+    // while nothing existed. Fail loudly instead, and report partial skips.
+    const skipped = requestedPlatforms.filter((p) => !accountByPlatform.has(p));
+    if (skipped.length === requestedPlatforms.length) {
+      return jsonError('no_connected_accounts', 400, {
+        skipped,
+        hint: `No connected account for ${skipped.join(', ')}. Connect the platform first, then schedule.`,
+      });
+    }
+
     const inserted = [];
     for (const platform of requestedPlatforms) {
       const acct = accountByPlatform.get(platform);
@@ -95,6 +107,6 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    return { scheduled: inserted };
+    return { scheduled: inserted, skipped };
   }, req);
 }

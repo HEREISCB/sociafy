@@ -61,6 +61,28 @@ function statusToType(status: ScheduledRow['status']): CalEventType {
 
 const platGlyphs: Record<string, string> = { ig: 'I', fb: 'f', x: 'X', li: 'in', tt: 'T', yt: 'Y' };
 
+/** apiPost throws `Error("<status>: <json-body>")`. Pull out the structured
+ *  hint when there is one so the modal shows actionable copy ("top up your
+ *  credits", "AI provider is down") instead of a raw status dump. */
+function friendlyApiError(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e);
+  const m = msg.match(/^(\d{3}):\s*(\{[\s\S]*\})?/);
+  if (m) {
+    const status = Number(m[1]);
+    let body: { error?: string; hint?: string; balance?: number; needed?: number } = {};
+    try { body = m[2] ? JSON.parse(m[2]) : {}; } catch { /* non-JSON body */ }
+    if (status === 402 && body.error === 'insufficient_credits') {
+      return `You need ${body.needed ?? 'more'} credits but have ${body.balance ?? 0}. Top up on the Billing page, then try again.`;
+    }
+    if (body.hint) return body.hint;
+    if (status === 401) return 'Your session expired — sign in again.';
+    if (status === 429) return 'Too many requests — wait a minute and try again.';
+    if (status >= 500) return 'Something went wrong on the server. Try again shortly.';
+  }
+  if (msg.startsWith('timeout')) return 'The request took too long — try again.';
+  return `Failed: ${msg.slice(0, 120)}`;
+}
+
 function startOfWeek(d: Date) {
   const x = new Date(d);
   const day = x.getDay();
@@ -222,8 +244,7 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onCompose }) => {
       setQuickPickedVariant(composed.variants[0].label);
       setQuickMsg(null);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setQuickMsg(`Failed: ${msg.slice(0, 120)}`);
+      setQuickMsg(friendlyApiError(e));
     } finally {
       setQuickBusy(false);
     }
@@ -253,8 +274,12 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onCompose }) => {
         preset: quickMode === 'video' ? 'reel' : 'announcement',
       });
       const whenIso = slotIsoFor(slot);
-      await apiPost('/api/schedule', { draftId: draft.id, scheduledAt: whenIso, platforms: quickPlatforms });
-      setQuickMsg('Scheduled.');
+      const res = await apiPost<{ scheduled: unknown[]; skipped?: string[] }>(
+        '/api/schedule',
+        { draftId: draft.id, scheduledAt: whenIso, platforms: quickPlatforms },
+      );
+      const skipped = res.skipped ?? [];
+      setQuickMsg(skipped.length > 0 ? `Scheduled. Skipped ${skipped.join(', ')} — not connected.` : 'Scheduled.');
       await mutate();
       setTimeout(() => {
         setQuickSlot(null);
@@ -262,10 +287,9 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onCompose }) => {
         setQuickVariants(null);
         setQuickPickedVariant(null);
         setQuickMsg(null);
-      }, 700);
+      }, skipped.length > 0 ? 2500 : 700);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setQuickMsg(`Failed: ${msg.slice(0, 120)}`);
+      setQuickMsg(friendlyApiError(e));
     } finally {
       setQuickBusy(false);
     }

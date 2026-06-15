@@ -67,6 +67,37 @@ async function ensureProfile(userId: string) {
 const IS_PROD = process.env.NODE_ENV === 'production';
 
 /**
+ * Recognize upstream AI-provider failures (OpenAI APIError shapes) that are
+ * NOT the caller's fault, so routes can return an actionable 503 instead of a
+ * generic 500. `insufficient_quota` means the platform's OpenAI account is out
+ * of funds — every generation in the app fails until it's topped up, and the
+ * user can do nothing about it from the UI.
+ */
+export function aiProviderHint(e: unknown): { error: string; hint: string } | null {
+  if (!e || typeof e !== 'object') return null;
+  const err = e as { status?: number; code?: string | null };
+  if (err.code === 'insufficient_quota') {
+    return {
+      error: 'ai_unavailable',
+      hint: 'AI generation is temporarily unavailable (provider quota exhausted). Your credits were refunded — please try again later.',
+    };
+  }
+  if (err.code === 'invalid_api_key' || err.code === 'account_deactivated') {
+    return {
+      error: 'ai_unavailable',
+      hint: 'AI generation is temporarily unavailable (provider configuration). Your credits were refunded — please try again later.',
+    };
+  }
+  if (err.status === 429) {
+    return {
+      error: 'ai_busy',
+      hint: 'The AI provider is rate-limiting requests. Wait a moment and try again.',
+    };
+  }
+  return null;
+}
+
+/**
  * For non-GET requests verify the Origin (or Referer fallback) matches the
  * server's own origin. Clerk cookies are SameSite=Lax, which already blocks
  * top-level cross-site POSTs from forms, but a defense-in-depth check on
@@ -128,6 +159,11 @@ export async function withUser<T>(
       // dropped between pre-flight and charge (parallel request). Return the
       // same 402 shape the pre-flight would have produced.
       return insufficientCreditsResponse({ balance: e.balance, needed: e.needed }) as NextResponse;
+    }
+    const ai = aiProviderHint(e);
+    if (ai) {
+      console.error('[api] ai provider failure:', e instanceof Error ? e.message : String(e));
+      return jsonError(ai.error, 503, { hint: ai.hint });
     }
     const msg = e instanceof Error ? e.message : String(e);
     // Drizzle wraps DB failures as "Failed query: ..." and stashes the real

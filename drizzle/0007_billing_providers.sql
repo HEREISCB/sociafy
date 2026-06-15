@@ -1,6 +1,3 @@
--- Add Razorpay billing columns + currency/country detection + pending tier changes.
--- Mirrors the existing Stripe linkage pattern. Paste into Supabase SQL Editor.
--- Idempotent: safe to re-run.
 
 ALTER TABLE public.profiles
   ADD COLUMN IF NOT EXISTS billing_country           text,

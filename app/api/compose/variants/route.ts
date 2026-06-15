@@ -81,6 +81,18 @@ export async function POST(req: NextRequest) {
       throw e;
     }
 
+    // A stub result means no real AI ran (provider unconfigured, or the model
+    // returned unparseable output and we fell back to canned text). Don't
+    // charge for that — refund the full reservation.
+    if (result.stub) {
+      await refund({ userId: user.id, ledgerId: reserved.ledgerId, reason: 'compose_stub_fallback' }).catch(() => {});
+      return {
+        ...result,
+        creditsCharged: 0,
+        meta: { searchCount: 0, extraSearches: 0, surcharge: 0 },
+      };
+    }
+
     // Reconcile: count actual web_search invocations and partial-refund the
     // unused reservation. We bundle 1 free search into the research base, so
     // the surcharge only kicks in from the 2nd search onward.
