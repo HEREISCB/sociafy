@@ -1,0 +1,1202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sociafy Reputation Shield — Technical Proposal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..600;1,9..144,300..400&family=Geist:wght@300..600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --paper:#FAFAF7; --elev:#FFFFFF; --sunk:#F4F3EE; --ink:#0A0A0A; --ink-2:#2A2A28;
+    --ink-3:#6B6B66; --ink-4:#9C9C96; --line:#E8E7E1; --line-2:#D8D7D0;
+    --accent: oklch(0.58 0.20 25); --accent-ink: oklch(0.42 0.18 25); --accent-soft: oklch(0.96 0.04 25);
+    --good: oklch(0.62 0.13 155); --good-soft: oklch(0.95 0.04 155);
+    --warn: oklch(0.70 0.15 75); --warn-soft: oklch(0.95 0.05 85);
+    --bad: oklch(0.58 0.20 25); --bad-soft: oklch(0.95 0.04 25);
+    --blue: oklch(0.58 0.16 255); --blue-soft: oklch(0.95 0.04 255);
+    --sans:"Geist", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    --serif:"Fraunces", Georgia, "Times New Roman", serif;
+    --mono:"Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    --r:12px; --r-lg:18px;
+  }
+  * { box-sizing:border-box; }
+  html { -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
+  body {
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:var(--sans); font-size:15px; line-height:1.6; font-weight:350;
+  }
+  .doc { max-width:920px; margin:0 auto; }
+  section { padding:0 56px; }
+  p { color:var(--ink-2); }
+  strong { font-weight:550; color:var(--ink); }
+  em { font-style:italic; }
+  a { color:var(--accent-ink); }
+  code { font-family:var(--mono); font-size:13px; background:var(--sunk); padding:2px 6px; border-radius:4px; color:var(--ink-2); }
+
+  h1,h2,h3,h4 { margin:0; letter-spacing:-0.02em; }
+  .eyebrow {
+    font-family:var(--mono); font-size:11px; font-weight:500; text-transform:uppercase;
+    letter-spacing:0.16em; color:var(--accent-ink); display:flex; align-items:center; gap:12px; margin-bottom:18px;
+  }
+  .eyebrow::before { content:""; width:24px; height:1.5px; background:var(--accent); flex:0 0 24px; }
+  .eyebrow .num { color:var(--ink-4); margin-left:auto; letter-spacing:0.1em; }
+  .h-sec { font-family:var(--serif); font-weight:380; font-size:38px; line-height:1.06; letter-spacing:-0.015em; margin-bottom:14px; }
+  .h-sec .accent { color:var(--accent-ink); font-style:italic; }
+  .h-sub { font-family:var(--serif); font-weight:400; font-size:22px; line-height:1.2; letter-spacing:-0.01em; margin-bottom:10px; margin-top:28px; }
+  .lede { font-size:16.5px; line-height:1.6; color:var(--ink-3); max-width:62ch; }
+  .mono { font-family:var(--mono); }
+  .small { font-size:12.5px; }
+  .muted { color:var(--ink-3); }
+
+  /* Cover */
+  .cover {
+    background:#0C0C0A; color:var(--paper); padding:64px 56px 52px; position:relative; overflow:hidden;
+    border-radius:0 0 var(--r-lg) var(--r-lg);
+  }
+  .cover::before {
+    content:""; position:absolute; inset:0; pointer-events:none;
+    background:
+      radial-gradient(circle at 88% 8%, oklch(0.50 0.20 25 / 0.55), transparent 46%),
+      radial-gradient(circle at 8% 92%, oklch(0.45 0.14 255 / 0.35), transparent 50%);
+  }
+  .cover > * { position:relative; z-index:1; }
+  .cover .kicker {
+    font-family:var(--mono); font-size:11.5px; letter-spacing:0.22em; text-transform:uppercase;
+    color:oklch(0.78 0.10 25); display:flex; align-items:center; gap:10px; margin-bottom:40px;
+  }
+  .cover .kicker .dot { width:7px; height:7px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 4px oklch(0.50 0.20 25 / 0.30); }
+  .wordmark { font-family:var(--mono); font-size:13px; letter-spacing:-0.01em; font-weight:500; color:oklch(0.86 0 0); }
+  .wordmark .dot { color:var(--accent); }
+  .cover h1 { font-family:var(--serif); font-weight:340; font-size:84px; line-height:0.94; letter-spacing:-0.04em; margin:6px 0 4px; }
+  .cover h1 .stop { color:var(--accent); }
+  .cover .subtitle { font-family:var(--serif); font-style:italic; font-weight:300; font-size:26px; letter-spacing:-0.01em; color:oklch(0.82 0.04 25); margin-bottom:26px; }
+  .cover .promise { font-size:16.5px; line-height:1.55; color:oklch(0.80 0 0); max-width:52ch; margin:0 0 34px; }
+  .cover .promise b { color:var(--paper); font-weight:500; }
+  .cover .meta { display:flex; flex-wrap:wrap; gap:8px 28px; font-family:var(--mono); font-size:10.5px; letter-spacing:0.06em; color:oklch(0.66 0 0); text-transform:uppercase; }
+  .cover .meta b { color:oklch(0.88 0 0); font-weight:500; }
+
+  /* Generic */
+  .gap { height:60px; }
+  .gap-sm { height:36px; }
+  .rule { height:1px; background:var(--line); margin:0 56px; }
+
+  .stat-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; }
+  .stat { border:1px solid var(--line); border-radius:var(--r); background:var(--elev); padding:16px 16px 14px; }
+  .stat .v { font-family:var(--serif); font-weight:400; font-size:32px; line-height:1; letter-spacing:-0.02em; }
+  .stat .v .u { font-size:14px; color:var(--ink-3); font-family:var(--sans); margin-left:2px; }
+  .stat .l { font-family:var(--mono); font-size:10px; letter-spacing:0.08em; text-transform:uppercase; color:var(--ink-3); margin-top:10px; }
+
+  .cols-2 { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+  .cols-3 { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+
+  .card { border:1px solid var(--line); border-radius:var(--r); background:var(--elev); padding:20px; }
+  .card h4 { font-size:15.5px; font-weight:550; letter-spacing:-0.01em; margin-bottom:6px; }
+  .card p { font-size:13.5px; line-height:1.55; color:var(--ink-3); margin:0; }
+  .card .tag { font-family:var(--mono); font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:var(--accent-ink); display:block; margin-bottom:12px; }
+
+  /* Flow */
+  .flow { display:grid; grid-template-columns:repeat(5,1fr); gap:0; border:1px solid var(--line); border-radius:var(--r); overflow:hidden; }
+  .flow .step { padding:18px 14px; border-right:1px solid var(--line); position:relative; background:var(--elev); }
+  .flow .step:last-child { border-right:0; }
+  .flow .step .n { font-family:var(--mono); font-size:10px; letter-spacing:0.1em; color:var(--ink-4); }
+  .flow .step h4 { font-family:var(--serif); font-weight:420; font-size:18px; margin:6px 0 5px; letter-spacing:-0.01em; }
+  .flow .step p { font-size:11.5px; line-height:1.45; color:var(--ink-3); margin:0; }
+  .flow .step .arr { position:absolute; right:-9px; top:22px; z-index:2; width:18px; height:18px; border-radius:50%; background:var(--ink); color:var(--paper); display:grid; place-items:center; font-size:10px; }
+  .flow .step:last-child .arr { display:none; }
+
+  /* Tables */
+  .tbl { width:100%; border-collapse:collapse; font-size:13.5px; }
+  .tbl th { text-align:left; font-family:var(--mono); font-size:10px; letter-spacing:0.08em; text-transform:uppercase; color:var(--ink-3); padding:10px 12px; border-bottom:2px solid var(--line-2); font-weight:500; }
+  .tbl td { padding:10px 12px; border-bottom:1px solid var(--line); color:var(--ink-2); vertical-align:top; }
+  .tbl tr:last-child td { border-bottom:none; }
+  .tbl .cost { font-family:var(--mono); font-size:12px; color:var(--accent-ink); font-weight:500; }
+  .tbl .free { font-family:var(--mono); font-size:12px; color:var(--good); font-weight:500; }
+  .tbl .badge-s { font-family:var(--mono); font-size:9px; letter-spacing:0.08em; text-transform:uppercase; padding:2px 7px; border-radius:100px; font-weight:500; white-space:nowrap; }
+  .badge-s.primary { background:var(--accent-soft); color:var(--accent-ink); }
+  .badge-s.existing { background:var(--good-soft); color:var(--good); }
+  .badge-s.new { background:var(--blue-soft); color:var(--blue); }
+  .badge-s.phase2 { background:var(--warn-soft); color:oklch(0.48 0.13 70); }
+
+  /* Tiers */
+  .tier { border:1px solid var(--line); border-left-width:4px; border-radius:10px; background:var(--elev); padding:16px 18px; margin-bottom:12px; }
+  .tier.red { border-left-color:var(--bad); }
+  .tier.blue { border-left-color:var(--blue); }
+  .tier.green { border-left-color:var(--good); }
+  .tier .th { display:flex; align-items:center; gap:10px; margin-bottom:6px; }
+  .tier .badge { font-family:var(--mono); font-size:9.5px; letter-spacing:0.1em; text-transform:uppercase; padding:3px 8px; border-radius:100px; font-weight:500; }
+  .tier.red .badge { background:var(--bad-soft); color:var(--bad); }
+  .tier.blue .badge { background:var(--blue-soft); color:var(--blue); }
+  .tier.green .badge { background:var(--good-soft); color:var(--good); }
+  .tier h4 { font-size:15.5px; font-weight:550; }
+  .tier p { font-size:13.5px; color:var(--ink-3); margin:0; }
+  .tier .ex { font-family:var(--mono); font-size:11.5px; color:var(--ink-3); margin-top:8px; padding-top:8px; border-top:1px dashed var(--line); }
+  .tier .ex b { color:var(--ink-2); font-weight:500; }
+
+  /* Code blocks */
+  .codeblock {
+    background:#0C0C0A; color:oklch(0.84 0 0); font-family:var(--mono); font-size:12px; line-height:1.6;
+    padding:18px 20px; border-radius:var(--r); overflow-x:auto; margin:14px 0;
+  }
+  .codeblock .cm { color:oklch(0.50 0 0); }
+  .codeblock .kw { color:oklch(0.72 0.14 25); }
+  .codeblock .str { color:oklch(0.72 0.12 155); }
+  .codeblock .fn { color:oklch(0.78 0.10 255); }
+  .codeblock .type { color:oklch(0.78 0.10 60); }
+
+  /* Pipeline diagram */
+  .pipeline { display:flex; flex-direction:column; gap:0; }
+  .pipe-row { display:grid; grid-template-columns:140px 1fr; gap:16px; padding:16px 0; border-top:1px solid var(--line); align-items:start; }
+  .pipe-row:first-child { border-top:none; }
+  .pipe-label { font-family:var(--mono); font-size:11px; letter-spacing:0.06em; text-transform:uppercase; color:var(--accent-ink); padding-top:2px; }
+  .pipe-content { font-size:13.5px; color:var(--ink-2); line-height:1.55; }
+  .pipe-content strong { display:block; font-size:14.5px; margin-bottom:3px; }
+
+  /* Architecture box */
+  .arch-box {
+    border:1px solid var(--line-2); border-radius:var(--r); background:var(--elev);
+    padding:24px; font-family:var(--mono); font-size:12px; line-height:2.2;
+    color:var(--ink-2); white-space:pre-wrap; overflow-x:auto;
+  }
+  .arch-box .heading { font-family:var(--sans); font-weight:550; font-size:13px; color:var(--ink); letter-spacing:0; text-transform:none; }
+  .arch-box .arrow { color:var(--accent); }
+  .arch-box .dim { color:var(--ink-4); }
+
+  /* Phases */
+  .phase { display:grid; grid-template-columns:120px 1fr; gap:20px; padding:18px 0; border-top:1px solid var(--line); }
+  .phase:last-child { border-bottom:1px solid var(--line); }
+  .phase .pl { font-family:var(--mono); font-size:11px; letter-spacing:0.06em; text-transform:uppercase; color:var(--accent-ink); }
+  .phase .pl b { display:block; font-family:var(--serif); font-size:22px; color:var(--ink); letter-spacing:-0.01em; margin-bottom:4px; text-transform:none; font-weight:400; }
+  .phase ul { margin:0; padding:0; list-style:none; columns:2; column-gap:24px; }
+  .phase li { font-size:13px; color:var(--ink-2); padding:2px 0 2px 16px; position:relative; break-inside:avoid; }
+  .phase li::before { content:"\2192"; position:absolute; left:0; color:var(--accent); font-size:11px; }
+
+  /* Closing */
+  .closing {
+    background:#0C0C0A; color:var(--paper); padding:54px 56px; border-radius:var(--r-lg) var(--r-lg) 0 0;
+    position:relative; overflow:hidden;
+  }
+  .closing::before { content:""; position:absolute; inset:0; background:radial-gradient(circle at 10% 0%, oklch(0.45 0.18 25 / 0.45), transparent 50%); pointer-events:none; }
+  .closing > * { position:relative; z-index:1; }
+  .closing h2 { font-family:var(--serif); font-weight:340; font-size:36px; line-height:1.08; letter-spacing:-0.02em; margin-bottom:14px; }
+  .closing h2 .a { color:var(--accent); font-style:italic; }
+  .closing p { color:oklch(0.82 0 0); font-size:15px; max-width:54ch; }
+  .foot { display:flex; flex-wrap:wrap; gap:6px 24px; margin-top:34px; padding-top:20px; border-top:1px solid oklch(0.24 0 0); font-family:var(--mono); font-size:10px; letter-spacing:0.06em; text-transform:uppercase; color:oklch(0.60 0 0); }
+
+  .printbtn {
+    position:fixed; top:18px; right:18px; z-index:99; font-family:var(--mono); font-size:11px; letter-spacing:0.08em; text-transform:uppercase;
+    background:var(--ink); color:var(--paper); border:0; border-radius:100px; padding:10px 16px; cursor:pointer; box-shadow:0 6px 20px -6px rgba(0,0,0,0.4);
+  }
+  .printbtn:hover { background:var(--ink-2); }
+
+  /* List styling */
+  .content-list { margin:8px 0; padding:0 0 0 20px; }
+  .content-list li { font-size:13.5px; color:var(--ink-2); padding:3px 0; line-height:1.5; }
+  .content-list li strong { color:var(--ink); }
+
+  /* Callout */
+  .callout { background:var(--sunk); border:1px solid var(--line); border-radius:var(--r); padding:16px 18px; margin:16px 0; }
+  .callout .cl { font-family:var(--mono); font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:var(--accent-ink); margin-bottom:6px; }
+  .callout p { font-size:13.5px; color:var(--ink-2); margin:0; line-height:1.55; }
+
+  /* Severity badges inline */
+  .sev { font-family:var(--mono); font-size:10px; letter-spacing:0.06em; text-transform:uppercase; padding:2px 8px; border-radius:100px; font-weight:500; }
+  .sev.crisis { background:var(--bad-soft); color:var(--bad); }
+  .sev.negative { background:var(--warn-soft); color:oklch(0.48 0.13 70); }
+  .sev.neutral { background:var(--sunk); color:var(--ink-3); }
+  .sev.positive { background:var(--good-soft); color:var(--good); }
+
+  @media (max-width:720px) {
+    section,.cover,.closing { padding-left:24px; padding-right:24px; }
+    .rule { margin:0 24px; }
+    .cover h1 { font-size:52px; } .cover .subtitle { font-size:20px; }
+    .h-sec { font-size:28px; }
+    .stat-grid,.cols-2,.cols-3,.flow { grid-template-columns:1fr; }
+    .flow .step { border-right:0; border-bottom:1px solid var(--line); } .flow .step .arr { display:none; }
+    .pipe-row,.phase { grid-template-columns:1fr; gap:8px; } .phase ul { columns:1; }
+    .tbl { font-size:12px; } .tbl th,.tbl td { padding:8px; }
+    .arch-box { font-size:10.5px; padding:16px; }
+  }
+
+  @media print {
+    @page { size:A4; margin:14mm; }
+    body { background:#fff; font-size:11px; }
+    .doc { max-width:none; }
+    section,.rule { padding-left:0; padding-right:0; margin-left:0; margin-right:0; }
+    .printbtn { display:none; }
+    .cover,.closing,.tier { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+    * { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+    .cover { border-radius:0; padding:34px 0; }
+    .cover h1 { font-size:64px; }
+    .closing { border-radius:0; padding:34px 0; }
+    .gap { height:28px; } .gap-sm { height:16px; }
+    .h-sec { font-size:24px; } .h-sub { font-size:18px; }
+    section,.card,.flow,.tier,.pipe-row,.phase,.stat { break-inside:avoid; }
+    .sheet { break-before:page; }
+    .codeblock { font-size:10px; padding:12px; }
+    .arch-box { font-size:10px; }
+  }
+</style>
+</head>
+<body>
+<button class="printbtn" onclick="window.print()">&#8615; Print / Save as PDF</button>
+<div class="doc">
+
+  <!-- ============ COVER ============ -->
+  <section class="cover">
+    <div class="kicker"><span class="dot"></span> Sociafy &middot; Technical Proposal &middot; Confidential</div>
+    <div class="wordmark">sociafy<span class="dot">.</span></div>
+    <h1>Reputation<br>Shield<span class="stop">.</span></h1>
+    <div class="subtitle">Detect Brand Negativity. Generate Crisis Response Videos. Automatically.</div>
+    <p class="promise">Continuously monitor <b>every corner of the internet</b> for brand negativity &mdash; news, social media, forums, reviews. When a crisis hits, <b>auto-generate a professional response video</b> with your brand spokesperson's voice and face in under 3 minutes. From detection to defense, fully automated.</p>
+
+    <div class="meta">
+      <span>Version <b>1.0</b></span>
+      <span>Date <b>June 2026</b></span>
+      <span>Prepared for <b>Founding Team</b></span>
+      <span>Type <b>Technical Proposal</b></span>
+      <span>Classification <b>Confidential</b></span>
+    </div>
+  </section>
+
+  <div class="gap"></div>
+
+  <!-- ============ 01 — EXECUTIVE SUMMARY ============ -->
+  <section>
+    <div class="eyebrow">What this is <span class="num">01 &mdash; Executive Summary</span></div>
+    <h2 class="h-sec">Brand crises are won or lost in the <span class="accent">first 60 minutes.</span></h2>
+    <p class="lede">Reputation Shield extends Sociafy's existing Pulse listening infrastructure with two critical capabilities: (1) deep negative-mention intelligence from 8+ internet sources, scored and triaged by severity, and (2) automated crisis-response video generation &mdash; where the brand's own spokesperson (AI avatar + cloned voice) addresses the specific allegation in a polished, publishable video. Detection to defense in under 3 minutes, at under $2 per video.</p>
+
+    <div class="gap-sm"></div>
+    <div class="stat-grid">
+      <div class="stat"><div class="v">8<span class="u">+</span></div><div class="l">Internet sources monitored</div></div>
+      <div class="stat"><div class="v">&lt;15<span class="u">min</span></div><div class="l">Negativity detection latency</div></div>
+      <div class="stat"><div class="v">&lt;3<span class="u">min</span></div><div class="l">Video generation time</div></div>
+      <div class="stat"><div class="v">~$1.50</div><div class="l">Cost per response video</div></div>
+    </div>
+
+    <div class="callout" style="margin-top:24px;">
+      <div class="cl">Key Differentiator</div>
+      <p>No tool on the market combines continuous brand monitoring with automated video response generation at this price point. Enterprise solutions (Meltwater, Brandwatch) charge $25,000&ndash;$100,000/year for monitoring alone, without any video capability. Reputation Shield delivers both for a fraction of that cost by leveraging Sociafy's existing AI, voice cloning, and avatar infrastructure.</p>
+    </div>
+  </section>
+
+  <div class="gap"></div>
+  <div class="rule"></div>
+  <div class="gap"></div>
+
+  <!-- ============ 02 — PROBLEM ============ -->
+  <section>
+    <div class="eyebrow">Why it matters <span class="num">02 &mdash; Problem Statement</span></div>
+    <h2 class="h-sec">Negativity spreads at internet speed. <span class="accent">Brands respond at email speed.</span></h2>
+    <p class="lede" style="margin-bottom:24px;">A single viral negative post can destroy months of brand-building overnight. Founders and small teams don't have the bandwidth to monitor every platform, and when a crisis hits, producing a professional video response takes days &mdash; by which time the narrative is already set.</p>
+
+    <div class="cols-2">
+      <div class="card">
+        <span class="tag">Problem 01</span>
+        <h4>Negativity is everywhere, invisible until it's too late</h4>
+        <p>A scathing Reddit thread, a 1-star review, a Twitter pile-on, a news article quoting a competitor &mdash; brand-damaging content appears across dozens of platforms simultaneously. No human can watch them all. By the time you find it, 10,000 people have already seen it.</p>
+      </div>
+      <div class="card">
+        <span class="tag">Problem 02</span>
+        <h4>Text responses feel weak against viral attacks</h4>
+        <p>A tweet or press release in response to a viral video feels like bringing a knife to a gunfight. Video is the dominant medium. A real human (or convincing avatar) addressing the specific allegation on camera carries 10x the weight of a text post. But producing video takes days.</p>
+      </div>
+      <div class="card">
+        <span class="tag">Problem 03</span>
+        <h4>Enterprise tools are priced for Fortune 500</h4>
+        <p>Meltwater starts at $6,000/year. Brandwatch at $10,000. Sprinklr at $25,000. These tools only <em>monitor</em> &mdash; they don't help you respond. For a startup or small brand, this is out of reach. The brands that need reputation defense most can afford it least.</p>
+      </div>
+      <div class="card">
+        <span class="tag">Problem 04</span>
+        <h4>Generic responses make things worse</h4>
+        <p>A cookie-cutter "We take this seriously" response is worse than silence. Each crisis needs a specific, factual, empathetic response that addresses the exact allegation. This requires understanding the context &mdash; what was said, where, by whom, and what the public sentiment is.</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="gap"></div>
+
+  <!-- ============ 03 — SOLUTION OVERVIEW ============ -->
+  <section class="sheet">
+    <div class="eyebrow">The system <span class="num">03 &mdash; Solution Architecture</span></div>
+    <h2 class="h-sec">Five-stage pipeline: <span class="accent">Collect &rarr; Analyze &rarr; Triage &rarr; Script &rarr; Generate.</span></h2>
+    <p class="lede" style="margin-bottom:26px;">Every 15 minutes, Reputation Shield sweeps 8+ internet sources for brand mentions. Negative mentions flow through a two-pass sentiment analysis, get severity-scored, and if threat level exceeds the brand's threshold, the system auto-generates a custom video response featuring the brand's AI spokesperson.</p>
+
+    <div class="flow">
+      <div class="step"><div class="n">01</div><h4>Collect</h4><p>Sweep 8+ sources for brand mentions. De-duplicate by URL. Extract clean text.</p><div class="arr">&rarr;</div></div>
+      <div class="step"><div class="n">02</div><h4>Analyze</h4><p>VADER pre-filter, then GPT-5-mini deep classification: sentiment, severity, theme.</p><div class="arr">&rarr;</div></div>
+      <div class="step"><div class="n">03</div><h4>Triage</h4><p>Score threat level. Route: auto-reply, draft response, escalate, or trigger video.</p><div class="arr">&rarr;</div></div>
+      <div class="step"><div class="n">04</div><h4>Script</h4><p>GPT-5 writes a crisis-specific response script using brand voice + context.</p><div class="arr">&rarr;</div></div>
+      <div class="step"><div class="n">05</div><h4>Video</h4><p>Voice clone + avatar engine produce a polished spokesperson video in &lt;3 min.</p></div>
+    </div>
+  </section>
+
+  <div class="gap"></div>
+  <div class="rule"></div>
+  <div class="gap"></div>
+
+  <!-- ============ 04 — DATA SOURCES ============ -->
+  <section class="sheet">
+    <div class="eyebrow">Where we look <span class="num">04 &mdash; Data Sources &amp; APIs</span></div>
+    <h2 class="h-sec">Eight sources across four layers of the internet.</h2>
+    <p class="lede" style="margin-bottom:20px;">Each source is chosen for signal quality, cost efficiency, and legal clarity. We reuse Sociafy's existing API integrations wherever possible.</p>
+
+    <div style="overflow-x:auto;">
+    <table class="tbl">
+      <thead>
+        <tr>
+          <th style="width:150px;">Source</th>
+          <th>API / Method</th>
+          <th style="width:120px;">Cost</th>
+          <th style="width:90px;">Frequency</th>
+          <th style="width:80px;">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Brave Search (News)</strong></td>
+          <td><code>GET /res/v1/news/search</code> &mdash; brand keyword query. Returns title, URL, description, age, hostname. Covers news sites, blogs, press releases. Auth: <code>X-Subscription-Token</code> header.</td>
+          <td class="cost">$0.005/query</td>
+          <td>Every 15 min</td>
+          <td><span class="badge-s existing">Existing</span></td>
+        </tr>
+        <tr>
+          <td><strong>Brave Search (Web)</strong></td>
+          <td><code>GET /res/v1/web/search</code> &mdash; catches blog posts, forums, and long-tail mentions that don't appear in news index. Same auth. Supplement news endpoint for broader coverage.</td>
+          <td class="cost">$0.005/query</td>
+          <td>Every 30 min</td>
+          <td><span class="badge-s existing">Existing</span></td>
+        </tr>
+        <tr>
+          <td><strong>Reddit</strong></td>
+          <td><code>GET /search.json?q={brand}&sort=new</code> &mdash; free JSON endpoint, officially sanctioned by Reddit. Returns title, selftext, subreddit, score, num_comments, created_utc. Auth: OAuth 2.0 (register at reddit.com/prefs/apps). Also supports subreddit-specific search: <code>/r/{sub}/search.json</code>.</td>
+          <td class="free">Free (60 req/min)</td>
+          <td>Every 30 min</td>
+          <td><span class="badge-s new">New</span></td>
+        </tr>
+        <tr>
+          <td><strong>GDELT Global News</strong></td>
+          <td><code>GET api.gdeltproject.org/api/v2/doc/doc?query={brand}&mode=artlist&format=json</code> &mdash; no authentication required. Updates every 15 min. Covers 100+ languages, nearly every country. Returns URL, title, seendate, domain, language, sourcecountry. Includes built-in <strong>tone score</strong> (-10 to +10) for free sentiment pre-scoring.</td>
+          <td class="free">Free</td>
+          <td>Every 60 min</td>
+          <td><span class="badge-s new">New</span></td>
+        </tr>
+        <tr>
+          <td><strong>Serper.dev (Google SERP)</strong></td>
+          <td><code>POST https://google.serper.dev/news</code> &mdash; structured Google News results. Returns title, link, snippet, date, source. Supports <code>gl</code> (country), <code>hl</code> (language), <code>tbs</code> (time range) params. Auth: API key in <code>X-API-KEY</code> header. Legal: Serper assumes Google ToS risk on your behalf.</td>
+          <td class="cost">$0.001/query&nbsp;($50/yr)</td>
+          <td>Every 30 min</td>
+          <td><span class="badge-s new">New</span></td>
+        </tr>
+        <tr>
+          <td><strong>YouTube Data API v3</strong></td>
+          <td><code>GET /youtube/v3/search?q={brand}&type=video&order=date</code> + <code>GET /youtube/v3/commentThreads?videoId={id}</code>. Returns video metadata + comment threads. Auth: existing Google OAuth credentials. 10,000 quota units/day free (search = 100 units, comments = 1 unit).</td>
+          <td class="free">Free (10K units/day)</td>
+          <td>Every 60 min</td>
+          <td><span class="badge-s existing">Existing OAuth</span></td>
+        </tr>
+        <tr>
+          <td><strong>X / Twitter Recent Search</strong></td>
+          <td><code>GET /2/tweets/search/recent?query={brand}</code> &mdash; 7-day window on Basic tier ($200/mo, already paying). Returns tweet text, public_metrics, author_id, context_annotations. 60 requests/15min. Auth: existing OAuth 2.0 credentials.</td>
+          <td class="free">Included in Basic</td>
+          <td>Every 30 min</td>
+          <td><span class="badge-s existing">Existing</span></td>
+        </tr>
+        <tr>
+          <td><strong>Own Social (Comments/DMs)</strong></td>
+          <td>Reuse existing platform adapters + webhooks for Instagram, Facebook, LinkedIn, TikTok. Already authenticated &mdash; subscribe to inbound side of channels already connected. Near-real-time via webhooks where available.</td>
+          <td class="free">Already integrated</td>
+          <td>Real-time</td>
+          <td><span class="badge-s existing">Existing</span></td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+
+    <div class="callout" style="margin-top:18px;">
+      <div class="cl">Phase 2 Sources (After MVP proven)</div>
+      <p><strong>Google Business Reviews</strong> via Places API ($17/1K requests) &middot; <strong>Trustpilot</strong> via Business API (requires partnership) &middot; <strong>App Store / Play Store</strong> reviews via RSS feeds (free) &middot; <strong>Hacker News</strong> via Algolia API (free, already integrated in trends) &middot; <strong>Quora</strong> via web search proxy &middot; <strong>LinkedIn articles/comments</strong> via Marketing API (requires approved app)</p>
+    </div>
+
+    <h3 class="h-sub">Estimated monitoring cost per brand per month</h3>
+    <div style="overflow-x:auto;">
+    <table class="tbl">
+      <thead>
+        <tr><th>Source</th><th>Queries/Day</th><th>Unit Cost</th><th>Monthly Cost</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Brave News + Web</td><td>96 + 48 = 144</td><td>$0.005/query</td><td class="cost">$21.60</td></tr>
+        <tr><td>Serper.dev (Google)</td><td>48</td><td>$0.001/query</td><td class="cost">$1.44</td></tr>
+        <tr><td>Reddit</td><td>48</td><td>Free</td><td class="free">$0.00</td></tr>
+        <tr><td>GDELT</td><td>24</td><td>Free</td><td class="free">$0.00</td></tr>
+        <tr><td>YouTube</td><td>24</td><td>Free (within quota)</td><td class="free">$0.00</td></tr>
+        <tr><td>X/Twitter</td><td>48</td><td>Included in Basic</td><td class="free">$0.00</td></tr>
+        <tr><td>Own Social</td><td>Webhook-driven</td><td>Already integrated</td><td class="free">$0.00</td></tr>
+        <tr><td>GPT-5-mini sentiment</td><td>~50 negative mentions</td><td>$0.00015/mention</td><td class="cost">$0.23</td></tr>
+        <tr><td colspan="3" style="text-align:right; font-weight:550;">Total per brand/month</td><td class="cost" style="font-size:15px;">~$23.27</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+  <div class="gap"></div>
+  <div class="rule"></div>
+  <div class="gap"></div>
+
+  <!-- ============ 05 — COLLECTION PIPELINE ============ -->
+  <section class="sheet">
+    <div class="eyebrow">How we fetch <span class="num">05 &mdash; Data Collection Pipeline</span></div>
+    <h2 class="h-sec">Cron-driven, serverless-native, <span class="accent">fault-tolerant collection.</span></h2>
+
+    <h3 class="h-sub">Architecture</h3>
+    <div class="arch-box"><span class="heading">Collection Pipeline Architecture</span>
+
+<span class="dim">&#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;</span>
+<span class="dim">&#9474;</span>  <span class="heading">Vercel Cron: /api/cron/reputation-monitor</span> (every 15 min)                <span class="dim">&#9474;</span>
+<span class="dim">&#9474;</span>                                                                            <span class="dim">&#9474;</span>
+<span class="dim">&#9474;</span>  For each user with Shield enabled:                                         <span class="dim">&#9474;</span>
+<span class="dim">&#9474;</span>                                                                            <span class="dim">&#9474;</span>
+<span class="dim">&#9474;</span>  <span class="arrow">&#9472;&#9472;&#9472;&#9658;</span> Brave News API    <span class="arrow">&#9472;&#9472;&#9472;&#9658;</span> &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;                              <span class="dim">&#9474;</span>
+<span class="dim">&#9474;</span>  <span class="arrow">&#9472;&#9472;&#9472;&#9658;</span> Serper.dev        <span class="arrow">&#9472;&#9472;&#9472;&#9658;</span> &#9474;                  &#9474;    <span class="arrow">&#9472;&#9472;&#9472;&#9658;</span> VADER pre-filter       <span class="dim">&#9474;</span>
+<span class="dim">&#9474;</span>  <span class="arrow">&#9472;&#9472;&#9472;&#9658;</span> Reddit JSON       <span class="arrow">&#9472;&#9472;&#9472;&#9658;</span> &#9474;   De-duplicate    &#9474;    <span class="arrow">&#9472;&#9472;&#9472;&#9658;</span> GPT-5-mini sentiment   <span class="dim">&#9474;</span>
+<span class="dim">&#9474;</span>  <span class="arrow">&#9472;&#9472;&#9472;&#9658;</span> GDELT DOC API     <span class="arrow">&#9472;&#9472;&#9472;&#9658;</span> &#9474;   by URL hash     &#9474;    <span class="arrow">&#9472;&#9472;&#9472;&#9658;</span> Store in DB            <span class="dim">&#9474;</span>
+<span class="dim">&#9474;</span>  <span class="arrow">&#9472;&#9472;&#9472;&#9658;</span> YouTube Search    <span class="arrow">&#9472;&#9472;&#9472;&#9658;</span> &#9474;   + Readability   &#9474;    <span class="arrow">&#9472;&#9472;&#9472;&#9658;</span> If CRISIS &#8594; alert     <span class="dim">&#9474;</span>
+<span class="dim">&#9474;</span>  <span class="arrow">&#9472;&#9472;&#9472;&#9658;</span> X Recent Search   <span class="arrow">&#9472;&#9472;&#9472;&#9658;</span> &#9474;   text extract    &#9474;    <span class="arrow">&#9472;&#9472;&#9472;&#9658;</span> If CRISIS &#8594; video     <span class="dim">&#9474;</span>
+<span class="dim">&#9474;</span>  <span class="arrow">&#9472;&#9472;&#9472;&#9658;</span> Social webhooks   <span class="arrow">&#9472;&#9472;&#9472;&#9658;</span> &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;                              <span class="dim">&#9474;</span>
+<span class="dim">&#9474;</span>                                                                            <span class="dim">&#9474;</span>
+<span class="dim">&#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;</span></div>
+
+    <h3 class="h-sub">Source-by-source integration details</h3>
+
+    <div class="pipeline">
+      <div class="pipe-row">
+        <div class="pipe-label">Brave Search</div>
+        <div class="pipe-content">
+          <strong>Endpoint &amp; Auth</strong>
+          Two endpoints: <code>/res/v1/news/search</code> for news coverage, <code>/res/v1/web/search</code> for broader web mentions. Auth via <code>X-Subscription-Token</code> header with existing <code>BRAVE_API_KEY</code>. Rate limit: 50 req/sec (paid tier).
+          <br><br><strong>Query Strategy</strong>
+          For each monitored brand, send: <code>"{brand_name}" OR "{product_name}" OR "{founder_name}"</code>. Add <code>&freshness=pd</code> (past day) to limit to recent results. Parse <code>results[].title</code>, <code>results[].url</code>, <code>results[].description</code>, <code>results[].age</code>.
+          <br><br><strong>Integration Point</strong>
+          Reuse existing <code>BRAVE_API_KEY</code> from <code>lib/env.ts</code>. Extend the web_search tool in <code>lib/ai/skills/</code> with a dedicated news-search wrapper.
+        </div>
+      </div>
+
+      <div class="pipe-row">
+        <div class="pipe-label">Reddit</div>
+        <div class="pipe-content">
+          <strong>Endpoint &amp; Auth</strong>
+          Public JSON feed: <code>https://www.reddit.com/search.json?q={brand}&sort=new&limit=100</code>. Requires <code>User-Agent</code> header identifying our bot. For authenticated access (60 req/min vs 10): register an app at reddit.com/prefs/apps, get <code>client_id</code>/<code>client_secret</code>, obtain bearer token via <code>POST /api/v1/access_token</code> with grant_type=client_credentials.
+          <br><br><strong>Data Extracted</strong>
+          From <code>data.children[].data</code>: <code>title</code>, <code>selftext</code> (post body), <code>subreddit</code>, <code>score</code> (upvotes), <code>num_comments</code>, <code>url</code>, <code>created_utc</code>, <code>author</code>. Score velocity (score / age_hours) indicates viral potential.
+          <br><br><strong>Subreddit Watchlists</strong>
+          Users configure which subreddits to watch (e.g., <code>r/SaaS</code>, <code>r/startups</code>, <code>r/technology</code>, product-specific subs). System also does global <code>/search.json</code> for brand name across all of Reddit.
+        </div>
+      </div>
+
+      <div class="pipe-row">
+        <div class="pipe-label">GDELT</div>
+        <div class="pipe-content">
+          <strong>Endpoint &amp; Auth</strong>
+          <code>GET https://api.gdeltproject.org/api/v2/doc/doc?query={brand}&mode=artlist&format=json&maxrecords=75&timespan=1h</code>. No authentication needed. Free. Updates every 15 minutes. Covers 100+ languages and virtually every country on Earth.
+          <br><br><strong>Built-in Sentiment</strong>
+          GDELT's GKG (Global Knowledge Graph) includes a <code>tone</code> field scored from -10 (extremely negative) to +10 (extremely positive). This gives us a free first-pass sentiment signal before we spend money on LLM classification.
+          <br><br><strong>Why GDELT</strong>
+          It's the only source that provides global, multilingual news monitoring at zero cost. Catches press coverage in local-language publications that Brave/Serper miss. Particularly valuable for brands with international presence.
+        </div>
+      </div>
+
+      <div class="pipe-row">
+        <div class="pipe-label">Serper.dev</div>
+        <div class="pipe-content">
+          <strong>Endpoint &amp; Auth</strong>
+          <code>POST https://google.serper.dev/news</code> with JSON body: <code>{"q": "{brand}", "gl": "us", "num": 20}</code>. Auth: <code>X-API-KEY</code> header. Returns structured Google News results including <code>title</code>, <code>link</code>, <code>snippet</code>, <code>date</code>, <code>source</code>.
+          <br><br><strong>Why Serper</strong>
+          Cheapest Google SERP API: $0.001/query ($50/yr for 50K queries, credits last 6 months). Up to 300 queries/sec. Catches mentions that appear in Google results but not in Brave's news index. Also supports <code>/search</code> endpoint for general web results and <code>/images</code> for visual content monitoring.
+          <br><br><strong>Legal Note</strong>
+          Serper assumes the legal risk of querying Google programmatically. No ToS violation on our end.
+        </div>
+      </div>
+
+      <div class="pipe-row">
+        <div class="pipe-label">YouTube</div>
+        <div class="pipe-content">
+          <strong>Endpoint &amp; Auth</strong>
+          Search: <code>GET /youtube/v3/search?q={brand}&type=video&order=date&part=snippet</code> (100 quota units). Comments: <code>GET /youtube/v3/commentThreads?videoId={id}&part=snippet</code> (1 unit). Auth: existing <code>GOOGLE_CLIENT_ID</code>/<code>GOOGLE_CLIENT_SECRET</code> OAuth credentials.
+          <br><br><strong>Quota Budget</strong>
+          10,000 units/day free. Reserve 3,000 for publishing (2 uploads &times; 1,600 units). Remaining 7,000 supports ~70 video searches + comment reads per day. For multi-brand monitoring, request a quota increase (free, Google review required).
+          <br><br><strong>Signal Value</strong>
+          YouTube videos about a brand often carry the highest reputation impact. A negative video review can accumulate millions of views. Comment sections are goldmines for sentiment that doesn't appear on any other platform.
+        </div>
+      </div>
+
+      <div class="pipe-row">
+        <div class="pipe-label">X / Twitter</div>
+        <div class="pipe-content">
+          <strong>Endpoint &amp; Auth</strong>
+          <code>GET /2/tweets/search/recent?query={brand} -is:retweet</code>. Returns text, public_metrics (retweet_count, like_count, reply_count), author_id, context_annotations. 7-day search window. Auth: existing OAuth 2.0 credentials.
+          <br><br><strong>Tier Constraints</strong>
+          Basic tier ($200/mo, already paying): 60 requests/15min, 10,000 tweets/month search limit. Sufficient for monitoring ~5 brands. Filtered Stream (real-time firehose) requires Pro ($5,000/mo) &mdash; skip unless revenue justifies it.
+          <br><br><strong>Engagement as Signal</strong>
+          <code>public_metrics.like_count + reply_count * 2 + retweet_count * 3</code> &mdash; same engagement weighting formula already used in <code>lib/ai/skills/posts.ts</code>.
+        </div>
+      </div>
+    </div>
+
+    <h3 class="h-sub">Article text extraction</h3>
+    <p>When a mention URL points to a news article or blog post, we need the full text for accurate sentiment analysis. Use Mozilla's <strong>Readability.js</strong> (<code>@mozilla/readability</code> npm package) &mdash; the same engine that powers Firefox Reader View. Already battle-tested, actively maintained. Extend the existing <code>lib/ai/skills/fetch-url.ts</code> (which already has SSRF protection) to pipe fetched HTML through Readability before sending to the LLM.</p>
+
+    <h3 class="h-sub">De-duplication strategy</h3>
+    <p>The same story appears on multiple sources simultaneously. De-duplicate by:</p>
+    <ul class="content-list">
+      <li><strong>URL hash</strong> &mdash; SHA-256 of normalized URL (strip query params, trailing slashes, www prefix)</li>
+      <li><strong>Title similarity</strong> &mdash; Jaccard similarity on tokenized title. Threshold: 0.7 for merge. Catches syndicated articles with slightly different headlines.</li>
+      <li><strong>Recency window</strong> &mdash; Skip mentions already seen in the last 24 hours (by URL hash lookup in <code>mentions</code> table)</li>
+    </ul>
+  </section>
+
+  <div class="gap"></div>
+  <div class="rule"></div>
+  <div class="gap"></div>
+
+  <!-- ============ 06 — SENTIMENT & ANALYSIS ============ -->
+  <section class="sheet">
+    <div class="eyebrow">How we understand <span class="num">06 &mdash; Sentiment Analysis &amp; Threat Scoring</span></div>
+    <h2 class="h-sec">Two-pass analysis: <span class="accent">fast filter, then deep classification.</span></h2>
+
+    <h3 class="h-sub">Pass 1: VADER pre-filter (free, &lt;1ms)</h3>
+    <p>Every collected mention passes through <strong>VADER</strong> (Valence Aware Dictionary for Sentiment Reasoning) &mdash; a lexicon-based sentiment tool specifically designed for social media text. It handles slang, emoji, capitalization, and punctuation emphasis. Available as <code>vader-sentiment</code> npm package. Runs in-process, zero API cost, sub-millisecond per classification.</p>
+    <p>VADER returns a <strong>compound score</strong> from -1.0 (most negative) to +1.0 (most positive). We use it as a gate:</p>
+    <ul class="content-list">
+      <li><strong>Compound &lt; -0.3</strong>: Route to GPT-5-mini for deep analysis (potentially negative)</li>
+      <li><strong>Compound -0.3 to +0.3</strong>: Log as neutral, skip LLM (saves ~60% of LLM costs)</li>
+      <li><strong>Compound &gt; +0.3</strong>: Log as positive, optional "thank you" draft</li>
+    </ul>
+
+    <h3 class="h-sub">Pass 2: GPT-5-mini deep classification ($0.00015/mention)</h3>
+    <p>Mentions that pass the VADER negativity threshold get sent to GPT-5-mini with a structured classification prompt. Cost: ~200 input tokens + ~80 output tokens = $0.00015 per mention. At 50 negative mentions/day, this costs $0.23/month per brand.</p>
+
+    <div class="codeblock"><span class="cm">// Prompt template for deep sentiment classification</span>
+<span class="kw">const</span> classificationPrompt = <span class="str">`
+You are a brand reputation analyst. Classify this mention.
+
+Brand: {brand_name}
+Mention source: {source}
+Mention text: {text}
+
+Return JSON:
+{
+  "sentiment": "crisis" | "negative" | "neutral" | "positive",
+  "severity": 1-10,          // 10 = existential threat
+  "intent": "praise" | "question" | "complaint" | "accusation" |
+            "comparison" | "misinformation" | "legal_threat",
+  "theme": string,            // e.g., "pricing", "data breach", "product quality"
+  "reach_estimate": "low" | "medium" | "high" | "viral",
+  "allegation_summary": string | null,  // one-line summary of the specific claim
+  "suggested_action": "auto_reply" | "draft_response" | "escalate" |
+                      "generate_video" | "ignore",
+  "response_angle": string    // suggested angle for the response
+}`</span></div>
+
+    <h3 class="h-sub">Threat severity matrix</h3>
+    <div style="overflow-x:auto;">
+    <table class="tbl">
+      <thead>
+        <tr><th>Level</th><th>Severity</th><th>Criteria</th><th>System Response</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="sev crisis">Crisis</span></td>
+          <td>8&ndash;10</td>
+          <td>Viral reach (>1K engagements), legal/safety accusation, mainstream media, data breach allegation, fraud claim, or multiple negative mentions converging on the same theme within 1 hour</td>
+          <td><strong>Immediate alert</strong> (email + in-app) + <strong>auto-generate response video</strong> + draft text responses for all platforms + human escalation</td>
+        </tr>
+        <tr>
+          <td><span class="sev negative">Negative</span></td>
+          <td>4&ndash;7</td>
+          <td>Individual complaints, bad reviews, competitor comparisons, moderate-reach threads (&lt;1K engagements)</td>
+          <td><strong>Alert within 1 hour</strong> + draft text response + optional video generation (if user enables auto-video for this tier)</td>
+        </tr>
+        <tr>
+          <td><span class="sev neutral">Neutral</span></td>
+          <td>1&ndash;3</td>
+          <td>Brand mentioned without strong sentiment, questions, feature requests</td>
+          <td><strong>Log only</strong>, feed into theme tracking and reputation score. No alert.</td>
+        </tr>
+        <tr>
+          <td><span class="sev positive">Positive</span></td>
+          <td>0</td>
+          <td>Praise, recommendations, positive reviews, success stories</td>
+          <td><strong>Log + optional auto-thank</strong>. Surface in dashboard as reputation wins. Candidate for repost/reshare.</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h3 class="h-sub">Theme clustering</h3>
+    <p>Over time, individual mentions aggregate into <strong>themes</strong> &mdash; recurring topics that reveal systemic reputation risks. Example themes: "pricing is too high", "support response time", "data privacy concerns", "product quality declining". Theme detection uses GPT-5-mini to tag each mention with a theme string, then we group by theme and track volume + sentiment over time. A theme with rising volume and declining sentiment triggers proactive alerts <em>before</em> it becomes a crisis.</p>
+  </section>
+
+  <div class="gap"></div>
+  <div class="rule"></div>
+  <div class="gap"></div>
+
+  <!-- ============ 07 — VIDEO GENERATION ============ -->
+  <section class="sheet">
+    <div class="eyebrow">The differentiator <span class="num">07 &mdash; Crisis Response Video Generation</span></div>
+    <h2 class="h-sec">From crisis to published response video in <span class="accent">under 3 minutes.</span></h2>
+    <p class="lede" style="margin-bottom:24px;">This is the feature no competitor has. When a crisis-severity mention is detected, the system writes a contextual response script, synthesizes it in the brand spokesperson's voice, generates a talking-head avatar video, and delivers it ready to publish &mdash; all automatically.</p>
+
+    <h3 class="h-sub">The video generation pipeline</h3>
+
+    <div class="tier blue" style="margin-bottom:16px;">
+      <div class="th"><span class="badge">Step 1</span><h4>Script Generation &mdash; GPT-5 (30&ndash;45 seconds)</h4></div>
+      <p>GPT-5 receives the full context: the original allegation text, the source platform, the reach estimate, the brand's voice guidelines (from <code>brand_profile</code> table), and any prior response history on this theme. It generates a 30&ndash;90 second crisis response script structured as:</p>
+      <div class="ex"><b>Structure:</b> Acknowledge &rarr; Address the specific claim &rarr; Present facts/evidence &rarr; State corrective action &rarr; Invite follow-up. Script length: 75&ndash;225 words (at ~150 wpm speaking pace).</div>
+    </div>
+
+    <div class="tier blue" style="margin-bottom:16px;">
+      <div class="th"><span class="badge">Step 2</span><h4>Voice Synthesis &mdash; Modal Voice Engine (15&ndash;30 seconds)</h4></div>
+      <p>The script is sent to the existing <strong>OmniVoice engine</strong> running on Modal Labs L4 GPU. Uses zero-shot voice cloning from a reference audio sample (uploaded during onboarding). Returns a WAV audio file of the spokesperson reading the script in their own voice. Cost: ~$0.05 per utterance.</p>
+      <div class="ex"><b>Existing integration:</b> <code>modal/voice_engine.py</code> already deployed. API via <code>lib/ai/modal.ts</code>. Voice profiles stored in <code>voice_templates</code> table. No new infrastructure needed.</div>
+    </div>
+
+    <div class="tier blue" style="margin-bottom:16px;">
+      <div class="th"><span class="badge">Step 3</span><h4>Avatar Video &mdash; Modal Avatar Engine (60&ndash;120 seconds)</h4></div>
+      <p>The synthesized audio + a spokesperson photo are sent to the existing <strong>LTX-2.3 avatar engine</strong> running on Modal Labs L40S GPU. Generates a lip-synced talking-head video via headless ComfyUI pipeline. Output: 720p MP4, 30&ndash;90 seconds long. Cost: ~$0.30 (480p) to ~$0.50 (720p).</p>
+      <div class="ex"><b>Existing integration:</b> <code>modal/avatar_engine.py</code> already deployed. Job tracking in <code>avatar_jobs</code> table. Upload to Cloudflare R2 via <code>lib/media/r2.ts</code>.</div>
+    </div>
+
+    <div class="tier blue" style="margin-bottom:16px;">
+      <div class="th"><span class="badge">Step 4</span><h4>Post-processing &amp; Branding (15&ndash;30 seconds)</h4></div>
+      <p>Add brand watermark, intro/outro cards, captions (burned-in SRT), and a lower-third title bar identifying the speaker and topic. Uses <strong>FFmpeg</strong> (available on Vercel via <code>@ffmpeg/ffmpeg</code> or as a Modal processing step). Final output: branded MP4 ready for direct upload to any platform.</p>
+      <div class="ex"><b>Captions matter:</b> 85% of social media video is watched without sound. Burned-in captions ensure the response message is delivered regardless of audio settings.</div>
+    </div>
+
+    <div class="tier green">
+      <div class="th"><span class="badge">Step 5</span><h4>Delivery &amp; Distribution</h4></div>
+      <p>Video is uploaded to Cloudflare R2 and presented to the user as a ready-to-publish draft in the Compose tab. If the user has enabled <strong>auto-publish for crisis responses</strong>, the video is automatically queued for publishing across all connected platforms. Otherwise, one-tap approval.</p>
+      <div class="ex"><b>Distribution channels:</b> Instagram Reels, TikTok, YouTube Shorts, LinkedIn Video, Facebook Video, X (Twitter) video. Cross-posted simultaneously via existing platform adapters.</div>
+    </div>
+
+    <h3 class="h-sub">Total cost per response video</h3>
+    <div style="overflow-x:auto;">
+    <table class="tbl">
+      <thead>
+        <tr><th>Component</th><th>Resource</th><th>Cost</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Script generation</td><td>GPT-5, ~3K in / 500 out tokens</td><td class="cost">$0.0088</td></tr>
+        <tr><td>Voice synthesis</td><td>Modal L4 GPU, ~15&ndash;30s compute</td><td class="cost">$0.05</td></tr>
+        <tr><td>Avatar video (720p, 60s)</td><td>Modal L40S GPU, ~90s compute</td><td class="cost">$0.50</td></tr>
+        <tr><td>Post-processing</td><td>FFmpeg on Modal or Vercel</td><td class="cost">$0.02</td></tr>
+        <tr><td>R2 storage</td><td>~50MB per video</td><td class="cost">$0.0008</td></tr>
+        <tr><td colspan="2" style="text-align:right; font-weight:550;">Total per video</td><td class="cost" style="font-size:15px;">~$0.58</td></tr>
+        <tr><td colspan="2" style="text-align:right; font-weight:550;">With 10% safety margin</td><td class="cost" style="font-size:15px;">~$0.64</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <p class="small muted" style="margin-top:8px;">Compare: HeyGen charges $3.00/min ($3.00 for a 60s video). Synthesia charges ~$2.00/min. Our Modal-based pipeline delivers the same result at <strong>~80% less cost</strong> because the infrastructure is already deployed for the Voice Studio feature.</p>
+
+    <h3 class="h-sub">Premium option: HeyGen for higher quality avatars</h3>
+    <p>For brands that need broadcast-quality avatar video (TV appearance, investor presentation), offer <strong>HeyGen API</strong> as a premium tier. Pay-as-you-go: $0.05/sec ($3.00/min) for Photo Avatar at 1080p. Digital Twin (trained on video footage): $0.067/sec ($4.00/min). No monthly subscription &mdash; ideal for infrequent crisis events. Integration: <code>POST https://api.heygen.com/v2/video/generate</code> with API key.</p>
+  </section>
+
+  <div class="gap"></div>
+  <div class="rule"></div>
+  <div class="gap"></div>
+
+  <!-- ============ 08 — DATABASE SCHEMA ============ -->
+  <section class="sheet">
+    <div class="eyebrow">Data model <span class="num">08 &mdash; Database Schema</span></div>
+    <h2 class="h-sec">Three new tables, one extended table.</h2>
+
+    <div class="codeblock"><span class="cm">-- Migration 0010: Reputation Shield</span>
+
+<span class="cm">-- 1. Brand mentions collected from all sources</span>
+<span class="kw">CREATE TABLE</span> <span class="type">mentions</span> (
+  <span class="fn">id</span>            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  <span class="fn">user_id</span>       TEXT NOT NULL REFERENCES profiles(clerk_id),
+  <span class="fn">source</span>        TEXT NOT NULL,        <span class="cm">-- 'brave_news', 'reddit', 'gdelt', 'serper',</span>
+                                        <span class="cm">-- 'youtube', 'x_twitter', 'instagram', 'facebook',</span>
+                                        <span class="cm">-- 'tiktok', 'linkedin', 'trustpilot', 'google_reviews'</span>
+  <span class="fn">url</span>           TEXT,
+  <span class="fn">url_hash</span>      TEXT NOT NULL,         <span class="cm">-- SHA-256 of normalized URL, for dedup</span>
+  <span class="fn">title</span>         TEXT,
+  <span class="fn">body</span>          TEXT NOT NULL,         <span class="cm">-- extracted clean text</span>
+  <span class="fn">author</span>        TEXT,
+  <span class="fn">author_reach</span>  INTEGER DEFAULT 0,    <span class="cm">-- followers, subscribers, karma</span>
+  <span class="fn">engagement</span>    INTEGER DEFAULT 0,    <span class="cm">-- likes + comments*2 + shares*3</span>
+
+  <span class="cm">-- Sentiment analysis results</span>
+  <span class="fn">vader_score</span>   REAL,                  <span class="cm">-- -1.0 to +1.0 compound score</span>
+  <span class="fn">sentiment</span>     TEXT,                  <span class="cm">-- 'crisis', 'negative', 'neutral', 'positive'</span>
+  <span class="fn">severity</span>      INTEGER,               <span class="cm">-- 1-10 from GPT classification</span>
+  <span class="fn">intent</span>        TEXT,                  <span class="cm">-- 'praise', 'complaint', 'accusation', etc.</span>
+  <span class="fn">theme</span>         TEXT,                  <span class="cm">-- clustered topic string</span>
+  <span class="fn">allegation</span>    TEXT,                  <span class="cm">-- one-line allegation summary (if negative)</span>
+  <span class="fn">response_angle</span> TEXT,                 <span class="cm">-- suggested response approach from GPT</span>
+
+  <span class="cm">-- Response tracking</span>
+  <span class="fn">response_status</span> TEXT DEFAULT <span class="str">'pending'</span>,  <span class="cm">-- 'pending', 'auto_replied', 'draft_ready',</span>
+                                             <span class="cm">-- 'human_replied', 'video_generated',</span>
+                                             <span class="cm">-- 'escalated', 'ignored'</span>
+  <span class="fn">response_text</span>    TEXT,              <span class="cm">-- the reply that was sent or drafted</span>
+  <span class="fn">response_video_id</span> UUID REFERENCES crisis_videos(id),
+
+  <span class="fn">seen_at</span>       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  <span class="fn">source_date</span>   TIMESTAMPTZ,          <span class="cm">-- when the mention was originally posted</span>
+  <span class="fn">created_at</span>    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+<span class="kw">CREATE INDEX</span> idx_mentions_user_seen ON mentions(user_id, seen_at DESC);
+<span class="kw">CREATE INDEX</span> idx_mentions_url_hash ON mentions(url_hash);
+<span class="kw">CREATE INDEX</span> idx_mentions_severity ON mentions(user_id, severity DESC) WHERE severity >= 4;
+<span class="kw">CREATE INDEX</span> idx_mentions_theme ON mentions(user_id, theme);
+
+<span class="cm">-- 2. Crisis response videos</span>
+<span class="kw">CREATE TABLE</span> <span class="type">crisis_videos</span> (
+  <span class="fn">id</span>             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  <span class="fn">user_id</span>        TEXT NOT NULL REFERENCES profiles(clerk_id),
+  <span class="fn">mention_id</span>     UUID NOT NULL REFERENCES mentions(id),
+  <span class="fn">script</span>         TEXT NOT NULL,          <span class="cm">-- the generated response script</span>
+  <span class="fn">voice_template_id</span> UUID REFERENCES voice_templates(id),
+  <span class="fn">audio_url</span>      TEXT,                   <span class="cm">-- R2 URL of synthesized audio</span>
+  <span class="fn">video_url</span>      TEXT,                   <span class="cm">-- R2 URL of final branded video</span>
+  <span class="fn">thumbnail_url</span>  TEXT,
+  <span class="fn">duration_sec</span>   INTEGER,
+  <span class="fn">resolution</span>     TEXT DEFAULT <span class="str">'720p'</span>,
+  <span class="fn">provider</span>       TEXT DEFAULT <span class="str">'modal'</span>,  <span class="cm">-- 'modal' or 'heygen'</span>
+  <span class="fn">status</span>         TEXT DEFAULT <span class="str">'generating'</span>, <span class="cm">-- 'generating', 'ready', 'published', 'failed'</span>
+  <span class="fn">published_to</span>   JSONB DEFAULT <span class="str">'[]'</span>,  <span class="cm">-- platforms where it was posted</span>
+  <span class="fn">cost_cents</span>     INTEGER,                <span class="cm">-- actual provider cost in cents</span>
+  <span class="fn">created_at</span>     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+<span class="cm">-- 3. Reputation score snapshots (daily rollup)</span>
+<span class="kw">CREATE TABLE</span> <span class="type">reputation_scores</span> (
+  <span class="fn">id</span>             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  <span class="fn">user_id</span>        TEXT NOT NULL REFERENCES profiles(clerk_id),
+  <span class="fn">date</span>           DATE NOT NULL,
+  <span class="fn">overall_score</span>  REAL NOT NULL,           <span class="cm">-- 0-100, weighted composite</span>
+  <span class="fn">positive_pct</span>   REAL,
+  <span class="fn">negative_pct</span>   REAL,
+  <span class="fn">neutral_pct</span>    REAL,
+  <span class="fn">mention_count</span>  INTEGER DEFAULT 0,
+  <span class="fn">crisis_count</span>   INTEGER DEFAULT 0,
+  <span class="fn">top_themes</span>     JSONB DEFAULT <span class="str">'[]'</span>,     <span class="cm">-- [{theme, count, sentiment_avg}]</span>
+  <span class="fn">per_platform</span>   JSONB DEFAULT <span class="str">'{}'</span>,    <span class="cm">-- {source: {score, count, positive_pct}}</span>
+  <span class="fn">created_at</span>     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(user_id, date)
+);
+
+<span class="cm">-- 4. Extend brand_profile with Shield settings</span>
+<span class="kw">ALTER TABLE</span> <span class="type">brand_profile</span> ADD COLUMN
+  <span class="fn">shield_config</span> JSONB DEFAULT <span class="str">'{
+    "enabled": false,
+    "keywords": [],
+    "subreddits": [],
+    "auto_video_threshold": 8,
+    "auto_reply_threshold": "green_only",
+    "alert_email": true,
+    "alert_slack_webhook": null,
+    "spokesperson_photo_url": null,
+    "spokesperson_voice_id": null
+  }'</span>;</div>
+  </section>
+
+  <div class="gap"></div>
+  <div class="rule"></div>
+  <div class="gap"></div>
+
+  <!-- ============ 09 — API ENDPOINTS ============ -->
+  <section class="sheet">
+    <div class="eyebrow">API surface <span class="num">09 &mdash; New Endpoints</span></div>
+    <h2 class="h-sec">Seven new routes, two extended crons.</h2>
+
+    <div style="overflow-x:auto;">
+    <table class="tbl">
+      <thead>
+        <tr><th>Method</th><th>Route</th><th>Purpose</th><th>Auth</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>GET</code></td><td><code>/api/mentions</code></td><td>List mentions for the authenticated user. Supports filtering by <code>sentiment</code>, <code>severity</code>, <code>source</code>, <code>theme</code>, <code>date_range</code>. Paginated. Powers the live mentions feed in the dashboard.</td><td>Clerk session</td></tr>
+        <tr><td><code>GET</code></td><td><code>/api/mentions/[id]</code></td><td>Full mention detail with extracted text, sentiment analysis, and linked response (if any).</td><td>Clerk session</td></tr>
+        <tr><td><code>POST</code></td><td><code>/api/mentions/[id]/respond</code></td><td>Approve a draft response, edit and send, or trigger video generation for a specific mention. Body: <code>{ action: "approve" | "edit" | "generate_video", text?: string }</code></td><td>Clerk session</td></tr>
+        <tr><td><code>GET</code></td><td><code>/api/reputation</code></td><td>Current reputation score, 30-day trend, per-platform breakdown, top themes. Powers the Pulse dashboard widget.</td><td>Clerk session</td></tr>
+        <tr><td><code>GET</code></td><td><code>/api/crisis-videos</code></td><td>List generated crisis response videos. Filter by status, mention_id, date. Includes video URL, script, publish status.</td><td>Clerk session</td></tr>
+        <tr><td><code>POST</code></td><td><code>/api/crisis-videos/generate</code></td><td>Manually trigger video generation for any mention. Body: <code>{ mention_id, resolution?, provider? }</code>. Charges credits.</td><td>Clerk session</td></tr>
+        <tr><td><code>PATCH</code></td><td><code>/api/shield/settings</code></td><td>Update Shield configuration: keywords, subreddits, thresholds, spokesperson, notification preferences.</td><td>Clerk session</td></tr>
+        <tr><td><code>GET</code></td><td><code>/api/cron/reputation-monitor</code></td><td><strong>New cron</strong> &mdash; every 15 min. Runs the full collection + analysis pipeline for all Shield-enabled users.</td><td>CRON_SECRET</td></tr>
+        <tr><td><code>GET</code></td><td><code>/api/cron/reputation-rollup</code></td><td><strong>New cron</strong> &mdash; daily at midnight. Computes daily reputation score snapshot and stores in <code>reputation_scores</code> table.</td><td>CRON_SECRET</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h3 class="h-sub">Credit metering</h3>
+    <div style="overflow-x:auto;">
+    <table class="tbl">
+      <thead>
+        <tr><th>Action</th><th>Credits Charged</th><th>Provider Cost</th><th>Rationale</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Monitoring (per brand/month)</td><td>Included in plan</td><td>~$23</td><td>Monitoring is the hook &mdash; free/included drives adoption</td></tr>
+        <tr><td>AI text response (draft/auto)</td><td>3 credits</td><td>$0.003</td><td>Same as compose (fast, no tools)</td></tr>
+        <tr><td>Crisis video (Modal, 720p)</td><td>65 credits</td><td>$0.64</td><td>Voice + avatar + processing</td></tr>
+        <tr><td>Crisis video (HeyGen, premium)</td><td>300 credits</td><td>$3.00</td><td>HeyGen Photo Avatar at 1080p</td></tr>
+        <tr><td>On-demand mention analysis</td><td>2 credits</td><td>$0.002</td><td>Re-analyze or analyze manually added URLs</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+  <div class="gap"></div>
+  <div class="rule"></div>
+  <div class="gap"></div>
+
+  <!-- ============ 10 — INTEGRATION WITH EXISTING CODE ============ -->
+  <section class="sheet">
+    <div class="eyebrow">How it fits <span class="num">10 &mdash; Integration with Existing Sociafy Code</span></div>
+    <h2 class="h-sec">Reputation Shield is <span class="accent">80% assembly</span> of existing pieces.</h2>
+    <p class="lede" style="margin-bottom:20px;">The proposal deliberately maximizes reuse of Sociafy's existing infrastructure. Here's what's reused vs. what's new.</p>
+
+    <div style="overflow-x:auto;">
+    <table class="tbl">
+      <thead>
+        <tr><th>Component</th><th>Existing Code</th><th>What Changes</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Data collection cron</strong></td>
+          <td><code>lib/cron/trends.ts</code> &mdash; already fetches from HN, Reddit, dev.to on a cron schedule</td>
+          <td>New <code>lib/cron/reputation-monitor.ts</code> following same pattern. Add Brave News, Serper, GDELT, YouTube source adapters.</td>
+        </tr>
+        <tr>
+          <td><strong>Web search</strong></td>
+          <td><code>lib/ai/skills/fetch-url.ts</code> with SSRF protection + Brave Search via agent loop</td>
+          <td>Add <code>@mozilla/readability</code> for article text extraction. Add Serper.dev client.</td>
+        </tr>
+        <tr>
+          <td><strong>Sentiment analysis</strong></td>
+          <td><code>app/api/agent/brand-monitor/route.ts</code> already classifies mentions as positive/neutral/negative</td>
+          <td>Add VADER npm for pre-filtering. Structured GPT-5-mini classification with severity scoring.</td>
+        </tr>
+        <tr>
+          <td><strong>Brand context</strong></td>
+          <td><code>lib/ai/brand-context.ts</code> injects brand voice, knowledge base, personality</td>
+          <td>Reuse for response script generation. Add spokesperson identity to brand profile.</td>
+        </tr>
+        <tr>
+          <td><strong>Voice cloning</strong></td>
+          <td><code>modal/voice_engine.py</code> + <code>lib/ai/modal.ts</code> + <code>voice_templates</code> table</td>
+          <td>Zero changes. Call existing voice synthesis endpoint with crisis script.</td>
+        </tr>
+        <tr>
+          <td><strong>Avatar generation</strong></td>
+          <td><code>modal/avatar_engine.py</code> + <code>avatar_jobs</code> table + R2 upload</td>
+          <td>Zero changes. Call existing avatar endpoint with voice audio + spokesperson photo.</td>
+        </tr>
+        <tr>
+          <td><strong>Media storage</strong></td>
+          <td><code>lib/media/r2.ts</code> &mdash; Cloudflare R2 upload/download</td>
+          <td>Zero changes. Store generated videos in same R2 bucket.</td>
+        </tr>
+        <tr>
+          <td><strong>Publishing</strong></td>
+          <td><code>lib/platforms/registry.ts</code> &mdash; platform adapters for X, LinkedIn, Meta, TikTok, YouTube</td>
+          <td>Zero changes. Publish response videos through existing adapters.</td>
+        </tr>
+        <tr>
+          <td><strong>Credit system</strong></td>
+          <td><code>lib/credits/ledger.ts</code> &mdash; append-only credit ledger</td>
+          <td>Add new action types: <code>crisis_video</code>, <code>ai_reply</code>, <code>mention_analysis</code>. Same charge/refund pattern.</td>
+        </tr>
+        <tr>
+          <td><strong>Rate limiting</strong></td>
+          <td><code>lib/rate-limit.ts</code> &mdash; per-endpoint token bucket</td>
+          <td>Add buckets for new endpoints: <code>mentionsList</code>, <code>crisisVideoGenerate</code>, <code>shieldSettings</code>.</td>
+        </tr>
+        <tr>
+          <td><strong>API auth wrapper</strong></td>
+          <td><code>lib/api.ts</code> &mdash; <code>withUser()</code> for session auth + CSRF</td>
+          <td>Zero changes. All new routes use same wrapper.</td>
+        </tr>
+        <tr>
+          <td><strong>Activity log</strong></td>
+          <td><code>activity_log</code> table with event types</td>
+          <td>Add new event types: <code>mention_detected</code>, <code>crisis_alert</code>, <code>auto_replied</code>, <code>video_generated</code>.</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+
+    <div class="callout" style="margin-top:18px;">
+      <div class="cl">New dependencies (npm)</div>
+      <p><code>vader-sentiment</code> (VADER port for social media sentiment, ~2.5K weekly downloads) &middot; <code>@mozilla/readability</code> (article text extraction, powers Firefox Reader View) &middot; <code>@serper/serper-api</code> or direct HTTP client (Google SERP results). Total: 3 new packages. No new infrastructure providers &mdash; everything runs on existing Vercel + Modal + R2 stack.</p>
+    </div>
+  </section>
+
+  <div class="gap"></div>
+  <div class="rule"></div>
+  <div class="gap"></div>
+
+  <!-- ============ 11 — VERCEL CONSTRAINTS ============ -->
+  <section>
+    <div class="eyebrow">Infrastructure <span class="num">11 &mdash; Serverless Architecture Considerations</span></div>
+    <h2 class="h-sec">Working within <span class="accent">Vercel's serverless model.</span></h2>
+
+    <div class="cols-2">
+      <div class="card">
+        <span class="tag">Constraint 01</span>
+        <h4>Function timeout: 300s</h4>
+        <p>Vercel functions now support up to 300s execution. The monitoring cron must process all enabled users within this window. Strategy: process users in parallel batches of 5&ndash;10. If approaching timeout, save checkpoint and let next cron cycle pick up remaining users. Average per-user collection: ~8&ndash;15 seconds (parallel API calls).</p>
+      </div>
+      <div class="card">
+        <span class="tag">Constraint 02</span>
+        <h4>No persistent WebSocket</h4>
+        <p>For the "live mentions" feed, use <strong>polling</strong> (client fetches <code>GET /api/mentions?since={timestamp}</code> every 30s) or integrate <strong>Supabase Realtime</strong> (existing Postgres provider) for instant push. The cron writes to DB; the client subscribes to changes on the <code>mentions</code> table.</p>
+      </div>
+      <div class="card">
+        <span class="tag">Constraint 03</span>
+        <h4>Video generation is async</h4>
+        <p>Modal voice + avatar generation takes 2&ndash;3 minutes. Use existing <strong>job tracking pattern</strong> from <code>avatar_jobs</code> table: create job record, return job ID immediately, poll for completion. Client polls <code>GET /api/crisis-videos/{id}</code> until status = 'ready'. Same UX pattern as existing Voice Studio.</p>
+      </div>
+      <div class="card">
+        <span class="tag">Constraint 04</span>
+        <h4>Multi-instance rate limiting</h4>
+        <p>Current in-process rate limiter breaks across Vercel instances (known issue). For Shield, add <strong>Upstash Redis</strong> ($0/mo for 10K commands/day on free tier) for distributed rate limiting. Single integration, solves both Shield and existing rate-limit issue.</p>
+      </div>
+    </div>
+
+    <h3 class="h-sub">Cron configuration</h3>
+    <div class="codeblock"><span class="cm">// Add to vercel.json crons array</span>
+{
+  <span class="str">"crons"</span>: [
+    <span class="cm">// ... existing crons ...</span>
+    { <span class="str">"path"</span>: <span class="str">"/api/cron/reputation-monitor"</span>, <span class="str">"schedule"</span>: <span class="str">"*/15 * * * *"</span> },
+    { <span class="str">"path"</span>: <span class="str">"/api/cron/reputation-rollup"</span>,  <span class="str">"schedule"</span>: <span class="str">"0 0 * * *"</span> }
+  ]
+}</div>
+  </section>
+
+  <div class="gap"></div>
+  <div class="rule"></div>
+  <div class="gap"></div>
+
+  <!-- ============ 12 — COMPETITIVE LANDSCAPE ============ -->
+  <section class="sheet">
+    <div class="eyebrow">Market context <span class="num">12 &mdash; Competitive Landscape</span></div>
+    <h2 class="h-sec">Nobody else does <span class="accent">monitoring + video response</span> together.</h2>
+
+    <div style="overflow-x:auto;">
+    <table class="tbl">
+      <thead>
+        <tr><th>Tool</th><th>Monitoring</th><th>AI Response</th><th>Video Gen</th><th>Price</th><th>Target</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>Meltwater</strong></td><td>Full (social + news + broadcast)</td><td>No</td><td>No</td><td>$6K&ndash;$100K/yr</td><td>Enterprise</td></tr>
+        <tr><td><strong>Brandwatch</strong></td><td>Full (100M+ sources)</td><td>Limited</td><td>No</td><td>$10K&ndash;$36K/yr</td><td>Enterprise</td></tr>
+        <tr><td><strong>Mention.com</strong></td><td>Web + social</td><td>No</td><td>No</td><td>$7.2K/yr</td><td>Mid-market</td></tr>
+        <tr><td><strong>Sprout Social</strong></td><td>Social only</td><td>AI suggestions</td><td>No</td><td>$3K&ndash;$6K/yr</td><td>SMB+</td></tr>
+        <tr><td><strong>Buffer / Hootsuite</strong></td><td>Social comments only</td><td>Basic AI</td><td>No</td><td>$1.2K&ndash;$3.6K/yr</td><td>SMB</td></tr>
+        <tr><td><strong style="color:var(--accent-ink);">Sociafy Shield</strong></td><td><strong>Web + social + news + forums + reviews</strong></td><td><strong>Full AI auto-reply + human-in-loop</strong></td><td><strong style="color:var(--accent-ink);">AI avatar video with voice clone</strong></td><td><strong>Included in plan ($228&ndash;$2,388/yr)</strong></td><td><strong>Founders, small brands</strong></td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <div class="callout" style="margin-top:18px;">
+      <div class="cl">Unique Selling Point</div>
+      <p>No competitor combines brand monitoring with automatic crisis-response video generation. Enterprise tools charge 10&ndash;100x more for monitoring alone. Sociafy Shield gives small brands the same intelligence as Fortune 500 companies, plus an automated video response capability that <em>nobody</em> has at any price point. The AI spokesperson video addresses the specific allegation by name, in the brand's own voice, published across all platforms simultaneously &mdash; within 3 minutes of detection.</p>
+    </div>
+  </section>
+
+  <div class="gap"></div>
+  <div class="rule"></div>
+  <div class="gap"></div>
+
+  <!-- ============ 13 — PACKAGING & PRICING ============ -->
+  <section>
+    <div class="eyebrow">Business model <span class="num">13 &mdash; Packaging &amp; Pricing</span></div>
+    <h2 class="h-sec">Monitoring hooks them. Video response <span class="accent">upgrades them.</span></h2>
+
+    <div class="cols-3">
+      <div class="card" style="border-top:3px solid var(--good);">
+        <span class="tag" style="color:var(--good);">Starter &mdash; $19/mo</span>
+        <h4>Shield Lite</h4>
+        <ul class="content-list" style="padding-left:16px;">
+          <li>Monitoring: own social comments only</li>
+          <li>Daily reputation score</li>
+          <li>Theme tracking</li>
+          <li>Email alerts for crisis-level</li>
+          <li>Draft AI replies (no auto-send)</li>
+          <li>No video generation</li>
+        </ul>
+      </div>
+      <div class="card" style="border-top:3px solid var(--accent);">
+        <span class="tag">Pro &mdash; $59/mo</span>
+        <h4>Shield Full</h4>
+        <ul class="content-list" style="padding-left:16px;">
+          <li>All 8+ sources monitored</li>
+          <li>Real-time reputation score</li>
+          <li>Auto-reply (green tier)</li>
+          <li>Reddit + review site coverage</li>
+          <li>3 crisis videos/month (Modal)</li>
+          <li>Slack webhook alerts</li>
+        </ul>
+      </div>
+      <div class="card" style="border-top:3px solid var(--ink);">
+        <span class="tag" style="color:var(--ink);">Business &mdash; $199/mo</span>
+        <h4>Shield Premium</h4>
+        <ul class="content-list" style="padding-left:16px;">
+          <li>Everything in Pro</li>
+          <li>Unlimited crisis videos</li>
+          <li>HeyGen premium avatars</li>
+          <li>Full auto-reply (all tiers)</li>
+          <li>Competitor benchmarking</li>
+          <li>White-label reputation reports</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <div class="gap"></div>
+  <div class="rule"></div>
+  <div class="gap"></div>
+
+  <!-- ============ 14 — IMPLEMENTATION ROADMAP ============ -->
+  <section class="sheet">
+    <div class="eyebrow">How we ship <span class="num">14 &mdash; Implementation Roadmap</span></div>
+    <h2 class="h-sec">Three phases over <span class="accent">8&ndash;10 weeks.</span></h2>
+
+    <div class="phase">
+      <div class="pl"><b>Phase 1</b> Foundation<br><span style="font-size:10px; color:var(--ink-4);">Weeks 1&ndash;3</span></div>
+      <ul>
+        <li>DB migration 0010 (mentions, crisis_videos, reputation_scores, shield_config)</li>
+        <li>Brave News + Web source adapter</li>
+        <li>Reddit JSON source adapter</li>
+        <li>GDELT DOC API source adapter</li>
+        <li>Serper.dev client integration</li>
+        <li>VADER npm + GPT-5-mini classification pipeline</li>
+        <li>De-duplication by URL hash</li>
+        <li>Readability.js article extraction</li>
+        <li>Cron: /api/cron/reputation-monitor</li>
+        <li>GET /api/mentions endpoint</li>
+        <li>PATCH /api/shield/settings endpoint</li>
+        <li>Basic Shield settings UI in dashboard</li>
+      </ul>
+    </div>
+    <div class="phase">
+      <div class="pl"><b>Phase 2</b> Video Pipeline<br><span style="font-size:10px; color:var(--ink-4);">Weeks 4&ndash;6</span></div>
+      <ul>
+        <li>Crisis script generation (GPT-5 + brand context)</li>
+        <li>Voice synthesis integration (existing Modal)</li>
+        <li>Avatar video generation (existing Modal)</li>
+        <li>FFmpeg post-processing (watermark, captions, branding)</li>
+        <li>POST /api/crisis-videos/generate endpoint</li>
+        <li>Auto-trigger video on crisis threshold</li>
+        <li>Video review + one-tap publish UI</li>
+        <li>Credit metering for video generation</li>
+        <li>YouTube + X/Twitter source adapters</li>
+        <li>Own social comment ingestion</li>
+        <li>Email alert system for crisis-level mentions</li>
+        <li>Daily reputation score rollup cron</li>
+      </ul>
+    </div>
+    <div class="phase">
+      <div class="pl"><b>Phase 3</b> Polish<br><span style="font-size:10px; color:var(--ink-4);">Weeks 7&ndash;10</span></div>
+      <ul>
+        <li>Pulse dashboard (reputation score, per-platform consensus, themes, live feed)</li>
+        <li>30-day sentiment trend chart</li>
+        <li>Theme clustering + drill-down views</li>
+        <li>HeyGen premium video provider option</li>
+        <li>Slack webhook alerts</li>
+        <li>Auto-reply for green-tier mentions</li>
+        <li>Mention response tracking + analytics</li>
+        <li>Spokesperson onboarding flow (photo + voice upload)</li>
+        <li>Mobile-responsive dashboard</li>
+        <li>End-to-end testing</li>
+        <li>Cost monitoring + budget alerts</li>
+        <li>Documentation + launch prep</li>
+      </ul>
+    </div>
+  </section>
+
+  <div class="gap"></div>
+  <div class="rule"></div>
+  <div class="gap"></div>
+
+  <!-- ============ 15 — RISK ASSESSMENT ============ -->
+  <section>
+    <div class="eyebrow">What could go wrong <span class="num">15 &mdash; Risk Assessment</span></div>
+    <h2 class="h-sec">Identified risks and mitigations.</h2>
+
+    <div class="tier red" style="margin-bottom:14px;">
+      <div class="th"><span class="badge">High</span><h4>AI-generated response goes viral for wrong reasons</h4></div>
+      <p>An AI avatar video that sounds robotic, says something factually wrong, or comes across as insincere could amplify the crisis instead of defusing it.</p>
+      <div class="ex"><b>Mitigation:</b> Default to human-approval for all crisis videos (one-tap approve, not auto-publish). Auto-publish only enabled by explicit user opt-in after they've verified quality. Script review step shows the text before video generation starts.</div>
+    </div>
+    <div class="tier red" style="margin-bottom:14px;">
+      <div class="th"><span class="badge">High</span><h4>False positive crisis alerts cause panic</h4></div>
+      <p>VADER or GPT-5-mini misclassifies a neutral mention as crisis-level, triggering unnecessary alerts and wasting video generation credits.</p>
+      <div class="ex"><b>Mitigation:</b> Two-pass sentiment analysis (VADER pre-filter + GPT deep analysis). Crisis threshold defaults to severity 8+ (conservative). First 2 weeks run in "shadow mode" &mdash; log classifications but don't alert, so we can tune the model.</div>
+    </div>
+    <div class="tier blue" style="margin-bottom:14px;">
+      <div class="th"><span class="badge">Medium</span><h4>API rate limits during a real crisis</h4></div>
+      <p>During a genuine viral crisis, mention volume spikes 10&ndash;100x. Source APIs may throttle, and LLM costs spike.</p>
+      <div class="ex"><b>Mitigation:</b> Implement per-user daily budget caps for monitoring queries and LLM calls. Priority queue: crisis-severity mentions processed first. Source APIs are called at staggered intervals, not all at once.</div>
+    </div>
+    <div class="tier blue" style="margin-bottom:14px;">
+      <div class="th"><span class="badge">Medium</span><h4>Legal: scraping vs. API terms of service</h4></div>
+      <p>Some platforms (Google, X) have aggressive ToS against automated access.</p>
+      <div class="ex"><b>Mitigation:</b> We use only official APIs and SERP proxy services (Serper.dev) that assume the legal risk. No direct scraping of any platform. Reddit's public JSON feeds are officially sanctioned. GDELT is explicitly free for commercial use.</div>
+    </div>
+    <div class="tier green">
+      <div class="th"><span class="badge">Low</span><h4>OpenAI quota / model availability</h4></div>
+      <p>OpenAI API outage or quota exhaustion (already experienced) blocks sentiment classification and script generation.</p>
+      <div class="ex"><b>Mitigation:</b> VADER provides a degraded-but-functional sentiment layer without any API. For script generation, fall back to Anthropic Claude (already have <code>ANTHROPIC_API_KEY</code> configured) or queue and retry.</div>
+    </div>
+  </section>
+
+  <div class="gap"></div>
+  <div class="rule"></div>
+  <div class="gap"></div>
+
+  <!-- ============ 16 — SUCCESS METRICS ============ -->
+  <section>
+    <div class="eyebrow">How we measure <span class="num">16 &mdash; Success Metrics</span></div>
+    <h2 class="h-sec">Measurable outcomes at each stage.</h2>
+
+    <div class="stat-grid">
+      <div class="stat"><div class="v">&lt;15<span class="u">min</span></div><div class="l">P50 time from mention to detection</div></div>
+      <div class="stat"><div class="v">&lt;3<span class="u">min</span></div><div class="l">Crisis video generation time</div></div>
+      <div class="stat"><div class="v">&gt;85<span class="u">%</span></div><div class="l">Sentiment classification accuracy</div></div>
+      <div class="stat"><div class="v">&lt;5<span class="u">%</span></div><div class="l">False positive rate on crisis alerts</div></div>
+    </div>
+    <div class="gap-sm"></div>
+    <div class="stat-grid">
+      <div class="stat"><div class="v">30<span class="u">%</span></div><div class="l">Users enabling Shield in first month</div></div>
+      <div class="stat"><div class="v">15<span class="u">%</span></div><div class="l">Starter &rarr; Pro upgrade driven by Shield</div></div>
+      <div class="stat"><div class="v">&lt;$25</div><div class="l">Monthly monitoring cost per brand</div></div>
+      <div class="stat"><div class="v">&lt;$1</div><div class="l">Marginal cost per response video</div></div>
+    </div>
+  </section>
+
+  <div class="gap"></div>
+
+  <!-- ============ CLOSING ============ -->
+  <section class="closing">
+    <div class="eyebrow" style="color:var(--accent);">The bottom line <span class="num" style="color:oklch(0.6 0 0);">17 &mdash; Recommendation</span></div>
+    <h2>Sociafy already speaks for brands. <span class="a">Now let it defend them.</span></h2>
+    <p>Reputation Shield transforms Sociafy from a publishing tool into a full-spectrum brand defense platform. By leveraging 80% existing infrastructure (voice cloning, avatar generation, platform adapters, credit system), the build cost is minimal. The result is a capability no competitor offers at any price point: automated, context-aware, video-based crisis response &mdash; from detection to published defense in under 3 minutes, for under $1 per video.</p>
+    <p style="margin-top:18px;">The monitoring infrastructure costs ~$23/brand/month. The video pipeline reuses the Modal GPU stack already deployed. Three new npm packages, three new database tables, seven new API routes, two new crons. The rest is assembly.</p>
+    <div class="foot">
+      <span>Sociafy &middot; Reputation Shield &mdash; Technical Proposal v1.0</span>
+      <span>June 2026 &middot; Confidential</span>
+      <span>GNIX Semiconductors Private Limited</span>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

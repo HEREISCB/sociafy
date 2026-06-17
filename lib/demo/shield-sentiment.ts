@@ -1,0 +1,99 @@
+const CRISIS = new Set([
+  'fraud','scam','lawsuit','sue','sued','suing','investigation','breach','hack',
+  'hacked','stolen','corrupt','corruption','criminal','illegal','arrest','arrested',
+  'bankrupt','bankruptcy','collapse','shutdown','recall','death','dangerous','unsafe',
+  'explosion','resign','resigned','discrimination','racist','racism','sexist','abuse',
+  'abused','exploit','exploitation','whistleblower','ponzi','embezzl','extort',
+  'manipulate','manipulation','bribe','bribery','coverup','cover-up','negligence',
+  'negligent','defamation','libel','slander','mislead','defraud',
+]);
+
+const NEGATIVE = new Set([
+  'terrible','awful','horrible','dreadful','disgusting','pathetic','useless',
+  'worthless','garbage','trash','bad','worst','worse','broken','bug','bugs',
+  'buggy','crash','crashes','crashing','slow','unreliable','unstable','down',
+  'outage','offline','fail','failed','failing','failure','disaster','disappointed',
+  'disappointing','frustrating','frustrated','frustration','angry','furious','rage',
+  'upset','hate','hated','avoid','boycott','refund','chargeback','overpriced',
+  'expensive','ripoff','waste','misleading','deceptive','lied','lying','dishonest',
+  'unethical','incompetent','unprofessional','rude','arrogant','spam','spammy',
+  'sketchy','shady','suspicious','warning','beware','complaint','complaints',
+  'controversy','controversial','scandal','embarrassing','accusation','alleged',
+  'allegedly','negative','critical','criticism','problem','problems','issue','issues',
+  'concern','concerns','wrong','error','errors','broken','unusable','disappoints',
+]);
+
+const POSITIVE = new Set([
+  'amazing','awesome','excellent','fantastic','wonderful','great','good','best',
+  'love','loved','perfect','brilliant','outstanding','exceptional','superb',
+  'incredible','impressive','helpful','useful','recommend','reliable','trustworthy',
+  'professional','efficient','fast','innovative','happy','pleased','satisfied',
+  'thankful','grateful','appreciate','success','successful','winning','leader',
+]);
+
+export interface SentimentResult {
+  score: number;
+  severity: number;
+  label: 'crisis' | 'negative' | 'neutral' | 'positive';
+  crisisWords: string[];
+  negWords: string[];
+  theme: string;
+}
+
+export function scoreMention(title: string, body: string): SentimentResult {
+  const text = `${title} ${body}`.toLowerCase();
+  const words = text.split(/\W+/).filter(Boolean);
+
+  const foundCrisis: string[] = [];
+  const foundNeg: string[] = [];
+  let pos = 0;
+
+  for (const w of words) {
+    if (CRISIS.has(w)) foundCrisis.push(w);
+    else if (NEGATIVE.has(w)) foundNeg.push(w);
+    else if (POSITIVE.has(w)) pos++;
+  }
+
+  const rawScore = pos - foundNeg.length - foundCrisis.length * 3;
+  const score = Math.max(-10, Math.min(10, rawScore));
+
+  let label: SentimentResult['label'];
+  let severity: number;
+
+  if (foundCrisis.length > 0) {
+    label = 'crisis';
+    severity = Math.min(10, 7 + foundCrisis.length);
+  } else if (score < -1 || foundNeg.length >= 2) {
+    label = 'negative';
+    severity = Math.min(7, 2 + foundNeg.length);
+  } else if (score > 1) {
+    label = 'positive';
+    severity = 0;
+  } else {
+    label = 'neutral';
+    severity = 1;
+  }
+
+  return {
+    score,
+    severity,
+    label,
+    crisisWords: [...new Set(foundCrisis)].slice(0, 4),
+    negWords: [...new Set(foundNeg)].slice(0, 4),
+    theme: detectTheme(text),
+  };
+}
+
+function detectTheme(text: string): string {
+  if (/breach|hack|data|privacy|security|leak|password|cyber/i.test(text)) return 'Data Security';
+  if (/lawsuit|sue|court|legal|lawyer|attorney|settlement|litigation/i.test(text)) return 'Legal Action';
+  if (/fraud|scam|fake|mislead|deceiv|dishonest|ponzi|embezzl/i.test(text)) return 'Fraud/Deception';
+  if (/price|expensive|cost|fee|billing|charge|overpriced|subscription/i.test(text)) return 'Pricing';
+  if (/crash|bug|broken|error|outage|down|slow|unreliable|glitch/i.test(text)) return 'Product Quality';
+  if (/support|customer service|response|reply|ignored|wait|ticket/i.test(text)) return 'Customer Support';
+  if (/fire|layoff|employee|worker|staff|toxic|culture|workplace/i.test(text)) return 'Workplace Issues';
+  if (/racist|discriminat|bias|unfair|unjust|abuse|harass/i.test(text)) return 'Discrimination';
+  if (/competitor|alternative|better|switch|cancel|leave|comparison/i.test(text)) return 'Competitor Comparison';
+  if (/environment|climate|pollution|sustainab|carbon|waste/i.test(text)) return 'Environmental';
+  return 'General Reputation';
+}
