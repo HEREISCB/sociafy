@@ -18,6 +18,7 @@ export const PLATFORM_LIMITS: Record<Platform, { hard: number; sweet: [number, n
   facebook: { hard: 2000, sweet: [100, 400], notes: 'Conversational. Encourage reply or reaction.' },
   tiktok: { hard: 2200, sweet: [40, 150], notes: 'Caption hook for the video. Punchy. Question or claim that begs a watch.' },
   youtube: { hard: 5000, sweet: [200, 800], notes: 'Title-style hook then context. Mention what the viewer learns. Add chapter cues if helpful.' },
+  reddit: { hard: 40000, sweet: [200, 1500], notes: 'Natural, community-aware tone. No marketing speak. Add relevant subreddit context. Be helpful first.' },
 };
 
 export type ComposePresetKey = 'thread' | 'announcement' | 'recap' | 'hot-take' | 'lesson' | 'reel';

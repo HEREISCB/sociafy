@@ -13,6 +13,8 @@ export const SHORT_TO_PLATFORM: Record<string, Platform> = {
   tiktok: 'tiktok',
   yt: 'youtube',
   youtube: 'youtube',
+  rd: 'reddit',
+  reddit: 'reddit',
 };
 
 export const PLATFORM_TO_SHORT: Record<Platform, string> = {
@@ -22,6 +24,7 @@ export const PLATFORM_TO_SHORT: Record<Platform, string> = {
   facebook: 'fb',
   tiktok: 'tt',
   youtube: 'yt',
+  reddit: 'rd',
 };
 
 export function toPlatform(short: string): Platform | null {

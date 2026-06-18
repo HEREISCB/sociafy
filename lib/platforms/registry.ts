@@ -5,6 +5,7 @@ import { linkedinAdapter } from './linkedin';
 import { facebookAdapter, instagramAdapter } from './meta';
 import { tiktokAdapter } from './tiktok';
 import { youtubeAdapter } from './youtube';
+import { redditAdapter } from './reddit';
 
 export const ADAPTERS: Record<Platform, PlatformAdapter> = {
   x: xAdapter,
@@ -13,6 +14,7 @@ export const ADAPTERS: Record<Platform, PlatformAdapter> = {
   facebook: facebookAdapter,
   tiktok: tiktokAdapter,
   youtube: youtubeAdapter,
+  reddit: redditAdapter,
 };
 
 export function getAdapter(p: Platform): PlatformAdapter {

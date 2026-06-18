@@ -64,6 +64,10 @@ export const env = {
       clientId: required('GOOGLE_CLIENT_ID'),
       clientSecret: required('GOOGLE_CLIENT_SECRET'),
     },
+    reddit: {
+      clientId: required('REDDIT_CLIENT_ID'),
+      clientSecret: required('REDDIT_CLIENT_SECRET'),
+    },
   },
 
   stripe: {
@@ -92,7 +96,7 @@ export const isStubMode = {
   r2: () => !env.r2.accountId || !env.r2.bucket,
   stripe: () => !env.stripe.secretKey,
   razorpay: () => !env.razorpay.keyId || !env.razorpay.keySecret,
-  platform: (p: 'x' | 'linkedin' | 'instagram' | 'facebook' | 'tiktok' | 'youtube'): boolean => {
+  platform: (p: 'x' | 'linkedin' | 'instagram' | 'facebook' | 'tiktok' | 'youtube' | 'reddit'): boolean => {
     switch (p) {
       case 'x': return !env.platforms.x.clientId;
       case 'linkedin': return !env.platforms.linkedin.clientId;
@@ -100,6 +104,7 @@ export const isStubMode = {
       case 'facebook': return !env.platforms.meta.appId;
       case 'tiktok': return !env.platforms.tiktok.clientKey;
       case 'youtube': return !env.platforms.google.clientId;
+      case 'reddit': return !env.platforms.reddit.clientId;
     }
   },
 };

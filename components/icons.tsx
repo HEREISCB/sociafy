@@ -11,7 +11,8 @@ type IconName =
   | 'chevron_left' | 'more' | 'upload' | 'eye' | 'heart' | 'bookmark'
   | 'send' | 'fire' | 'globe' | 'lock' | 'waveform' | 'target'
   | 'folder' | 'grid' | 'list' | 'filter' | 'link' | 'book' | 'fork' | 'alert'
-  | 'maximize';
+  | 'maximize'
+  | 'shield';
 
 interface IconProps extends React.SVGProps<SVGSVGElement> {
   name: IconName;
@@ -70,6 +71,7 @@ export const Icon: React.FC<IconProps> = ({ name, size = 16, ...props }) => {
     fork: <><circle cx="4" cy="3" r="1.5"/><circle cx="12" cy="3" r="1.5"/><circle cx="8" cy="13" r="1.5"/><path d="M4 4.5v3a2 2 0 002 2h4a2 2 0 002-2v-3M8 9.5v2"/></>,
     alert: <><path d="M8 2L1.5 13.5h13L8 2z"/><path d="M8 6.5v3.5M8 12v.5"/></>,
     maximize: <><path d="M2.5 6V2.5H6M14 6V2.5H10.5M2.5 10v3.5H6M14 10v3.5H10.5"/></>,
+    shield: <><path d="M8 1.5L2.5 4v5c0 3 2.5 5 5.5 5.5 3-.5 5.5-2.5 5.5-5.5V4L8 1.5z"/></>,
   };
 
   return (
@@ -146,6 +148,11 @@ const PLATFORM_LOGOS: Record<string, (s: number) => React.ReactNode> = {
       style={{ display: 'block' }}
     >
       <path d="M21.58 7.19c-.23-.86-.91-1.54-1.77-1.77C18.25 5 12 5 12 5s-6.25 0-7.81.42c-.86.23-1.54.91-1.77 1.77C2 8.75 2 12 2 12s0 3.25.42 4.81c.23.86.91 1.54 1.77 1.77 1.56.42 7.81.42 7.81.42s6.25 0 7.81-.42c.86-.23 1.54-.91 1.77-1.77C22 15.25 22 12 22 12s0-3.25-.42-4.81zM10 15V9l5.2 3L10 15z" />
+    </svg>
+  ),
+  rd: (s) => (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="currentColor" aria-hidden style={{ display: 'block' }}>
+      <path d="M12 0C5.37 0 0 5.37 0 12s5.37 12 12 12 12-5.37 12-12S18.63 0 12 0zm5.73 11.57a1.5 1.5 0 0 1 .77 2.79c.03.2.05.4.05.61 0 3.1-3.62 5.62-8.08 5.62S2.39 18.07 2.39 16.97c0-.21.02-.41.05-.61a1.5 1.5 0 1 1 1.67-2.33c.93-.65 2.22-1.07 3.65-1.11l.89-4.18.01-.05c.05-.2.25-.33.46-.28l2.94.62A1.25 1.25 0 1 1 13.25 10a1.25 1.25 0 0 1-1.21-.95l-2.61-.55-.72 3.38c1.37.07 2.6.48 3.49 1.11a1.5 1.5 0 1 1 1.67 2.33c.03.2.05.4.05.61 0 0 0 0 0 0h-.01c0-.21.02-.41.05-.61a1.5 1.5 0 0 1 .77-2.79v.04zM9 17c.55 0 1-.45 1-1s-.45-1-1-1-1 .45-1 1 .45 1 1 1zm6 0c.55 0 1-.45 1-1s-.45-1-1-1-1 .45-1 1 .45 1 1 1z"/>
     </svg>
   ),
 };

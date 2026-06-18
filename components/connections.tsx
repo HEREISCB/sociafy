@@ -108,6 +108,16 @@ const PLATFORMS: PlatformDef[] = [
     tip: 'You\'ll grant access to the Google account that owns your channel. Multiple channels are supported.',
     capabilities: ['Channel', 'Analytics'],
   },
+  {
+    id: 'reddit',
+    short: 'x' as 'x', // reuse a safe short glyph until Reddit glyph added
+    name: 'Reddit',
+    color: '#FF4500',
+    tagline: 'Brand monitoring · community replies',
+    blurb: 'Connect to monitor brand mentions across subreddits and reply to threads via Reputation Shield.',
+    tip: 'Use a dedicated brand/company Reddit account. Personal accounts are fine too — only the scopes you grant are used.',
+    capabilities: ['Monitoring', 'Reply', 'Submit'],
+  },
 ];
 
 const DAY = 86_400_000;
@@ -211,6 +221,7 @@ const PLATFORM_LABELS: Record<string, string> = {
   linkedin: 'LinkedIn',
   tiktok: 'TikTok',
   youtube: 'YouTube',
+  reddit: 'Reddit',
 };
 
 const ConnectionsPage: React.FC = () => {

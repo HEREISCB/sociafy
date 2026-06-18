@@ -8,7 +8,7 @@ import { Icon } from './icons';
 import { useApi } from '../lib/ui/fetcher';
 import { CreditMeter } from './credits';
 
-type Page = 'dashboard' | 'compose' | 'agent' | 'calendar' | 'connections' | 'onboarding';
+type Page = 'dashboard' | 'compose' | 'agent' | 'calendar' | 'connections' | 'shield' | 'onboarding';
 // Legacy alias kept so callers compile during the topbar refactor.
 type Mode = 'manual' | 'auto';
 
@@ -76,6 +76,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ page, onNav, showTTS = true, m
     { id: 'agent' as Page, label: 'Auto-pilot', icon: 'bolt' as const, kbd: '3' },
     { id: 'calendar' as Page, label: 'Calendar', icon: 'calendar' as const, kbd: '4' },
     { id: 'connections' as Page, label: 'Connections', icon: 'globe' as const, kbd: '5' },
+    { id: 'shield' as Page, label: 'Reputation Shield', icon: 'shield' as const, kbd: '6', badge: 'New', accent: true },
   ];
 
   // Auto-close drawer on Esc so a thumb-friendly escape exists alongside scrim tap.

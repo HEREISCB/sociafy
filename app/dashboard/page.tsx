@@ -10,8 +10,9 @@ import AgentPage from '../../components/agent';
 import CalendarPage from '../../components/calendar';
 import ConnectionsPage from '../../components/connections';
 import Onboarding from '../../components/onboarding';
+import ShieldDashboard from '../../components/shield/ShieldDashboard';
 
-type Page = 'dashboard' | 'compose' | 'agent' | 'calendar' | 'connections' | 'onboarding';
+type Page = 'dashboard' | 'compose' | 'agent' | 'calendar' | 'connections' | 'shield' | 'onboarding';
 
 /**
  * Time-of-day greeting. `now` MUST be null on the SSR / first-client render so
@@ -30,7 +31,7 @@ function greetingFor(name: string | null | undefined, now: Date | null): string 
   return `Good ${slot}, ${first}`;
 }
 
-function usePageMeta(page: Exclude<Page, 'onboarding'>, displayName: string | null | undefined, now: Date | null) {
+function usePageMeta(page: Exclude<Page, 'onboarding'> | 'dashboard', displayName: string | null | undefined, now: Date | null) {
   return useMemo(() => {
     const base: Record<Exclude<Page, 'onboarding'>, { crumbs: string[]; h1: string; sub: string }> = {
       dashboard: {
@@ -58,6 +59,11 @@ function usePageMeta(page: Exclude<Page, 'onboarding'>, displayName: string | nu
         h1: 'Connections',
         sub: 'Connect, reconnect, or disconnect every platform Sociafy posts to.',
       },
+      shield: {
+        crumbs: ['Sociafy', 'Workspace', 'Reputation Shield'],
+        h1: 'Reputation Shield',
+        sub: 'Monitor brand mentions, detect negative coverage, and publish AI-crafted responses.',
+      },
     };
     return base[page];
   }, [page, displayName, now]);
@@ -78,7 +84,7 @@ const SparkleIcon = () => (
 function initialPageFromUrl(): Page {
   if (typeof window === 'undefined') return 'dashboard';
   const tab = new URLSearchParams(window.location.search).get('tab');
-  const valid: Page[] = ['dashboard', 'compose', 'agent', 'calendar', 'connections', 'onboarding'];
+  const valid: Page[] = ['dashboard', 'compose', 'agent', 'calendar', 'connections', 'shield', 'onboarding'];
   return (valid as string[]).includes(tab ?? '') ? (tab as Page) : 'dashboard';
 }
 
@@ -139,6 +145,7 @@ export default function Home() {
         if (e.key === '3') { e.preventDefault(); setPage('agent'); }
         if (e.key === '4') { e.preventDefault(); setPage('calendar'); }
         if (e.key === '5') { e.preventDefault(); setPage('connections'); }
+        if (e.key === '6') { e.preventDefault(); setPage('shield'); }
       }
     };
     window.addEventListener('keydown', handler);
@@ -214,6 +221,7 @@ export default function Home() {
           {page === 'agent' && <AgentPage onEditDraft={(id) => goCompose(id)} />}
           {page === 'calendar' && <CalendarPage onCompose={() => goCompose()} />}
           {page === 'connections' && <ConnectionsPage />}
+          {page === 'shield' && <ShieldDashboard />}
         </div>
       </div>
     </div>

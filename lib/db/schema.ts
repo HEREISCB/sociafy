@@ -10,7 +10,7 @@ import {
   index,
 } from 'drizzle-orm/pg-core';
 
-export const PLATFORMS = ['x', 'linkedin', 'instagram', 'facebook', 'tiktok', 'youtube'] as const;
+export const PLATFORMS = ['x', 'linkedin', 'instagram', 'facebook', 'tiktok', 'youtube', 'reddit'] as const;
 export type Platform = (typeof PLATFORMS)[number];
 
 export const NICHES = [
@@ -307,7 +307,11 @@ export type ActivityKind =
   | 'agent_enabled'
   | 'agent_disabled'
   | 'onboarded'
-  | 'webhook_event';
+  | 'webhook_event'
+  | 'shield_mention_detected'
+  | 'shield_response_approved'
+  | 'shield_response_published'
+  | 'shield_response_rejected';
 
 export const activityLog = pgTable(
   'activity_log',
@@ -472,5 +476,76 @@ export const genJobs = pgTable(
   (t) => [
     index('gen_jobs_user_idx').on(t.userId),
     index('gen_jobs_call_idx').on(t.providerCallId),
+  ],
+);
+
+// =====================================================
+// reputation_shield — brand mention monitoring + crisis response
+// =====================================================
+
+export type MentionSource = 'google_news' | 'hackernews' | 'wikipedia' | 'reddit' | 'x' | 'linkedin' | 'own_post';
+export type SentimentLabel = 'crisis' | 'negative' | 'neutral' | 'positive';
+export type ShieldActionStatus = 'pending' | 'approved' | 'rejected' | 'published' | 'failed';
+
+/** One brand mention fetched from any source. externalId is the dedup key
+ *  (url hash or platform post id). */
+export const mentions = pgTable(
+  'mentions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id').notNull(),
+    brand: text('brand').notNull(),
+    source: text('source').notNull().$type<MentionSource>(),
+    externalId: text('external_id').notNull(),
+    url: text('url').notNull().default(''),
+    title: text('title').notNull(),
+    body: text('body').notNull().default(''),
+    author: text('author').notNull().default(''),
+    engagement: integer('engagement').notNull().default(0),
+    sentimentLabel: text('sentiment_label').notNull().$type<SentimentLabel>().default('neutral'),
+    sentimentScore: integer('sentiment_score').notNull().default(0),
+    severity: integer('severity').notNull().default(1),
+    theme: text('theme').notNull().default('General Reputation'),
+    crisisWords: jsonb('crisis_words').$type<string[]>().default([]),
+    negWords: jsonb('neg_words').$type<string[]>().default([]),
+    fetchedAt: timestamp('fetched_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('mentions_user_brand_idx').on(t.userId, t.brand),
+    index('mentions_user_sentiment_idx').on(t.userId, t.sentimentLabel),
+    index('mentions_external_id_idx').on(t.userId, t.externalId),
+  ],
+);
+
+/** One crisis-response action created per negative/crisis mention.
+ *  The UI shows this as a card the user can approve, edit, and publish. */
+export const shieldActions = pgTable(
+  'shield_actions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    mentionId: uuid('mention_id')
+      .notNull()
+      .references(() => mentions.id, { onDelete: 'cascade' }),
+    userId: text('user_id').notNull(),
+    status: text('status').notNull().$type<ShieldActionStatus>().default('pending'),
+    /** AI-generated response draft — user may edit before approving. */
+    script: text('script').notNull().default(''),
+    /** Where to post the response (platform id or 'auto'). */
+    targetPlatform: text('target_platform'),
+    /** The external post/comment id to reply to (if replying in-thread). */
+    targetPostId: text('target_post_id'),
+    /** Platform's returned post id after publishing. */
+    publishedPostId: text('published_post_id'),
+    /** Clerk userId of the person who approved/rejected. */
+    approvedBy: text('approved_by'),
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+    publishedAt: timestamp('published_at', { withTimezone: true }),
+    error: text('error'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('shield_actions_user_status_idx').on(t.userId, t.status),
+    index('shield_actions_mention_idx').on(t.mentionId),
   ],
 );
