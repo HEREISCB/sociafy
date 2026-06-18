@@ -11,6 +11,11 @@ import { InsufficientCreditsError, insufficientCreditsResponse } from './credits
 export type ApiUser = { id: string; email?: string | null };
 
 export async function authedUser(): Promise<ApiUser | null> {
+  // Dev bypass: SKIP_AUTH_DEV=true in .env.local lets you hit auth'd routes
+  // locally without setting up Clerk. Never set this in production.
+  if (process.env.SKIP_AUTH_DEV === 'true' && process.env.NODE_ENV === 'development') {
+    return { id: 'dev-user-local', email: 'dev@localhost' };
+  }
   // Clerk v7 supports keyless mode when no env keys are set — it auto-mounts a temp dev instance.
   // We trust whatever Clerk's auth() returns. No stub short-circuit.
   try {

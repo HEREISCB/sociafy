@@ -1,4 +1,4 @@
-import { getOpenAI, MODELS } from '../ai/client';
+import { getOpenAI, getGroq, MODELS, GROQ_MODELS } from '../ai/client';
 
 export interface ScriptInput {
   brand: string;
@@ -115,18 +115,8 @@ We have a customer advisory board, a public product changelog, and monthly town 
 Thank you for holding us to a high standard. We are committed to meeting it.`,
 };
 
-export async function generateScript(input: ScriptInput): Promise<ScriptOutput> {
-  const { brand, allegation, theme, severity } = input;
-  const ai = getOpenAI();
-
-  if (ai) {
-    try {
-      const res = await ai.chat.completions.create({
-        model: MODELS.fast,
-        messages: [
-          {
-            role: 'user',
-            content: `You are a crisis communications expert. Write a 60-90 second video response script for "${brand}".
+const SCRIPT_PROMPT = (brand: string, theme: string, severity: number, allegation: string) =>
+  `You are a crisis communications expert. Write a 60-90 second video response script for "${brand}".
 
 Crisis details:
 - Theme: ${theme}
@@ -138,9 +128,21 @@ Requirements:
 - Acknowledge → Address specific concern → Present facts → State concrete action → Invite engagement
 - Empathetic but factual tone, no admission of unproven wrongdoing
 - End with a specific, actionable commitment
-- NO stage directions, NO [brackets], NO formatting — just the script text itself`,
-          },
-        ],
+- NO stage directions, NO [brackets], NO formatting — just the script text itself`;
+
+export async function generateScript(input: ScriptInput): Promise<ScriptOutput> {
+  const { brand, allegation, theme, severity } = input;
+  const prompt = SCRIPT_PROMPT(brand, theme, severity, allegation);
+
+  // Try OpenAI first, then Groq as fallback.
+  const ai = getOpenAI() ?? getGroq();
+  const model = getOpenAI() ? MODELS.fast : GROQ_MODELS.fast;
+
+  if (ai) {
+    try {
+      const res = await ai.chat.completions.create({
+        model,
+        messages: [{ role: 'user', content: prompt }],
         max_tokens: 450,
         temperature: 0.65,
       });

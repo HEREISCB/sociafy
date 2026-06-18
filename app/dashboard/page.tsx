@@ -81,15 +81,21 @@ const SparkleIcon = () => (
   </svg>
 );
 
-function initialPageFromUrl(): Page {
-  if (typeof window === 'undefined') return 'dashboard';
-  const tab = new URLSearchParams(window.location.search).get('tab');
-  const valid: Page[] = ['dashboard', 'compose', 'agent', 'calendar', 'connections', 'shield', 'onboarding'];
-  return (valid as string[]).includes(tab ?? '') ? (tab as Page) : 'dashboard';
+const VALID_PAGES: Page[] = ['dashboard', 'compose', 'agent', 'calendar', 'connections', 'shield', 'onboarding'];
+
+function pageFromSearch(search: string): Page {
+  const tab = new URLSearchParams(search).get('tab');
+  return (VALID_PAGES as string[]).includes(tab ?? '') ? (tab as Page) : 'dashboard';
 }
 
 export default function Home() {
-  const [page, setPage] = useState<Page>(initialPageFromUrl);
+  // Always start with 'dashboard' so SSR and first client render match.
+  // After mount, read the URL and update — avoids hydration mismatch.
+  const [page, setPage] = useState<Page>('dashboard');
+  useEffect(() => {
+    const fromUrl = pageFromSearch(window.location.search);
+    if (fromUrl !== 'dashboard') setPage(fromUrl);
+  }, []);
   const [refreshing, setRefreshing] = useState(false);
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);

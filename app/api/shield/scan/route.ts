@@ -19,6 +19,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'brand name too long' }, { status: 400 });
   }
 
-  const result = await runShieldScan({ userId: user.id, brand });
-  return NextResponse.json(result);
+  try {
+    const result = await runShieldScan({ userId: user.id, brand });
+    return NextResponse.json(result);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[shield/scan] runShieldScan threw:', msg, err);
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
 }

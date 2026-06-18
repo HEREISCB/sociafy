@@ -9,9 +9,9 @@ let _client: OpenAI | null = null;
  * locally without an OpenAI account.
  */
 export function getOpenAI(): OpenAI | null {
-  if (isStubMode.ai()) return null;
+  if (!process.env.OPENAI_API_KEY) return null;
   if (_client) return _client;
-  _client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
+  _client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   return _client;
 }
 
@@ -32,4 +32,23 @@ export const MODELS = {
   fast: process.env.OPENAI_MODEL_FAST || 'gpt-5-mini',
   smart: process.env.OPENAI_MODEL || 'gpt-5',
   image: process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1',
+} as const;
+
+// Groq — OpenAI-compatible endpoint. Used as fallback when OPENAI_API_KEY
+// is absent but GROQ_API_KEY is set. Free tier is generous for shield scripts.
+let _groq: OpenAI | null = null;
+
+export function getGroq(): OpenAI | null {
+  const key = process.env.GROQ_API_KEY;
+  if (!key) return null;
+  if (_groq) return _groq;
+  _groq = new OpenAI({
+    apiKey: key,
+    baseURL: 'https://api.groq.com/openai/v1',
+  });
+  return _groq;
+}
+
+export const GROQ_MODELS = {
+  fast: 'llama-3.3-70b-versatile',
 } as const;

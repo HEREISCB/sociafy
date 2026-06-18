@@ -131,7 +131,7 @@ async function wikiSearch(query: string): Promise<RawMention[]> {
       title: r.title ?? '',
       body: cleanText(r.snippet ?? '').slice(0, 400),
       author: 'Wikipedia',
-      engagement: Math.max(50, (r.size ?? 0) / 100),
+      engagement: Math.round(Math.max(50, (r.size ?? 0) / 100)),
       timestamp: Date.now() / 1000 - 86400,
     })).filter(m => m.title.length > 3);
   } catch { return []; }

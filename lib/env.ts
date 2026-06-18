@@ -91,8 +91,8 @@ export const env = {
 export const isStubMode = {
   clerk: () => !env.clerk.publishableKey || !env.clerk.secretKey,
   database: () => !env.database.url,
-  // AI runs on OpenAI now. Anthropic key kept as legacy fallback only.
-  ai: () => !process.env.OPENAI_API_KEY && !env.anthropic.apiKey,
+  // AI: OpenAI preferred, Groq accepted, Anthropic legacy fallback.
+  ai: () => !process.env.OPENAI_API_KEY && !process.env.GROQ_API_KEY && !env.anthropic.apiKey,
   r2: () => !env.r2.accountId || !env.r2.bucket,
   stripe: () => !env.stripe.secretKey,
   razorpay: () => !env.razorpay.keyId || !env.razorpay.keySecret,
