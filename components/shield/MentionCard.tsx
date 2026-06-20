@@ -80,7 +80,8 @@ export const MentionCard: React.FC<Props> = ({ row, onApprove, onReject, connect
   const [expanded, setExpanded] = useState(row.mention.sentimentLabel === 'crisis');
   const [script, setScript] = useState(row.script);
   const [platform, setPlatform] = useState<string>(row.targetPlatform ?? '');
-  const [busy, setBusy] = useState<'approve' | 'reject' | null>(null);
+  const [busy, setBusy] = useState<'approve' | 'reject' | 'generate' | null>(null);
+  const [genError, setGenError] = useState<string | null>(null);
   const [done, setDone] = useState<'approved' | 'rejected' | null>(
     row.status === 'published' || row.status === 'approved'
       ? 'approved'
@@ -108,6 +109,21 @@ export const MentionCard: React.FC<Props> = ({ row, onApprove, onReject, connect
     try {
       await onReject(row.id);
       setDone('rejected');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleGenerate = async () => {
+    setBusy('generate');
+    setGenError(null);
+    try {
+      const res = await fetch(`/api/shield/actions/${row.id}/generate`, { method: 'POST' });
+      const data = await res.json().catch(() => ({})) as { script?: string; error?: string };
+      if (!res.ok) { setGenError(data.error ?? 'Failed'); return; }
+      setScript(data.script ?? '');
+    } catch {
+      setGenError('Network error');
     } finally {
       setBusy(null);
     }
@@ -315,17 +331,27 @@ export const MentionCard: React.FC<Props> = ({ row, onApprove, onReject, connect
             gap: 10,
           }}
         >
-          <div
-            className="mono"
-            style={{
-              fontSize: 10,
-              letterSpacing: '0.1em',
-              textTransform: 'uppercase',
-              color: 'var(--ink-4)',
-            }}
-          >
-            Response draft {row.script ? '· AI generated' : '· Write your response'}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span
+              className="mono"
+              style={{ fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)' }}
+            >
+              Response {script ? '· edit before publishing' : '· write or generate with AI'}
+            </span>
+            <div style={{ flex: 1 }} />
+            <button
+              className="btn sm"
+              onClick={handleGenerate}
+              disabled={busy !== null}
+              style={{ fontSize: 11, gap: 4 }}
+            >
+              <Icon name="sparkle" size={11} />
+              {busy === 'generate' ? 'Generating…' : script ? 'Regenerate' : 'Generate with AI'}
+            </button>
           </div>
+          {genError && (
+            <p style={{ margin: 0, fontSize: 12, color: 'oklch(0.42 0.18 25)' }}>{genError}</p>
+          )}
           <textarea
             value={script}
             onChange={e => setScript(e.target.value)}
@@ -343,7 +369,7 @@ export const MentionCard: React.FC<Props> = ({ row, onApprove, onReject, connect
               fontFamily: 'var(--sans)',
               boxSizing: 'border-box',
             }}
-            placeholder="Write your response to this mention…"
+            placeholder="Write your response, or click 'Generate with AI' above…"
           />
 
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>

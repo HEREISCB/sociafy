@@ -23,6 +23,7 @@ export interface RawMention {
   author: string;
   engagement: number;
   timestamp: number; // unix seconds
+  platformPostId?: string; // native post ID for direct replies (tweet ID, reddit name, etc.)
 }
 
 // ── Google News RSS ───────────────────────────────────────────────────────────
@@ -182,6 +183,7 @@ export async function fetchXMentions(
       author: `@${t.author_id ?? 'unknown'}`,
       engagement: (t.public_metrics?.like_count ?? 0) + (t.public_metrics?.retweet_count ?? 0) * 3,
       timestamp: t.created_at ? Date.parse(t.created_at) / 1000 : Date.now() / 1000,
+      platformPostId: t.id, // tweet ID for direct reply
     })).filter(m => m.title.length > 5);
   } catch { return []; }
 }

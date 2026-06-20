@@ -21,7 +21,6 @@ import {
 } from '../db/schema';
 import { decryptToken } from '../crypto/tokens';
 import { scoreMention } from './sentiment';
-import { generateScript } from './script';
 import {
   fetchAllFreeSources,
   fetchRedditMentions,
@@ -150,31 +149,25 @@ export async function runShieldScan(opts: ShieldScanOptions): Promise<ShieldScan
     r => r.sentimentLabel === 'crisis' || r.sentimentLabel === 'negative',
   );
 
+  // Insert pending actions with empty script — user generates reply on demand
+  // Pre-wire targetPlatform/targetPostId for X tweets so reply is one click
   let newActions = 0;
-  for (const row of actionable) {
-    // Generate a response script — fire and don't block on individual failures
-    let script = '';
-    try {
-      const novelMention = novel.find(m => m.id === row.externalId);
-      const result = await generateScript({
-        brand,
-        allegation: `${row.title} ${novelMention?.body ?? ''}`.slice(0, 400),
-        theme: row.theme,
-        source: novelMention?.source ?? 'web',
-        severity: row.severity,
-      });
-      script = result.script;
-    } catch { /* use empty draft */ }
-
-    await db().insert(shieldActions).values({
-      mentionId: row.id,
-      userId,
-      status: 'pending',
-      script,
-      targetPlatform: null,
-      targetPostId: null,
-    });
-    newActions++;
+  if (actionable.length > 0) {
+    await db().insert(shieldActions).values(
+      actionable.map(row => {
+        const raw = novel.find(m => m.id === row.externalId);
+        const isX = raw?.source === 'x';
+        return {
+          mentionId: row.id,
+          userId,
+          status: 'pending' as const,
+          script: '',
+          targetPlatform: isX ? 'x' : null,
+          targetPostId: isX ? (raw?.platformPostId ?? null) : null,
+        };
+      }),
+    );
+    newActions = actionable.length;
   }
 
   // Log to activityLog
