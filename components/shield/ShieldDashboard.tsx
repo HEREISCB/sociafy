@@ -4,17 +4,30 @@ import React, { useState } from 'react';
 import { useApi } from '../../lib/ui/fetcher';
 import { Icon } from '../icons';
 import { MentionCard, type ShieldActionRow } from './MentionCard';
+import BrandKnowledge from './BrandKnowledge';
 import type { SentimentLabel } from '../../lib/db/schema';
 
 type FilterType = 'all' | 'crisis' | 'negative' | 'pending';
 
 type ConnectedAccount = { platform: string; isStub: boolean };
 
+// Scan source options. `sources: undefined` = scan everything.
+const SOURCE_OPTIONS: { id: string; label: string; sources?: string[] }[] = [
+  { id: 'all', label: 'All sources' },
+  { id: 'x', label: 'X / Twitter only', sources: ['x'] },
+  { id: 'reddit', label: 'Reddit only', sources: ['reddit'] },
+  { id: 'news', label: 'Google News only', sources: ['google_news'] },
+  { id: 'hn', label: 'Hacker News only', sources: ['hackernews'] },
+  { id: 'wikipedia', label: 'Wikipedia only', sources: ['wikipedia'] },
+];
+
 const ShieldDashboard: React.FC = () => {
   const [brand, setBrand] = useState('');
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterType>('all');
+  const [source, setSource] = useState('all');
+  const [resolvedNote, setResolvedNote] = useState<string | null>(null);
 
   const { data: actionsData, mutate } = useApi<{ actions: ShieldActionRow[] }>(
     '/api/shield/actions',
@@ -44,15 +57,26 @@ const ShieldDashboard: React.FC = () => {
     setScanning(true);
     setScanError(null);
     try {
+      const opt = SOURCE_OPTIONS.find(o => o.id === source);
       const res = await fetch('/api/shield/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ brand: brand.trim() }),
+        body: JSON.stringify({ brand: brand.trim(), sources: opt?.sources }),
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({})) as { error?: string };
         setScanError(d.error ?? 'Scan failed');
       } else {
+        const d = await res.json().catch(() => ({})) as {
+          resolvedX?: { handle: string | null; displayName: string | null };
+        };
+        if (d.resolvedX?.handle) {
+          setResolvedNote(
+            `Resolved to @${d.resolvedX.handle}${d.resolvedX.displayName ? ` — ${d.resolvedX.displayName}` : ''}`,
+          );
+        } else {
+          setResolvedNote(null);
+        }
         await mutate();
       }
     } catch (e) {
@@ -154,6 +178,24 @@ const ShieldDashboard: React.FC = () => {
             fontSize: 14,
           }}
         />
+        <select
+          value={source}
+          onChange={e => setSource(e.target.value)}
+          title="Which sources to scan"
+          style={{
+            padding: '10px 12px',
+            borderRadius: 'var(--r)',
+            border: '1px solid var(--line-2)',
+            background: 'var(--bg-sunk)',
+            color: 'var(--ink)',
+            fontSize: 13,
+            cursor: 'pointer',
+          }}
+        >
+          {SOURCE_OPTIONS.map(o => (
+            <option key={o.id} value={o.id}>{o.label}</option>
+          ))}
+        </select>
         <button
           className="btn primary"
           onClick={scan}
@@ -170,6 +212,15 @@ const ShieldDashboard: React.FC = () => {
           <Icon name="alert" size={12} /> {scanError}
         </div>
       )}
+
+      {resolvedNote && !scanError && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '8px 14px', background: 'var(--bg-elev)', border: '1px solid var(--line)', borderRadius: 'var(--r-sm)', fontSize: 12.5, color: 'var(--ink-2)' }}>
+          <Icon name="target" size={12} /> <span><strong>Smart match:</strong> {resolvedNote}</span>
+        </div>
+      )}
+
+      {/* Brand knowledge base — grounds AI responses */}
+      <BrandKnowledge />
 
       {/* Filter pills */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>

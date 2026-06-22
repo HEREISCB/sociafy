@@ -24,6 +24,13 @@ export const env = {
     apiKey: required('ANTHROPIC_API_KEY'),
   },
 
+  // TwitterAPI.io — third-party pay-as-you-go X/Twitter READ API. The
+  // reputation shield uses it to fetch brand mentions without an official
+  // X API subscription. Replies still go out via official X OAuth (platforms.x).
+  twitterApiIo: {
+    apiKey: required('TWITTERAPI_IO_KEY'),
+  },
+
   r2: {
     accountId: required('R2_ACCOUNT_ID'),
     accessKeyId: required('R2_ACCESS_KEY_ID'),

@@ -6,6 +6,9 @@ export interface ScriptInput {
   theme: string;
   source: string;
   severity: number;
+  /** Optional brand knowledge base — approved facts, voice, and messaging the
+   *  AI should ground the response in (assembled from shield_documents). */
+  knowledge?: string;
 }
 
 export interface ScriptOutput {
@@ -115,14 +118,19 @@ We have a customer advisory board, a public product changelog, and monthly town 
 Thank you for holding us to a high standard. We are committed to meeting it.`,
 };
 
-const SCRIPT_PROMPT = (brand: string, theme: string, severity: number, allegation: string) =>
+const SCRIPT_PROMPT = (brand: string, theme: string, severity: number, allegation: string, knowledge?: string) =>
   `You are a crisis communications expert. Write a 60-90 second video response script for "${brand}".
 
 Crisis details:
 - Theme: ${theme}
 - Severity: ${severity}/10
 - Context: "${allegation.slice(0, 250)}"
-
+${knowledge ? `
+Brand knowledge base — use ONLY these approved facts, voice, and messaging. Do not invent facts or contradict anything here:
+"""
+${knowledge}
+"""
+` : ''}
 Requirements:
 - Natural spoken language, 150-200 words
 - Acknowledge → Address specific concern → Present facts → State concrete action → Invite engagement
@@ -131,12 +139,12 @@ Requirements:
 - NO stage directions, NO [brackets], NO formatting — just the script text itself`;
 
 export async function generateScript(input: ScriptInput): Promise<ScriptOutput> {
-  const { brand, allegation, theme, severity } = input;
-  const prompt = SCRIPT_PROMPT(brand, theme, severity, allegation);
+  const { brand, allegation, theme, severity, knowledge } = input;
+  const prompt = SCRIPT_PROMPT(brand, theme, severity, allegation, knowledge);
 
-  // Try OpenAI first, then Groq as fallback.
+  // Try OpenAI first (GPT-5 for the highest-stakes output), then Groq fallback.
   const ai = getOpenAI() ?? getGroq();
-  const model = getOpenAI() ? MODELS.fast : GROQ_MODELS.fast;
+  const model = getOpenAI() ? MODELS.smart : GROQ_MODELS.fast;
 
   if (ai) {
     try {

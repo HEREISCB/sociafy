@@ -549,3 +549,19 @@ export const shieldActions = pgTable(
     index('shield_actions_mention_idx').on(t.mentionId),
   ],
 );
+
+/** Brand knowledge base — user-supplied reference text the AI grounds crisis
+ *  responses in (brand voice, approved messaging, facts, spokesperson info,
+ *  do's & don'ts). v1 is plain text; vector retrieval can layer on later. */
+export const shieldDocuments = pgTable(
+  'shield_documents',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id').notNull(),
+    title: text('title').notNull().default('Untitled'),
+    content: text('content').notNull().default(''),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index('shield_documents_user_idx').on(t.userId)],
+);

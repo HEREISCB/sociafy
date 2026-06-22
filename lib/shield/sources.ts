@@ -9,6 +9,7 @@
  */
 
 import { searchRedditMentions, type RedditHit } from '../platforms/reddit';
+import { searchTweets, isConfigured as twitterApiIoConfigured } from '../platforms/twitterapi-io';
 
 const UA = 'Mozilla/5.0 (compatible; SociafyReputationShield/1.0)';
 
@@ -159,33 +160,44 @@ export async function fetchRedditMentions(
   } catch { return []; }
 }
 
-// ── X / Twitter search (bearer token) ────────────────────────────────────────
+// ── X / Twitter search (TwitterAPI.io read API) ──────────────────────────────
+// Reads go through TwitterAPI.io (pay-as-you-go, key-only) so we don't need an
+// official X API subscription. Replies still post via official X OAuth.
+// Provider-agnostic: swap the body for official /2/tweets/search/recent later
+// without touching callers.
+
+export function xReadsConfigured(): boolean {
+  return twitterApiIoConfigured();
+}
 
 export async function fetchXMentions(
   brand: string,
-  bearerToken: string,
+  opts: { max?: number; query?: string } = {},
 ): Promise<RawMention[]> {
-  const q = encodeURIComponent(`"${brand}" -is:retweet lang:en`);
-  try {
-    const res = await fetch(
-      `https://api.twitter.com/2/tweets/search/recent?query=${q}&max_results=20&tweet.fields=created_at,author_id,public_metrics`,
-      { headers: { Authorization: `Bearer ${bearerToken}` }, cache: 'no-store' },
-    );
-    if (!res.ok) return [];
-    const data = await res.json();
-    const tweets: any[] = data?.data ?? [];
-    return tweets.map(t => ({
-      id: `x-${t.id}`,
-      source: 'x' as const,
-      url: `https://x.com/i/web/status/${t.id}`,
-      title: t.text?.slice(0, 140) ?? '',
-      body: t.text ?? '',
-      author: `@${t.author_id ?? 'unknown'}`,
-      engagement: (t.public_metrics?.like_count ?? 0) + (t.public_metrics?.retweet_count ?? 0) * 3,
-      timestamp: t.created_at ? Date.parse(t.created_at) / 1000 : Date.now() / 1000,
-      platformPostId: t.id, // tweet ID for direct reply
-    })).filter(m => m.title.length > 5);
-  } catch { return []; }
+  if (!twitterApiIoConfigured()) return [];
+  const max = opts.max ?? 20;
+  // Use the smart resolved query when provided; else a literal phrase search.
+  const query = opts.query ?? `"${brand}" lang:en -filter:retweets`;
+  const tweets = await searchTweets(query, { queryType: 'Latest', max });
+  return tweets
+    .map(t => {
+      const handle = t.author?.userName ? `@${t.author.userName}` : '@unknown';
+      const likes = t.likeCount ?? 0;
+      const rts = t.retweetCount ?? 0;
+      const replies = t.replyCount ?? 0;
+      return {
+        id: `x-${t.id}`,
+        source: 'x' as const,
+        url: t.url || t.twitterUrl || `https://x.com/i/web/status/${t.id}`,
+        title: (t.text ?? '').slice(0, 140),
+        body: t.text ?? '',
+        author: handle,
+        engagement: likes + rts * 3 + replies * 2,
+        timestamp: t.createdAt ? Date.parse(t.createdAt) / 1000 : Date.now() / 1000,
+        platformPostId: t.id, // tweet ID for direct reply
+      };
+    })
+    .filter(m => m.title.length > 5);
 }
 
 // ── All free sources bundled ──────────────────────────────────────────────────

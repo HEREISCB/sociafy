@@ -4,6 +4,7 @@ import { db } from '../../../../../../lib/db';
 import { shieldActions, mentions } from '../../../../../../lib/db/schema';
 import { authedUser } from '../../../../../../lib/api';
 import { generateScript } from '../../../../../../lib/shield/script';
+import { getBrandKnowledge } from '../../../../../../lib/shield/knowledge';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
@@ -25,12 +26,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const { action, mention } = rows[0];
 
+  // Ground the response in the user's brand knowledge base (if any).
+  const knowledge = await getBrandKnowledge(user.id);
+
   const result = await generateScript({
     brand: mention.brand,
     allegation: `${mention.title} ${mention.body}`.slice(0, 400),
     theme: mention.theme,
     source: mention.source,
     severity: mention.severity,
+    knowledge,
   });
 
   await db()

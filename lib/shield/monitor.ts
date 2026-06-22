@@ -21,22 +21,33 @@ import {
 } from '../db/schema';
 import { decryptToken } from '../crypto/tokens';
 import { scoreMention } from './sentiment';
+import { resolveXQuery } from './resolve';
 import {
-  fetchAllFreeSources,
+  fetchGoogleNews,
+  fetchGoogleNewsControversy,
+  fetchHackerNews,
+  fetchWikipedia,
   fetchRedditMentions,
   fetchXMentions,
+  xReadsConfigured,
   type RawMention,
+  type MentionSourceId,
 } from './sources';
 
 export interface ShieldScanOptions {
   userId: string;
   brand: string;
+  /** Restrict the scan to these sources (e.g. ['x'] for X-only). When omitted,
+   *  every available source runs. */
+  sources?: MentionSourceId[];
 }
 
 export interface ShieldScanResult {
   total: number;
   newMentions: number;
   newActions: number;
+  /** When X was scanned, the account the brand name resolved to (if any). */
+  resolvedX?: { handle: string | null; displayName: string | null };
 }
 
 export async function runShieldScan(opts: ShieldScanOptions): Promise<ShieldScanResult> {
@@ -51,28 +62,35 @@ export async function runShieldScan(opts: ShieldScanOptions): Promise<ShieldScan
 
   const accountFor = (p: Platform) => accounts.find(a => a.platform === p);
 
-  // Parallel fetch — authenticated sources used when available, else skipped
-  const freeTask = fetchAllFreeSources(brand);
+  // A source runs only if it's in opts.sources (or opts.sources is omitted).
+  const want = (s: MentionSourceId) => !opts.sources || opts.sources.includes(s);
 
   const redditAccount = accountFor('reddit');
   const redditToken = redditAccount ? decryptToken(redditAccount.accessToken) : null;
-  const redditTask = redditToken
-    ? fetchRedditMentions(brand, redditToken)
-    : Promise.resolve([] as RawMention[]);
 
-  const xAccount = accountFor('x');
-  const xToken = xAccount ? decryptToken(xAccount.accessToken) : null;
-  const xTask = xToken
-    ? fetchXMentions(brand, xToken)
-    : Promise.resolve([] as RawMention[]);
+  // Smart-resolve the brand to a real X account first, so we search mentions of
+  // the actual handle (+ display name) even when the user typed the org's name.
+  let resolvedX: ShieldScanResult['resolvedX'];
+  let xQuery: string | undefined;
+  if (want('x') && xReadsConfigured()) {
+    const r = await resolveXQuery(brand);
+    resolvedX = { handle: r.handle, displayName: r.displayName };
+    xQuery = r.query;
+  }
 
-  const [freeResult, redditResult, xResult] = await Promise.allSettled([freeTask, redditTask, xTask]);
+  // Build the task list from the requested sources. X reads run via
+  // TwitterAPI.io (key-only); replies still need a connected account at approve.
+  const tasks: Promise<RawMention[]>[] = [];
+  if (want('google_news')) {
+    tasks.push(fetchGoogleNews(brand), fetchGoogleNewsControversy(brand));
+  }
+  if (want('hackernews')) tasks.push(fetchHackerNews(brand));
+  if (want('wikipedia')) tasks.push(fetchWikipedia(brand));
+  if (want('reddit') && redditToken) tasks.push(fetchRedditMentions(brand, redditToken));
+  if (want('x') && xReadsConfigured()) tasks.push(fetchXMentions(brand, { query: xQuery }));
 
-  const all: RawMention[] = [
-    ...(freeResult.status === 'fulfilled' ? freeResult.value : []),
-    ...(redditResult.status === 'fulfilled' ? redditResult.value : []),
-    ...(xResult.status === 'fulfilled' ? xResult.value : []),
-  ];
+  const settled = await Promise.allSettled(tasks);
+  const all: RawMention[] = settled.flatMap(r => (r.status === 'fulfilled' ? r.value : []));
 
   // Deduplicate by external id within this batch
   const seen = new Set<string>();
@@ -83,7 +101,7 @@ export async function runShieldScan(opts: ShieldScanOptions): Promise<ShieldScan
     return true;
   });
 
-  if (deduped.length === 0) return { total: 0, newMentions: 0, newActions: 0 };
+  if (deduped.length === 0) return { total: 0, newMentions: 0, newActions: 0, resolvedX };
 
   // Check which externalIds already exist in the DB for this user
   const existingIds = new Set(
@@ -104,7 +122,7 @@ export async function runShieldScan(opts: ShieldScanOptions): Promise<ShieldScan
   );
 
   const novel = deduped.filter(m => !existingIds.has(m.id));
-  if (novel.length === 0) return { total: deduped.length, newMentions: 0, newActions: 0 };
+  if (novel.length === 0) return { total: deduped.length, newMentions: 0, newActions: 0, resolvedX };
 
   // Score all novel mentions
   const scored = novel.map(m => ({ m, sentiment: scoreMention(m.title, m.body) }));
@@ -181,5 +199,5 @@ export async function runShieldScan(opts: ShieldScanOptions): Promise<ShieldScan
     });
   }
 
-  return { total: deduped.length, newMentions: novel.length, newActions };
+  return { total: deduped.length, newMentions: novel.length, newActions, resolvedX };
 }

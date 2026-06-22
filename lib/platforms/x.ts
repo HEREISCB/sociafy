@@ -103,13 +103,20 @@ export const xAdapter: PlatformAdapter = {
   },
   async publishText(input: PublishInput): Promise<PublishResult> {
     if (!this.isConfigured() || input.account.accessToken === 'stub') return stubPublish(input, 'x');
+    // When the shield approves a reply to a specific tweet, the approve route
+    // passes the parent tweet id via account.meta.parentId. Thread the reply
+    // by setting reply.in_reply_to_tweet_id; otherwise post a standalone tweet.
+    const meta = input.account.meta as { parentId?: string } | null;
+    const parentId = meta?.parentId;
+    const payload: { text: string; reply?: { in_reply_to_tweet_id: string } } = { text: input.text };
+    if (parentId) payload.reply = { in_reply_to_tweet_id: parentId };
     const resp = await fetch(TWEET_URL, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${input.account.accessToken}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ text: input.text }),
+      body: JSON.stringify(payload),
     });
     if (!resp.ok) {
       const body = await resp.text();
