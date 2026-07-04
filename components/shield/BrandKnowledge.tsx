@@ -20,7 +20,6 @@ const BrandKnowledge: React.FC = () => {
   const { data, mutate } = useApi<{ documents: ShieldDocument[] }>('/api/shield/documents');
   const docs = data?.documents ?? [];
 
-  const [open, setOpen] = useState(false);
   const [draftTitle, setDraftTitle] = useState('');
   const [draftContent, setDraftContent] = useState('');
   const [busy, setBusy] = useState(false);
@@ -75,50 +74,8 @@ const BrandKnowledge: React.FC = () => {
     }
   };
 
-  const totalChars = docs.reduce((n, d) => n + d.content.length, 0);
-
   return (
-    <div
-      style={{
-        border: '1px solid var(--line)',
-        borderRadius: 'var(--r-lg)',
-        background: 'var(--bg-elev)',
-        overflow: 'hidden',
-      }}
-    >
-      {/* Header / toggle */}
-      <button
-        onClick={() => setOpen(o => !o)}
-        style={{
-          width: '100%',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          padding: '12px 16px',
-          background: 'transparent',
-          border: 'none',
-          cursor: 'pointer',
-          color: 'var(--ink)',
-          textAlign: 'left',
-        }}
-      >
-        <Icon name="shield" size={14} />
-        <span style={{ fontSize: 14, fontWeight: 500 }}>Brand Knowledge</span>
-        <span
-          className="mono"
-          style={{ fontSize: 9.5, padding: '1px 6px', borderRadius: 100, background: 'var(--bg-sunk)', color: 'var(--ink-3)' }}
-        >
-          {docs.length} doc{docs.length === 1 ? '' : 's'}
-        </span>
-        <span style={{ flex: 1 }} />
-        <span className="mono" style={{ fontSize: 10, color: 'var(--ink-3)' }}>
-          {totalChars.toLocaleString()} chars
-        </span>
-        <Icon name={open ? 'chevron_down' : 'chevron_right'} size={13} />
-      </button>
-
-      {open && (
-        <div style={{ padding: '4px 16px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink-3)', lineHeight: 1.5 }}>
             Reference text the AI uses when drafting responses — brand voice, approved messaging, key
             facts, spokesperson details. Paste text or upload a <code>.txt</code>/<code>.md</code> file.
@@ -206,8 +163,6 @@ const BrandKnowledge: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
-      )}
     </div>
   );
 };

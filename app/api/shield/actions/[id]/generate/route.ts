@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq, and } from 'drizzle-orm';
 import { db } from '../../../../../../lib/db';
-import { shieldActions, mentions } from '../../../../../../lib/db/schema';
+import { shieldActions, mentions, shieldSettings } from '../../../../../../lib/db/schema';
 import { authedUser } from '../../../../../../lib/api';
 import { generateScript } from '../../../../../../lib/shield/script';
 import { getBrandKnowledge } from '../../../../../../lib/shield/knowledge';
@@ -26,8 +26,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const { action, mention } = rows[0];
 
-  // Ground the response in the user's brand knowledge base (if any).
+  // Ground the response in the user's brand knowledge base + custom prompt (if any).
   const knowledge = await getBrandKnowledge(user.id);
+  const [settings] = await db()
+    .select({ systemPrompt: shieldSettings.systemPrompt })
+    .from(shieldSettings)
+    .where(eq(shieldSettings.userId, user.id))
+    .limit(1);
 
   const result = await generateScript({
     brand: mention.brand,
@@ -36,6 +41,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     source: mention.source,
     severity: mention.severity,
     knowledge,
+    systemPrompt: settings?.systemPrompt || undefined,
+    author: mention.author || undefined,
+    datetime: mention.fetchedAt ? new Date(mention.fetchedAt).toLocaleString() : undefined,
   });
 
   await db()

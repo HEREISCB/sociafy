@@ -2,6 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
+import { TIER_PRICING, TOPUP_PRICING, type Currency } from '../lib/billing/pricing';
 
 const ArrowIcon = () => (
   <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
@@ -94,7 +95,7 @@ const LPNav = () => (
   </header>
 );
 
-const Hero = () => (
+const Hero = ({ currency }: { currency: Currency }) => (
   <section className="hero">
     <div className="lp">
       <div className="hero-grid">
@@ -122,7 +123,7 @@ const Hero = () => (
             </a>
           </div>
           <div className="hero-meta">
-            <span className="dotted">From $30 / month</span>
+            <span className="dotted">From {tierPrice(currency, 'starter')} / month</span>
             <span className="dotted">Cancel anytime</span>
             <span className="dotted">No free trial</span>
           </div>
@@ -459,6 +460,31 @@ const VoiceSection = () => (
 
 type Tier = 'starter' | 'pro' | 'business';
 
+// ── Location-based pricing helpers ────────────────────────────────────────────
+const CREDITS: Record<Tier, number> = { starter: 2000, pro: 6000, business: 25000 };
+const TIER_OFF: Record<Tier, string> = { starter: '', pro: ' · 11% off Starter', business: ' · 20% off Starter' };
+
+/** Guess the visitor's currency from their timezone (no network). India →
+ *  INR, everyone else → USD. A manual toggle lets them override. */
+const detectCurrency = (): Currency => {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (tz === 'Asia/Kolkata' || tz === 'Asia/Calcutta') return 'INR';
+  } catch { /* SSR / unsupported */ }
+  return 'USD';
+};
+
+const tierPrice = (c: Currency, t: Tier): string => TIER_PRICING[c][t].priceMonthly;
+
+/** Per-credit rate label, derived from the tier's minor-unit price ÷ credits. */
+const perCreditLabel = (c: Currency, t: Tier): string => {
+  const rate = TIER_PRICING[c][t].amountMinor / 100 / CREDITS[t];
+  return c === 'INR' ? `₹${rate.toFixed(2)}` : `$${rate.toFixed(rate < 0.1 ? 4 : 3)}`;
+};
+
+const priceTag = (c: Currency, t: Tier): string =>
+  `${CREDITS[t].toLocaleString()} credits / month · ${perCreditLabel(c, t)} per credit${TIER_OFF[t]}`;
+
 const startCheckoutFromLanding = async (tier: Tier, setBusy: (t: Tier | null) => void) => {
   setBusy(tier);
   try {
@@ -486,7 +512,31 @@ const startCheckoutFromLanding = async (tier: Tier, setBusy: (t: Tier | null) =>
   }
 };
 
-const Pricing = () => {
+const CurrencyToggle = ({ currency, setCurrency }: { currency: Currency; setCurrency: (c: Currency) => void }) => (
+  <div className="ccy-toggle" style={{ display: 'inline-flex', gap: 4, padding: 3, borderRadius: 999, border: '1px solid var(--line, rgba(0,0,0,0.12))' }}>
+    {(['INR', 'USD'] as Currency[]).map(c => (
+      <button
+        key={c}
+        onClick={() => setCurrency(c)}
+        aria-pressed={currency === c}
+        style={{
+          padding: '5px 12px',
+          borderRadius: 999,
+          border: 'none',
+          cursor: 'pointer',
+          fontSize: 12.5,
+          fontWeight: 600,
+          background: currency === c ? 'var(--ink, #0a0a0a)' : 'transparent',
+          color: currency === c ? 'var(--bg, #fff)' : 'inherit',
+        }}
+      >
+        {c === 'INR' ? '₹ India' : '$ Global'}
+      </button>
+    ))}
+  </div>
+);
+
+const Pricing = ({ currency, setCurrency }: { currency: Currency; setCurrency: (c: Currency) => void }) => {
   const [busy, setBusy] = React.useState<Tier | null>(null);
   return (
   <section className="lp-section" id="pricing">
@@ -498,15 +548,22 @@ const Pricing = () => {
         </div>
         <p className="blurb">
           Text post: 1 credit. AI image: 4 credits. 720p video reel: 180 credits.
-          Top up anytime at $15 per 1,000 credits. No free trial — start when you&apos;re ready.
+          Top up anytime at {TOPUP_PRICING[currency].display}. No free trial — start when you&apos;re ready.
         </p>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+        <CurrencyToggle currency={currency} setCurrency={setCurrency} />
+        <span style={{ fontSize: 12, opacity: 0.6 }}>
+          {currency === 'INR' ? 'Billed in ₹ via Razorpay · GST invoice' : 'Billed in $ · cards & wallets'}
+        </span>
       </div>
 
       <div className="pricing">
         <div className="price-card">
           <div className="price-name">Starter</div>
-          <div className="price-amt">$30<small>/ mo</small></div>
-          <div className="price-tag">2,000 credits / month · $0.015 per credit</div>
+          <div className="price-amt">{tierPrice(currency, 'starter')}<small>/ mo</small></div>
+          <div className="price-tag">{priceTag(currency, 'starter')}</div>
           <div className="price-divider" />
           <ul className="price-list">
             <li><span className="check">✓</span> All 6 platforms</li>
@@ -525,8 +582,8 @@ const Pricing = () => {
 
         <div className="price-card featured">
           <div className="price-name">Pro</div>
-          <div className="price-amt">$80<small>/ mo</small></div>
-          <div className="price-tag">6,000 credits / month · $0.0133 per credit · 11% off Starter</div>
+          <div className="price-amt">{tierPrice(currency, 'pro')}<small>/ mo</small></div>
+          <div className="price-tag">{priceTag(currency, 'pro')}</div>
           <div className="price-divider" />
           <ul className="price-list">
             <li><span className="check">✓</span> Everything in Starter</li>
@@ -545,8 +602,8 @@ const Pricing = () => {
 
         <div className="price-card">
           <div className="price-name">Business</div>
-          <div className="price-amt">$299<small>/ mo</small></div>
-          <div className="price-tag">25,000 credits / month · $0.012 per credit · 20% off Starter</div>
+          <div className="price-amt">{tierPrice(currency, 'business')}<small>/ mo</small></div>
+          <div className="price-tag">{priceTag(currency, 'business')}</div>
           <div className="price-divider" />
           <ul className="price-list">
             <li><span className="check">✓</span> Everything in Pro</li>
@@ -584,7 +641,11 @@ const FAQ_ITEMS = [
   ['What happens to my credits and posts if I cancel?', 'Cancellation takes effect at the end of your current billing cycle, so anything already scheduled keeps publishing until then and your remaining cycle credits stay usable. Unused monthly credits roll over for one month (two months on Business). See the Refund & Cancellation policy for details.'],
 ] as const;
 
-const FAQSection = () => (
+const FAQSection = ({ currency }: { currency: Currency }) => {
+  const p = TIER_PRICING[currency];
+  const pricingAnswer = `Every plan is credit-based: Starter is ${p.starter.priceMonthly}/mo (2,000 credits), Pro is ${p.pro.priceMonthly}/mo (6,000 credits), and Business is ${p.business.priceMonthly}/mo (25,000 credits). Each action costs credits — a text post is 1 credit, an AI image is 4, a 720p video reel is 180. There is no free trial; you can top up anytime at ${TOPUP_PRICING[currency].display} and cancel in one click.`;
+  const items = FAQ_ITEMS.map((it, i) => (i === 0 ? ([it[0], pricingAnswer] as const) : it));
+  return (
   <section className="lp-section" id="faq">
     <div className="lp">
       <div className="lp-section-head">
@@ -595,7 +656,7 @@ const FAQSection = () => (
         <p className="blurb">More in the docs, or ping us — a real person replies in under an hour during EU/US hours.</p>
       </div>
       <div className="faq">
-        {FAQ_ITEMS.map(([q, a], i) => (
+        {items.map(([q, a], i) => (
           <div className="faq-item" key={i}>
             <div className="faq-num">/ 0{i + 1}</div>
             <div className="faq-q">{q}</div>
@@ -605,7 +666,8 @@ const FAQSection = () => (
       </div>
     </div>
   </section>
-);
+  );
+};
 
 const FinalCTA = () => (
   <section className="lp-section" style={{ paddingTop: 96, paddingBottom: 0, borderTop: 0 }}>
@@ -682,6 +744,7 @@ const Footer = () => (
       </div>
       <div className="lp-foot-bottom" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
         <span>Sociafy is a product of <strong>GNIX SEMICONDUCTORS PRIVATE LIMITED</strong>.</span>
+        <span>2TF, Satyam Complex 2, Sector Alpha II, Greater Noida, Uttar Pradesh 201310, India</span>
         <span>© 2026 GNIX SEMICONDUCTORS PRIVATE LIMITED · Made for founders.</span>
       </div>
     </div>
@@ -689,17 +752,20 @@ const Footer = () => (
 );
 
 export default function LandingPage() {
+  const [currency, setCurrency] = React.useState<Currency>('USD');
+  // Default to the visitor's likely currency (India → INR) after mount.
+  React.useEffect(() => { setCurrency(detectCurrency()); }, []);
   return (
     <>
       <SkipLink />
       <LPNav />
       <main id="main">
-        <Hero />
+        <Hero currency={currency} />
         <PreviewSection />
         <AgentShowcase />
         <VoiceSection />
-        <Pricing />
-        <FAQSection />
+        <Pricing currency={currency} setCurrency={setCurrency} />
+        <FAQSection currency={currency} />
         <FinalCTA />
       </main>
       <Footer />

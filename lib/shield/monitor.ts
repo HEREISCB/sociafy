@@ -17,11 +17,13 @@ import {
   activityLog,
   mentions,
   shieldActions,
+  shieldSettings,
   type Platform,
 } from '../db/schema';
 import { decryptToken } from '../crypto/tokens';
 import { scoreMention } from './sentiment';
 import { resolveXQuery } from './resolve';
+import { sendCrisisAlert } from './notify';
 import {
   fetchGoogleNews,
   fetchGoogleNewsControversy,
@@ -197,6 +199,27 @@ export async function runShieldScan(opts: ShieldScanOptions): Promise<ShieldScan
       body: actionable.map(r => r.title).slice(0, 3).join(' · '),
       meta: { brand, count: actionable.length },
     });
+  }
+
+  // Fire crisis alerts (best-effort) if the user configured a channel.
+  const crisisRows = inserted.filter(r => r.sentimentLabel === 'crisis');
+  if (crisisRows.length > 0) {
+    const [settings] = await db()
+      .select({ slackWebhookUrl: shieldSettings.slackWebhookUrl, alertEmail: shieldSettings.alertEmail })
+      .from(shieldSettings)
+      .where(eq(shieldSettings.userId, userId))
+      .limit(1);
+    if (settings && (settings.slackWebhookUrl || settings.alertEmail)) {
+      const mentionsForAlert = crisisRows.map(r => {
+        const raw = novel.find(m => m.id === r.externalId);
+        return { title: r.title, url: raw?.url ?? '', severity: r.severity, source: raw?.source ?? 'web' };
+      });
+      await sendCrisisAlert({
+        webhookUrl: settings.slackWebhookUrl,
+        email: settings.alertEmail,
+        alert: { brand, mentions: mentionsForAlert },
+      });
+    }
   }
 
   return { total: deduped.length, newMentions: novel.length, newActions, resolvedX };

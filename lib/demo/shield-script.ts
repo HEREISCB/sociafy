@@ -9,6 +9,45 @@ export interface ScriptInput {
   /** Optional brand knowledge base — approved facts, voice, and messaging the
    *  AI should ground the response in (assembled from shield_documents). */
   knowledge?: string;
+  /** Optional user-customized system prompt. May contain {{variables}}
+   *  (see TEMPLATE_VARS) that are substituted with live mention data. Empty
+   *  string / undefined → use the built-in default prompt. */
+  systemPrompt?: string;
+  /** Mention author handle, for the {{author}} variable. */
+  author?: string;
+  /** Human-readable capture time, for the {{datetime}} variable. */
+  datetime?: string;
+}
+
+/** Variables a user may use in a custom system prompt; substituted at gen time. */
+export const TEMPLATE_VARS = ['brand', 'mention', 'author', 'theme', 'severity', 'source', 'datetime'] as const;
+
+/** The default crisis-response prompt, exposed so the settings UI can show /
+ *  reset to it. Mirrors the built-in SCRIPT_PROMPT but in {{variable}} form. */
+export const DEFAULT_SYSTEM_PROMPT = `You are the crisis communications lead for {{brand}}. Write a 60-90 second spoken video response (150-200 words) to this mention:
+
+"{{mention}}"
+— by {{author}} · theme: {{theme}} · severity {{severity}}/10 · captured {{datetime}}
+
+Structure: acknowledge → address the specific concern → present facts → state a concrete action → invite further contact. Empathetic but factual, no admission of unproven wrongdoing. NO stage directions, NO [brackets], NO formatting — just the script text itself.`;
+
+/** Substitute {{var}} tokens (case-insensitive, whitespace-tolerant). Unknown
+ *  tokens are left intact so a typo is visible rather than silently dropped. */
+function substituteVars(template: string, input: ScriptInput): string {
+  const map: Record<string, string> = {
+    brand: input.brand,
+    mention: input.allegation,
+    allegation: input.allegation,
+    author: input.author || 'a user',
+    theme: input.theme,
+    severity: String(input.severity),
+    source: input.source,
+    datetime: input.datetime || new Date().toISOString(),
+  };
+  return template.replace(/\{\{\s*(\w+)\s*\}\}/g, (whole, key: string) => {
+    const v = map[key.toLowerCase()];
+    return v !== undefined ? v : whole;
+  });
 }
 
 export interface ScriptOutput {
@@ -118,19 +157,14 @@ We have a customer advisory board, a public product changelog, and monthly town 
 Thank you for holding us to a high standard. We are committed to meeting it.`,
 };
 
-const SCRIPT_PROMPT = (brand: string, theme: string, severity: number, allegation: string, knowledge?: string) =>
+const SCRIPT_PROMPT = (brand: string, theme: string, severity: number, allegation: string) =>
   `You are a crisis communications expert. Write a 60-90 second video response script for "${brand}".
 
 Crisis details:
 - Theme: ${theme}
 - Severity: ${severity}/10
 - Context: "${allegation.slice(0, 250)}"
-${knowledge ? `
-Brand knowledge base — use ONLY these approved facts, voice, and messaging. Do not invent facts or contradict anything here:
-"""
-${knowledge}
-"""
-` : ''}
+
 Requirements:
 - Natural spoken language, 150-200 words
 - Acknowledge → Address specific concern → Present facts → State concrete action → Invite engagement
@@ -138,9 +172,23 @@ Requirements:
 - End with a specific, actionable commitment
 - NO stage directions, NO [brackets], NO formatting — just the script text itself`;
 
+/** Assemble the final prompt: a user's custom system prompt (with variables
+ *  substituted) when set, else the built-in default — then append the brand
+ *  knowledge base if any. */
+function buildPrompt(input: ScriptInput): string {
+  const custom = input.systemPrompt?.trim();
+  const base = custom
+    ? substituteVars(custom, input)
+    : SCRIPT_PROMPT(input.brand, input.theme, input.severity, input.allegation);
+  const knowledgeBlock = input.knowledge
+    ? `\n\nBrand knowledge base — use ONLY these approved facts, voice, and messaging. Do not invent facts or contradict anything here:\n"""\n${input.knowledge}\n"""`
+    : '';
+  return base + knowledgeBlock;
+}
+
 export async function generateScript(input: ScriptInput): Promise<ScriptOutput> {
-  const { brand, allegation, theme, severity, knowledge } = input;
-  const prompt = SCRIPT_PROMPT(brand, theme, severity, allegation, knowledge);
+  const { brand, theme } = input;
+  const prompt = buildPrompt(input);
 
   // Try OpenAI first (GPT-5 for the highest-stakes output), then Groq fallback.
   const ai = getOpenAI() ?? getGroq();
@@ -164,7 +212,7 @@ export async function generateScript(input: ScriptInput): Promise<ScriptOutput> 
   }
 
   const fn = TEMPLATES[theme] ?? TEMPLATES['General Reputation'];
-  return buildOutput(fn(brand, allegation), brand, theme, false);
+  return buildOutput(fn(brand, input.allegation), brand, theme, false);
 }
 
 function buildOutput(script: string, brand: string, theme: string, usedAI: boolean): ScriptOutput {

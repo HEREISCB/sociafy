@@ -565,3 +565,24 @@ export const shieldDocuments = pgTable(
   },
   (t) => [index('shield_documents_user_idx').on(t.userId)],
 );
+
+/** Per-user reputation-shield settings. systemPrompt overrides the default
+ *  crisis-response generation prompt; it may contain {{variables}} that are
+ *  substituted with live mention data at generation time. */
+export const shieldSettings = pgTable('shield_settings', {
+  userId: text('user_id').primaryKey(),
+  /** Custom system prompt for response generation. Empty = use built-in default. */
+  systemPrompt: text('system_prompt').notNull().default(''),
+  /** Scheduled auto-scan: when true the cron re-scans autoFetchBrand. */
+  autoFetch: boolean('auto_fetch').notNull().default(false),
+  /** The brand/handle the scheduled scan monitors. */
+  autoFetchBrand: text('auto_fetch_brand'),
+  /** Last time the scheduled scan ran for this user. */
+  lastAutoFetchAt: timestamp('last_auto_fetch_at', { withTimezone: true }),
+  /** Incoming-webhook URL for crisis alerts (Slack/Discord-compatible). */
+  slackWebhookUrl: text('slack_webhook_url'),
+  /** Email address to alert on new crisis mentions (needs RESEND_API_KEY). */
+  alertEmail: text('alert_email'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});

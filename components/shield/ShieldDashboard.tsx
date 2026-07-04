@@ -5,6 +5,10 @@ import { useApi } from '../../lib/ui/fetcher';
 import { Icon } from '../icons';
 import { MentionCard, type ShieldActionRow } from './MentionCard';
 import BrandKnowledge from './BrandKnowledge';
+import ResponseSettings from './ResponseSettings';
+import MonitoringSettings from './MonitoringSettings';
+import AttentionQueue, { type AttentionData } from './AttentionQueue';
+import Modal from './Modal';
 import type { SentimentLabel } from '../../lib/db/schema';
 
 type FilterType = 'all' | 'crisis' | 'negative' | 'pending';
@@ -21,6 +25,16 @@ const SOURCE_OPTIONS: { id: string; label: string; sources?: string[] }[] = [
   { id: 'wikipedia', label: 'Wikipedia only', sources: ['wikipedia'] },
 ];
 
+// Platform filter for the mention list (filters by mention.source).
+const PLATFORM_FILTERS: { id: string; label: string }[] = [
+  { id: 'all', label: 'All platforms' },
+  { id: 'x', label: 'X / Twitter' },
+  { id: 'reddit', label: 'Reddit' },
+  { id: 'google_news', label: 'Google News' },
+  { id: 'hackernews', label: 'Hacker News' },
+  { id: 'wikipedia', label: 'Wikipedia' },
+];
+
 const ShieldDashboard: React.FC = () => {
   const [brand, setBrand] = useState('');
   const [scanning, setScanning] = useState(false);
@@ -28,23 +42,37 @@ const ShieldDashboard: React.FC = () => {
   const [filter, setFilter] = useState<FilterType>('all');
   const [source, setSource] = useState('all');
   const [resolvedNote, setResolvedNote] = useState<string | null>(null);
+  const [modal, setModal] = useState<null | 'knowledge' | 'prompt' | 'monitoring' | 'attention'>(null);
+  const [platform, setPlatform] = useState('all');
+  const [sortBy, setSortBy] = useState<'recent' | 'severity'>('recent');
 
   const { data: actionsData, mutate } = useApi<{ actions: ShieldActionRow[] }>(
     '/api/shield/actions',
   );
   const { data: accountsData } = useApi<ConnectedAccount[]>('/api/accounts');
+  // For the toolbar button badges (SWR dedupes with the modal components' calls).
+  const { data: docsData } = useApi<{ documents: unknown[] }>('/api/shield/documents');
+  const { data: settingsData } = useApi<{ settings: { systemPrompt: string; autoFetch: boolean } }>('/api/shield/settings');
+  const { data: attentionData } = useApi<AttentionData>('/api/shield/attention');
+  const docCount = docsData?.documents?.length ?? 0;
+  const promptCustom = !!settingsData?.settings?.systemPrompt?.trim();
+  const autoFetchOn = !!settingsData?.settings?.autoFetch;
+  const attentionCount = attentionData?.counts?.total ?? 0;
 
   const actions = actionsData?.actions ?? [];
   const connectedPlatforms = (accountsData ?? [])
     .filter(a => !a.isStub)
     .map(a => a.platform);
 
-  const filtered = actions.filter(a => {
-    if (filter === 'pending') return a.status === 'pending';
-    if (filter === 'crisis') return a.mention.sentimentLabel === 'crisis';
-    if (filter === 'negative') return a.mention.sentimentLabel === 'negative';
-    return true;
-  });
+  const filtered = actions
+    .filter(a => {
+      if (filter === 'pending') return a.status === 'pending';
+      if (filter === 'crisis') return a.mention.sentimentLabel === 'crisis';
+      if (filter === 'negative') return a.mention.sentimentLabel === 'negative';
+      return true;
+    })
+    .filter(a => platform === 'all' || a.mention.source === platform)
+    .sort((a, b) => (sortBy === 'severity' ? (b.mention.severity ?? 0) - (a.mention.severity ?? 0) : 0));
 
   const stats = {
     total: actions.length,
@@ -219,11 +247,37 @@ const ShieldDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* Brand knowledge base — grounds AI responses */}
-      <BrandKnowledge />
+      {/* Compact tools toolbar — expand into full modals */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <ToolButton icon="shield" label="Brand Knowledge" badge={String(docCount)} onClick={() => setModal('knowledge')} />
+        <ToolButton icon="settings" label="Response AI" badge={promptCustom ? 'custom' : 'default'} onClick={() => setModal('prompt')} />
+        <ToolButton icon="refresh" label="Monitoring" badge={autoFetchOn ? 'on' : 'off'} onClick={() => setModal('monitoring')} />
+        <ToolButton icon="bell" label="Needs attention" badge={attentionCount > 0 ? String(attentionCount) : undefined} onClick={() => setModal('attention')} />
+      </div>
 
-      {/* Filter pills */}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+      {modal === 'knowledge' && (
+        <Modal title="Brand Knowledge" subtitle="Reference text the AI grounds responses in" onClose={() => setModal(null)}>
+          <BrandKnowledge />
+        </Modal>
+      )}
+      {modal === 'prompt' && (
+        <Modal title="Response AI — System Prompt" subtitle="Customize how the AI writes responses" onClose={() => setModal(null)}>
+          <ResponseSettings />
+        </Modal>
+      )}
+      {modal === 'monitoring' && (
+        <Modal title="Monitoring & Alerts" subtitle="Scheduled auto-scans + crisis alerts" onClose={() => setModal(null)}>
+          <MonitoringSettings />
+        </Modal>
+      )}
+      {modal === 'attention' && (
+        <Modal title="Needs your attention" subtitle="Mentions awaiting a response + failed posts" onClose={() => setModal(null)}>
+          <AttentionQueue onReview={() => { setFilter('crisis'); setModal(null); }} />
+        </Modal>
+      )}
+
+      {/* Filter pills + platform/sort */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         {FILTERS.map(f => (
           <button
             key={f.id}
@@ -253,6 +307,28 @@ const ShieldDashboard: React.FC = () => {
             )}
           </button>
         ))}
+
+        <span style={{ flex: 1 }} />
+
+        <select
+          value={platform}
+          onChange={e => setPlatform(e.target.value)}
+          title="Filter by platform"
+          style={{ padding: '6px 10px', borderRadius: 'var(--r-sm)', border: '1px solid var(--line)', background: 'var(--bg-elev)', color: 'var(--ink-2)', fontSize: 12.5, cursor: 'pointer' }}
+        >
+          {PLATFORM_FILTERS.map(p => (
+            <option key={p.id} value={p.id}>{p.label}</option>
+          ))}
+        </select>
+        <select
+          value={sortBy}
+          onChange={e => setSortBy(e.target.value as 'recent' | 'severity')}
+          title="Sort by"
+          style={{ padding: '6px 10px', borderRadius: 'var(--r-sm)', border: '1px solid var(--line)', background: 'var(--bg-elev)', color: 'var(--ink-2)', fontSize: 12.5, cursor: 'pointer' }}
+        >
+          <option value="recent">Newest first</option>
+          <option value="severity">Highest severity</option>
+        </select>
       </div>
 
       {/* Mention cards */}
@@ -292,6 +368,35 @@ const ShieldDashboard: React.FC = () => {
     </div>
   );
 };
+
+const ToolButton: React.FC<{
+  icon: React.ComponentProps<typeof Icon>['name'];
+  label: string;
+  badge?: string;
+  soon?: boolean;
+  onClick?: () => void;
+}> = ({ icon, label, badge, soon, onClick }) => (
+  <button
+    className="btn sm"
+    onClick={onClick}
+    disabled={soon}
+    title={soon ? 'Coming soon' : label}
+    style={{ display: 'flex', alignItems: 'center', gap: 7, opacity: soon ? 0.55 : 1 }}
+  >
+    <Icon name={icon} size={13} />
+    {label}
+    {badge && (
+      <span className="mono" style={{ fontSize: 9, padding: '1px 5px', borderRadius: 100, background: 'var(--bg-sunk)', color: 'var(--ink-3)' }}>
+        {badge}
+      </span>
+    )}
+    {soon && (
+      <span className="mono" style={{ fontSize: 8, letterSpacing: '0.06em', textTransform: 'uppercase', padding: '1px 4px', borderRadius: 100, background: 'var(--bg-sunk)', color: 'var(--ink-3)' }}>
+        soon
+      </span>
+    )}
+  </button>
+);
 
 const StatCell: React.FC<{ label: string; value: number; warn?: boolean }> = ({ label, value, warn }) => (
   <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>

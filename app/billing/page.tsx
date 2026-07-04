@@ -469,6 +469,8 @@ function BillingPageInner() {
               {' '}See our <a href="/legal/refund">Refund &amp; Cancellation Policy</a>.
               <br />
               Sociafy is a product of GNIX SEMICONDUCTORS PRIVATE LIMITED.
+              <br />
+              2TF, Satyam Complex 2, Sector Alpha II, Greater Noida, Uttar Pradesh 201310, India
             </section>
           </div>
         </div>
