@@ -9,9 +9,10 @@ import Compose from '../../components/compose';
 import AgentPage from '../../components/agent';
 import CalendarPage from '../../components/calendar';
 import ConnectionsPage from '../../components/connections';
+import TrendsDashboard from '../../components/trends/trends-dashboard';
 import Onboarding from '../../components/onboarding';
 
-type Page = 'dashboard' | 'compose' | 'agent' | 'calendar' | 'connections' | 'onboarding';
+type Page = 'dashboard' | 'compose' | 'agent' | 'calendar' | 'connections' | 'trends' | 'onboarding';
 
 /**
  * Time-of-day greeting. `now` MUST be null on the SSR / first-client render so
@@ -58,6 +59,11 @@ function usePageMeta(page: Exclude<Page, 'onboarding'>, displayName: string | nu
         h1: 'Connections',
         sub: 'Connect, reconnect, or disconnect every platform Sociafy posts to.',
       },
+      trends: {
+        crumbs: ['Sociafy', 'Workspace', 'Trends'],
+        h1: 'Trend Radar',
+        sub: 'What is breaking out across Instagram, TikTok, and YouTube — before it peaks.',
+      },
     };
     return base[page];
   }, [page, displayName, now]);
@@ -78,7 +84,7 @@ const SparkleIcon = () => (
 function initialPageFromUrl(): Page {
   if (typeof window === 'undefined') return 'dashboard';
   const tab = new URLSearchParams(window.location.search).get('tab');
-  const valid: Page[] = ['dashboard', 'compose', 'agent', 'calendar', 'connections', 'onboarding'];
+  const valid: Page[] = ['dashboard', 'compose', 'agent', 'calendar', 'connections', 'trends', 'onboarding'];
   return (valid as string[]).includes(tab ?? '') ? (tab as Page) : 'dashboard';
 }
 
@@ -139,6 +145,7 @@ export default function Home() {
         if (e.key === '3') { e.preventDefault(); setPage('agent'); }
         if (e.key === '4') { e.preventDefault(); setPage('calendar'); }
         if (e.key === '5') { e.preventDefault(); setPage('connections'); }
+        if (e.key === '6') { e.preventDefault(); setPage('trends'); }
       }
     };
     window.addEventListener('keydown', handler);
@@ -214,6 +221,7 @@ export default function Home() {
           {page === 'agent' && <AgentPage onEditDraft={(id) => goCompose(id)} />}
           {page === 'calendar' && <CalendarPage onCompose={() => goCompose()} />}
           {page === 'connections' && <ConnectionsPage />}
+          {page === 'trends' && <TrendsDashboard />}
         </div>
       </div>
     </div>

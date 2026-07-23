@@ -8,6 +8,9 @@ import {
   jsonb,
   numeric,
   index,
+  uniqueIndex,
+  doublePrecision,
+  date,
 } from 'drizzle-orm/pg-core';
 
 export const PLATFORMS = ['x', 'linkedin', 'instagram', 'facebook', 'tiktok', 'youtube'] as const;
@@ -307,7 +310,15 @@ export type ActivityKind =
   | 'agent_enabled'
   | 'agent_disabled'
   | 'onboarded'
-  | 'webhook_event';
+  | 'webhook_event'
+  | 'trend_refresh'
+  | 'creator_analyzed'
+  | 'competitor_added'
+  | 'competitor_discovered'
+  | 'competitor_refresh'
+  | 'linkedin_added'
+  | 'linkedin_refresh'
+  | 'trend_high_alert';
 
 export const activityLog = pgTable(
   'activity_log',
@@ -474,3 +485,250 @@ export const genJobs = pgTable(
     index('gen_jobs_call_idx').on(t.providerCallId),
   ],
 );
+
+// =====================================================
+// api_usage — per-feature credit metering
+// =====================================================
+export type UsageMeter = 'caption_generation' | 'analysis' | 'post_publish' | 'video' | 'brandshield_scan';
+
+export const apiUsage = pgTable(
+  'api_usage',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id').notNull(),
+    meter: text('meter').notNull().$type<UsageMeter>(),
+    amount: integer('amount').notNull().default(1),
+    meta: jsonb('meta').$type<Record<string, unknown>>().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index('api_usage_user_meter_created_idx').on(t.userId, t.meter, t.createdAt)],
+);
+
+// =====================================================
+// trends — snapshots of hashtag scrapes + analysis settings
+// =====================================================
+export type TrendSource = 'seed' | 'apify';
+
+export type TrendPlatform = 'instagram' | 'tiktok' | 'youtube';
+
+export const trendSnapshots = pgTable(
+  'trend_snapshots',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id').notNull(),
+    label: text('label'),
+    source: text('source').notNull().$type<TrendSource>().default('seed'),
+    platform: text('platform').notNull().$type<TrendPlatform>().default('instagram'),
+    fetchedAt: timestamp('fetched_at', { withTimezone: true }).defaultNow().notNull(),
+    postCount: integer('post_count').notNull().default(0),
+  },
+  (t) => [
+    index('trend_snapshots_user_fetched_idx').on(t.userId, t.fetchedAt),
+    index('trend_snapshots_user_platform_idx').on(t.userId, t.platform),
+  ],
+);
+
+export const trendPosts = pgTable(
+  'trend_posts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    snapshotId: uuid('snapshot_id')
+      .notNull()
+      .references(() => trendSnapshots.id, { onDelete: 'cascade' }),
+    hashtagQueried: text('hashtag_queried').notNull(),
+    postUrl: text('post_url').notNull(),
+    likes: integer('likes').default(0),
+    comments: integer('comments').default(0),
+    views: integer('views').default(0),
+    caption: text('caption'),
+    postHashtags: jsonb('post_hashtags').$type<string[]>().default([]),
+    owner: text('owner'),
+    ownerFollowers: integer('owner_followers').default(0),
+    type: text('type'),
+    isReel: boolean('is_reel').default(false),
+    audioTitle: text('audio_title'),
+    audioArtist: text('audio_artist'),
+    engagementRate: doublePrecision('engagement_rate').default(0),
+    fetchedAt: timestamp('fetched_at', { withTimezone: true }),
+  },
+  (t) => [index('trend_posts_snapshot_idx').on(t.snapshotId)],
+);
+
+export const trendSettings = pgTable('trend_settings', {
+  userId: text('user_id').primaryKey(),
+  trackedHashtags: jsonb('tracked_hashtags').$type<string[]>().notNull().default([]),
+  niche: text('niche'),
+  companyDescription: text('company_description'),
+  selfHandle: text('self_handle'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// =====================================================
+// creators — verification / bot-score audits
+// =====================================================
+export const creators = pgTable(
+  'creators',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id').notNull(),
+    username: text('username').notNull(),
+    followers: integer('followers').default(0),
+    following: integer('following').default(0),
+    bio: text('bio'),
+    location: text('location'),
+    avgLikes: integer('avg_likes').default(0),
+    avgComments: integer('avg_comments').default(0),
+    engagementRate: doublePrecision('engagement_rate').default(0),
+    botScore: integer('bot_score').default(0),
+    botLabel: text('bot_label'),
+    botExplanation: text('bot_explanation'),
+    lastAnalyzedAt: timestamp('last_analyzed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex('creators_user_username_idx').on(t.userId, t.username)],
+);
+
+export const creatorPosts = pgTable(
+  'creator_posts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    creatorId: uuid('creator_id')
+      .notNull()
+      .references(() => creators.id, { onDelete: 'cascade' }),
+    url: text('url'),
+    type: text('type'),
+    isReel: boolean('is_reel').default(false),
+    likes: integer('likes').default(0),
+    comments: integer('comments').default(0),
+    score: integer('score').default(0),
+    caption: text('caption'),
+    thumbnail: text('thumbnail'),
+    postedAt: timestamp('posted_at', { withTimezone: true }),
+  },
+  (t) => [index('creator_posts_creator_idx').on(t.creatorId)],
+);
+
+export const watchlist = pgTable(
+  'watchlist',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id').notNull(),
+    username: text('username').notNull(),
+    note: text('note'),
+    followersAtAdd: integer('followers_at_add').default(0),
+    engagementRate: doublePrecision('engagement_rate').default(0),
+    botScore: integer('bot_score').default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex('watchlist_user_username_idx').on(t.userId, t.username)],
+);
+
+// =====================================================
+// competitors — tracked accounts, their posts, daily rollups
+// =====================================================
+export const competitors = pgTable(
+  'competitors',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id').notNull(),
+    platform: text('platform').notNull().default('instagram'),
+    handle: text('handle').notNull(),
+    displayName: text('display_name'),
+    followers: integer('followers').default(0),
+    isActive: boolean('is_active').notNull().default(true),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex('competitors_user_platform_handle_idx').on(t.userId, t.platform, t.handle)],
+);
+
+export const competitorPosts = pgTable(
+  'competitor_posts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    competitorId: uuid('competitor_id')
+      .notNull()
+      .references(() => competitors.id, { onDelete: 'cascade' }),
+    caption: text('caption'),
+    likes: integer('likes').default(0),
+    comments: integer('comments').default(0),
+    views: integer('views').default(0),
+    shares: integer('shares').default(0),
+    hashtags: jsonb('hashtags').$type<string[]>().default([]),
+    theme: text('theme'),
+    type: text('type'),
+    postUrl: text('post_url'),
+    audioTitle: text('audio_title'),
+    postedAt: timestamp('posted_at', { withTimezone: true }),
+  },
+  (t) => [index('competitor_posts_competitor_idx').on(t.competitorId)],
+);
+
+export const competitorMetrics = pgTable(
+  'competitor_metrics',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    competitorId: uuid('competitor_id')
+      .notNull()
+      .references(() => competitors.id, { onDelete: 'cascade' }),
+    date: date('date').notNull(),
+    followers: integer('followers').default(0),
+    postsCount: integer('posts_count').default(0),
+    storiesCount: integer('stories_count').default(0),
+    avgEngagementRate: doublePrecision('avg_engagement_rate').default(0),
+  },
+  (t) => [uniqueIndex('competitor_metrics_competitor_date_idx').on(t.competitorId, t.date)],
+);
+
+// =====================================================
+// linkedin_companies — tracked LinkedIn company pages + daily rollups
+// =====================================================
+export const linkedinCompanies = pgTable(
+  'linkedin_companies',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id').notNull(),
+    slug: text('slug').notNull(),
+    url: text('url').notNull(),
+    name: text('name'),
+    industry: text('industry'),
+    website: text('website'),
+    headquarters: text('headquarters'),
+    foundedYear: integer('founded_year'),
+    description: text('description'),
+    specialities: jsonb('specialities').$type<string[]>().default([]),
+    logoUrl: text('logo_url'),
+    followers: integer('followers').default(0),
+    employees: integer('employees').default(0),
+    isActive: boolean('is_active').notNull().default(true),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex('linkedin_companies_user_slug_idx').on(t.userId, t.slug)],
+);
+
+export const linkedinMetrics = pgTable(
+  'linkedin_metrics',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => linkedinCompanies.id, { onDelete: 'cascade' }),
+    date: date('date').notNull(),
+    followers: integer('followers').default(0),
+    employees: integer('employees').default(0),
+  },
+  (t) => [uniqueIndex('linkedin_metrics_company_date_idx').on(t.companyId, t.date)],
+);
+
+// =====================================================
+// ai_cache — md5-keyed LLM response cache
+// =====================================================
+export const aiCache = pgTable('ai_cache', {
+  key: text('key').primaryKey(),
+  payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
+  model: text('model'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
