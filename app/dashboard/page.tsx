@@ -9,9 +9,11 @@ import Compose from '../../components/compose';
 import AgentPage from '../../components/agent';
 import CalendarPage from '../../components/calendar';
 import ConnectionsPage from '../../components/connections';
+import CompetitorsDashboard from '../../components/competitors/competitors-dashboard';
+import LinkedInDashboard from '../../components/competitors/linkedin-dashboard';
 import Onboarding from '../../components/onboarding';
 
-type Page = 'dashboard' | 'compose' | 'agent' | 'calendar' | 'connections' | 'onboarding';
+type Page = 'dashboard' | 'compose' | 'agent' | 'calendar' | 'connections' | 'competitors' | 'linkedin' | 'onboarding';
 
 /**
  * Time-of-day greeting. `now` MUST be null on the SSR / first-client render so
@@ -58,6 +60,16 @@ function usePageMeta(page: Exclude<Page, 'onboarding'>, displayName: string | nu
         h1: 'Connections',
         sub: 'Connect, reconnect, or disconnect every platform Sociafy posts to.',
       },
+      competitors: {
+        crumbs: ['Sociafy', 'Intelligence', 'Competitors'],
+        h1: 'Competitor Analysis',
+        sub: 'Track competitor posting cadence, engagement, and content strategy.',
+      },
+      linkedin: {
+        crumbs: ['Sociafy', 'Intelligence', 'LinkedIn'],
+        h1: 'LinkedIn Competitor Analysis',
+        sub: 'Track LinkedIn company growth, headcount, and firmographics.',
+      },
     };
     return base[page];
   }, [page, displayName, now]);
@@ -78,7 +90,7 @@ const SparkleIcon = () => (
 function initialPageFromUrl(): Page {
   if (typeof window === 'undefined') return 'dashboard';
   const tab = new URLSearchParams(window.location.search).get('tab');
-  const valid: Page[] = ['dashboard', 'compose', 'agent', 'calendar', 'connections', 'onboarding'];
+  const valid: Page[] = ['dashboard', 'compose', 'agent', 'calendar', 'connections', 'competitors', 'linkedin', 'onboarding'];
   return (valid as string[]).includes(tab ?? '') ? (tab as Page) : 'dashboard';
 }
 
@@ -139,6 +151,8 @@ export default function Home() {
         if (e.key === '3') { e.preventDefault(); setPage('agent'); }
         if (e.key === '4') { e.preventDefault(); setPage('calendar'); }
         if (e.key === '5') { e.preventDefault(); setPage('connections'); }
+        if (e.key === '6') { e.preventDefault(); setPage('competitors'); }
+        if (e.key === '7') { e.preventDefault(); setPage('linkedin'); }
       }
     };
     window.addEventListener('keydown', handler);
@@ -214,6 +228,8 @@ export default function Home() {
           {page === 'agent' && <AgentPage onEditDraft={(id) => goCompose(id)} />}
           {page === 'calendar' && <CalendarPage onCompose={() => goCompose()} />}
           {page === 'connections' && <ConnectionsPage />}
+          {page === 'competitors' && <CompetitorsDashboard />}
+          {page === 'linkedin' && <LinkedInDashboard />}
         </div>
       </div>
     </div>

@@ -80,3 +80,9 @@ export async function apiDelete<T = unknown>(url: string): Promise<T> {
   if (!r.ok) throw new Error(`${r.status}`);
   return r.json();
 }
+
+export async function apiGet<T = unknown>(url: string): Promise<T> {
+  const r = await fetch(url, { credentials: 'include' });
+  if (!r.ok) throw new Error(`${r.status}`);
+  return r.json();
+}
