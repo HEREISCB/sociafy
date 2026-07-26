@@ -95,6 +95,16 @@ export type CreateSeedanceTaskArgs = {
   audioUrls?: string[];
   /** "seedance-2" (quality) or "seedance-2-fast" (fast). Default quality. */
   fast?: boolean;
+  /**
+   * Opt-in push notification (https://piapi.ai/docs/unified-webhook). PiAPI
+   * POSTs `{ timestamp, data: { task_id, status, output, error } }` to
+   * `endpoint` on `completed` / `failed` and echoes `secret` back verbatim in
+   * the `x-webhook-secret` header — so it's a shared bearer token, NOT an HMAC
+   * over the body. Keep it high-entropy and compare in constant time.
+   *
+   * Optional so the first-party path (which polls) is byte-identical to before.
+   */
+  webhookConfig?: { endpoint: string; secret: string };
 };
 
 type PiapiCreateResponse = {
@@ -117,6 +127,8 @@ export async function createSeedanceTask(args: CreateSeedanceTaskArgs & { apiKey
       ...(args.videoUrls && args.videoUrls.length ? { video_urls: args.videoUrls } : {}),
       ...(args.audioUrls && args.audioUrls.length ? { audio_urls: args.audioUrls } : {}),
     },
+    // `config` is a sibling of `input`, not nested inside it.
+    ...(args.webhookConfig ? { config: { webhook_config: args.webhookConfig } } : {}),
   };
   const res = await piapiRequest<PiapiCreateResponse>({
     method: 'POST',

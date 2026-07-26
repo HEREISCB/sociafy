@@ -4,6 +4,10 @@ import type { NextFetchEvent, NextRequest } from 'next/server';
 
 const isProtected = createRouteMatcher(['/dashboard(.*)', '/onboarding(.*)']);
 const isCron = createRouteMatcher(['/api/cron/(.*)']);
+// Machine-to-machine traffic, routed around Clerk in `middleware` below.
+// /api/v1 authenticates with a Bearer API key (lib/api-key.ts); the provider
+// webhook verifies its own signature.
+const isMachine = createRouteMatcher(['/api/v1/(.*)', '/api/piapi/webhook']);
 
 const clerk = clerkMiddleware(async (auth, req) => {
   if (isCron(req)) return; // cron uses its own bearer-secret check
@@ -35,6 +39,11 @@ export default function middleware(req: NextRequest, event: NextFetchEvent) {
     url.protocol = 'https:';
     return NextResponse.redirect(url, 308);
   }
+  // Machine traffic skips Clerk entirely, not just auth(). A public API must not
+  // inherit Clerk's failure modes (malformed cookie, host/instance mismatch) —
+  // the www redirect above exists because that handshake 500s, and an API key
+  // holder has no session for Clerk to resolve anyway.
+  if (isMachine(req)) return NextResponse.next();
   return clerk(req, event);
 }
 

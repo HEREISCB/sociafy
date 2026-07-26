@@ -9,7 +9,9 @@ const required = (key: string): string | null => {
 export const env = {
   appUrl: process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000',
   internalSecret: process.env.INTERNAL_API_SECRET || 'dev-secret-change-me',
-  cronSecret: process.env.CRON_SECRET || 'dev-cron-secret-change-me',
+  // No cronSecret here on purpose. A default made the check fail OPEN when the
+  // var was unset. Cron routes read process.env.CRON_SECRET via checkCronAuth
+  // (lib/api.ts), which refuses to run without a real secret.
 
   clerk: {
     publishableKey: required('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY'),

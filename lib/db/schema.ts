@@ -8,6 +8,7 @@ import {
   jsonb,
   numeric,
   index,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
 
 export const PLATFORMS = ['x', 'linkedin', 'instagram', 'facebook', 'tiktok', 'youtube', 'reddit'] as const;
@@ -586,3 +587,35 @@ export const shieldSettings = pgTable('shield_settings', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
+
+// =====================================================
+// api_keys — developer keys for the public /api/v1 surface
+// =====================================================
+/** One row per developer API key. A key maps to a Clerk userId, so an external
+ *  developer is just a profiles row and the credit ledger / refunds / storage
+ *  namespacing all apply unchanged.
+ *
+ *  keyHash is SHA-256 of the plaintext (never the plaintext itself) and is
+ *  uniquely indexed: authenticating a request is one indexed lookup. */
+export const apiKeys = pgTable(
+  'api_keys',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id').notNull(),
+    /** User-supplied label, for telling keys apart in the dashboard. */
+    name: text('name').notNull().default(''),
+    /** Leading chars of the plaintext ("sfy_live_" + 6). Display + support only. */
+    prefix: text('prefix').notNull(),
+    keyHash: text('key_hash').notNull(),
+    /** Per-key 24h credit ceiling, enforced in Postgres against credit_ledger. */
+    dailyCreditCap: integer('daily_credit_cap').notNull().default(2_000),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+    /** Set instead of deleting so historical ledger rows stay explainable. */
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex('api_keys_hash_uniq').on(t.keyHash),
+    index('api_keys_user_idx').on(t.userId),
+  ],
+);

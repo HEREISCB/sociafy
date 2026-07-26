@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Sidebar, Topbar } from '../../components/shell';
 import { Icon } from '../../components/icons';
 import { useApi } from '../../lib/ui/fetcher';
+import { ApiKeys } from '../../components/api-keys';
 import type { CreditsPayload } from '../../components/credits';
 
 type Page = 'dashboard' | 'compose' | 'agent' | 'calendar' | 'connections' | 'onboarding';
@@ -113,6 +114,8 @@ export default function UsagePage() {
                 <LedgerRow key={row.id} row={row} />
               ))}
             </section>
+
+            <ApiKeys />
           </div>
         </div>
       </div>

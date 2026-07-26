@@ -214,6 +214,12 @@ export async function POST(req: NextRequest) {
     const seedance = mapToSeedanceInput({
       genMode, startFrameUrl, endFrameUrl, referenceImageUrls, referenceVideoUrl, audioUrl,
     });
+    // The row → charge → submit ordering below is duplicated by submitVideo() in
+    // app/api/v1/shared.ts. Kept separate on purpose: this route carries count,
+    // reference mode and prompt rewriting, which v1 deliberately dropped so
+    // Idempotency-Key maps 1:1 onto one charge. Both orderings are pinned by
+    // tests (generatevideo.test.ts here, v1.test.ts there) — if you change the
+    // ordering in one, change it in both.
     const submissions = await Promise.allSettled(
       Array.from({ length: effectiveCount }, async () => {
         // providerTaskId '' = "not submitted yet"; finalizeVideoJob and the

@@ -35,8 +35,16 @@ export function jsonOk<T>(data: T, init?: ResponseInit) {
   return NextResponse.json(data, init);
 }
 
-// Ensure a profile row exists for the current Clerk user. Idempotent. Best-effort metadata sync.
-async function ensureProfile(userId: string) {
+/**
+ * Ensure a profile row exists for the current Clerk user. Idempotent. Best-effort metadata sync.
+ *
+ * Exported because `withApiKey` (lib/api-key.ts) must guarantee the same
+ * invariant: `charge()` serializes concurrent spends with
+ * `SELECT … FOR UPDATE` on the profile row, and FOR UPDATE matching zero rows
+ * takes no lock at all — a missing profile silently reopens the double-spend
+ * race. Every auth path must run this before anything can charge.
+ */
+export async function ensureProfile(userId: string) {
   if (isStubMode.database()) return;
   const [existing] = await db()
     .select({ id: profiles.id })
