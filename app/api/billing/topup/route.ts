@@ -15,7 +15,8 @@ const bodySchema = z.object({
 });
 
 /**
- * POST /api/billing/topup — one-time credit pack purchase.
+ * POST /api/billing/topup — one-time credit pack purchase. Charged in INR via
+ * Razorpay for every customer; see lib/billing/router.ts.
  */
 export async function POST(req: NextRequest) {
   return withUser(async (user) => {
@@ -35,7 +36,10 @@ export async function POST(req: NextRequest) {
       billingCurrency: profile.billingCurrency as 'INR' | 'USD' | null,
       billingCountry: profile.billingCountry,
     });
-    if (!provider) return jsonError('billing_coming_soon', 503);
+    // Only reachable when Razorpay credentials are missing.
+    if (!provider) return jsonError('billing_coming_soon', 503, {
+      hint: 'Payments are not configured yet. Set RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET.',
+    });
 
     const handoff = await provider.startTopUp({ userId: user.id, credits: parsed.data.credits });
     return handoff;

@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { TIER_PRICING, TOPUP_PRICING, type Currency } from '../lib/billing/pricing';
+import { tierPriceView, topupLabel, topupPriceView, type Currency } from '../lib/billing/pricing';
 
 const ArrowIcon = () => (
   <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
@@ -123,7 +123,7 @@ const Hero = ({ currency }: { currency: Currency }) => (
             </a>
           </div>
           <div className="hero-meta">
-            <span className="dotted">From {tierPrice(currency, 'starter')} / month</span>
+            <span className="dotted">From {tierPriceView(currency, 'starter').display} / month</span>
             <span className="dotted">Cancel anytime</span>
             <span className="dotted">No free trial</span>
           </div>
@@ -474,12 +474,27 @@ const detectCurrency = (): Currency => {
   return 'USD';
 };
 
-const tierPrice = (c: Currency, t: Tier): string => TIER_PRICING[c][t].priceMonthly;
-
-/** Per-credit rate label, derived from the tier's minor-unit price ÷ credits. */
+/** Per-credit rate, derived from the same figure we display ÷ credits, so the
+ *  headline price and the per-credit rate can never disagree. */
 const perCreditLabel = (c: Currency, t: Tier): string => {
-  const rate = TIER_PRICING[c][t].amountMinor / 100 / CREDITS[t];
+  const rate = tierPriceView(c, t).displayMajor / CREDITS[t];
   return c === 'INR' ? `₹${rate.toFixed(2)}` : `$${rate.toFixed(rate < 0.1 ? 4 : 3)}`;
+};
+
+/** Headline price. Outside India the figure is derived from the rupee amount
+ *  we actually charge, and the rupee amount is shown right beside it. */
+const PriceAmount = ({ currency, tier }: { currency: Currency; tier: Tier }) => {
+  const v = tierPriceView(currency, tier);
+  return (
+    <>
+      <div className="price-amt">{v.display}<small>/ mo</small></div>
+      {v.approximate && (
+        <div className="price-tag" style={{ opacity: 0.8 }}>
+          billed as <strong>{v.charge} / mo</strong> in ₹ INR
+        </div>
+      )}
+    </>
+  );
 };
 
 const priceTag = (c: Currency, t: Tier): string =>
@@ -548,21 +563,24 @@ const Pricing = ({ currency, setCurrency }: { currency: Currency; setCurrency: (
         </div>
         <p className="blurb">
           Text post: 1 credit. AI image: 4 credits. 720p video reel: 180 credits.
-          Top up anytime at {TOPUP_PRICING[currency].display}. No free trial — start when you&apos;re ready.
+          Top up anytime at {topupLabel(currency)}. No free trial — start when you&apos;re ready.
         </p>
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
         <CurrencyToggle currency={currency} setCurrency={setCurrency} />
         <span style={{ fontSize: 12, opacity: 0.6 }}>
-          {currency === 'INR' ? 'Billed in ₹ via Razorpay · GST invoice' : 'Billed in $ · cards & wallets'}
+          {/* Same charge either way — the toggle only changes the figure shown. */}
+          {currency === 'INR'
+            ? 'Billed in ₹ via Razorpay · GST invoice'
+            : 'Approximate — every plan is charged in ₹ INR via Razorpay'}
         </span>
       </div>
 
       <div className="pricing">
         <div className="price-card">
           <div className="price-name">Starter</div>
-          <div className="price-amt">{tierPrice(currency, 'starter')}<small>/ mo</small></div>
+          <PriceAmount currency={currency} tier="starter" />
           <div className="price-tag">{priceTag(currency, 'starter')}</div>
           <div className="price-divider" />
           <ul className="price-list">
@@ -582,7 +600,7 @@ const Pricing = ({ currency, setCurrency }: { currency: Currency; setCurrency: (
 
         <div className="price-card featured">
           <div className="price-name">Pro</div>
-          <div className="price-amt">{tierPrice(currency, 'pro')}<small>/ mo</small></div>
+          <PriceAmount currency={currency} tier="pro" />
           <div className="price-tag">{priceTag(currency, 'pro')}</div>
           <div className="price-divider" />
           <ul className="price-list">
@@ -602,7 +620,7 @@ const Pricing = ({ currency, setCurrency }: { currency: Currency; setCurrency: (
 
         <div className="price-card">
           <div className="price-name">Business</div>
-          <div className="price-amt">{tierPrice(currency, 'business')}<small>/ mo</small></div>
+          <PriceAmount currency={currency} tier="business" />
           <div className="price-tag">{priceTag(currency, 'business')}</div>
           <div className="price-divider" />
           <ul className="price-list">
@@ -626,15 +644,17 @@ const Pricing = ({ currency, setCurrency }: { currency: Currency; setCurrency: (
       </div>
 
       <div style={{ textAlign: 'center', marginTop: 32, fontSize: 12.5, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>
-        Need more? Top up at $15 / 1,000 credits · Annual plans save 2 months · Custom Enterprise tier on request
+        Need more? Top up at {topupLabel(currency)}
+        {currency === 'INR' ? '' : ` (${topupPriceView('INR').charge})`} · Annual plans save 2 months · Custom Enterprise tier on request
       </div>
     </div>
   </section>
   );
 };
 
+// The pricing answer is built per-currency in FAQSection — it can't be a
+// hardcoded string without drifting from what we actually charge.
 const FAQ_ITEMS = [
-  ['How does pricing actually work?', 'Every plan is credit-based: Starter is $30/mo (2,000 credits), Pro is $80/mo (6,000 credits), and Business is $299/mo (25,000 credits). Each action costs credits — a text post is 1 credit, an AI image is 4, a 720p video reel is 180. There is no free trial; you can top up anytime at $15 per 1,000 credits and cancel in one click.'],
   ['Does the agent post without my approval?', 'Only if you tell it to. Autopilot is a Pro and Business feature, and it is off by default. When you turn it on you set a confidence threshold (e.g. ≥ 90/100) and a quiet-hours window — anything below the bar lands in your inbox for review.'],
   ['What does “voice training” actually use?', 'Whatever you give it: pasted essays, a public profile URL, your last 30–90 days of posts, or three short voice memos. Nothing leaves your workspace, and we never use your writing to train other accounts.'],
   ['Which platforms are supported?', 'X, LinkedIn, Instagram, Facebook, TikTok, and YouTube — on every plan. Each platform gets a native draft, not a copy-paste with #hashtags slapped on.'],
@@ -642,9 +662,13 @@ const FAQ_ITEMS = [
 ] as const;
 
 const FAQSection = ({ currency }: { currency: Currency }) => {
-  const p = TIER_PRICING[currency];
-  const pricingAnswer = `Every plan is credit-based: Starter is ${p.starter.priceMonthly}/mo (2,000 credits), Pro is ${p.pro.priceMonthly}/mo (6,000 credits), and Business is ${p.business.priceMonthly}/mo (25,000 credits). Each action costs credits — a text post is 1 credit, an AI image is 4, a 720p video reel is 180. There is no free trial; you can top up anytime at ${TOPUP_PRICING[currency].display} and cancel in one click.`;
-  const items = FAQ_ITEMS.map((it, i) => (i === 0 ? ([it[0], pricingAnswer] as const) : it));
+  const v = (t: Tier) => tierPriceView(currency, t);
+  // Outside India the plan figures are approximations of the rupee amount we
+  // charge, so the answer has to name the rupee amounts too.
+  const inrNote = currency === 'INR' ? '' :
+    ` Dollar figures are approximate: every plan is charged in ₹ INR via Razorpay — ${v('starter').charge}, ${v('pro').charge} and ${v('business').charge} per month, and top-ups at ${topupPriceView('INR').charge}.`;
+  const pricingAnswer = `Every plan is credit-based: Starter is ${v('starter').display}/mo (2,000 credits), Pro is ${v('pro').display}/mo (6,000 credits), and Business is ${v('business').display}/mo (25,000 credits). Each action costs credits — a text post is 1 credit, an AI image is 4, a 720p video reel is 180. There is no free trial; you can top up anytime at ${topupLabel(currency)} and cancel in one click.${inrNote}`;
+  const items = [['How does pricing actually work?', pricingAnswer] as const, ...FAQ_ITEMS];
   return (
   <section className="lp-section" id="faq">
     <div className="lp">

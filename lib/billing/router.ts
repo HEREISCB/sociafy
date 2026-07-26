@@ -1,18 +1,23 @@
 /**
  * Selects the BillingProvider for a profile. Lock-first: once
  * `payment_provider` is set on the profile (i.e. user has started a
- * subscription), that wins. Otherwise derive from billing currency, then
- * from country.
+ * subscription), that wins. Otherwise it used to derive from billing
+ * currency, then from country.
  *
- * Returns null only when the resolved provider has no usable credentials —
- * callers turn that into a 503 rather than a mid-checkout crash.
+ * Stripe is parked: every customer is charged by Razorpay in INR regardless
+ * of location, so every branch below resolves to Razorpay. The Stripe
+ * provider stays in the tree — dormant and unrouted — for the day USD
+ * billing is switched on. Stripe never charged anyone, so no profile can
+ * legitimately carry a `stripe` lock; a stray value routes to Razorpay
+ * rather than dead-ending the customer's checkout.
+ *
+ * Returns null only when Razorpay credentials are missing — callers turn
+ * that into a 503 rather than a mid-checkout crash.
  */
 
 import type { BillingProvider } from './provider';
 import { razorpayProvider } from './providers/razorpay';
-import { stripeProvider, stripeConfigured } from './providers/stripe';
-
-const stripeOrNull = () => (stripeConfigured() ? stripeProvider() : null);
+import { isStubMode } from '../env';
 
 export type ProfileForRouting = {
   paymentProvider: 'stripe' | 'razorpay' | null;
@@ -20,12 +25,15 @@ export type ProfileForRouting = {
   billingCountry: string | null;
 };
 
+const razorpayOrNull = () => (isStubMode.razorpay() ? null : razorpayProvider());
+
 export function providerFor(profile: ProfileForRouting): BillingProvider | null {
   const locked = profile.paymentProvider;
-  if (locked === 'razorpay') return razorpayProvider();
-  if (locked === 'stripe')   return stripeOrNull();
+  if (locked === 'razorpay') return razorpayOrNull();
+  if (locked === 'stripe')   return razorpayOrNull(); // parked — see above
 
-  const currency = profile.billingCurrency
-    ?? (profile.billingCountry === 'IN' ? 'INR' : 'USD');
-  return currency === 'INR' ? razorpayProvider() : stripeOrNull();
+  // `billingCurrency` / `billingCountry` no longer branch here: they only
+  // decide how the price is *displayed* (see pricing.ts). Un-parking Stripe
+  // means restoring the derive-from-currency step at this point.
+  return razorpayOrNull();
 }

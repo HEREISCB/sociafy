@@ -13,8 +13,8 @@ const bodySchema = z.object({ tier: z.enum(TIERS) });
 
 /**
  * POST /api/billing/checkout — start a subscription checkout for the
- * requested tier. Returns a CheckoutHandoff the client opens (URL
- * redirect for Stripe, modal params for Razorpay).
+ * requested tier. Returns a CheckoutHandoff the client opens: Razorpay modal
+ * params, always charged in INR regardless of the customer's location.
  */
 export async function POST(req: NextRequest) {
   return withUser(async (user) => {
@@ -35,10 +35,10 @@ export async function POST(req: NextRequest) {
       billingCountry: profile.billingCountry,
     });
     if (!provider) {
-      // Only reachable when the resolved provider has no credentials — see
-      // stripeConfigured(). Error code kept for the billing page's copy.
+      // Only reachable when Razorpay has no credentials. Error code kept for
+      // the billing page's copy.
       return jsonError('billing_coming_soon', 503, {
-        hint: 'Payments are not configured for your currency. Set STRIPE_* env vars, or use the "Pay in INR via Razorpay" option.',
+        hint: 'Payments are not configured yet. Set RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET.',
       });
     }
 

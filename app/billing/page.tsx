@@ -7,7 +7,7 @@ import { Sidebar, Topbar } from '../../components/shell';
 import { Icon } from '../../components/icons';
 import { apiPost, useApi } from '../../lib/ui/fetcher';
 import { openRazorpayModal } from '../../components/billing/razorpay-checkout';
-import { TOPUP_PRICING } from '../../lib/billing/pricing';
+import { topupPriceView } from '../../lib/billing/pricing';
 
 type CheckoutHandoff =
   | { kind: 'redirect'; url: string }
@@ -37,15 +37,20 @@ type BillingPayload = {
   hasActiveSubscription: boolean;
   billingConfigured: boolean;
   subscriptionsAvailable: boolean;
+  /** Display currency only — the charge is always INR. */
   currency: 'INR' | 'USD';
-  provider: 'razorpay' | 'stripe' | null;
+  provider: 'razorpay' | null;
   isIndia: boolean;
   canSwitchProvider: boolean;
   pendingTierChange: { toTier: 'starter' | 'pro' | 'business'; at: string | null } | null;
   tiers: Array<{
     tier: 'starter' | 'pro' | 'business';
     label: string;
+    /** Local figure — approximate when `priceApproximate`. */
     priceMonthly: string;
+    /** What Razorpay actually charges, always in ₹. */
+    chargeMonthly: string;
+    priceApproximate: boolean;
     amountMinor: number;
     credits: number;
     isCurrent: boolean;
@@ -180,7 +185,7 @@ function BillingPageInner() {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg.includes('503') || msg.includes('billing_coming_soon')) {
-        setToast('USD billing isn\'t live yet — switch to ₹ INR via Razorpay to subscribe today.');
+        setToast('Payments aren\'t configured yet — please try again shortly or contact support.');
       } else {
         setToast(`Checkout failed: ${msg.slice(0, 160)}`);
       }
@@ -220,10 +225,10 @@ function BillingPageInner() {
       await dispatchHandoff(handoff);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      // The USD/Stripe path returns 503 billing_coming_soon — don't show the
-      // raw JSON to the user. Route them to Razorpay (INR) instead.
+      // 503 billing_coming_soon = Razorpay credentials missing. Don't show the
+      // raw JSON to the user.
       if (msg.includes('503') || msg.includes('billing_coming_soon')) {
-        setToast('USD billing isn\'t live yet — switch to ₹ INR via Razorpay above to top up today.');
+        setToast('Payments aren\'t configured yet — please try again shortly or contact support.');
       } else {
         setToast(`Top-up failed: ${msg.slice(0, 160)}`);
       }
@@ -365,9 +370,10 @@ function BillingPageInner() {
                 fontSize: 13,
               }}>
                 {data.currency === 'INR' ? (
-                  <>Pay in <strong>₹ INR via Razorpay</strong>. USD billing coming soon.</>
+                  <>Pay in <strong>₹ INR via Razorpay</strong> · GST invoice.</>
                 ) : (
-                  <>USD billing via Stripe — <em>coming soon</em>.{' '}
+                  <>All plans are <strong>charged in ₹ INR via Razorpay</strong> — your card is billed in
+                    rupees and your bank converts at its own rate. Dollar figures below are approximate.{' '}
                     <button
                       className="btn ghost"
                       style={{ marginLeft: 8 }}
@@ -379,7 +385,7 @@ function BillingPageInner() {
                           setToast(`Couldn't switch currency: ${e instanceof Error ? e.message : String(e)}`);
                         }
                       }}
-                    >Pay in ₹ INR via Razorpay instead</button>
+                    >Show ₹ prices</button>
                   </>
                 )}
               </div>
@@ -393,7 +399,8 @@ function BillingPageInner() {
                 fontSize: 12,
                 color: 'var(--muted)',
               }}>
-                Billing in <strong>{data.currency === 'INR' ? '₹ INR via Razorpay' : '$ USD via Stripe'}</strong> · cancel to change
+                Billing in <strong>₹ INR via Razorpay</strong>
+                {data.currency === 'INR' ? null : ' · dollar figures are approximate'}
               </div>
             )}
 
@@ -405,6 +412,13 @@ function BillingPageInner() {
                     {t.isCurrent && <div className="current-badge mono">Current</div>}
                     <div className="tier-label">{t.label}</div>
                     <div className="tier-price">{t.priceMonthly}<span className="per">/mo</span></div>
+                    {/* The customer must see the currency they'll actually be
+                        charged before clicking Subscribe — not in a footnote. */}
+                    {t.priceApproximate && (
+                      <div className="mono" style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: -4 }}>
+                        billed as <strong>{t.chargeMonthly}/mo</strong> in ₹ INR
+                      </div>
+                    )}
                     <ul className="tier-perks">
                       {TIER_PERKS[t.tier].map((perk) => (
                         <li key={perk}>{perk}</li>
@@ -413,15 +427,6 @@ function BillingPageInner() {
                     {t.isCurrent ? (
                       <button className="btn" disabled style={{ width: '100%', justifyContent: 'center' }}>
                         <Icon name="check" size={12} /> Current plan
-                      </button>
-                    ) : data?.currency === 'USD' ? (
-                      <button
-                        className="btn ghost"
-                        disabled
-                        title="Card billing in USD via Stripe is coming soon. Switch to ₹ INR via Razorpay to subscribe today."
-                        style={{ width: '100%', justifyContent: 'center', cursor: 'not-allowed', fontStyle: 'italic', color: 'var(--muted)' }}
-                      >
-                        <Icon name="lock" size={12} /> Coming soon — card billing
                       </button>
                     ) : !data?.subscriptionsAvailable ? (
                       <button
@@ -451,7 +456,13 @@ function BillingPageInner() {
                         onClick={() => startCheckout(t.tier)}
                         disabled={busy === t.tier}
                       >
-                        {busy === t.tier ? 'Redirecting…' : `Subscribe to ${t.label}`}
+                        {busy === t.tier
+                          ? 'Redirecting…'
+                          // Currency in the button label itself: no one can pay
+                          // in rupees without having read the word "INR" first.
+                          : t.priceApproximate
+                            ? `Subscribe — ${t.chargeMonthly}/mo INR`
+                            : `Subscribe to ${t.label}`}
                       </button>
                     )}
                   </div>
@@ -460,12 +471,8 @@ function BillingPageInner() {
             </section>
 
             <section className="billing-footnote mono">
-              All prices in {data?.currency === 'INR' ? 'INR' : 'USD'}. Cancel anytime — credits remain usable until your renewal date.
-              {data?.provider === 'razorpay'
-                ? <> Billing handled by Razorpay (₹ INR). USD via Stripe is coming soon.</>
-                : data?.provider === 'stripe'
-                  ? <> Billing handled by Stripe.</>
-                  : <> Card billing (USD) via Stripe is coming soon. Switch to ₹ INR via Razorpay to subscribe today.</>}
+              All charges are in ₹ INR, handled by Razorpay. Cancel anytime — credits remain usable until your renewal date.
+              {data?.currency === 'INR' ? null : <> Dollar amounts are an approximate guide only; your card is billed in rupees and your bank applies its own conversion rate and any foreign-transaction fee.</>}
               {' '}See our <a href="/legal/refund">Refund &amp; Cancellation Policy</a>.
               <br />
               Sociafy is a product of GNIX SEMICONDUCTORS PRIVATE LIMITED.
@@ -494,17 +501,12 @@ function BillingPageInner() {
           >
             <h3 style={{ marginTop: 0 }}>Top up credits</h3>
             <p className="muted" style={{ fontSize: 13 }}>
-              {TOPUP_PRICING[data?.currency ?? 'USD'].display}. Charged once.
+              {topupPriceView(data?.currency ?? 'INR').display} / 1,000 credits. Charged once
+              {data?.currency === 'INR' ? '' : ' in ₹ INR via Razorpay — dollar figures are approximate'}.
             </p>
             <div style={{ display: 'grid', gap: 8 }}>
               {[1000, 2000, 5000].map((n) => {
-                const pack = TOPUP_PRICING[data?.currency ?? 'USD'];
-                const packs = n / pack.credits;
-                // amountMinor is paise (INR) or cents (USD); divide to display.
-                const total = (pack.amountMinor * packs) / 100;
-                const formatted = data?.currency === 'INR'
-                  ? `₹${total.toLocaleString('en-IN')}`
-                  : `$${total.toLocaleString('en-US')}`;
+                const v = topupPriceView(data?.currency ?? 'INR', n);
                 return (
                   <button
                     key={n}
@@ -514,7 +516,8 @@ function BillingPageInner() {
                     disabled={topupBusy}
                   >
                     <span>{n.toLocaleString()} credits</span>
-                    <span className="mono">{formatted}</span>
+                    {/* Approximate figure never stands alone next to a pay action. */}
+                    <span className="mono">{v.approximate ? `${v.display} · ${v.charge}` : v.charge}</span>
                   </button>
                 );
               })}
