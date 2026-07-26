@@ -168,10 +168,48 @@ export const facebookAdapter: PlatformAdapter = {
   async publishText(input: PublishInput): Promise<PublishResult> {
     if (!metaConfigured() || input.account.accessToken === 'stub') return stubPublish(input, 'facebook');
     const pageId = input.account.platformUserId;
+    const token = input.account.accessToken;
+    const media = input.media ?? [];
+
+    // Attached media used to be dropped silently — /feed takes a message and
+    // nothing else. Photos go up unpublished first, then the feed post
+    // references them via attached_media (works for 1..N images alike).
+    if (media.some((m) => m.mimeType.startsWith('video/'))) {
+      // ponytail: Page video needs the resumable upload session on
+      // graph-video.facebook.com (or a /videos file_url post we can't verify
+      // here). Fail loudly instead of posting the caption alone.
+      throw new PlatformError(
+        'facebook_video_unsupported',
+        400,
+        'Posting video to a Facebook Page is not supported yet (only images). Remove the video or publish it to another platform.',
+      );
+    }
+
+    const attachedIds: string[] = [];
+    for (const m of media) {
+      const photoResp = await fetch(`${GRAPH}/${pageId}/photos`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        // published=false uploads the photo without creating its own story, so
+        // the /feed post below owns the text and the photo(s) together.
+        body: new URLSearchParams({ url: m.url, published: 'false', access_token: token }),
+      });
+      if (!photoResp.ok) {
+        throw new PlatformError('facebook_photo_upload_failed', photoResp.status, await photoResp.text());
+      }
+      const photo = (await photoResp.json()) as { id: string };
+      attachedIds.push(photo.id);
+    }
+
+    // Form-encoded, not JSON: attached_media takes indexed bracket keys whose
+    // values are JSON strings, which is only well-defined in a form body.
+    const feedBody = new URLSearchParams({ message: input.text, access_token: token });
+    attachedIds.forEach((id, i) => feedBody.set(`attached_media[${i}]`, JSON.stringify({ media_fbid: id })));
+
     const resp = await fetch(`${GRAPH}/${pageId}/feed`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: input.text, access_token: input.account.accessToken }),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: feedBody,
     });
     if (!resp.ok) throw new PlatformError('facebook_publish_failed', resp.status, await resp.text());
     const data = (await resp.json()) as { id: string };

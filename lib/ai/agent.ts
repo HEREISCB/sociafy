@@ -1,4 +1,4 @@
-import { getOpenAI } from './client';
+import { getTextAI, completeText } from './client';
 import type { Niche, Platform, VoiceTemplate } from '../db/schema';
 import { PLATFORM_LIMITS } from './compose';
 import { runAgentLoop, webSearchTool } from './agent-loop';
@@ -31,8 +31,12 @@ export type DraftAgentArgs = {
 };
 
 export async function draftFromTrends(args: DraftAgentArgs): Promise<AgentDraft[]> {
-  const openai = getOpenAI();
-  if (!openai) return stubDrafts(args);
+  const ai = getTextAI('smart');
+  if (!ai) return stubDrafts(args);
+
+  // Tool loops need the Responses API + OpenAI-hosted web_search. On Groq we
+  // draft single-shot from the trend digest instead of stubbing out.
+  const enableTools = args.enableTools !== false && ai.supportsTools;
 
   const sys = [
     'You are an autonomous social media agent for a solo founder.',
@@ -41,15 +45,21 @@ export async function draftFromTrends(args: DraftAgentArgs): Promise<AgentDraft[
     `Niches they post about: ${args.niches.join(', ') || 'general'}`,
     `Brand safety: ${args.brandSafetyStrict ? 'strict — refuse posts that mention competitors negatively, unverified claims, or sensitive topics' : 'standard'}`,
     '',
-    'Workflow:',
-    '1. Optionally call `web_search` to verify a trend is current and find a sharp angle.',
-    '2. Optionally call `fetch_url` to read the source article in full before drafting.',
-    '3. Optionally call `read_recent_posts` to learn what topics/formats work for THIS user.',
-    '4. Optionally call `search_images` if a draft needs visual support.',
-    '5. Then output your drafts as STRICT JSON.',
-    '',
+    ...(enableTools
+      ? [
+          'Workflow:',
+          '1. Optionally call `web_search` to verify a trend is current and find a sharp angle.',
+          '2. Optionally call `fetch_url` to read the source article in full before drafting.',
+          '3. Optionally call `read_recent_posts` to learn what topics/formats work for THIS user.',
+          '4. Optionally call `search_images` if a draft needs visual support.',
+          '5. Then output your drafts as STRICT JSON.',
+          '',
+        ]
+      : []),
     'Output rules:',
-    '- After tool calls, your FINAL message must be ONLY a JSON object. No markdown fences. No commentary.',
+    enableTools
+      ? '- After tool calls, your FINAL message must be ONLY a JSON object. No markdown fences. No commentary.'
+      : '- Your reply must be ONLY a JSON object. No markdown fences. No commentary.',
     '- Schema: { "drafts": [ { "title": string, "body": string, "perPlatform": { ... }, "score": 0-100, "rationale": string, "trendId": string | null, "suggestedImageUrl": string | null } ] }',
     `- Produce ${args.count} drafts. Each tied to a different trend if possible.`,
     `- Score reflects: hook strength, on-brand fit, novelty, AND signal from the user's past engagement. ≥ 90 means safe to auto-publish.`,
@@ -65,29 +75,32 @@ export async function draftFromTrends(args: DraftAgentArgs): Promise<AgentDraft[
     ),
   ].join('\n');
 
-  const enableTools = args.enableTools !== false;
-  const tools = enableTools
-    ? [
+  console.log(`[agent] provider=${ai.kind} tools=${enableTools} trends=${args.trends.length}`);
+
+  let text: string;
+  if (enableTools) {
+    const result = await runAgentLoop({
+      model: 'smart',
+      system: sys,
+      user,
+      tools: [
         webSearchTool(),
         fetchUrlSkill,
         ...(args.userId ? [readRecentPostsSkill(args.userId), readRecentDraftsSkill(args.userId)] : []),
         searchImagesSkill,
-      ]
-    : [];
-
-  const result = await runAgentLoop({
-    model: 'smart',
-    system: sys,
-    user,
-    tools,
-    maxSteps: 6,
-    maxOutputTokens: 3500,
-  });
-  if (!result) return stubDrafts(args);
+      ],
+      maxSteps: 6,
+      maxOutputTokens: 3500,
+    });
+    if (!result) return stubDrafts(args);
+    text = result.text;
+  } else {
+    text = await completeText(ai, { system: sys, user, maxOutputTokens: 3500, json: true });
+  }
 
   let parsed: { drafts: AgentDraft[] };
   try {
-    parsed = JSON.parse(stripFences(result.text));
+    parsed = JSON.parse(stripFences(text));
   } catch {
     return stubDrafts(args);
   }

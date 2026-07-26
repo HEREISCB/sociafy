@@ -8,11 +8,18 @@ const AUTH_URL = 'https://twitter.com/i/oauth2/authorize';
 const TOKEN_URL = 'https://api.twitter.com/2/oauth2/token';
 const ME_URL = 'https://api.twitter.com/2/users/me?user.fields=username,profile_image_url,name';
 const TWEET_URL = 'https://api.twitter.com/2/tweets';
+// v2 media upload (GA 2025). The old v1.1 upload.twitter.com endpoints are
+// deprecated; this one takes an OAuth 2.0 user token like /2/tweets does.
+const MEDIA_UPLOAD_URL = 'https://api.x.com/2/media/upload';
+const MAX_MEDIA = 4; // X's per-tweet cap
 
 export const xAdapter: PlatformAdapter = {
   id: 'x',
   label: 'X',
-  scopes: ['tweet.read', 'tweet.write', 'users.read', 'offline.access'],
+  // media.write is required by /2/media/upload. Accounts connected before it
+  // was added get a 403 on media posts and must reconnect — that's a loud,
+  // actionable failure, unlike the silent text-only post we used to send.
+  scopes: ['tweet.read', 'tweet.write', 'users.read', 'media.write', 'offline.access'],
   isConfigured() {
     return !!env.platforms.x.clientId && !!env.platforms.x.clientSecret;
   },
@@ -108,8 +115,38 @@ export const xAdapter: PlatformAdapter = {
     // by setting reply.in_reply_to_tweet_id; otherwise post a standalone tweet.
     const meta = input.account.meta as { parentId?: string } | null;
     const parentId = meta?.parentId;
-    const payload: { text: string; reply?: { in_reply_to_tweet_id: string } } = { text: input.text };
+    const payload: {
+      text: string;
+      reply?: { in_reply_to_tweet_id: string };
+      media?: { media_ids: string[] };
+    } = { text: input.text };
     if (parentId) payload.reply = { in_reply_to_tweet_id: parentId };
+
+    // Attached media used to be dropped here — the tweet went out text-only
+    // with no error, after the user paid credits for the image.
+    const media = input.media ?? [];
+    if (media.length > 0) {
+      if (media.length > MAX_MEDIA) {
+        throw new PlatformError(
+          'x_too_many_media',
+          400,
+          `X allows at most ${MAX_MEDIA} attachments per post; this one has ${media.length}.`,
+        );
+      }
+      if (media.some((m) => m.mimeType.startsWith('video/'))) {
+        // ponytail: video needs the chunked INIT/APPEND/FINALIZE flow plus
+        // processing_info polling. Not implemented — fail loudly rather than
+        // post the caption alone. Add chunked upload if users ask for X video.
+        throw new PlatformError(
+          'x_video_unsupported',
+          400,
+          'Posting video to X is not supported yet (only images). Remove the video or publish it to another platform.',
+        );
+      }
+      const ids: string[] = [];
+      for (const m of media) ids.push(await uploadXMedia(input.account.accessToken, m));
+      payload.media = { media_ids: ids };
+    }
     const resp = await fetch(TWEET_URL, {
       method: 'POST',
       headers: {
@@ -144,6 +181,42 @@ export const xAdapter: PlatformAdapter = {
     };
   },
 };
+
+/**
+ * Fetch an image from our R2 URL and hand it to X's v2 media endpoint as
+ * multipart/form-data. Returns the media id to reference in /2/tweets.
+ * Single-request upload only — fine for images (≤5 MB), see the video guard
+ * in publishText for why we don't try video here.
+ */
+async function uploadXMedia(token: string, m: { url: string; mimeType: string }): Promise<string> {
+  const src = await fetch(m.url);
+  if (!src.ok) {
+    throw new PlatformError('x_media_source_fetch_failed', src.status, `Couldn't fetch ${m.url}`);
+  }
+  const form = new FormData();
+  form.append('media', new Blob([await src.arrayBuffer()], { type: m.mimeType }), 'upload');
+  form.append('media_category', 'tweet_image');
+  const resp = await fetch(MEDIA_UPLOAD_URL, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` }, // fetch sets the multipart boundary
+    body: form,
+  });
+  if (!resp.ok) {
+    const body = await resp.text();
+    if (resp.status === 401 || resp.status === 403) {
+      throw new PlatformError(
+        'x_media_scope_missing',
+        403,
+        'X rejected the image upload — the connected account is missing the media.write scope. Reconnect X on the Connections page. Detail: ' + body.slice(0, 300),
+      );
+    }
+    throw new PlatformError('x_media_upload_failed', resp.status, body);
+  }
+  const j = (await resp.json()) as { data?: { id?: string }; media_id_string?: string };
+  const id = j.data?.id ?? j.media_id_string;
+  if (!id) throw new PlatformError('x_media_upload_failed', 502, 'upload returned no media id');
+  return id;
+}
 
 function toS256(verifier: string): string {
   return crypto.createHash('sha256').update(verifier).digest('base64url');

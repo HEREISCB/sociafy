@@ -21,6 +21,11 @@ const dlAgent = new https.Agent({
   family: 4,
 });
 
+/** Hard ceiling on a provider artifact. Everything we download is buffered in
+ *  memory, so an oversized (or endless) CDN response would OOM the function.
+ *  200MB clears our 15s 1080p worst case with room to spare. */
+const MAX_DOWNLOAD_BYTES = 200 * 1024 * 1024;
+
 export function downloadToBuffer(
   rawUrl: string,
   redirectsLeft = 5,
@@ -59,8 +64,24 @@ export function downloadToBuffer(
           reject(new Error(`download_${res.statusCode}`));
           return;
         }
+        // Reject on the declared size first (cheap), then enforce it while
+        // streaming — content-length is advisory and can be absent or lying.
+        const declared = Number(res.headers['content-length'] ?? 0);
+        if (declared > MAX_DOWNLOAD_BYTES) {
+          res.resume();
+          reject(new Error(`download_too_large: ${declared}`));
+          return;
+        }
         const chunks: Buffer[] = [];
-        res.on('data', (c: Buffer) => chunks.push(c));
+        let total = 0;
+        res.on('data', (c: Buffer) => {
+          total += c.length;
+          if (total > MAX_DOWNLOAD_BYTES) {
+            req.destroy(new Error(`download_too_large: >${MAX_DOWNLOAD_BYTES}`));
+            return;
+          }
+          chunks.push(c);
+        });
         res.on('end', () => resolve({ buffer: Buffer.concat(chunks), contentType: res.headers['content-type'] }));
         res.on('error', reject);
       },

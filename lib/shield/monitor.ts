@@ -134,7 +134,7 @@ export async function runShieldScan(opts: ShieldScanOptions): Promise<ShieldScan
     scored.map(({ m, sentiment }) => ({
       userId,
       brand,
-      source: m.source as any,
+      source: m.source,
       externalId: m.id,
       url: m.url,
       title: m.title.slice(0, 500),
@@ -145,8 +145,8 @@ export async function runShieldScan(opts: ShieldScanOptions): Promise<ShieldScan
       sentimentScore: sentiment.score,
       severity: sentiment.severity,
       theme: sentiment.theme,
-      crisisWords: sentiment.crisisWords as any,
-      negWords: sentiment.negWords as any,
+      crisisWords: sentiment.crisisWords,
+      negWords: sentiment.negWords,
     })),
   );
 

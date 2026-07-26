@@ -35,6 +35,10 @@ export type PublishResult = {
   platformPostId: string;
   url?: string | null;
   raw?: unknown;
+  /** Set by stubPublish only. Nothing was posted anywhere and the url is a
+   *  dead stub.sociafy.local link — callers MUST NOT record this as a
+   *  published post (that shipped green posts with dead links). */
+  stub?: true;
 };
 
 /** Outcome of polling a deferred publish (Instagram container, TikTok

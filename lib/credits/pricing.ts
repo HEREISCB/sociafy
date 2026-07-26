@@ -113,12 +113,19 @@ export type VideoQuality = '480p' | '720p' | '1080p';
  * We bucket durations into 8s and 15s tiers (matches the pricing doc). For
  * other durations we proportionally scale from the 8s tier — keeps the math
  * consistent without exploding the action enum.
+ *
+ * `inputDurationSec` prices Seedance's video-to-video surcharge (COSTS.md:77):
+ * feeding a reference clip costs (unit_price / 2) × input_duration on top of
+ * the output price. Omit it (or pass 0) and the result is byte-identical to
+ * before — non-reference generations are untouched.
  */
 export function priceForVideo(args: {
   durationSec: number;
   quality: VideoQuality;
   fast: boolean;
-}): { action: CreditAction; credits: number } {
+  /** Length of a reference/video-to-video input clip, in seconds. */
+  inputDurationSec?: number;
+}): { action: CreditAction; credits: number; surcharge: number } {
   const { durationSec, quality, fast } = args;
   const is15 = durationSec >= 13;
   // 1080p Fast is not currently offered by Seedance — fall back to Quality.
@@ -146,7 +153,18 @@ export function priceForVideo(args: {
   } else if (is15 && durationSec !== 15) {
     credits = Math.round((baseCredits * durationSec) / 15);
   }
-  return { action, credits };
+
+  // Reference-video surcharge = (unit_price / 2) × input_duration, expressed in
+  // credits. Derive it from baseCredits rather than a second dollar table:
+  // baseCredits already encodes unit_price × bucketSec at this file's basis
+  // ($0.012/credit at the Business rate — e.g. 8s/720p/Quality is 180 cr for
+  // Seedance's $1.60, i.e. 112.5 cr per provider dollar), so credits-per-input-
+  // second is just baseCredits / bucketSec and the margin stays identical
+  // across every resolution and the fast/quality split for free.
+  const bucketSec = is15 ? 15 : 8;
+  const inputSec = Math.max(0, args.inputDurationSec ?? 0);
+  const surcharge = Math.round((baseCredits / bucketSec) * (inputSec / 2));
+  return { action, credits: credits + surcharge, surcharge };
 }
 
 // =====================================================

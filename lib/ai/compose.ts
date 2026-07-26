@@ -1,4 +1,4 @@
-import { getOpenAI, MODELS } from './client';
+import { getTextAI, completeText } from './client';
 import { type Platform, type DraftVariant, type VoiceTemplate } from '../db/schema';
 import { runAgentLoop, webSearchTool } from './agent-loop';
 import { fetchUrlSkill } from './skills/fetch-url';
@@ -64,8 +64,8 @@ export async function generateCompose(args: ComposeArgs): Promise<ComposeResult>
   const count = Math.min(args.count ?? 4, 4);
   const platforms = args.platforms?.length ? args.platforms : (['x', 'linkedin'] as Platform[]);
 
-  const openai = getOpenAI();
-  if (!openai) {
+  const ai = getTextAI('fast');
+  if (!ai) {
     return stubResult(args.prompt, count, platforms);
   }
 
@@ -95,8 +95,13 @@ export async function generateCompose(args: ComposeArgs): Promise<ComposeResult>
   let text: string;
   let toolsUsed: string[] | undefined;
 
-  console.log(`[compose] withTools=${!!args.withTools} platforms=${platforms.join(',')} prompt="${args.prompt.slice(0, 60)}"`);
-  if (args.withTools) {
+  // Tool loops need the Responses API + OpenAI-hosted web_search. On Groq we
+  // drop to the single-shot path rather than to a stub — losing web_search is
+  // a much smaller regression than losing the model entirely.
+  const withTools = !!args.withTools && ai.supportsTools;
+
+  console.log(`[compose] provider=${ai.kind} withTools=${withTools} platforms=${platforms.join(',')} prompt="${args.prompt.slice(0, 60)}"`);
+  if (withTools) {
     const sysWithTools = [
       sys,
       '',
@@ -122,20 +127,14 @@ export async function generateCompose(args: ComposeArgs): Promise<ComposeResult>
     text = result.text;
     toolsUsed = result.toolsUsed;
   } else {
-    // Fast path: no tools, single Responses API call with gpt-5-mini.
-    // gpt-5 family models spend tokens on reasoning BEFORE emitting output —
-    // keep effort low for copywriting and budget enough that the JSON answer
+    // Fast path: no tools, one call. Budget enough output that the JSON answer
     // never gets truncated (truncated JSON silently degrades to stub text).
-    const resp = await openai.responses.create({
-      model: MODELS.fast,
-      input: [
-        { role: 'system', content: sys },
-        { role: 'user', content: user },
-      ],
-      max_output_tokens: 3000,
-      ...(MODELS.fast.startsWith('gpt-5') ? { reasoning: { effort: 'low' as const } } : {}),
+    text = await completeText(ai, {
+      system: sys,
+      user,
+      maxOutputTokens: 3000,
+      json: true,
     });
-    text = (resp.output_text ?? '').trim();
   }
 
   let parsed: { variants: DraftVariant[]; perPlatform: Partial<Record<Platform, string>> };

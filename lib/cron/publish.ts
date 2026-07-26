@@ -7,6 +7,7 @@ import {
   drafts,
 } from '../db/schema';
 import { getAdapter } from '../platforms/registry';
+import { PlatformError } from '../platforms/types';
 import { ensureFreshToken } from '../platforms/token';
 
 export type PublishResult = {
@@ -15,7 +16,13 @@ export type PublishResult = {
   ok: boolean;
   error?: string;
   postId?: string;
+  /** Requeued as 'pending' — a later tick will try again. */
+  willRetry?: boolean;
 };
+
+/** Total tries per post, counted by scheduled_posts.attempts. The cron runs
+ *  every 5 min (vercel.json), so that's the backoff — no sleep, no queue. */
+const MAX_ATTEMPTS = 3;
 
 /**
  * Publish all scheduled_posts whose scheduledAt has passed.
@@ -23,6 +30,11 @@ export type PublishResult = {
  * Concurrency: claims posts atomically with a single UPDATE ... RETURNING so
  * two overlapping invocations cannot both pick up the same row. This is the
  * fix for the TOCTOU race the prior SELECT-then-UPDATE pattern had.
+ *
+ * Retries: a transient failure requeues the row as 'pending' with the error
+ * recorded, so the next tick reclaims it (and increments attempts again).
+ * Terminal 'failed' only once attempts hit MAX_ATTEMPTS or the failure is
+ * clearly permanent (see isPermanent).
  */
 export async function runPublish(): Promise<{ ran: number; results: PublishResult[] }> {
   const now = new Date();
@@ -30,6 +42,11 @@ export async function runPublish(): Promise<{ ran: number; results: PublishResul
   // Atomic claim. Posts that are still 'pending' and overdue get flipped to
   // 'publishing' and returned in one round-trip. Two concurrent crons cannot
   // each grab the same row — Postgres serializes the UPDATE.
+  //
+  // ponytail: a row stranded in 'publishing' by a killed invocation is never
+  // reclaimed. Reclaiming on a staleness window would risk double-posting a
+  // row that succeeded just before the crash; add it only with a platform
+  // idempotency key.
   const due = await db()
     .update(scheduledPosts)
     .set({
@@ -65,10 +82,34 @@ export async function runPublish(): Promise<{ ran: number; results: PublishResul
   const results: PublishResult[] = [];
 
   for (const sp of batch) {
+    // Every failure path goes through here so the retry/terminal decision
+    // lives in exactly one place.
+    const fail = async (msg: string, permanent: boolean) => {
+      const willRetry = !permanent && sp.attempts < MAX_ATTEMPTS;
+      if (willRetry) {
+        // Back to 'pending' so the next tick reclaims it. attempts is already
+        // incremented by the claim, so it can't loop forever.
+        await db()
+          .update(scheduledPosts)
+          .set({ status: 'pending', error: `retrying (${sp.attempts}/${MAX_ATTEMPTS}): ${msg}`, updatedAt: new Date() })
+          .where(eq(scheduledPosts.id, sp.id));
+      } else {
+        await markFailed(sp.id, msg);
+        // Only log the terminal verdict — logging every retry spams the feed.
+        await db().insert(activityLog).values({
+          userId: sp.userId,
+          kind: 'publish_failed',
+          title: `Publish failed: ${sp.platform}`,
+          body: msg,
+          meta: { scheduledPostId: sp.id, platform: sp.platform, attempts: sp.attempts },
+        });
+      }
+      results.push({ id: sp.id, platform: sp.platform, ok: false, error: msg, willRetry });
+    };
+
     const initialAcct = accountById.get(sp.accountId);
     if (!initialAcct) {
-      await markFailed(sp.id, 'no_account');
-      results.push({ id: sp.id, platform: sp.platform, ok: false, error: 'no_account' });
+      await fail('no_account', true);
       continue;
     }
 
@@ -76,9 +117,10 @@ export async function runPublish(): Promise<{ ran: number; results: PublishResul
     try {
       acct = await ensureFreshToken(initialAcct);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      await markFailed(sp.id, `token_refresh_failed: ${msg}`);
-      results.push({ id: sp.id, platform: sp.platform, ok: false, error: 'token_refresh_failed' });
+      // ensureFreshToken swallows provider refresh failures (it stamps the row
+      // and returns the stale token), so a throw here is our own infra —
+      // transient by default.
+      await fail(`token_refresh_failed: ${errMsg(e)}`, isPermanent(e));
       continue;
     }
 
@@ -96,6 +138,20 @@ export async function runPublish(): Promise<{ ran: number; results: PublishResul
           meta: acct.meta as Record<string, unknown> | null,
         },
       });
+
+      // The adapter short-circuited to stubPublish: the platform isn't
+      // configured or the account holds a stub token, so nothing was posted
+      // and out.url is a dead stub.sociafy.local link. Recording this as
+      // 'published' is how users ended up with green posts they could never
+      // find. Terminal — retrying can't connect an account.
+      if (out.stub) {
+        await fail(
+          `platform_not_connected: ${sp.platform} is not connected (publish was simulated — nothing was posted). Connect ${sp.platform}, then reschedule.`,
+          true,
+        );
+        continue;
+      }
+
       await db()
         .update(scheduledPosts)
         .set({
@@ -117,16 +173,7 @@ export async function runPublish(): Promise<{ ran: number; results: PublishResul
 
       results.push({ id: sp.id, platform: sp.platform, ok: true, postId: out.platformPostId });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      await markFailed(sp.id, msg);
-      await db().insert(activityLog).values({
-        userId: sp.userId,
-        kind: 'publish_failed',
-        title: `Publish failed: ${sp.platform}`,
-        body: msg,
-        meta: { scheduledPostId: sp.id, platform: sp.platform },
-      });
-      results.push({ id: sp.id, platform: sp.platform, ok: false, error: msg });
+      await fail(errMsg(e), isPermanent(e));
     }
   }
 
@@ -151,6 +198,29 @@ export async function runPublish(): Promise<{ ran: number; results: PublishResul
   }
 
   return { ran: results.length, results };
+}
+
+function errMsg(e: unknown): string {
+  // PlatformError.message is a bare code ('x_publish_failed'); the useful part
+  // is detail (the upstream body). Keep both, bounded — this string is shown
+  // to the user on the calendar and in the activity feed.
+  if (e instanceof PlatformError && e.detail) {
+    const detail = typeof e.detail === 'string' ? e.detail : JSON.stringify(e.detail);
+    return `${e.message}: ${detail}`.slice(0, 900);
+  }
+  return e instanceof Error ? e.message : String(e);
+}
+
+/**
+ * Is retrying pointless? Adapters throw PlatformError carrying the upstream
+ * HTTP status: 4xx means the request itself is wrong (revoked token 401/403,
+ * missing media 400, exhausted X credits 402) and will be just as wrong in
+ * 5 minutes. 408/429 and every 5xx are transient, as is anything that isn't
+ * a PlatformError (fetch/DNS/socket errors).
+ */
+export function isPermanent(e: unknown): boolean {
+  if (!(e instanceof PlatformError)) return false;
+  return e.status >= 400 && e.status < 500 && e.status !== 408 && e.status !== 429;
 }
 
 async function markFailed(id: string, error: string) {

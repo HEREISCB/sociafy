@@ -4,6 +4,7 @@ import { db } from '../../../../lib/db';
 import { mediaAssets } from '../../../../lib/db/schema';
 import { isStubMode } from '../../../../lib/env';
 import { makeMediaKey, publicUrlFor, uploadBuffer } from '../../../../lib/storage/r2';
+import { videoDurationSec } from '../../../../lib/media/probe';
 
 export const runtime = 'nodejs';
 // Multipart bodies can be larger than the default 1MB. Bump generously.
@@ -29,6 +30,12 @@ export async function POST(req: NextRequest) {
     const buf = Buffer.from(await file.arrayBuffer());
     await uploadBuffer({ key, body: buf, contentType: file.type });
 
+    // Duration is billing input, not metadata: reference-video generation is
+    // priced per input second, so it has to be derived here from the bytes we
+    // received (never from anything the client claims). null = unknown, and
+    // consumers on a money path reject rather than guess.
+    const durationS = file.type.startsWith('video/') ? videoDurationSec(buf) : null;
+
     const url = publicUrlFor(key);
     const [row] = await db()
       .insert(mediaAssets)
@@ -38,9 +45,10 @@ export async function POST(req: NextRequest) {
         publicUrl: url,
         mimeType: file.type,
         sizeBytes: file.size,
+        durationS: durationS != null ? String(durationS) : null,
         label: form.get('label')?.toString() || file.name,
       })
       .returning();
     return row;
-  });
+  }, req); // `req` enables withUser's Origin check — without it this POST had no CSRF guard.
 }

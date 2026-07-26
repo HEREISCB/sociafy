@@ -61,6 +61,28 @@ export async function apiPost<T = unknown>(
   }
 }
 
+/** apiPost/apiPatch throw `Error("<status>: <json-body>")`. Pull out the
+ *  structured hint when there is one so the UI shows actionable copy ("top up
+ *  your credits", "X is not connected") instead of a raw status dump. */
+export function friendlyApiError(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e);
+  const m = msg.match(/^(\d{3}):\s*(\{[\s\S]*\})?/);
+  if (m) {
+    const status = Number(m[1]);
+    let body: { error?: string; hint?: string; balance?: number; needed?: number } = {};
+    try { body = m[2] ? JSON.parse(m[2]) : {}; } catch { /* non-JSON body */ }
+    if (status === 402 && body.error === 'insufficient_credits') {
+      return `You need ${body.needed ?? 'more'} credits but have ${body.balance ?? 0}. Top up on the Billing page, then try again.`;
+    }
+    if (body.hint) return body.hint;
+    if (status === 401) return 'Your session expired — sign in again.';
+    if (status === 429) return 'Too many requests — wait a minute and try again.';
+    if (status >= 500) return 'Something went wrong on the server. Try again shortly.';
+  }
+  if (msg.startsWith('timeout')) return 'The request took too long — try again.';
+  return `Failed: ${msg.slice(0, 120)}`;
+}
+
 export async function apiPatch<T = unknown>(url: string, body: unknown): Promise<T> {
   const r = await fetch(url, {
     method: 'PATCH',

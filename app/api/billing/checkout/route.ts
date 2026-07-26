@@ -35,8 +35,10 @@ export async function POST(req: NextRequest) {
       billingCountry: profile.billingCountry,
     });
     if (!provider) {
+      // Only reachable when the resolved provider has no credentials — see
+      // stripeConfigured(). Error code kept for the billing page's copy.
       return jsonError('billing_coming_soon', 503, {
-        hint: 'USD billing via Stripe is coming soon. Use the "Pay in INR via Razorpay" option.',
+        hint: 'Payments are not configured for your currency. Set STRIPE_* env vars, or use the "Pay in INR via Razorpay" option.',
       });
     }
 

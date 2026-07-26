@@ -25,6 +25,36 @@ export interface CrisisAlert {
   mentions: CrisisAlertMention[];
 }
 
+/**
+ * Hosts we will POST a user-supplied webhook URL to.
+ *
+ * An allowlist rather than a private-IP check (see lib/ai/skills/fetch-url.ts):
+ * blocklists lose here. Integer-form and IPv6-mapped literals dodge dotted-quad
+ * parsing, and even a correct check races DNS — the name can re-resolve to
+ * 169.254.169.254 between validation and fetch. These are the only hosts the
+ * feature has ever needed (Slack + Discord, per the dual text/content payload).
+ */
+const WEBHOOK_HOSTS = new Set([
+  'hooks.slack.com',
+  'discord.com',
+  'discordapp.com',
+  'canary.discord.com',
+  'ptb.discord.com',
+]);
+
+/** true when `url` is an https incoming-webhook URL on an allowlisted host. */
+export function isAllowedWebhookUrl(url: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return false;
+  }
+  // Default port only — a non-standard port on an allowlisted name is never a
+  // real webhook, and refusing it keeps the surface to "whatever Slack serves".
+  return u.protocol === 'https:' && u.port === '' && WEBHOOK_HOSTS.has(u.hostname.toLowerCase());
+}
+
 function buildText(alert: CrisisAlert): string {
   const n = alert.mentions.length;
   const header = `🚨 Reputation Shield — ${n} new crisis mention${n === 1 ? '' : 's'} for "${alert.brand}"`;
@@ -35,6 +65,9 @@ function buildText(alert: CrisisAlert): string {
 }
 
 async function postWebhook(url: string, alert: CrisisAlert): Promise<void> {
+  // Re-check at the fetch, not only on write: rows stored before validation
+  // existed still carry arbitrary URLs.
+  if (!isAllowedWebhookUrl(url)) return;
   const text = buildText(alert);
   try {
     await fetch(url, {
@@ -42,6 +75,11 @@ async function postWebhook(url: string, alert: CrisisAlert): Promise<void> {
       headers: { 'Content-Type': 'application/json' },
       // `text` → Slack, `content` → Discord. Harmless extra key on each.
       body: JSON.stringify({ text, content: text }),
+      // Don't follow redirects — a 302 is the one way an allowlisted host can
+      // still walk us to an internal address. Also bound the wait so a hung
+      // webhook can't stall the monitor cron.
+      redirect: 'manual',
+      signal: AbortSignal.timeout(10_000),
     });
   } catch {
     /* best-effort */

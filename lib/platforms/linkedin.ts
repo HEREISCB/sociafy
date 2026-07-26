@@ -76,6 +76,17 @@ export const linkedinAdapter: PlatformAdapter = {
     } | null = null;
 
     const firstMedia = input.media?.[0];
+    if (input.media && input.media.length > 1) {
+      // One asset per post here. Dropping the rest quietly is the same bug as
+      // dropping all of them, so refuse instead.
+      // ponytail: multi-image needs the newer /rest/posts API; add it if users
+      // ask for LinkedIn carousels.
+      throw new PlatformError(
+        'linkedin_multi_media_unsupported',
+        400,
+        `LinkedIn posts carry one attachment here; this one has ${input.media.length}. Keep a single image or video.`,
+      );
+    }
     if (firstMedia) {
       const isVideo = firstMedia.mimeType.startsWith('video/');
       const recipe = isVideo
@@ -88,6 +99,10 @@ export const linkedinAdapter: PlatformAdapter = {
           recipe,
           sourceUrl: firstMedia.url,
         });
+        // Video needs transcoding before the UGC post will accept it —
+        // referencing it too early fails with INVALID_MEDIA_STATE. Images are
+        // ready immediately, so only video pays the polling cost.
+        if (isVideo) await waitForLinkedInAsset(token, assetUrn);
         mediaBlock = {
           shareMediaCategory: isVideo ? 'VIDEO' : 'IMAGE',
           media: [{ status: 'READY', media: assetUrn, title: { text: input.text.slice(0, 80) } }],
@@ -139,10 +154,8 @@ export const linkedinAdapter: PlatformAdapter = {
  *
  * The asset URN looks like "urn:li:digitalmediaAsset:C5605AQ...". The UGC
  * post takes shareMediaCategory: IMAGE|VIDEO with media: [{ status: 'READY',
- * media: <urn> }]. We do NOT poll for AVAILABLE here — for images and
- * short reels the post API tolerates a brief processing window, and
- * polling adds more failure modes than it removes. If LinkedIn rejects
- * the post with INVALID_MEDIA_STATE we'll add polling at that point.
+ * media: <urn> }]. Video is then polled to AVAILABLE by the caller (see
+ * waitForLinkedInAsset) — that's the INVALID_MEDIA_STATE fix.
  */
 async function uploadLinkedInAsset(args: {
   token: string;
@@ -199,4 +212,33 @@ async function uploadLinkedInAsset(args: {
     throw new PlatformError('linkedin_upload_put_failed', putResp.status, await putResp.text());
   }
   return assetUrn;
+}
+
+/**
+ * Poll GET /v2/assets/{id} until the recipe reports AVAILABLE. LinkedIn
+ * transcodes video after the PUT; posting against a still-PROCESSING asset
+ * fails with INVALID_MEDIA_STATE. Non-ok polls just count as "not yet" —
+ * only the 60s ceiling is fatal.
+ */
+async function waitForLinkedInAsset(token: string, assetUrn: string): Promise<void> {
+  const id = assetUrn.split(':').pop()!;
+  const deadline = Date.now() + 60_000;
+  let last = 'unknown';
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 2_000));
+    const resp = await fetch(`https://api.linkedin.com/v2/assets/${encodeURIComponent(id)}`, {
+      headers: { Authorization: `Bearer ${token}`, 'X-Restli-Protocol-Version': '2.0.0' },
+    });
+    if (!resp.ok) continue;
+    const j = (await resp.json()) as { recipes?: Array<{ status?: string }>; status?: string };
+    last = j.recipes?.[0]?.status ?? j.status ?? last;
+    if (last === 'AVAILABLE') return;
+    // CLIENT_ERROR / INFRA_ERROR are terminal — no point waiting out the clock.
+    if (last.endsWith('_ERROR')) break;
+  }
+  throw new PlatformError(
+    'linkedin_media_not_ready',
+    502,
+    `LinkedIn is still processing the video (last state: ${last}). Try scheduling it a few minutes later.`,
+  );
 }

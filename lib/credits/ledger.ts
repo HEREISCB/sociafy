@@ -118,44 +118,85 @@ export async function charge(args: {
 }
 
 /**
+ * Insert at most one refund row per charge, under the same profile lock
+ * `charge` takes.
+ *
+ * The lock is the point: check-for-existing-refund then insert used to run as
+ * two unsynchronized statements, so two concurrent calls for the same ledgerId
+ * both saw "not refunded yet" and both inserted → the user was credited twice.
+ * That is reachable today — the video-job poller refunds on the failure path
+ * and parallel polls are expected. Serializing on `profiles … FOR UPDATE`
+ * makes the read-then-write atomic per user.
+ *
+ * `credits: null` means "reverse the original row in full".
+ */
+async function refundOnce(args: {
+  userId: string;
+  ledgerId: string;
+  credits: number | null;
+  action: CreditAction | null;
+  meta: Record<string, unknown>;
+}): Promise<{ refunded: boolean; balanceAfter: number }> {
+  return db().transaction(async (tx) => {
+    // Must read the balance through `tx` so it includes our own insert.
+    const balance = async () => {
+      const [b] = await tx
+        .select({ total: sql<number>`COALESCE(SUM(${creditLedger.credits}), 0)::int` })
+        .from(creditLedger)
+        .where(eq(creditLedger.userId, args.userId));
+      return Number(b?.total ?? 0);
+    };
+
+    await tx
+      .select({ id: profiles.id })
+      .from(profiles)
+      .where(eq(profiles.id, args.userId))
+      .for('update');
+
+    const [original] = await tx
+      .select()
+      .from(creditLedger)
+      .where(and(eq(creditLedger.id, args.ledgerId), eq(creditLedger.userId, args.userId)))
+      .limit(1);
+    if (!original) return { refunded: false, balanceAfter: await balance() };
+
+    const [existing] = await tx
+      .select({ id: creditLedger.id })
+      .from(creditLedger)
+      .where(and(eq(creditLedger.userId, args.userId), eq(creditLedger.relatedLedgerId, args.ledgerId)))
+      .limit(1);
+    if (existing) return { refunded: false, balanceAfter: await balance() };
+
+    await tx.insert(creditLedger).values({
+      userId: args.userId,
+      kind: 'refund',
+      action: args.action ?? original.action,
+      // Flip the sign of the charge so the pair nets to zero.
+      credits: args.credits === null ? -original.credits : Math.abs(args.credits),
+      meta: args.meta,
+      relatedLedgerId: args.ledgerId,
+    });
+    return { refunded: true, balanceAfter: await balance() };
+  });
+}
+
+/**
  * Reverse a previous charge. Use when an upstream API call fails after we
  * already deducted credits. Inserts a positive ledger row referencing the
- * original charge. Idempotent: calling refund() twice for the same
- * ledgerId is a no-op (the second call sees an existing refund row).
+ * original charge. Idempotent under concurrency — see `refundOnce`.
  */
 export async function refund(args: {
   userId: string;
   ledgerId: string;
   reason: string;
 }): Promise<{ refunded: boolean; balanceAfter: number }> {
-  // Find the original charge.
-  const [original] = await db()
-    .select()
-    .from(creditLedger)
-    .where(and(eq(creditLedger.id, args.ledgerId), eq(creditLedger.userId, args.userId)))
-    .limit(1);
-  if (!original) {
-    return { refunded: false, balanceAfter: await getBalance(args.userId) };
-  }
-  // Already refunded? Check for an existing refund pointing at this row.
-  const existing = await db()
-    .select({ id: creditLedger.id })
-    .from(creditLedger)
-    .where(and(eq(creditLedger.userId, args.userId), eq(creditLedger.relatedLedgerId, args.ledgerId)))
-    .limit(1);
-  if (existing.length > 0) {
-    return { refunded: false, balanceAfter: await getBalance(args.userId) };
-  }
-  // Insert opposite-signed row. Sign of `credits` flip so the net is zero.
-  await db().insert(creditLedger).values({
+  return refundOnce({
     userId: args.userId,
-    kind: 'refund',
-    action: original.action,
-    credits: -original.credits,
+    ledgerId: args.ledgerId,
+    credits: null,
+    action: null,
     meta: { reason: args.reason, refundOf: args.ledgerId },
-    relatedLedgerId: args.ledgerId,
   });
-  return { refunded: true, balanceAfter: await getBalance(args.userId) };
 }
 
 /**
@@ -164,7 +205,8 @@ export async function refund(args: {
  * only 3 came back, refund the cost of the missing 1.
  *
  * `credits` is the positive number of credits to return. Caller is
- * responsible for ensuring this doesn't exceed the original charge.
+ * responsible for ensuring this doesn't exceed the original charge. Shares
+ * `refundOnce`, so it is now also one-per-charge and race-free.
  */
 export async function partialRefund(args: {
   userId: string;
@@ -176,15 +218,14 @@ export async function partialRefund(args: {
   if (args.credits <= 0) {
     return { balanceAfter: await getBalance(args.userId) };
   }
-  await db().insert(creditLedger).values({
+  const { balanceAfter } = await refundOnce({
     userId: args.userId,
-    kind: 'refund',
+    ledgerId: args.ledgerId,
+    credits: args.credits,
     action: args.action,
-    credits: Math.abs(args.credits),
     meta: { reason: args.reason, partialOf: args.ledgerId },
-    relatedLedgerId: args.ledgerId,
   });
-  return { balanceAfter: await getBalance(args.userId) };
+  return { balanceAfter };
 }
 
 /** Grant credits (signup_bonus, monthly_grant, topup, admin_grant). */
@@ -253,19 +294,32 @@ export function insufficientCreditsResponse(args: { balance: number; needed: num
   );
 }
 
+/** Postgres unique_violation (23505), including drizzle's wrapped form. */
+function isUniqueViolation(e: unknown): boolean {
+  for (let cur = e, hops = 0; cur && hops < 4; cur = (cur as { cause?: unknown }).cause, hops++) {
+    if ((cur as { code?: unknown }).code === '23505') return true;
+    const msg = (cur as { message?: unknown }).message;
+    if (typeof msg === 'string' && msg.includes('duplicate key value violates unique constraint')) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Idempotent grant keyed by `meta.source`. Used by both Stripe and
  * Razorpay webhooks so that retried events do not double-credit a user.
  *
- * Implementation note: we scan the user's recent monthly_grant /
- * topup rows and check for a matching source in TS rather than relying
- * on a JSONB unique index (cheaper to ship, fast enough at our scale).
- * A future migration can promote `meta.source` to a true unique
- * constraint.
+ * Authority is the DB, not this function: drizzle/0008 creates the partial
+ * unique index `credit_ledger_user_kind_source_uniq` on
+ * (user_id, kind, meta->>'source'). The TS scan below is only a fast path —
+ * on its own it was unsound, because an unordered `.limit(50)` returns rows in
+ * whatever order pg feels like, so past 50 grant rows the dedup could miss its
+ * match and double-credit on a webhook retry (both providers retry hard).
  */
 export async function grantIdempotent(args: {
   userId: string;
-  kind: Extract<CreditLedgerKind, 'monthly_grant' | 'topup'>;
+  kind: Extract<CreditLedgerKind, 'monthly_grant' | 'topup' | 'admin_grant'>;
   credits: number;
   source: string;
   meta?: Record<string, unknown>;
@@ -274,6 +328,7 @@ export async function grantIdempotent(args: {
     .select({ id: creditLedger.id, meta: creditLedger.meta })
     .from(creditLedger)
     .where(and(eq(creditLedger.userId, args.userId), eq(creditLedger.kind, args.kind)))
+    .orderBy(desc(creditLedger.createdAt))
     .limit(50);
 
   const dup = recent.find(
@@ -281,15 +336,22 @@ export async function grantIdempotent(args: {
   );
   if (dup) return false;
 
-  await db()
-    .insert(creditLedger)
-    .values({
-      userId: args.userId,
-      kind: args.kind,
-      action: null,
-      credits: Math.abs(args.credits),
-      meta: { source: args.source, ...(args.meta ?? {}) } as Record<string, unknown>,
-    })
-    .returning({ id: creditLedger.id });
+  try {
+    await db()
+      .insert(creditLedger)
+      .values({
+        userId: args.userId,
+        kind: args.kind,
+        action: null,
+        credits: Math.abs(args.credits),
+        meta: { source: args.source, ...(args.meta ?? {}) } as Record<string, unknown>,
+      })
+      .returning({ id: creditLedger.id });
+  } catch (e) {
+    // The unique index fired: this (user, kind, source) was already granted,
+    // by an older event outside the scan window or a concurrent retry.
+    if (isUniqueViolation(e)) return false;
+    throw e;
+  }
   return true;
 }

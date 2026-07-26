@@ -127,6 +127,22 @@ export const redditAdapter: PlatformAdapter = {
     const parentId = meta?.parentId;
     const subreddit = meta?.subreddit;
 
+    // We only ever submitted kind:'self', so any attachment was dropped
+    // without a word. Reddit image posts need the asset-lease flow
+    // (POST /api/media/asset.json → PUT to the returned S3 form → submit
+    // kind:'image' with the websocket asset url), and comments can't carry
+    // media at all outside richtext. Neither is implemented, so say so.
+    // ponytail: implement the asset lease if image posts to Reddit get asked
+    // for; a kind:'link' post to the raw R2 url is not the same thing and
+    // many subreddits ban it.
+    if (input.media && input.media.length > 0) {
+      throw new PlatformError(
+        'reddit_media_unsupported',
+        400,
+        'Reddit posting supports text only right now. Remove the attachment, or publish the image to another platform.',
+      );
+    }
+
     // If we have a parentId, this is a comment/reply on an existing thread
     if (parentId) {
       const resp = await fetch(COMMENT_URL, {

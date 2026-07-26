@@ -37,6 +37,16 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ platform: s
   const redirectUri = absoluteUrl(req, `/api/oauth/${platform}/callback`);
 
   if (!adapter.isConfigured()) {
+    // Stub connect mints a fake connected account (handle "you-on-x", token
+    // "stub-token-x") that publishes to nowhere. It's a local-dev affordance
+    // only — same gate as SKIP_AUTH_DEV in lib/api.ts. In production an
+    // unconfigured platform must say so instead of faking success.
+    if (process.env.NODE_ENV !== 'development') {
+      const sep = next.includes('?') ? '&' : '?';
+      return NextResponse.redirect(
+        absoluteUrl(req, `${next}${sep}oauth_error=platform_not_configured&platform=${platform}`),
+      );
+    }
     const stubUrl = new URL(absoluteUrl(req, `/api/oauth/${platform}/callback`));
     stubUrl.searchParams.set('state', state);
     stubUrl.searchParams.set('stub', '1');

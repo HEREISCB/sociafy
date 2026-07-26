@@ -25,5 +25,6 @@ export async function stubPublish(input: PublishInput, platform: Platform): Prom
     platformPostId: id,
     url: `https://stub.sociafy.local/${platform}/${id}`,
     raw: { stub: true, text: input.text.slice(0, 80) },
+    stub: true,
   };
 }

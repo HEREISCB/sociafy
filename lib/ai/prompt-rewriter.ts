@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { getOpenAI, MODELS } from './client';
+import { getTextAI, completeText } from './client';
 
 /**
  * Media-prompt rewriter.
@@ -57,8 +57,8 @@ export type RewriteResult = {
 };
 
 export async function rewritePromptForMedia(args: RewriteArgs): Promise<RewriteResult> {
-  const openai = getOpenAI();
-  if (!openai || !args.userPrompt.trim()) {
+  const ai = getTextAI('fast');
+  if (!ai || !args.userPrompt.trim()) {
     return { prompt: args.userPrompt, enhanced: false };
   }
 
@@ -82,18 +82,12 @@ export async function rewritePromptForMedia(args: RewriteArgs): Promise<RewriteR
     // Hard 12s timeout — the rewriter is a nice-to-have. If the user's
     // network is taking longer than that to even start a response we'd
     // rather generate with the raw prompt than make them wait.
-    const resp = await openai.responses.create(
-      {
-        model: MODELS.fast,
-        input: [
-          { role: 'system', content: sys },
-          { role: 'user', content: userMsg },
-        ],
-        max_output_tokens: 500,
-      },
-      { timeout: 12_000 },
-    );
-    const text = (resp.output_text ?? '').trim();
+    const text = await completeText(ai, {
+      system: sys,
+      user: userMsg,
+      maxOutputTokens: 500,
+      timeoutMs: 12_000,
+    });
     if (!text) return { prompt: args.userPrompt, enhanced: false };
     // Strip any stray quote wrappers or "Prompt:" labels the model still emits.
     const cleaned = text

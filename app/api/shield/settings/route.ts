@@ -3,10 +3,14 @@ import { eq } from 'drizzle-orm';
 import { db } from '../../../../lib/db';
 import { shieldSettings } from '../../../../lib/db/schema';
 import { authedUser } from '../../../../lib/api';
+import { isAllowedWebhookUrl } from '../../../../lib/shield/notify';
 
 export const runtime = 'nodejs';
 
 const MAX_PROMPT = 8000;
+// Deliberately loose: we only need "plausibly deliverable" to stop this field
+// being used as a free-text spam relay through the platform's Resend sender.
+const EMAIL_RX = /^[^\s@,;<>]+@[^\s@,;<>]+\.[a-z]{2,}$/i;
 
 type SettingsPayload = {
   systemPrompt: string;
@@ -55,8 +59,26 @@ export async function PUT(req: NextRequest) {
   if (typeof body.systemPrompt === 'string') set.systemPrompt = body.systemPrompt.slice(0, MAX_PROMPT);
   if (typeof body.autoFetch === 'boolean') set.autoFetch = body.autoFetch;
   if (typeof body.autoFetchBrand === 'string') set.autoFetchBrand = body.autoFetchBrand.trim().slice(0, 120);
-  if (typeof body.slackWebhookUrl === 'string') set.slackWebhookUrl = body.slackWebhookUrl.trim().slice(0, 500);
-  if (typeof body.alertEmail === 'string') set.alertEmail = body.alertEmail.trim().slice(0, 200);
+  // Empty string clears the field; anything else must survive validation.
+  // Unvalidated these two were an SSRF (server POSTs to any URL, incl. cloud
+  // metadata) and an open mail relay on our sender reputation.
+  if (typeof body.slackWebhookUrl === 'string') {
+    const url = body.slackWebhookUrl.trim().slice(0, 500);
+    if (url && !isAllowedWebhookUrl(url)) {
+      return NextResponse.json(
+        { error: 'invalid_webhook_url', hint: 'Must be an https Slack (hooks.slack.com) or Discord incoming-webhook URL.' },
+        { status: 400 },
+      );
+    }
+    set.slackWebhookUrl = url || null;
+  }
+  if (typeof body.alertEmail === 'string') {
+    const email = body.alertEmail.trim().slice(0, 200);
+    if (email && !EMAIL_RX.test(email)) {
+      return NextResponse.json({ error: 'invalid_alert_email' }, { status: 400 });
+    }
+    set.alertEmail = email || null;
+  }
 
   await db()
     .insert(shieldSettings)

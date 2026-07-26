@@ -644,7 +644,13 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
   const [videoCount, setVideoCount] = useState<number>(1);
   const [videoDuration, setVideoDuration] = useState<number>(8);
   const [videoQuality, setVideoQuality] = useState<VideoQuality>('720p');
+  // seedance-2-fast is the recommended default (COSTS.md): ~20% cheaper for the
+  // same resolution. Quality stays one click away.
+  const [videoFast, setVideoFast] = useState<boolean>(true);
   const [videoAspect, setVideoAspect] = useState<VideoAspect>('9:16');
+  // seedance-2-fast has no 1080p variant, so 1080p always means Quality — both
+  // pricing and the provider call have to agree on that.
+  const effectiveFast = videoFast && videoQuality !== '1080p';
   const [videoBusy, setVideoBusy] = useState(false);
   // Generation type picker + all the possible anchors.
   const [videoGenMode, setVideoGenMode] = useState<VideoGenMode>('text');
@@ -652,6 +658,10 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
   const [endFrameUrl, setEndFrameUrl] = useState<string | null>(null);
   const [referenceImageUrls, setReferenceImageUrls] = useState<string[]>([]);
   const [referenceVideoUrl, setReferenceVideoUrl] = useState<string | null>(null);
+  // Server-probed length of the reference clip (from the upload row, not the
+  // browser) — drives the surcharge shown in the cost preview. null = the
+  // server couldn't read it, and it will reject the generation.
+  const [refVideoSec, setRefVideoSec] = useState<number | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   // Avatar mode: a face photo + a script spoken in a Voice Twin (or uploaded audio).
   const [avatarImageUrl, setAvatarImageUrl] = useState<string | null>(null);
@@ -673,7 +683,9 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
   type AnchorTarget = 'start' | 'end' | 'reference' | 'refVideo' | 'audio' | 'avatarFace';
   const [refUploadTarget, setRefUploadTarget] = useState<AnchorTarget | null>(null);
 
-  const uploadAnchor = async (file: File): Promise<string | null> => {
+  /** Uploads and returns the media_assets row (durationS included — the video
+   *  cost preview needs the server's number, not one measured in the browser). */
+  const uploadAnchor = async (file: File): Promise<{ publicUrl: string; durationS: string | null } | null> => {
     const fd = new FormData();
     fd.append('file', file);
     fd.append('label', `anchor-${file.name}`);
@@ -682,8 +694,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
       setToast(r.status === 503 ? 'Storage not configured.' : `Upload failed: ${r.status}`);
       return null;
     }
-    const row = await r.json();
-    return row.publicUrl as string;
+    return r.json();
   };
 
   const onPickFrame = (target: AnchorTarget) => {
@@ -713,11 +724,16 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
       setRefUploadTarget(null);
       return;
     }
-    const url = await uploadAnchor(file);
-    if (!url) return;
+    const row = await uploadAnchor(file);
+    if (!row) return;
+    const url = row.publicUrl;
     if (target === 'start') setStartFrameUrl(url);
     else if (target === 'end') setEndFrameUrl(url);
-    else if (target === 'refVideo') setReferenceVideoUrl(url);
+    else if (target === 'refVideo') {
+      setReferenceVideoUrl(url);
+      const secs = row.durationS != null ? Number(row.durationS) : NaN;
+      setRefVideoSec(Number.isFinite(secs) && secs > 0 ? secs : null);
+    }
     else if (target === 'audio') setAudioUrl(url);
     else setReferenceImageUrls((cur) => [...cur, url].slice(0, 9));
     setRefUploadTarget(null);
@@ -726,8 +742,8 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
   /** Upload a (possibly cropped) avatar face image and set it as the photo. */
   const applyAvatarFace = async (data: Blob) => {
     const file = data instanceof File ? data : new File([data], 'avatar-face.png', { type: data.type || 'image/png' });
-    const url = await uploadAnchor(file);
-    if (url) { setAvatarImageUrl(url); setAvatarTouched(false); }
+    const row = await uploadAnchor(file);
+    if (row) { setAvatarImageUrl(row.publicUrl); setAvatarTouched(false); }
     setCropOpen(false);
   };
 
@@ -753,15 +769,21 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
       const per = priceForAvatar(q);
       setPreviewCost({ credits: per.credits, action: per.action, label: ACTION_LABELS[per.action] });
     } else if (mode === 'video') {
-      const per = priceForVideo({ durationSec: videoDuration, quality: videoQuality, fast: false });
-      const total = per.credits * videoCount;
+      // Mirror the server: a reference video adds a per-input-second surcharge
+      // and forces count to 1, so the preview matches what gets charged.
+      const refSec = videoGenMode === 'reference' ? refVideoSec : null;
+      const per = priceForVideo({
+        durationSec: videoDuration, quality: videoQuality, fast: effectiveFast,
+        inputDurationSec: refSec ?? undefined,
+      });
+      const total = per.credits * (refSec ? 1 : videoCount);
       setPreviewCost({ credits: total, action: per.action, label: ACTION_LABELS[per.action] });
     } else {
       // Text post: 1 credit, or 6 + maybe extra searches if research is on.
       const p = priceForCompose({ withTools: withResearch, extraSearches: 0 });
       setPreviewCost({ credits: p.credits, action: p.action, label: ACTION_LABELS[p.action] });
     }
-  }, [mode, imageSize, imageQuality, imageCount, videoDuration, videoQuality, videoCount, videoGenMode, withResearch]);
+  }, [mode, imageSize, imageQuality, imageCount, videoDuration, videoQuality, videoCount, videoGenMode, effectiveFast, refVideoSec, withResearch]);
 
   /** Full-screen media preview. null = closed. Handles both images and videos. */
   const [lightbox, setLightbox] = useState<{ url: string; label?: string; kind?: 'image' | 'video' } | null>(null);
@@ -962,6 +984,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
           count: videoCount,
           caption: variant?.text?.slice(0, 600),
           rawPrompt: !autoEnhance,
+          fast: effectiveFast,
           genMode: videoGenMode,
           startFrameUrl: startFrameUrl ?? undefined,
           endFrameUrl: endFrameUrl ?? undefined,
@@ -985,6 +1008,11 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
       if (!r.ok && r.status !== 202) {
         if (r.status === 429) setToast('Slow down — too many video generations. Try again shortly.');
         else if (r.status === 401) setToast('Sign in to generate videos.');
+        else if (r.status === 400 && (data as { hint?: string }).hint) {
+          // Reference-video rejections (too long / unreadable length) carry an
+          // actionable hint — show it rather than a bare status code.
+          setToast((data as { hint: string }).hint);
+        }
         else {
           const detail = (data as { detail?: string }).detail;
           setToast(`Video generation failed: ${r.status}${detail ? ` · ${detail.slice(0, 140)}` : ''}`);
@@ -1463,7 +1491,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
         <Icon name="play" size={14} style={{ color: 'var(--accent)' }} />
         <span style={{ fontSize: 12, fontWeight: 550, letterSpacing: '-0.005em' }}>Video options</span>
         <span style={{ marginLeft: 'auto', fontSize: 10.5, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>
-          {videoDuration}s · {videoQuality} · {videoAspect} · uses topic above
+          {videoDuration}s · {videoQuality} · {videoGenMode === 'avatar' ? videoAspect : `${effectiveFast ? 'fast' : 'quality'} · ${videoAspect}`} · uses topic above
         </span>
       </div>
       <div className="m-2col" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 14, marginTop: 4 }}>
@@ -1534,6 +1562,32 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
           </div>
         </div>
       </div>
+
+      {/* Speed/quality tier. Fast = seedance-2-fast, ~20% cheaper at the same
+          resolution and the recommended default (COSTS.md). No 1080p variant. */}
+      {videoGenMode !== 'avatar' && (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Model</div>
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+            {[true, false].map((f) => (
+              <button
+                key={String(f)}
+                type="button"
+                aria-pressed={effectiveFast === f}
+                className={`prompt-chip ${effectiveFast === f ? 'active' : ''}`}
+                disabled={f && videoQuality === '1080p'}
+                onClick={() => setVideoFast(f)}
+                title={f ? 'seedance-2-fast — cheaper, quicker' : 'seedance-2 — more detail'}
+              >
+                {f ? 'Fast' : 'Quality'}
+              </button>
+            ))}
+            <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>
+              {videoQuality === '1080p' ? 'Fast has no 1080p variant.' : 'Fast costs ~20% fewer credits.'}
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Generation type — drives which inputs render below. */}
       <div style={{ marginTop: 14 }}>
@@ -1650,7 +1704,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                   <div style={{ aspectRatio: '16/9', borderRadius: 8, border: '1px solid var(--line-2)', position: 'relative', overflow: 'hidden', background: '#000' }}>
                     <video src={referenceVideoUrl} muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                     <button
-                      onClick={() => setReferenceVideoUrl(null)}
+                      onClick={() => { setReferenceVideoUrl(null); setRefVideoSec(null); }}
                       style={{ position: 'absolute', top: 4, right: 4, width: 18, height: 18, borderRadius: 4, background: 'rgba(10,10,10,0.7)', color: 'white', border: 0, display: 'grid', placeItems: 'center', cursor: 'pointer' }}
                     >
                       <Icon name="x" size={10} />
@@ -1664,6 +1718,17 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                     <Icon name="upload" size={14} />
                     <span style={{ textTransform: 'uppercase', letterSpacing: '0.04em', fontSize: 9.5 }}>Upload</span>
                   </button>
+                )}
+                {/* The clip's own length is billed on top (Seedance charges half
+                    the per-second rate for input), so surface it here. */}
+                {referenceVideoUrl && (
+                  <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: refVideoSec == null || refVideoSec > 60 ? 'var(--danger, #c0392b)' : 'var(--ink-3)', marginTop: 4 }}>
+                    {refVideoSec == null
+                      ? 'Length unreadable — re-upload as MP4/MOV'
+                      : refVideoSec > 60
+                        ? `${Math.round(refVideoSec)}s — max 60s`
+                        : `${Math.round(refVideoSec)}s input · billed on top`}
+                  </div>
                 )}
               </div>
             </div>

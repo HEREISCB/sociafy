@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { Icon } from '../icons';
+import { friendlyApiError } from '../../lib/ui/fetcher';
 import type { MentionSource, SentimentLabel } from '../../lib/db/schema';
 
 export type ShieldActionRow = {
@@ -82,6 +83,10 @@ export const MentionCard: React.FC<Props> = ({ row, onApprove, onReject, connect
   const [platform, setPlatform] = useState<string>(row.targetPlatform ?? '');
   const [busy, setBusy] = useState<'approve' | 'reject' | 'generate' | null>(null);
   const [genError, setGenError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  // Set when /generate reports usedAI:false — the draft came from the canned
+  // template, not the model, and the user should know before publishing it.
+  const [isTemplate, setIsTemplate] = useState(false);
   const [done, setDone] = useState<'approved' | 'rejected' | null>(
     row.status === 'published' || row.status === 'approved'
       ? 'approved'
@@ -94,11 +99,16 @@ export const MentionCard: React.FC<Props> = ({ row, onApprove, onReject, connect
   const style = LABEL_STYLE[mention.sentimentLabel];
   const isCrisis = mention.sentimentLabel === 'crisis';
 
+  // onApprove/onReject throw when the request fails — never flip the card to
+  // the green "published" state off an unchecked response.
   const handleApprove = async () => {
     setBusy('approve');
+    setActionError(null);
     try {
       await onApprove(row.id, script, platform || null);
       setDone('approved');
+    } catch (e) {
+      setActionError(friendlyApiError(e));
     } finally {
       setBusy(null);
     }
@@ -106,9 +116,12 @@ export const MentionCard: React.FC<Props> = ({ row, onApprove, onReject, connect
 
   const handleReject = async () => {
     setBusy('reject');
+    setActionError(null);
     try {
       await onReject(row.id);
       setDone('rejected');
+    } catch (e) {
+      setActionError(friendlyApiError(e));
     } finally {
       setBusy(null);
     }
@@ -119,9 +132,10 @@ export const MentionCard: React.FC<Props> = ({ row, onApprove, onReject, connect
     setGenError(null);
     try {
       const res = await fetch(`/api/shield/actions/${row.id}/generate`, { method: 'POST' });
-      const data = await res.json().catch(() => ({})) as { script?: string; error?: string };
+      const data = await res.json().catch(() => ({})) as { script?: string; error?: string; usedAI?: boolean };
       if (!res.ok) { setGenError(data.error ?? 'Failed'); return; }
       setScript(data.script ?? '');
+      setIsTemplate(data.usedAI === false);
     } catch {
       setGenError('Network error');
     } finally {
@@ -338,6 +352,22 @@ export const MentionCard: React.FC<Props> = ({ row, onApprove, onReject, connect
             >
               Response {script ? '· edit before publishing' : '· write or generate with AI'}
             </span>
+            {isTemplate && (
+              <span
+                className="mono"
+                title="AI drafting was unavailable, so this came from a built-in template. Edit it before publishing."
+                style={{
+                  fontSize: 9.5,
+                  padding: '2px 7px',
+                  borderRadius: 100,
+                  background: 'var(--bg-sunk)',
+                  color: 'var(--ink-3)',
+                  border: '1px solid var(--line)',
+                }}
+              >
+                template draft
+              </span>
+            )}
             <div style={{ flex: 1 }} />
             <button
               className="btn sm"
@@ -411,6 +441,12 @@ export const MentionCard: React.FC<Props> = ({ row, onApprove, onReject, connect
               {busy === 'approve' ? 'Publishing…' : platform ? `Publish to ${platform}` : 'Approve'}
             </button>
           </div>
+
+          {actionError && (
+            <p style={{ margin: 0, fontSize: 12, color: 'oklch(0.42 0.18 25)' }}>
+              <Icon name="alert" size={11} /> {actionError}
+            </p>
+          )}
         </div>
       )}
     </article>

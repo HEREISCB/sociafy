@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { useApi } from '../../lib/ui/fetcher';
+import { useApi, apiPost } from '../../lib/ui/fetcher';
 import { Icon } from '../icons';
 import { MentionCard, type ShieldActionRow } from './MentionCard';
 import BrandKnowledge from './BrandKnowledge';
@@ -114,18 +114,22 @@ const ShieldDashboard: React.FC = () => {
     }
   };
 
+  // apiPost throws on a non-2xx so the card can report the failure. Refresh
+  // either way: on failure the action row is now 'failed' (retryable).
   const approve = async (id: string, script: string, targetPlatform: string | null) => {
-    await fetch(`/api/shield/actions/${id}/approve`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ script, targetPlatform }),
-    });
-    await mutate();
+    try {
+      await apiPost(`/api/shield/actions/${id}/approve`, { script, targetPlatform });
+    } finally {
+      await mutate();
+    }
   };
 
   const reject = async (id: string) => {
-    await fetch(`/api/shield/actions/${id}/reject`, { method: 'POST' });
-    await mutate();
+    try {
+      await apiPost(`/api/shield/actions/${id}/reject`, {});
+    } finally {
+      await mutate();
+    }
   };
 
   const FILTERS: { id: FilterType; label: string; count?: number }[] = [

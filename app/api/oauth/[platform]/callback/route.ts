@@ -27,19 +27,33 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ platform: s
 
   const adapter = getAdapter(platform as Platform);
   const redirectUri = absoluteUrl(req, `/api/oauth/${platform}/callback`);
+  const back = safeNextPath(state.next, '/onboarding');
+  const backSep = back.includes('?') ? '&' : '?';
+
+  // Fake connected accounts are development-only (see the matching gate in
+  // start/route.ts). Anywhere else, a ?stub=1 hit, an unconfigured platform,
+  // or a missing ?code is an error — never a green "Connected" flash.
+  const stubAllowed = process.env.NODE_ENV === 'development';
+  const wantsStub = isStub || !adapter.isConfigured() || !code;
+  if (wantsStub && !stubAllowed) {
+    const reason = !adapter.isConfigured() ? 'platform_not_configured' : 'oauth_incomplete';
+    return NextResponse.redirect(
+      absoluteUrl(req, `${back}${backSep}oauth_error=${reason}&platform=${platform}`),
+    );
+  }
+
   let result;
   try {
-    if (isStub || !adapter.isConfigured() || !code) {
+    // `|| !code` is redundant with wantsStub but narrows code to string here.
+    if (wantsStub || !code) {
       result = stubProfile(platform as Platform, state.uid);
     } else {
       result = await adapter.exchangeCode({ code, redirectUri, codeVerifier: state.cv });
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    const back = safeNextPath(state.next, '/onboarding');
-    const sep = back.includes('?') ? '&' : '?';
     return NextResponse.redirect(
-      absoluteUrl(req, `${back}${sep}oauth_error=${encodeURIComponent(msg)}&platform=${platform}`),
+      absoluteUrl(req, `${back}${backSep}oauth_error=${encodeURIComponent(msg)}&platform=${platform}`),
     );
   }
 
@@ -91,10 +105,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ platform: s
     meta: { platform, handle: result.profile.handle, stub: isStub || !adapter.isConfigured() },
   });
 
-  const back = safeNextPath(state.next, '/onboarding');
-  const sep = back.includes('?') ? '&' : '?';
   const handle = result.profile.handle ? encodeURIComponent(result.profile.handle) : '';
   return NextResponse.redirect(
-    absoluteUrl(req, `${back}${sep}connected=${platform}${handle ? `&handle=${handle}` : ''}`),
+    absoluteUrl(req, `${back}${backSep}connected=${platform}${handle ? `&handle=${handle}` : ''}`),
   );
 }

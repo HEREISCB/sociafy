@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { eq, desc } from 'drizzle-orm';
-import { withUser } from '../../../lib/api';
+import { withUser, jsonError } from '../../../lib/api';
 import { db } from '../../../lib/db';
 import { connectedAccounts, type Platform } from '../../../lib/db/schema';
 import { encryptToken } from '../../../lib/crypto/tokens';
@@ -72,6 +72,11 @@ export async function GET(req: NextRequest) {
 // Real OAuth flows live at /api/oauth/[platform]/start.
 export async function POST(req: NextRequest) {
   return withUser(async (user) => {
+    // A stub account publishes to nowhere (every adapter short-circuits to
+    // stubPublish on accessToken 'stub'), so minting one outside dev hands the
+    // user a connection that silently swallows posts. Same gate as the stub
+    // OAuth flow in /api/oauth/[platform]/start and SKIP_AUTH_DEV in lib/api.ts.
+    if (process.env.NODE_ENV !== 'development') return jsonError('stub_accounts_disabled', 403);
     const raw = await req.json().catch(() => ({}));
     const parsed = parseBody(stubAccountCreateSchema, raw);
     if (!parsed.ok) return parsed.response;

@@ -78,6 +78,19 @@ function parseRSSItems(xml: string, source: MentionSourceId): RawMention[] {
 
 // ── Hacker News (Algolia) ─────────────────────────────────────────────────────
 
+/** Only the Algolia fields we read; everything is optional because the API
+ *  omits keys rather than nulling them (story_text is absent on link posts). */
+type HNHit = {
+  objectID?: string | number;
+  url?: string;
+  title?: string;
+  story_text?: string;
+  author?: string;
+  points?: number;
+  num_comments?: number;
+  created_at_i?: number;
+};
+
 export async function fetchHackerNews(brand: string): Promise<RawMention[]> {
   const q = encodeURIComponent(`"${brand}"`);
   try {
@@ -87,7 +100,7 @@ export async function fetchHackerNews(brand: string): Promise<RawMention[]> {
     );
     if (!res.ok) return [];
     const data = await res.json();
-    const hits: any[] = data?.hits ?? [];
+    const hits: HNHit[] = data?.hits ?? [];
     return hits.map((h, i) => ({
       id: `hn-${h.objectID ?? i}`,
       source: 'hackernews' as const,
@@ -116,6 +129,10 @@ export async function fetchWikipedia(brand: string): Promise<RawMention[]> {
   return items.filter(m => { if (seen.has(m.title)) return false; seen.add(m.title); return true; });
 }
 
+/** Only the MediaWiki search fields we read. `title` is always present in a
+ *  search result; the rest are gated on the srprop we request. */
+type WikiSearchResult = { pageid?: number; title: string; snippet?: string; size?: number };
+
 async function wikiSearch(query: string): Promise<RawMention[]> {
   const q = encodeURIComponent(query);
   try {
@@ -125,7 +142,7 @@ async function wikiSearch(query: string): Promise<RawMention[]> {
     );
     if (!res.ok) return [];
     const data = await res.json();
-    const results: any[] = data?.query?.search ?? [];
+    const results: WikiSearchResult[] = data?.query?.search ?? [];
     return results.map((r, i) => ({
       id: `wiki-${r.pageid ?? i}`,
       source: 'wikipedia' as const,

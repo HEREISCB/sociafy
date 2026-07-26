@@ -4,13 +4,15 @@
  * subscription), that wins. Otherwise derive from billing currency, then
  * from country.
  *
- * Returns null when the resolved provider is "Stripe" — Stripe isn't
- * wired yet, so callers surface a friendly "USD billing coming soon"
- * response.
+ * Returns null only when the resolved provider has no usable credentials —
+ * callers turn that into a 503 rather than a mid-checkout crash.
  */
 
 import type { BillingProvider } from './provider';
 import { razorpayProvider } from './providers/razorpay';
+import { stripeProvider, stripeConfigured } from './providers/stripe';
+
+const stripeOrNull = () => (stripeConfigured() ? stripeProvider() : null);
 
 export type ProfileForRouting = {
   paymentProvider: 'stripe' | 'razorpay' | null;
@@ -21,9 +23,9 @@ export type ProfileForRouting = {
 export function providerFor(profile: ProfileForRouting): BillingProvider | null {
   const locked = profile.paymentProvider;
   if (locked === 'razorpay') return razorpayProvider();
-  if (locked === 'stripe')   return null;
+  if (locked === 'stripe')   return stripeOrNull();
 
   const currency = profile.billingCurrency
     ?? (profile.billingCountry === 'IN' ? 'INR' : 'USD');
-  return currency === 'INR' ? razorpayProvider() : null;
+  return currency === 'INR' ? razorpayProvider() : stripeOrNull();
 }

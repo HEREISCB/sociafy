@@ -70,7 +70,11 @@ export async function POST(req: NextRequest) {
     for (const platform of requested) {
       const initialAcct = byPlatform.get(platform);
       if (!initialAcct) {
-        results.push({ platform, ok: false, error: 'account_not_connected' });
+        results.push({
+          platform,
+          ok: false,
+          error: `platform_not_connected: no ${platform} account is connected (nothing was posted). Connect ${platform}, then try again.`,
+        });
         continue;
       }
       const acct = await ensureFreshToken(initialAcct);
@@ -107,6 +111,18 @@ export async function POST(req: NextRequest) {
             meta: acct.meta as Record<string, unknown> | null,
           },
         });
+
+        // The adapter short-circuited to stubPublish: the platform isn't
+        // configured or the account holds a stub token, so nothing was posted
+        // and out.url is a dead stub.sociafy.local link. Same discipline as
+        // lib/cron/publish.ts — a simulated publish is never a success.
+        // Thrown so the existing failure path records it (row + activity log).
+        if (out.stub) {
+          throw new PlatformError(
+            `platform_not_connected: ${platform} is not connected (publish was simulated — nothing was posted). Connect ${platform}, then try again.`,
+            422,
+          );
+        }
 
         await db()
           .update(scheduledPosts)
@@ -175,8 +191,14 @@ export async function POST(req: NextRequest) {
         .update(drafts)
         .set({ status: 'published', updatedAt: new Date() })
         .where(eq(drafts.id, draft.id));
+      return { results };
     }
 
-    return { results };
+    // Nothing was published. A 200 here reads as success to every caller
+    // (apiPost only throws on non-2xx), which is how "post now" showed a green
+    // result for a platform that was never connected. `error` carries the
+    // per-platform reason verbatim so the client's message stays readable.
+    const fixable = results.every((r) => r.error?.startsWith('platform_not_connected'));
+    return jsonError(results[0]?.error ?? 'publish_failed', fixable ? 422 : 502, { results });
   }, req);
 }

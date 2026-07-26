@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
       billingCountry: profile.billingCountry,
     });
     if (!provider) {
-      return jsonError('billing_coming_soon', 503, { hint: 'Stripe cancellation is not wired yet.' });
+      return jsonError('billing_coming_soon', 503, { hint: 'Payments are not configured for your currency.' });
     }
 
     const result = await provider.cancelSubscription({ userId: user.id });

@@ -110,7 +110,7 @@ const PLATFORMS: PlatformDef[] = [
   },
   {
     id: 'reddit',
-    short: 'x' as 'x', // reuse a safe short glyph until Reddit glyph added
+    short: 'x' as const, // reuse a safe short glyph until Reddit glyph added
     name: 'Reddit',
     color: '#FF4500',
     tagline: 'Brand monitoring · community replies',

@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Icon } from './icons';
-import { apiDelete, apiPatch, apiPost, useApi } from '../lib/ui/fetcher';
+import { apiDelete, apiPatch, apiPost, friendlyApiError, useApi } from '../lib/ui/fetcher';
 import { PLATFORM_TO_SHORT } from '../lib/ui/platforms';
 import type { Platform } from '../lib/db/schema';
 
@@ -35,6 +35,324 @@ type CalEvent = {
   time: string;
 };
 
+/**
+ * Ticking "now" as epoch ms, `0` until mounted.
+ *
+ * Every past/future decision in this file needs the current time, but reading
+ * `Date.now()` in a render body is impure — the same render can produce
+ * different output on the server and on the client, and near midnight it can
+ * flip a `disabled` attribute between paints. The `0` sentinel means "not
+ * mounted yet": callers treat it as "assume nothing is past", which is what
+ * makes the server's first paint and the client's first paint agree.
+ */
+function useNow(intervalMs: number): number {
+  const [now, setNow] = useState(0);
+  useEffect(() => {
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+  return now;
+}
+
+/**
+ * Quick-compose modal — prompt → variants → schedule, without leaving the
+ * calendar. Shared by the week grid (which pins the time to the clicked slot)
+ * and the month grid (which has no hour, so it exposes a time picker).
+ *
+ * Owns its own draft state and clears it on close, so reopening on a different
+ * day never inherits the previous slot's prompt or variants.
+ */
+interface QuickComposeModalProps {
+  /** Target publish time, ISO. Controlled by the parent. */
+  whenIso: string;
+  /** When set, the modal renders a datetime input and reports edits upward.
+   *  Month cells have no hour of their own, so they need this. */
+  onWhenChange?: (iso: string) => void;
+  onClose: () => void;
+  /** Called after a successful schedule so the parent can revalidate. */
+  onScheduled: () => void | Promise<unknown>;
+}
+
+const QuickComposeModal: React.FC<QuickComposeModalProps> = ({ whenIso, onWhenChange, onClose, onScheduled }) => {
+  const accountsApi = useApi<{ platform: Platform }[]>('/api/accounts');
+  const [mode, setMode] = useState<QuickMode>('text');
+  const [prompt, setPrompt] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [variants, setVariants] = useState<null | Array<{ label: string; text: string; score?: number; rationale?: string }>>(null);
+  const [picked, setPicked] = useState<string | null>(null);
+  const [perPlatform, setPerPlatform] = useState<Partial<Record<Platform, string>>>({});
+  /** Latched once /api/schedule has succeeded. Nothing on that POST path is
+   *  idempotent — a second submit buys a second draft, a second scheduled
+   *  publish, and a second credit charge — so this is a one-way door. */
+  const [done, setDone] = useState(false);
+
+  // Platform pills default to whatever's connected, but the user can dial that
+  // down for this one post. Derived rather than synced through an effect, so
+  // accounts arriving late can't clobber a selection the user already made.
+  const connected = useMemo(() => (accountsApi.data ?? []).map((a) => a.platform), [accountsApi.data]);
+  const [platformOverride, setPlatformOverride] = useState<Platform[] | null>(null);
+  const platforms = platformOverride ?? connected.slice(0, 4);
+
+  const togglePlatform = (p: Platform) => {
+    setPlatformOverride((cur) => {
+      const base = cur ?? connected.slice(0, 4);
+      return base.includes(p) ? base.filter((x) => x !== p) : [...base, p];
+    });
+  };
+
+  const close = () => {
+    if (busy) return;
+    onClose();
+  };
+
+  const now = useNow(30_000);
+  const isPast = now !== 0 && new Date(whenIso).getTime() <= now;
+
+  const generate = async () => {
+    if (!prompt.trim()) { setMsg('Add a prompt first.'); return; }
+    if (platforms.length === 0) { setMsg('Pick at least one platform.'); return; }
+    setBusy(true);
+    setMsg('Generating variants…');
+    try {
+      const composed = await apiPost<{
+        variants: { label: string; text: string; score?: number; rationale?: string }[];
+        perPlatform: Partial<Record<Platform, string>>;
+      }>('/api/compose/variants', {
+        prompt,
+        platforms,
+        preset: mode === 'video' ? 'reel' : 'announcement',
+      });
+      if (!composed.variants?.length) {
+        setMsg('No draft came back. Try a different prompt.');
+        return;
+      }
+      setVariants(composed.variants);
+      setPerPlatform(composed.perPlatform ?? {});
+      setPicked(composed.variants[0].label);
+      setMsg(null);
+    } catch (e) {
+      setMsg(friendlyApiError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const schedule = async () => {
+    if (done) return;
+    if (!variants || !picked) { setMsg('Generate and pick a variant first.'); return; }
+    if (new Date(whenIso).getTime() <= Date.now()) {
+      setMsg('That time has already passed. Pick a future time.');
+      return;
+    }
+    const chosen = variants.find((v) => v.label === picked) ?? variants[0];
+    setBusy(true);
+    setMsg('Scheduling…');
+    let skipped: string[];
+    try {
+      const draft = await apiPost<{ id: string }>('/api/drafts', {
+        prompt,
+        body: chosen.text,
+        variants: variants.map((v) => ({ label: v.label, text: v.text, score: v.score, rationale: v.rationale })),
+        selectedVariantLabel: chosen.label,
+        targetPlatforms: platforms,
+        perPlatformText: perPlatform,
+        preset: mode === 'video' ? 'reel' : 'announcement',
+      });
+      const res = await apiPost<{ scheduled: unknown[]; skipped?: string[] }>(
+        '/api/schedule',
+        { draftId: draft.id, scheduledAt: whenIso, platforms },
+      );
+      skipped = res.skipped ?? [];
+    } catch (e) {
+      setMsg(friendlyApiError(e));
+      setBusy(false);
+      return;
+    }
+    // Committed. Everything below is bookkeeping and must never re-open the
+    // submit path — the post is scheduled and the credit is spent whether or
+    // not the parent's cache manages to catch up.
+    setDone(true);
+    setBusy(false);
+    setMsg(skipped.length > 0 ? `Scheduled. Skipped ${skipped.join(', ')} — not connected.` : 'Scheduled.');
+    try {
+      await onScheduled();
+    } catch {
+      // Revalidation is the parent's SWR cache refreshing. If it rejects the
+      // post is still scheduled, so this must not read as a failure — the list
+      // picks it up on its next poll or remount.
+    }
+    setTimeout(onClose, skipped.length > 0 ? 2500 : 700);
+  };
+
+  return (
+    <div className="modal-scrim" onClick={close}>
+      <div className="modal-sheet" onClick={(e) => e.stopPropagation()} style={{ width: 'min(560px, 92vw)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+          <Icon name="sparkle" size={16} style={{ color: 'var(--accent)' }} />
+          <h3 style={{ margin: 0, fontSize: 15, letterSpacing: '-0.01em' }}>What do you want to post?</h3>
+          {!onWhenChange && (
+            <span className="chip ghost mono" style={{ marginLeft: 'auto' }}>
+              {new Date(whenIso).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+            </span>
+          )}
+          <button className="icon-btn" style={onWhenChange ? { marginLeft: 'auto' } : undefined} onClick={close}>
+            <Icon name="x" size={14} />
+          </button>
+        </div>
+
+        {/* Month cells carry no hour — let the user set one here. */}
+        {onWhenChange && (
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
+              When
+            </div>
+            <input
+              type="datetime-local"
+              value={toLocalInputValue(whenIso)}
+              onChange={(e) => {
+                const d = new Date(e.target.value);
+                if (!Number.isNaN(d.getTime())) onWhenChange(d.toISOString());
+              }}
+              style={{ padding: '8px 10px', border: `1px solid ${isPast ? 'var(--bad)' : 'var(--line-2)'}`, borderRadius: 8, fontFamily: 'var(--mono)', fontSize: 12, background: 'var(--bg)', color: 'var(--ink)' }}
+            />
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+          {(['text', 'image', 'video'] as QuickMode[]).map((m) => (
+            <span
+              key={m}
+              onClick={() => setMode(m)}
+              className={`prompt-chip ${mode === m ? 'active' : ''}`}
+              style={{ textTransform: 'capitalize' }}
+            >
+              <Icon name={m === 'text' ? 'edit' : m === 'image' ? 'image' : 'play'} size={11} />
+              {m === 'text' ? 'Text' : m === 'image' ? 'Image' : 'Video'} post
+            </span>
+          ))}
+        </div>
+
+        <textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder="What's this post about? One sentence is enough."
+          autoFocus
+          style={{
+            width: '100%', minHeight: 72, padding: 12, fontSize: 13,
+            border: '1px solid var(--line-2)', borderRadius: 10, background: 'var(--bg)',
+            color: 'var(--ink)', fontFamily: 'inherit', resize: 'vertical', outline: 'none', lineHeight: 1.5,
+            marginBottom: 10,
+          }}
+        />
+
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
+            Platforms
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {connected.map((p) => {
+              const on = platforms.includes(p);
+              return (
+                <span
+                  key={p}
+                  onClick={() => togglePlatform(p)}
+                  className={`prompt-chip ${on ? 'active' : ''}`}
+                  style={{ textTransform: 'capitalize' }}
+                >
+                  {p}
+                </span>
+              );
+            })}
+            {connected.length === 0 && (
+              <span style={{ fontSize: 11, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>
+                No accounts connected yet.
+              </span>
+            )}
+          </div>
+        </div>
+
+        {variants && variants.length > 0 && (
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+              Pick a variant
+              <button className="chip ghost" onClick={generate} disabled={busy} style={{ marginLeft: 'auto', fontSize: 10 }}>
+                <Icon name="refresh" size={10} /> Regenerate
+              </button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
+              {variants.map((v) => {
+                const on = picked === v.label;
+                return (
+                  <div
+                    key={v.label}
+                    onClick={() => setPicked(v.label)}
+                    style={{
+                      padding: 10, fontSize: 12, lineHeight: 1.4,
+                      border: on ? '2px solid var(--accent)' : '1px solid var(--line-2)',
+                      borderRadius: 8, background: on ? 'var(--accent-soft)' : 'var(--bg)',
+                      cursor: 'pointer', position: 'relative',
+                      display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+                    }}
+                  >
+                    <div style={{ fontSize: 9.5, fontFamily: 'var(--mono)', color: on ? 'var(--accent-ink)' : 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
+                      {v.label}{typeof v.score === 'number' ? ` · ${Math.round(v.score)}` : ''}
+                    </div>
+                    {v.text}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {msg && (
+          <div style={{ padding: 10, fontSize: 12.5, background: 'var(--bg-sunk)', border: '1px solid var(--line)', borderRadius: 8, marginBottom: 12 }}>
+            {msg}
+          </div>
+        )}
+
+        {/* Lives outside the time-picker branch: `isPast` disables the Schedule
+            button in BOTH modes, and the week-grid mode has no picker, so a
+            message nested in that branch left its button dead and silent. */}
+        {isPast && (
+          <div style={{ padding: 10, fontSize: 12.5, color: 'var(--bad)', background: 'var(--bg-sunk)', border: '1px solid var(--line)', borderRadius: 8, marginBottom: 12 }}>
+            {onWhenChange
+              ? 'That time is in the past — pick a later time to schedule.'
+              : 'This slot is in the past — close this and pick a later slot.'}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <a
+            href={`/dashboard?tab=compose&prompt=${encodeURIComponent(prompt)}&slot=${encodeURIComponent(whenIso)}&platforms=${encodeURIComponent(platforms.join(','))}`}
+            className="chip ghost"
+            style={{ fontSize: 11 }}
+          >
+            <Icon name="edit" size={10} /> Edit in compose
+          </a>
+          <div style={{ flex: 1 }} />
+          <button className="btn" onClick={close} disabled={busy}>Cancel</button>
+          {!variants ? (
+            <button
+              className="btn primary"
+              onClick={generate}
+              disabled={busy || !prompt.trim() || platforms.length === 0}
+            >
+              {busy ? <><Icon name="refresh" size={12} /> Generating</> : <><Icon name="sparkle" size={12} /> Generate variants</>}
+            </button>
+          ) : (
+            <button className="btn primary" onClick={schedule} disabled={busy || done || !picked || isPast}>
+              {busy ? <><Icon name="refresh" size={12} /> Scheduling</> : done ? <><Icon name="check" size={12} /> Scheduled</> : <><Icon name="calendar" size={12} /> Schedule this</>}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 /** Label + dot color for each event type. failed/canceled are surfaced
  *  distinctly (var(--bad)) so a failed publish isn't mistaken for a draft. */
 const TYPE_LABEL: Record<CalEventType, string> = {
@@ -60,28 +378,6 @@ function statusToType(status: ScheduledRow['status']): CalEventType {
 }
 
 const platGlyphs: Record<string, string> = { ig: 'I', fb: 'f', x: 'X', li: 'in', tt: 'T', yt: 'Y' };
-
-/** apiPost throws `Error("<status>: <json-body>")`. Pull out the structured
- *  hint when there is one so the modal shows actionable copy ("top up your
- *  credits", "AI provider is down") instead of a raw status dump. */
-function friendlyApiError(e: unknown): string {
-  const msg = e instanceof Error ? e.message : String(e);
-  const m = msg.match(/^(\d{3}):\s*(\{[\s\S]*\})?/);
-  if (m) {
-    const status = Number(m[1]);
-    let body: { error?: string; hint?: string; balance?: number; needed?: number } = {};
-    try { body = m[2] ? JSON.parse(m[2]) : {}; } catch { /* non-JSON body */ }
-    if (status === 402 && body.error === 'insufficient_credits') {
-      return `You need ${body.needed ?? 'more'} credits but have ${body.balance ?? 0}. Top up on the Billing page, then try again.`;
-    }
-    if (body.hint) return body.hint;
-    if (status === 401) return 'Your session expired — sign in again.';
-    if (status === 429) return 'Too many requests — wait a minute and try again.';
-    if (status >= 500) return 'Something went wrong on the server. Try again shortly.';
-  }
-  if (msg.startsWith('timeout')) return 'The request took too long — try again.';
-  return `Failed: ${msg.slice(0, 120)}`;
-}
 
 function startOfWeek(d: Date) {
   const x = new Date(d);
@@ -155,7 +451,6 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onCompose }) => {
 
   const url = `/api/schedule?from=${weekStart.toISOString()}&to=${weekEnd.toISOString()}`;
   const { data, unauth, mutate } = useApi<ScheduledRow[]>(url);
-  const accountsApi = useApi<{ platform: Platform }[]>('/api/accounts');
   const [selected, setSelected] = useState<ScheduledRow | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
   // Reschedule is an explicit confirm — we hold the edited datetime-local
@@ -163,28 +458,9 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onCompose }) => {
   // typing never moves a post mid-keystroke.
   const [rescheduleVal, setRescheduleVal] = useState<string>('');
 
-  // Quick-compose-from-slot state.
+  /** The slot the user clicked to open quick-compose. The modal itself owns
+   *  the prompt/variant state — we only track which slot it's anchored to. */
   const [quickSlot, setQuickSlot] = useState<QuickSlot | null>(null);
-  const [quickMode, setQuickMode] = useState<QuickMode>('text');
-  const [quickPrompt, setQuickPrompt] = useState('');
-  const [quickBusy, setQuickBusy] = useState(false);
-  const [quickMsg, setQuickMsg] = useState<string | null>(null);
-  /** Platforms checked in the modal — defaults to all connected accounts
-   *  the first time the modal opens for a given session. */
-  const [quickPlatforms, setQuickPlatforms] = useState<Platform[]>([]);
-  /** After Generate is clicked we hold 2-3 variants in state and let the
-   *  user pick one before scheduling. null = haven't generated yet. */
-  const [quickVariants, setQuickVariants] = useState<null | Array<{ label: string; text: string; score?: number; rationale?: string }>>(null);
-  const [quickPickedVariant, setQuickPickedVariant] = useState<string | null>(null);
-  const [quickPerPlatform, setQuickPerPlatform] = useState<Partial<Record<Platform, string>>>({});
-
-  // When the modal opens, default platforms to whatever's connected.
-  React.useEffect(() => {
-    if (quickSlot && quickPlatforms.length === 0) {
-      const connected = (accountsApi.data ?? []).map((a) => a.platform);
-      if (connected.length > 0) setQuickPlatforms(connected.slice(0, 4));
-    }
-  }, [quickSlot, accountsApi.data, quickPlatforms.length]);
 
   const slotIsoFor = (slot: QuickSlot): string => {
     const d = new Date(weekStart);
@@ -193,14 +469,8 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onCompose }) => {
     return d.toISOString();
   };
 
-  // Ticking "now" so isSlotPast stays pure during render. Re-evaluates each
-  // minute, which is plenty for "is this slot still in the future" decisions.
-  const [now, setNow] = useState<number>(() => 0);
-  useEffect(() => {
-    setNow(Date.now());
-    const id = setInterval(() => setNow(Date.now()), 60_000);
-    return () => clearInterval(id);
-  }, []);
+  // Once a minute is plenty for "is this slot still in the future" decisions.
+  const now = useNow(60_000);
 
   /** True when the slot's start time is in the past — the API would reject
    *  with `scheduledAt_in_past`, and the user can't fix that from a modal.
@@ -211,88 +481,6 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onCompose }) => {
     d.setDate(d.getDate() + slot.day);
     d.setHours(7 + slot.hour, 0, 0, 0);
     return d.getTime() <= now;
-  };
-
-  /** Step 1: turn the prompt into variants. The user then picks which one
-   *  to ship — same mental model as the main compose page. */
-  const quickGenerateVariants = async () => {
-    if (!quickPrompt.trim()) {
-      setQuickMsg('Add a prompt first.');
-      return;
-    }
-    if (quickPlatforms.length === 0) {
-      setQuickMsg('Pick at least one platform.');
-      return;
-    }
-    setQuickBusy(true);
-    setQuickMsg('Generating variants…');
-    try {
-      const composed = await apiPost<{
-        variants: { label: string; text: string; score?: number; rationale?: string }[];
-        perPlatform: Partial<Record<Platform, string>>;
-      }>('/api/compose/variants', {
-        prompt: quickPrompt,
-        platforms: quickPlatforms,
-        preset: quickMode === 'video' ? 'reel' : 'announcement',
-      });
-      if (!composed.variants?.length) {
-        setQuickMsg('No draft came back. Try a different prompt.');
-        return;
-      }
-      setQuickVariants(composed.variants);
-      setQuickPerPlatform(composed.perPlatform ?? {});
-      setQuickPickedVariant(composed.variants[0].label);
-      setQuickMsg(null);
-    } catch (e) {
-      setQuickMsg(friendlyApiError(e));
-    } finally {
-      setQuickBusy(false);
-    }
-  };
-
-  /** Step 2: persist the picked variant + schedule it at the chosen slot. */
-  const quickScheduleAt = async (slot: QuickSlot) => {
-    if (!quickVariants || !quickPickedVariant) {
-      setQuickMsg('Generate and pick a variant first.');
-      return;
-    }
-    if (isSlotPast(slot)) {
-      setQuickMsg('That slot has already passed. Pick a future time.');
-      return;
-    }
-    const picked = quickVariants.find((v) => v.label === quickPickedVariant) ?? quickVariants[0];
-    setQuickBusy(true);
-    setQuickMsg('Scheduling…');
-    try {
-      const draft = await apiPost<{ id: string }>('/api/drafts', {
-        prompt: quickPrompt,
-        body: picked.text,
-        variants: quickVariants.map((v) => ({ label: v.label, text: v.text, score: v.score, rationale: v.rationale })),
-        selectedVariantLabel: picked.label,
-        targetPlatforms: quickPlatforms,
-        perPlatformText: quickPerPlatform,
-        preset: quickMode === 'video' ? 'reel' : 'announcement',
-      });
-      const whenIso = slotIsoFor(slot);
-      const res = await apiPost<{ scheduled: unknown[]; skipped?: string[] }>(
-        '/api/schedule',
-        { draftId: draft.id, scheduledAt: whenIso, platforms: quickPlatforms },
-      );
-      const skipped = res.skipped ?? [];
-      setQuickMsg(skipped.length > 0 ? `Scheduled. Skipped ${skipped.join(', ')} — not connected.` : 'Scheduled.');
-      await mutate();
-      setTimeout(() => {
-        setQuickSlot(null);
-        setQuickPrompt('');
-        setQuickVariants(null);
-        setQuickPickedVariant(null);
-        setQuickMsg(null);
-      }, skipped.length > 0 ? 2500 : 700);
-    } catch (e) {
-      setQuickMsg(friendlyApiError(e));
-    } finally {
-      setQuickBusy(false);
-    }
   };
 
   // Seed the reschedule input whenever a different post is selected.
@@ -366,7 +554,7 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onCompose }) => {
   // On phones/tablets the 7-column week grid can't fit — render a fit-to-width
   // month grid instead. (Hooks above always run; this branch has none.)
   if (isNarrow) {
-    return <CalendarMobileMonth onCompose={onCompose} />;
+    return <CalendarMobileMonth />;
   }
 
   return (
@@ -434,7 +622,7 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onCompose }) => {
       </div>
 
       {view === 'month' ? (
-        <CalendarMobileMonth onCompose={onCompose} />
+        <CalendarMobileMonth />
       ) : view === 'list' ? (
         <CalendarListView events={all} weekStart={weekStart} data={data ?? null} onSelect={setSelected} />
       ) : (
@@ -462,21 +650,28 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onCompose }) => {
             <div key={dayIdx} className="cal-day-col">
               {HOURS.map((_, hi) => {
                 const past = isSlotPast({ day: dayIdx, hour: hi });
-                const clickable = !unauth && !past;
+                // Signed-out visitors used to get inert, disabled slots — the
+                // click did nothing and explained nothing. Route them to
+                // sign-in instead; only genuinely-past slots stay unclickable.
+                const clickable = !past;
                 return (
                   <button
                     type="button"
                     key={hi}
                     className="cal-slot"
                     disabled={!clickable}
-                    onClick={() => { if (clickable) { setQuickSlot({ day: dayIdx, hour: hi }); setQuickMsg(null); } }}
+                    onClick={() => {
+                      if (!clickable) return;
+                      if (unauth) { router.push('/sign-in?next=/dashboard'); return; }
+                      setQuickSlot({ day: dayIdx, hour: hi });
+                    }}
                     style={{
                       cursor: clickable ? 'pointer' : 'default',
                       background: past ? 'repeating-linear-gradient(135deg, transparent 0 6px, var(--bg-sunk) 6px 7px)' : undefined,
                       opacity: past ? 0.55 : 1,
                     }}
-                    aria-label={past ? 'Past time' : unauth ? 'Slot' : 'Schedule a post in this slot'}
-                    title={past ? 'Past time' : unauth ? '' : 'Click to schedule a post'}
+                    aria-label={past ? 'Past time' : unauth ? 'Sign in to schedule a post' : 'Schedule a post in this slot'}
+                    title={past ? 'Past time' : unauth ? 'Sign in to schedule a post' : 'Click to schedule a post'}
                   />
                 );
               })}
@@ -524,171 +719,11 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onCompose }) => {
       )}
 
       {quickSlot && (
-        <div
-          className="modal-scrim"
-          onClick={() => { if (!quickBusy) { setQuickSlot(null); setQuickMsg(null); } }}
-        >
-          <div
-            className="modal-sheet"
-            onClick={(e) => e.stopPropagation()}
-            style={{ width: 'min(560px, 92vw)' }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-              <Icon name="sparkle" size={16} style={{ color: 'var(--accent)' }} />
-              <h3 style={{ margin: 0, fontSize: 15, letterSpacing: '-0.01em' }}>
-                What do you want to post?
-              </h3>
-              <span className="chip ghost mono" style={{ marginLeft: 'auto' }}>
-                {new Date(slotIsoFor(quickSlot)).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
-              </span>
-              <button className="icon-btn" onClick={() => { if (!quickBusy) { setQuickSlot(null); setQuickMsg(null); } }}>
-                <Icon name="x" size={14} />
-              </button>
-            </div>
-
-            {/* Mode chips */}
-            <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
-              {(['text', 'image', 'video'] as QuickMode[]).map((m) => (
-                <span
-                  key={m}
-                  onClick={() => setQuickMode(m)}
-                  className={`prompt-chip ${quickMode === m ? 'active' : ''}`}
-                  style={{ textTransform: 'capitalize' }}
-                >
-                  <Icon name={m === 'text' ? 'edit' : m === 'image' ? 'image' : 'play'} size={11} />
-                  {m === 'text' ? 'Text' : m === 'image' ? 'Image' : 'Video'} post
-                </span>
-              ))}
-            </div>
-
-            <textarea
-              value={quickPrompt}
-              onChange={(e) => setQuickPrompt(e.target.value)}
-              placeholder="What's this post about? One sentence is enough."
-              autoFocus
-              style={{
-                width: '100%', minHeight: 72, padding: 12, fontSize: 13,
-                border: '1px solid var(--line-2)', borderRadius: 10, background: 'var(--bg)',
-                color: 'var(--ink)', fontFamily: 'inherit', resize: 'vertical', outline: 'none', lineHeight: 1.5,
-                marginBottom: 10,
-              }}
-            />
-
-            {/* Platform pills — multi-select. We default to all connected,
-                but the user can dial it down to a subset for this one slot. */}
-            <div style={{ marginBottom: 10 }}>
-              <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
-                Platforms
-              </div>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {(accountsApi.data ?? []).map((acct) => {
-                  const p = acct.platform;
-                  const on = quickPlatforms.includes(p);
-                  return (
-                    <span
-                      key={p}
-                      onClick={() => setQuickPlatforms((cur) => on ? cur.filter((x) => x !== p) : [...cur, p])}
-                      className={`prompt-chip ${on ? 'active' : ''}`}
-                      style={{ textTransform: 'capitalize' }}
-                    >
-                      {p}
-                    </span>
-                  );
-                })}
-                {(accountsApi.data ?? []).length === 0 && (
-                  <span style={{ fontSize: 11, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>
-                    No accounts connected yet.
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {/* Variants — only shown after Generate. User picks one. */}
-            {quickVariants && quickVariants.length > 0 && (
-              <div style={{ marginBottom: 10 }}>
-                <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  Pick a variant
-                  <button
-                    className="chip ghost"
-                    onClick={quickGenerateVariants}
-                    disabled={quickBusy}
-                    style={{ marginLeft: 'auto', fontSize: 10 }}
-                  >
-                    <Icon name="refresh" size={10} /> Regenerate
-                  </button>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
-                  {quickVariants.map((v) => {
-                    const picked = quickPickedVariant === v.label;
-                    return (
-                      <div
-                        key={v.label}
-                        onClick={() => setQuickPickedVariant(v.label)}
-                        style={{
-                          padding: 10, fontSize: 12, lineHeight: 1.4,
-                          border: picked ? '2px solid var(--accent)' : '1px solid var(--line-2)',
-                          borderRadius: 8, background: picked ? 'var(--accent-soft)' : 'var(--bg)',
-                          cursor: 'pointer', position: 'relative',
-                          display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical', overflow: 'hidden',
-                        }}
-                      >
-                        <div style={{ fontSize: 9.5, fontFamily: 'var(--mono)', color: picked ? 'var(--accent-ink)' : 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
-                          {v.label}{typeof v.score === 'number' ? ` · ${Math.round(v.score)}` : ''}
-                        </div>
-                        {v.text}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {quickMsg && (
-              <div style={{ padding: 10, fontSize: 12.5, background: 'var(--bg-sunk)', border: '1px solid var(--line)', borderRadius: 8, marginBottom: 12 }}>
-                {quickMsg}
-              </div>
-            )}
-
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <a
-                href={`/dashboard?tab=compose&prompt=${encodeURIComponent(quickPrompt)}&slot=${encodeURIComponent(slotIsoFor(quickSlot))}&platforms=${encodeURIComponent(quickPlatforms.join(','))}`}
-                className="chip ghost"
-                style={{ fontSize: 11 }}
-              >
-                <Icon name="edit" size={10} /> Edit in compose
-              </a>
-              <div style={{ flex: 1 }} />
-              <button
-                className="btn"
-                onClick={() => { if (!quickBusy) { setQuickSlot(null); setQuickMsg(null); setQuickVariants(null); setQuickPickedVariant(null); } }}
-                disabled={quickBusy}
-              >
-                Cancel
-              </button>
-              {!quickVariants ? (
-                <button
-                  className="btn primary"
-                  onClick={quickGenerateVariants}
-                  disabled={quickBusy || !quickPrompt.trim() || quickPlatforms.length === 0}
-                >
-                  {quickBusy
-                    ? <><Icon name="refresh" size={12} /> Generating</>
-                    : <><Icon name="sparkle" size={12} /> Generate variants</>}
-                </button>
-              ) : (
-                <button
-                  className="btn primary"
-                  onClick={() => quickScheduleAt(quickSlot)}
-                  disabled={quickBusy || !quickPickedVariant}
-                >
-                  {quickBusy
-                    ? <><Icon name="refresh" size={12} /> Scheduling</>
-                    : <><Icon name="calendar" size={12} /> Schedule this</>}
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
+        <QuickComposeModal
+          whenIso={slotIsoFor(quickSlot)}
+          onClose={() => setQuickSlot(null)}
+          onScheduled={mutate}
+        />
       )}
 
       {selected && (
@@ -890,11 +925,7 @@ const TYPE_DOT: Record<CalEventType, string> = {
  * below. Self-contained (own month-range fetch + reschedule/cancel) so it
  * doesn't entangle with the week-scoped desktop grid above.
  */
-interface CalendarMobileMonthProps {
-  onCompose?: () => void;
-}
-
-const CalendarMobileMonth: React.FC<CalendarMobileMonthProps> = ({ onCompose }) => {
+const CalendarMobileMonth: React.FC = () => {
   const router = useRouter();
   const [monthCursor, setMonthCursor] = useState(() => {
     const d = new Date();
@@ -907,6 +938,10 @@ const CalendarMobileMonth: React.FC<CalendarMobileMonthProps> = ({ onCompose }) 
   const [savingId, setSavingId] = useState<string | null>(null);
   const [rescheduleVal, setRescheduleVal] = useState<string>('');
   const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
+  /** Target time for quick-compose, or null when the modal is closed. A month
+   *  cell carries no hour, so we seed one and let the modal's picker adjust. */
+  const [createIso, setCreateIso] = useState<string | null>(null);
+  const now = useNow(60_000);
 
   useEffect(() => {
     setRescheduleVal(selected ? toLocalInputValue(selected.scheduledAt) : '');
@@ -948,7 +983,11 @@ const CalendarMobileMonth: React.FC<CalendarMobileMonthProps> = ({ onCompose }) 
     return d;
   }), [gridStart]);
 
-  const todayKey = ymd(new Date());
+  // Derived from the ticking clock, not a fresh Date() in the render body:
+  // this feeds `disabled` on the "New post" control, and an impure read there
+  // is a hydration-mismatch surface across midnight or a server/client TZ gap.
+  // Empty until mounted — nothing is "today" and nothing is "past" yet.
+  const todayKey = now === 0 ? '' : ymd(new Date(now));
   const monthLabel = monthCursor.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
   const selectedEvents = (byDate.get(selectedDay) ?? []).slice().sort((a, b) => a.time.localeCompare(b.time));
   const selectedDate = useMemo(() => {
@@ -960,6 +999,40 @@ const CalendarMobileMonth: React.FC<CalendarMobileMonthProps> = ({ onCompose }) 
     const d = new Date(monthCursor);
     d.setMonth(d.getMonth() + dir);
     setMonthCursor(d);
+  };
+
+  /** A day is creatable only if it hasn't fully passed — scheduling into the
+   *  past is rejected by the API, so we don't offer it. Pre-mount (empty
+   *  todayKey) nothing is greyed out, matching the week grid's isSlotPast. */
+  const isPastDay = (dayKey: string) => todayKey !== '' && dayKey < todayKey;
+
+  /**
+   * Open quick-compose for a day. Month cells have no hour, so seed one: 9am
+   * normally, or the next clear hour when 9am today has already gone by. Never
+   * seed a past time — the API would reject it. The modal exposes a picker so
+   * the user can move it anywhere within the day.
+   */
+  const openCreateFor = (dayKey: string) => {
+    if (isPastDay(dayKey)) return;
+    if (unauth) {
+      router.push('/sign-in?next=/dashboard');
+      return;
+    }
+    const [y, mo, da] = dayKey.split('-').map(Number);
+    const when = new Date(y, mo - 1, da, 9, 0, 0, 0);
+    if (when.getTime() <= now) {
+      // Today, past 9am: round up to the next clear hour — but clamp inside the
+      // day the user actually clicked. Unclamped, a 23:15 click rounds to 00:00
+      // tomorrow while selectedDay stays on today, and the picker then shows a
+      // different day than the cell. The modal's own past-time guard covers the
+      // last minute of the day, where no future slot is left.
+      const soonest = new Date(now + 60 * 60_000);
+      soonest.setMinutes(0, 0, 0);
+      const endOfDay = new Date(y, mo - 1, da, 23, 59, 0, 0);
+      when.setTime(Math.min(soonest.getTime(), endOfDay.getTime()));
+    }
+    setSelectedDay(dayKey);
+    setCreateIso(when.toISOString());
   };
 
   const cancelScheduled = async (id: string) => {
@@ -1036,11 +1109,16 @@ const CalendarMobileMonth: React.FC<CalendarMobileMonthProps> = ({ onCompose }) 
             const isToday = key === todayKey;
             const isSel = key === selectedDay;
             const evs = byDate.get(key) ?? [];
+            const pastDay = isPastDay(key);
             return (
               <button
                 key={i}
                 className={`cal-month-cell${inMonth ? '' : ' out'}${isToday ? ' today' : ''}${isSel ? ' sel' : ''}`}
+                // Single click browses (reveals the day's posts below); double
+                // click creates, mirroring the week grid's click-to-schedule.
                 onClick={() => setSelectedDay(key)}
+                onDoubleClick={() => openCreateFor(key)}
+                title={pastDay ? undefined : 'Double-click to schedule a post'}
               >
                 <span className="dnum">{d.getDate()}</span>
                 {evs.length > 0 && (
@@ -1062,16 +1140,29 @@ const CalendarMobileMonth: React.FC<CalendarMobileMonthProps> = ({ onCompose }) 
           <span style={{ fontWeight: 600, fontSize: 14 }}>
             {selectedDate.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
           </span>
+          {/* Creates *for the selected day* rather than dumping the user into
+              compose with no date — that round trip lost the day they picked. */}
           <button
             className="btn sm primary"
-            onClick={() => { if (onCompose) onCompose(); else router.push('/dashboard?tab=compose'); }}
+            onClick={() => openCreateFor(selectedDay)}
+            disabled={isPastDay(selectedDay)}
+            title={isPastDay(selectedDay) ? 'That day has already passed' : undefined}
           >
             <Icon name="plus" size={11} /> New post
           </button>
         </div>
         {selectedEvents.length === 0 ? (
           <div style={{ padding: '20px 4px', fontSize: 13, color: 'var(--ink-4)', textAlign: 'center' }}>
-            Nothing scheduled for this day.
+            {isPastDay(selectedDay) ? (
+              'Nothing was scheduled for this day.'
+            ) : (
+              <>
+                <div style={{ marginBottom: 10 }}>Nothing scheduled for this day.</div>
+                <button className="btn sm" onClick={() => openCreateFor(selectedDay)}>
+                  <Icon name="sparkle" size={11} /> Schedule a post
+                </button>
+              </>
+            )}
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
@@ -1100,6 +1191,17 @@ const CalendarMobileMonth: React.FC<CalendarMobileMonthProps> = ({ onCompose }) 
           </div>
         )}
       </div>
+
+      {/* Quick-compose for the clicked day — same modal the week grid uses,
+          plus a time picker since a month cell carries no hour. */}
+      {createIso && (
+        <QuickComposeModal
+          whenIso={createIso}
+          onWhenChange={setCreateIso}
+          onClose={() => setCreateIso(null)}
+          onScheduled={mutate}
+        />
+      )}
 
       {/* Detail / reschedule modal — mirrors the desktop one. */}
       {selected && (

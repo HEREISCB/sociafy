@@ -4,7 +4,7 @@ import { db } from '../../../../../../lib/db';
 import { shieldActions, mentions, activityLog, connectedAccounts } from '../../../../../../lib/db/schema';
 import { authedUser } from '../../../../../../lib/api';
 import { getAdapter } from '../../../../../../lib/platforms/registry';
-import { decryptToken } from '../../../../../../lib/crypto/tokens';
+import { ensureFreshToken } from '../../../../../../lib/platforms/token';
 import type { Platform } from '../../../../../../lib/db/schema';
 
 export const runtime = 'nodejs';
@@ -32,7 +32,10 @@ export async function POST(
     .limit(1);
 
   if (!action) return NextResponse.json({ error: 'not_found' }, { status: 404 });
-  if (action.status !== 'pending') {
+  // 'failed' is retryable: re-approving re-attempts the publish (the catch
+  // below is the only writer of that status, and nothing else resets it — so
+  // without this a transient 502 stranded the drafted reply forever).
+  if (action.status !== 'pending' && action.status !== 'failed') {
     return NextResponse.json({ error: 'already_processed', status: action.status }, { status: 409 });
   }
 
@@ -50,6 +53,7 @@ export async function POST(
       targetPostId,
       approvedBy: user.id,
       approvedAt: new Date(),
+      error: null, // clear a previous attempt's error on retry
       updatedAt: new Date(),
     })
     .where(eq(shieldActions.id, id));
@@ -71,28 +75,55 @@ export async function POST(
       .limit(1);
 
     if (!acct) {
-      await db()
-        .update(shieldActions)
-        .set({ status: 'failed', error: `No connected account for ${targetPlatform}`, updatedAt: new Date() })
-        .where(eq(shieldActions.id, id));
-      return NextResponse.json({ error: 'no_account', platform: targetPlatform }, { status: 422 });
+      const msg = `No connected account for ${targetPlatform}`;
+      await failAction(id, msg);
+      return NextResponse.json(
+        { error: 'no_account', platform: targetPlatform, hint: `Connect ${targetPlatform} first — nothing was posted.` },
+        { status: 422 },
+      );
+    }
+
+    // Refresh before publishing, like the publish cron does — a short-lived
+    // token (X: 2h) would otherwise hard-fail with a 401.
+    const fresh = await ensureFreshToken(acct);
+    // ensureFreshToken returns the STALE token when the provider refresh
+    // failed (it stamps lastRefreshError instead of throwing). If that token
+    // is also past expiry, publishing can only 401 — say "reconnect" instead.
+    const expired = fresh.tokenExpiresAt !== null && new Date(fresh.tokenExpiresAt).getTime() <= Date.now();
+    if (fresh.lastRefreshError && expired) {
+      const msg = `reconnect_needed: ${targetPlatform} token expired and could not be refreshed (${fresh.lastRefreshError.slice(0, 200)}). Nothing was posted.`;
+      await failAction(id, msg);
+      return NextResponse.json(
+        { error: 'reconnect_needed', platform: targetPlatform, hint: `Reconnect ${targetPlatform} on the Connections page, then approve again — nothing was posted.` },
+        { status: 422 },
+      );
     }
 
     try {
       const adapter = getAdapter(targetPlatform);
-      const decrypted = decryptToken(acct.accessToken);
-      if (!decrypted) throw new Error('token_decrypt_failed');
 
       const result = await adapter.publishText({
         text: scriptToUse,
         account: {
-          id: acct.id,
-          accessToken: decrypted,
-          refreshToken: decryptToken(acct.refreshToken),
-          platformUserId: acct.platformUserId,
-          meta: targetPostId ? { parentId: targetPostId } : acct.meta,
+          id: fresh.id,
+          accessToken: fresh.accessToken,
+          refreshToken: fresh.refreshToken,
+          platformUserId: fresh.platformUserId,
+          meta: targetPostId ? { parentId: targetPostId } : fresh.meta,
         },
       });
+
+      // stubPublish short-circuit: the platform isn't configured or the
+      // account holds a stub token, so no reply exists anywhere. Recording
+      // 'published' here told users a crisis had been answered when it hadn't.
+      if (result.stub) {
+        const msg = `platform_not_connected: ${targetPlatform} is not connected (the reply was simulated — nothing was posted). Connect ${targetPlatform}, then approve again.`;
+        await failAction(id, msg);
+        return NextResponse.json(
+          { error: 'platform_not_connected', platform: targetPlatform, hint: msg },
+          { status: 422 },
+        );
+      }
 
       publishedPostId = result.platformPostId;
       publishUrl = result.url ?? null;
@@ -116,11 +147,17 @@ export async function POST(
       });
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e);
-      await db()
-        .update(shieldActions)
-        .set({ status: 'failed', error: errMsg, updatedAt: new Date() })
-        .where(eq(shieldActions.id, id));
-      return NextResponse.json({ error: 'publish_failed', detail: errMsg }, { status: 502 });
+      await failAction(id, errMsg);
+      return NextResponse.json(
+        {
+          error: 'publish_failed',
+          detail: errMsg,
+          // The UI renders `hint` verbatim; without it a 502 shows only a
+          // generic "server error" and the real platform reason is lost.
+          hint: `Publishing to ${targetPlatform} failed: ${errMsg.slice(0, 300)}. The draft was kept — you can approve again to retry.`,
+        },
+        { status: 502 },
+      );
     }
   } else {
     // No platform selected — just mark approved (user will publish manually)
@@ -139,4 +176,13 @@ export async function POST(
     publishedPostId,
     publishUrl,
   });
+}
+
+/** Park the action as 'failed' with the reason. 'failed' is retryable — the
+ *  guard above lets a re-approve run this handler again. */
+async function failAction(id: string, error: string) {
+  await db()
+    .update(shieldActions)
+    .set({ status: 'failed', error: error.slice(0, 2000), updatedAt: new Date() })
+    .where(eq(shieldActions.id, id));
 }

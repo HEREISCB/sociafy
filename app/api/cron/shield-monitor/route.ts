@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { eq, and } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { db } from '../../../../lib/db';
 import { shieldSettings, agentSettings } from '../../../../lib/db/schema';
 import { runShieldScan } from '../../../../lib/shield/monitor';
-import { env } from '../../../../lib/env';
+import { checkCronAuth } from '../../../../lib/api';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -13,8 +13,12 @@ export const maxDuration = 300;
 // user's agentSettings.companyName when not set. Crisis alerts (Slack/email)
 // fire from inside runShieldScan when new crisis mentions are found.
 export async function GET(req: NextRequest) {
-  const auth = req.headers.get('authorization');
-  if (auth !== `Bearer ${env.cronSecret}`) {
+  // checkCronAuth, not env.cronSecret: env.cronSecret falls back to the value
+  // published in .env.example, so an unset CRON_SECRET made this scan (real
+  // TwitterAPI.io spend + Slack alerts to every user) publicly triggerable.
+  // checkCronAuth refuses to run without a real secret and compares in
+  // constant time.
+  if (!checkCronAuth(req)) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 

@@ -10,9 +10,15 @@ vi.mock('../db', () => {
     db: () => ({
       select: (_cols: unknown) => ({
         from: () => ({
-          where: () => ({
-            limit: () => Promise.resolve(rows.map((r) => ({ id: r.id, meta: r.meta }))),
-          }),
+          // The dedup scan now orders newest-first before LIMIT, so the chain
+          // has to accept .orderBy(). Row order doesn't matter to these tests.
+          where: () => {
+            const chain = {
+              orderBy: () => chain,
+              limit: () => Promise.resolve(rows.map((r) => ({ id: r.id, meta: r.meta }))),
+            };
+            return chain;
+          },
         }),
       }),
       insert: () => ({
