@@ -82,15 +82,39 @@ CRON_SECRET=<32+ char random string>
 INTERNAL_API_SECRET=<another random string>
 ```
 
-`CRON_SECRET` gates `/api/cron/*`. Vercel Cron sends it as `Authorization: Bearer $CRON_SECRET`.
+`CRON_SECRET` gates `/api/cron/*` via `checkCronAuth` (`lib/api.ts`) — constant-time,
+and it refuses to run at all when the secret is missing or under 16 chars, so the
+routes fail closed. Never reuse the value from `.env.example`.
 
-**Vercel Hobby:** the per-minute crons in `vercel.json` won't fire. Use [cron-job.org](https://cron-job.org) (free) and POST to:
-```
-https://<your-app>.vercel.app/api/cron/publish    every 5 min
-https://<your-app>.vercel.app/api/cron/agent      every 2 hr
-https://<your-app>.vercel.app/api/cron/trends     hourly
-```
-With header: `Authorization: Bearer <CRON_SECRET>`.
+**Scheduling lives in `.github/workflows/scheduled-jobs.yml`, not `vercel.json`.**
+
+`vercel.json` deliberately has **no `crons` block**. Two reasons:
+
+1. On the Vercel Hobby plan, any sub-daily cron expression fails at **deploy**
+   time, not run time — one `*/5 * * * *` entry blocks the entire deployment.
+2. `sociafy.app` currently answers from Cloudflare with no `x-vercel-id` header,
+   so the origin is not confirmed to be Vercel. `vercel.json` crons only ever run
+   on Vercel; anywhere else they are silently inert and nothing is scheduled.
+
+The GitHub Actions workflow is host- and plan-agnostic — it just makes HTTPS calls.
+Configure it in repo **Settings → Secrets and variables → Actions**:
+
+| | Name | Value |
+|---|---|---|
+| Secret | `CRON_SECRET` | must equal the deployed environment's value |
+| Variable | `APP_URL` | optional, defaults to `https://sociafy.app` |
+
+Schedules: `publish` + `finalize-video-jobs` every 5 min, `shield-monitor` every
+15 min, `trends` hourly, `agent` every 2 h, `refresh-tokens` daily at 03:00 UTC.
+Run one on demand from the Actions tab via **Run workflow** to verify setup.
+
+Two failure modes to know: GitHub's scheduler is best-effort and can lag several
+minutes under load (every job is idempotent, so a late or doubled run is safe),
+and **scheduled workflows are disabled after 60 days of repository inactivity** —
+check that first if posts silently stop publishing.
+
+If you later move to Vercel Pro and want native crons, delete the workflow in the
+same commit that adds the `crons` block back, or both will fire.
 
 ## Step 6 — Social platforms
 

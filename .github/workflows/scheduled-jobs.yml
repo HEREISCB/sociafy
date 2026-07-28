@@ -1,0 +1,115 @@
+name: Scheduled jobs
+
+# Drives the /api/cron/* routes from GitHub instead of vercel.json "crons".
+#
+# Why not Vercel cron:
+#   - On the Hobby plan ANY sub-daily expression fails at DEPLOY time, not at
+#     run time — so a single "*/5 * * * *" entry blocks the whole deployment.
+#   - sociafy.app answers from Cloudflare with no x-vercel-id header, so the
+#     origin is not confirmed to be Vercel. vercel.json crons only ever run on
+#     Vercel; anywhere else they are silently inert.
+#   This workflow is host-agnostic and plan-agnostic: it just makes HTTPS calls.
+#
+# Auth: every route checks `Authorization: Bearer $CRON_SECRET` via checkCronAuth
+# (lib/api.ts), which is constant-time and refuses to run when the secret is
+# missing or under 16 chars. The secret here MUST equal the deployment's.
+#
+# Setup — repo Settings → Secrets and variables → Actions:
+#   secret    CRON_SECRET   required, must match the deployed environment
+#   variable  APP_URL       optional, defaults to https://sociafy.app
+#
+# Caveats worth knowing:
+#   - GitHub's scheduler is best-effort; runs can lag several minutes under load.
+#     Every job here is idempotent (publish claims rows atomically, the video
+#     sweeper skips jobs a live tab is finalizing), so a late or doubled run is
+#     safe — but "every 5 minutes" is not a guarantee.
+#   - Scheduled workflows are DISABLED after 60 days with no repo activity.
+#     If posts silently stop publishing, check that first.
+#   - If Cloudflare ever challenges these requests, allow the endpoints in WAF —
+#     a bot challenge would surface here as an HTTP 403.
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'    # publish, finalize-video-jobs
+    - cron: '*/15 * * * *'   # shield-monitor
+    - cron: '0 * * * *'      # trends
+    - cron: '0 */2 * * *'    # agent
+    - cron: '0 3 * * *'      # refresh-tokens
+  workflow_dispatch:
+    inputs:
+      route:
+        description: 'Route under /api/cron/ to invoke once (for testing)'
+        required: true
+        default: publish
+        type: choice
+        options:
+          - publish
+          - finalize-video-jobs
+          - shield-monitor
+          - trends
+          - agent
+          - refresh-tokens
+
+# No repository access required — this only makes outbound HTTPS calls.
+permissions: {}
+
+concurrency:
+  # Never overlap a slow run with the next tick. Same-cadence runs queue; a
+  # publish batch that overruns 5 minutes would otherwise double-claim work.
+  group: cron-${{ github.event.schedule || github.event.inputs.route }}
+  cancel-in-progress: false
+
+jobs:
+  invoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      APP_URL: ${{ vars.APP_URL || 'https://sociafy.app' }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+    steps:
+      - name: Check the secret is configured
+        run: |
+          if [ -z "${CRON_SECRET}" ]; then
+            echo "::error::CRON_SECRET repo secret is not set — every call would 401."
+            exit 1
+          fi
+
+      - name: Invoke routes
+        run: |
+          set -uo pipefail
+
+          call() {
+            route="$1"
+            # --max-time 300 covers the longest route (shield-monitor scans every
+            # opted-in user). Secret goes via header, never the URL, so it stays
+            # out of logs and out of any upstream access log.
+            code=$(curl -sS -o /tmp/body -w '%{http_code}' --max-time 300 \
+              -H "Authorization: Bearer ${CRON_SECRET}" \
+              "${APP_URL}/api/cron/${route}") || code="000"
+            echo "--- ${route} → HTTP ${code}"
+            head -c 500 /tmp/body 2>/dev/null || true
+            echo
+            if [ "${code}" != "200" ]; then
+              echo "::error::${route} returned ${code} (000 = request failed outright)"
+              return 1
+            fi
+          }
+
+          rc=0
+          case "${{ github.event.schedule || 'dispatch' }}" in
+            '*/5 * * * *')
+              # Both are cheap and independent; run both rather than alternating.
+              call publish              || rc=1
+              call finalize-video-jobs  || rc=1
+              ;;
+            '*/15 * * * *') call shield-monitor || rc=1 ;;
+            '0 * * * *')    call trends         || rc=1 ;;
+            '0 */2 * * *')  call agent          || rc=1 ;;
+            '0 3 * * *')    call refresh-tokens || rc=1 ;;
+            dispatch)       call "${{ github.event.inputs.route }}" || rc=1 ;;
+            *)
+              echo "::error::Unmapped schedule '${{ github.event.schedule }}' — add a case for it."
+              rc=1
+              ;;
+          esac
+          exit $rc
