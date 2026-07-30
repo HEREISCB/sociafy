@@ -67,3 +67,97 @@ export function videoDurationSec(buf: Buffer): number | null {
   if (!timescale || !duration || duration === 0xffffffff) return null;
   return duration / timescale;
 }
+
+// =====================================================
+// Still-image probe
+// =====================================================
+
+export type ImageFormat = 'png' | 'jpeg' | 'webp';
+
+/**
+ * Container format from the leading magic bytes, or null.
+ *
+ * A `content-type` header is attacker-controlled, so anything we hand to an
+ * image provider (and price by its pixel count) is identified from the bytes.
+ */
+export function imageFormat(buf: Buffer): ImageFormat | null {
+  if (buf.length >= 8 && buf.readUInt32BE(0) === 0x89504e47 && buf.readUInt32BE(4) === 0x0d0a1a0a) return 'png';
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'jpeg';
+  if (
+    buf.length >= 12 &&
+    buf.toString('latin1', 0, 4) === 'RIFF' &&
+    buf.toString('latin1', 8, 12) === 'WEBP'
+  ) {
+    return 'webp';
+  }
+  return null;
+}
+
+/**
+ * Pixel dimensions of a PNG / JPEG / WebP buffer, or null when they cannot be
+ * determined (wrong format, truncated header, an exotic WebP chunk layout).
+ *
+ * Same spirit as videoDurationSec above: these are billing inputs, so we read
+ * them from the headers ourselves — no decoder, no new dependency — and never
+ * guess. Callers on a money path must fail closed on null.
+ */
+export function imageDimensions(buf: Buffer): { width: number; height: number } | null {
+  const fmt = imageFormat(buf);
+  const dim =
+    fmt === 'png' ? pngSize(buf) : fmt === 'jpeg' ? jpegSize(buf) : fmt === 'webp' ? webpSize(buf) : null;
+  // 0 is as unusable as absent — it would price as free and can't be a real image.
+  if (!dim || !dim.width || !dim.height) return null;
+  return dim;
+}
+
+/** IHDR is mandated to be the first chunk, so its offsets are fixed. */
+function pngSize(buf: Buffer) {
+  if (buf.length < 24 || buf.toString('latin1', 12, 16) !== 'IHDR') return null;
+  return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+}
+
+/** Walk JPEG marker segments to the first SOFn (baseline, progressive, or any
+ *  of the arithmetic/lossless variants) and read its frame header. */
+function jpegSize(buf: Buffer) {
+  let off = 2;
+  while (off + 4 <= buf.length) {
+    if (buf[off] !== 0xff) return null; // out of sync with the marker stream
+    const marker = buf[off + 1];
+    // Fill bytes (0xff padding) and standalone markers carry no length field.
+    if (marker === 0xff) { off += 1; continue; }
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd9)) { off += 2; continue; }
+    const len = buf.readUInt16BE(off + 2);
+    if (len < 2) return null;
+    // SOF0..SOF15 except DHT (c4), JPG (c8) and DAC (cc), which are not frames.
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+      if (off + 9 > buf.length) return null;
+      return { height: buf.readUInt16BE(off + 5), width: buf.readUInt16BE(off + 7) };
+    }
+    // SOS: entropy-coded data follows, so there is no SOFn left to find.
+    if (marker === 0xda) return null;
+    off += 2 + len;
+  }
+  return null;
+}
+
+/** RIFF header is 12 bytes, then one 8-byte chunk header; the first chunk of a
+ *  WebP is VP8 (lossy), VP8L (lossless) or VP8X (extended = canvas size). */
+function webpSize(buf: Buffer) {
+  if (buf.length < 30) return null;
+  const chunk = buf.toString('latin1', 12, 16);
+  if (chunk === 'VP8 ') {
+    // 3-byte frame tag, 3-byte sync code, then 14-bit width and height.
+    if (buf[23] !== 0x9d || buf[24] !== 0x01 || buf[25] !== 0x2a) return null;
+    return { width: buf.readUInt16LE(26) & 0x3fff, height: buf.readUInt16LE(28) & 0x3fff };
+  }
+  if (chunk === 'VP8L') {
+    if (buf[20] !== 0x2f) return null;
+    const bits = buf.readUInt32LE(21);
+    return { width: (bits & 0x3fff) + 1, height: ((bits >>> 14) & 0x3fff) + 1 };
+  }
+  if (chunk === 'VP8X') {
+    // Canvas size, 24-bit little-endian, stored minus one.
+    return { width: buf.readUIntLE(24, 3) + 1, height: buf.readUIntLE(27, 3) + 1 };
+  }
+  return null;
+}

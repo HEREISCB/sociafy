@@ -15,6 +15,13 @@ const state = vi.hoisted(() => ({
   refunds: [] as Record<string, unknown>[],
   uploads: 0,
   genError: null as (Error & { status?: number }) | null,
+  /** Provider calls, split by mechanism: reference input must go to images.edit
+   *  and text-only must stay on images.generate. */
+  generateCalls: [] as Record<string, unknown>[],
+  editCalls: [] as Record<string, unknown>[],
+  /** Stands in for the whole internet. No test makes a real request. */
+  refFetch: null as ((url: URL) => Response) | null,
+  fetched: [] as string[],
   /** Lets a test simulate a refund that did NOT land, which must keep the
    *  idempotency claim rather than free it for a second charge. */
   refundLands: true,
@@ -115,6 +122,7 @@ class InsufficientCreditsError extends Error {}
 vi.mock('../../../lib/credits/ledger', () => ({
   InsufficientCreditsError,
   getBalance: () => Promise.resolve(1_000),
+  ensureBalance: () => Promise.resolve({ ok: true, balance: 1_000 }),
   refund: (a: Record<string, unknown>) => {
     state.refunds.push(a);
     return Promise.resolve({ refunded: state.refundLands, balanceAfter: 1_000 });
@@ -142,19 +150,55 @@ vi.mock('../../../lib/storage/r2', () => ({
   },
 }));
 
-vi.mock('../../../lib/ai/client', () => ({
-  MODELS: { image: 'gpt-image-test' },
-  getOpenAI: () => ({
-    images: {
-      generate: () => {
-        if (state.genError) return Promise.reject(state.genError);
-        return Promise.resolve({ data: [{ b64_json: Buffer.from('png').toString('base64') }] });
+vi.mock('../../../lib/ai/client', () => {
+  const answer = () => {
+    if (state.genError) return Promise.reject(state.genError);
+    return Promise.resolve({ data: [{ b64_json: Buffer.from('png').toString('base64') }] });
+  };
+  return {
+    MODELS: { image: 'gpt-image-test' },
+    getOpenAI: () => ({
+      images: {
+        generate: (a: Record<string, unknown>) => {
+          state.generateCalls.push(a);
+          return answer();
+        },
+        edit: (a: Record<string, unknown>) => {
+          state.editCalls.push(a);
+          return answer();
+        },
       },
-    },
-  }),
-}));
+    }),
+  };
+});
 
 const { POST } = await import('./images/route');
+
+// ---- reference-image fixtures ----------------------------------------------
+
+/** Minimal but real PNG header — imageDimensions parses IHDR, nothing else. */
+function png(width: number, height: number): Buffer {
+  const b = Buffer.alloc(33);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(b, 0);
+  b.writeUInt32BE(13, 8);
+  b.write('IHDR', 12, 'latin1');
+  b.writeUInt32BE(width, 16);
+  b.writeUInt32BE(height, 20);
+  return b;
+}
+
+const imageResponse = (body: Buffer | ReadableStream, type = 'image/png') =>
+  new Response(body as BodyInit, { status: 200, headers: { 'content-type': type } });
+
+/** A public literal IP, so isPublicHost answers without touching DNS. */
+const REF_URL = 'https://93.184.216.34/rings/ref-1.png';
+
+vi.stubGlobal('fetch', (input: URL | string) => {
+  const url = new URL(String(input));
+  state.fetched.push(url.toString());
+  const res = state.refFetch?.(url) ?? imageResponse(png(1024, 1024));
+  return Promise.resolve(res);
+});
 
 function post(body: unknown, idempotencyKey?: string) {
   return POST(
@@ -177,6 +221,10 @@ beforeEach(() => {
   state.uploads = 0;
   state.genError = null;
   state.refundLands = true;
+  state.generateCalls = [];
+  state.editCalls = [];
+  state.refFetch = null;
+  state.fetched = [];
   process.env.OPENAI_API_KEY = 'test-key';
 });
 
@@ -345,5 +393,194 @@ describe('POST /api/v1/images', () => {
   it('scopes the idempotency source to the endpoint', async () => {
     await post({ prompt: 'a red bicycle' }, 'shared-key-0001');
     expect((state.charges[0] as { meta: { source: string } }).meta.source).toBe('api:images:shared-key-0001');
+  });
+});
+
+/**
+ * Reference input. Two things are being protected here: the trust boundary (we
+ * fetch URLs a stranger chose, on a public money-spending endpoint) and the
+ * bill (pixels are priced, so an unreadable header must refuse, never guess).
+ * Every rejection has to happen before the ledger is touched.
+ */
+describe('POST /api/v1/images — reference_images', () => {
+  const ref = (body: unknown = {}) => ({
+    prompt: 'this exact ring, on white marble, soft studio light',
+    reference_images: [REF_URL],
+    ...(body as object),
+  });
+
+  /** Asserts a rejection code AND that it was free — no charge, no provider call. */
+  async function expectRejected(body: unknown, code: string) {
+    const res = await post(body);
+    const json = await res.json();
+    expect([res.status, json.error]).toEqual([400, code]);
+    expect(typeof json.message).toBe('string');
+    expect(json.message.length).toBeGreaterThan(10);
+    expect(state.charges).toHaveLength(0);
+    expect(state.editCalls).toHaveLength(0);
+    expect(state.generateCalls).toHaveLength(0);
+    expect(state.uploads).toBe(0);
+    return json;
+  }
+
+  it('calls images.edit with the fetched files and prices the input pixels', async () => {
+    const res = await post(ref());
+    expect(res.status).toBe(200);
+    // 6 (medium square) + ceil(1024×1024 px = 1.048576 MP × 4 cr) = 6 + 5.
+    expect((await res.json()).credits_charged).toBe(11);
+
+    expect(state.generateCalls).toHaveLength(0);
+    expect(state.editCalls).toHaveLength(1);
+    const call = state.editCalls[0] as { model: string; image: File[]; prompt: string; n: number };
+    expect(call.model).toBe('gpt-image-test');
+    expect(Array.isArray(call.image)).toBe(true);
+    expect(call.image[0]).toBeInstanceOf(File);
+    expect(call.image[0].type).toBe('image/png');
+    expect(call.n).toBe(1);
+    // input_fidelity is 400 invalid_input_fidelity_model on gpt-image-2, and
+    // background:transparent is unsupported too — neither may be sent.
+    expect(Object.keys(call)).not.toContain('input_fidelity');
+    expect(Object.keys(call)).not.toContain('background');
+
+    const meta = (state.charges[0] as { meta: Record<string, unknown> }).meta;
+    expect(meta.referenceImages).toBe(1);
+    expect(meta.referenceSurcharge).toBe(5);
+    expect(state.uploads).toBe(1);
+  });
+
+  it('leaves text-only generation on images.generate at the unchanged price', async () => {
+    const res = await post({ prompt: 'a red bicycle' });
+    expect((await res.json()).credits_charged).toBe(6);
+    expect(state.editCalls).toHaveLength(0);
+    expect(state.generateCalls).toHaveLength(1);
+    expect(state.fetched).toHaveLength(0);
+  });
+
+  it('accepts several angles and charges for all of their pixels', async () => {
+    const urls = [1, 2, 3, 4].map((n) => `https://93.184.216.34/rings/ref-${n}.png`);
+    const res = await post(ref({ reference_images: urls }));
+    expect(res.status).toBe(200);
+    // 4 × 1.048576 MP = 4.194 MP → ceil(16.78) = 17.
+    expect((await res.json()).credits_charged).toBe(6 + 17);
+    expect((state.editCalls[0] as { image: File[] }).image).toHaveLength(4);
+    expect(state.fetched).toHaveLength(4);
+  });
+
+  it('rejects a 5th reference, an empty array and a non-array', async () => {
+    for (const value of [
+      [1, 2, 3, 4, 5].map((n) => `https://93.184.216.34/${n}.png`),
+      [],
+      REF_URL,
+    ]) {
+      state.charges = [];
+      await expectRejected({ prompt: 'a ring', reference_images: value }, 'invalid_request');
+    }
+  });
+
+  it('refuses http and every other scheme', async () => {
+    for (const url of [
+      'http://93.184.216.34/ref.png',
+      'file:///etc/passwd',
+      'gopher://93.184.216.34/ref.png',
+      'not a url at all',
+    ]) {
+      await expectRejected(ref({ reference_images: [url] }), 'reference_url_rejected');
+    }
+    expect(state.fetched).toHaveLength(0);
+  });
+
+  // The two bypasses in lib/ai/skills/fetch-url.ts: only dotted-quad IPv4 is
+  // matched there, so integer form and IPv4-mapped IPv6 walk straight through.
+  it('blocks private, loopback and metadata destinations in every notation', async () => {
+    for (const host of [
+      '127.0.0.1',
+      'localhost',
+      '10.0.0.5',
+      '192.168.1.10',
+      '169.254.169.254',        // cloud instance metadata
+      '2130706433',             // integer form of 127.0.0.1
+      '0x7f000001',             // hex form
+      '127.1',                  // shorthand
+      '[::1]',
+      '[::ffff:169.254.169.254]', // IPv4-mapped metadata
+      '[fd00::1]',
+    ]) {
+      await expectRejected(ref({ reference_images: [`https://${host}/ref.png`] }), 'reference_url_rejected');
+    }
+    expect(state.fetched).toHaveLength(0);
+  });
+
+  it('refuses a redirect instead of following it', async () => {
+    // Following would mean re-validating each hop — the exact step URL fetchers
+    // skip, which turns one public-looking URL into an internal one.
+    state.refFetch = () => new Response(null, { status: 302, headers: { location: 'https://169.254.169.254/' } });
+    await expectRejected(ref(), 'reference_url_rejected');
+  });
+
+  it('reports an unreachable or erroring URL as unfetchable', async () => {
+    state.refFetch = () => new Response('nope', { status: 404 });
+    await expectRejected(ref(), 'reference_unfetchable');
+
+    state.refFetch = () => { throw new Error('ETIMEDOUT'); };
+    await expectRejected(ref(), 'reference_unfetchable');
+  });
+
+  it('refuses a content-type we do not accept', async () => {
+    state.refFetch = () => imageResponse(png(1024, 1024), 'image/gif');
+    await expectRejected(ref(), 'reference_type_unsupported');
+
+    state.refFetch = () => imageResponse(png(1024, 1024), 'text/html; charset=utf-8');
+    await expectRejected(ref(), 'reference_type_unsupported');
+  });
+
+  it('refuses bytes that disagree with the declared content-type', async () => {
+    // content-type is set by the caller's own server — the magic bytes decide.
+    state.refFetch = () => imageResponse(Buffer.from('GIF89a' + 'x'.repeat(64)), 'image/png');
+    await expectRejected(ref(), 'reference_type_unsupported');
+
+    state.refFetch = () => imageResponse(png(64, 64), 'image/webp');
+    await expectRejected(ref(), 'reference_type_unsupported');
+  });
+
+  it('enforces the byte cap while streaming, with no content-length to go on', async () => {
+    state.refFetch = () =>
+      imageResponse(
+        new ReadableStream({
+          pull(c) { c.enqueue(new Uint8Array(1024 * 1024)); }, // endless 1MB chunks
+        }),
+      );
+    await expectRejected(ref(), 'reference_too_large');
+  });
+
+  it('refuses an image whose dimensions it cannot read, rather than guessing', async () => {
+    // Right magic bytes, no parsable IHDR: unpriceable, so it must fail closed.
+    state.refFetch = () =>
+      imageResponse(Buffer.concat([png(1, 1).subarray(0, 8), Buffer.alloc(64, 7)]));
+    await expectRejected(ref(), 'reference_dimensions_unreadable');
+  });
+
+  it('refuses more than the total megapixel ceiling, per image and cumulatively', async () => {
+    state.refFetch = () => imageResponse(png(5_000, 4_000)); // 20 MP in one file
+    await expectRejected(ref(), 'reference_pixels_exceeded');
+
+    state.refFetch = () => imageResponse(png(2_500, 2_000)); // 5 MP each, 20 MP total
+    await expectRejected(
+      ref({ reference_images: [1, 2, 3, 4].map((n) => `https://93.184.216.34/${n}.png`) }),
+      'reference_pixels_exceeded',
+    );
+  });
+
+  it('gives no bypass to a URL on our own media host', async () => {
+    // "We host it" says nothing about its size or its bytes.
+    state.refFetch = () => imageResponse(Buffer.from('<svg/>'), 'image/png');
+    await expectRejected(ref({ reference_images: ['https://93.184.216.34/users/user_1/ref.png'] }), 'reference_type_unsupported');
+  });
+
+  it('refunds a provider failure on the reference path too, surcharge included', async () => {
+    state.genError = apiErr(500, { message: 'internal error' });
+    const res = await post(ref());
+    expect(res.status).toBe(502);
+    expect(state.refunds).toHaveLength(1);
+    expect((state.charges[0] as { credits: number }).credits).toBe(11);
   });
 });

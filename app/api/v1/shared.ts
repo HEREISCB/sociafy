@@ -1,3 +1,5 @@
+import { BlockList, isIP } from 'node:net';
+import { lookup } from 'node:dns/promises';
 import { and, eq, sql } from 'drizzle-orm';
 import type { ApiKeyAuth } from '../../../lib/api-key';
 import { db } from '../../../lib/db';
@@ -5,6 +7,7 @@ import { creditLedger, videoJobs } from '../../../lib/db/schema';
 import { isStubMode } from '../../../lib/env';
 import { charge, ensureBalance, InsufficientCreditsError, refund } from '../../../lib/credits/ledger';
 import { priceForVideo, type VideoQuality } from '../../../lib/credits/pricing';
+import { imageDimensions, imageFormat, type ImageFormat } from '../../../lib/media/probe';
 import { createSeedanceTask, type SeedanceAspect } from '../../../lib/ai/piapi';
 
 /**
@@ -510,6 +513,218 @@ export async function submitVideo(args: SubmitVideoArgs): Promise<SubmitVideoRes
     // docs/api.md §7 says so.
     throw new SubmitFailure('provider_rejected', refunded, msg);
   }
+}
+
+// =====================================================
+// Reference images for POST /images
+// =====================================================
+
+/**
+ * Limits on caller-supplied reference images. Tight on purpose: /images is a
+ * public, money-spending endpoint, and each URL is both an SSRF surface and a
+ * billing input (pixels are charged — see priceForImage's referenceMegapixels).
+ * 5MB and 16MP together clear product photography with room to spare while
+ * bounding what one request can make us fetch, buffer and pay for.
+ */
+export const REFERENCE_LIMITS = {
+  maxImages: 4,
+  maxBytes: 5 * 1024 * 1024,
+  maxTotalMegapixels: 16,
+  perFetchMs: 20_000,
+  /** All fetches together. Four slow hosts must not eat the route's maxDuration
+   *  and strand us mid-generation after the charge. */
+  totalBudgetMs: 45_000,
+} as const;
+
+/** The only content types we accept, mapped to the magic-byte format that must
+ *  back them up. `image/jpg` is deliberately absent — it isn't a real type. */
+const REFERENCE_TYPES: Record<string, ImageFormat> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpeg',
+  'image/webp': 'webp',
+};
+
+/**
+ * Destinations a caller must never be able to point us at: loopback, private,
+ * link-local (169.254.169.254 is the cloud metadata endpoint), CGNAT, multicast
+ * and reserved space. `node:net`'s BlockList does the subnet arithmetic — and
+ * critically, `check(addr, 'ipv6')` matches IPv4-mapped forms like
+ * `::ffff:169.254.169.254` against the IPv4 rules, which the hand-rolled
+ * dotted-quad regex in lib/ai/skills/fetch-url.ts does not.
+ */
+const BLOCKED_HOSTS = new BlockList();
+for (const [net, bits] of [
+  ['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8],
+  ['169.254.0.0', 16], ['172.16.0.0', 12], ['192.0.0.0', 24], ['192.168.0.0', 16],
+  ['198.18.0.0', 15], ['224.0.0.0', 4], ['240.0.0.0', 4],
+] as const) {
+  BLOCKED_HOSTS.addSubnet(net, bits, 'ipv4');
+}
+for (const [net, bits] of [
+  ['::', 128], ['::1', 128], ['64:ff9b::', 96], ['fc00::', 7], ['fe80::', 10], ['ff00::', 8],
+] as const) {
+  BLOCKED_HOSTS.addSubnet(net, bits, 'ipv6');
+}
+
+/**
+ * Whether every address `host` resolves to is public.
+ *
+ * Resolving first is what closes the integer/hex/shorthand IPv4 bypasses
+ * (`https://2130706433/`, `https://0x7f000001/`, `https://127.1/`): getaddrinfo
+ * normalises all of them to 127.0.0.1, which BlockList then catches. A literal
+ * IP skips DNS. Any single private answer rejects the whole host — fail closed.
+ *
+ * ponytail: DNS rebinding is the residual hole. undici re-resolves when it
+ * connects, so a TTL-0 record can answer public here and private there. Closing
+ * it needs a pinned-IP connect (custom undici Agent with `connect.lookup`, or a
+ * dispatcher bound to the vetted address); the whole class also goes away if
+ * references are moved behind an egress proxy.
+ */
+async function isPublicHost(hostname: string): Promise<boolean> {
+  // URL keeps IPv6 literals bracketed; isIP does not accept the brackets.
+  const host = hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (!host || host === 'localhost' || host.endsWith('.localhost')) return false;
+  const literal = isIP(host);
+  let addrs: { address: string; family: number }[];
+  if (literal) {
+    addrs = [{ address: host, family: literal }];
+  } else {
+    try {
+      addrs = await lookup(host, { all: true });
+    } catch {
+      return false;
+    }
+  }
+  if (!addrs.length) return false;
+  return !addrs.some((a) => BLOCKED_HOSTS.check(a.address, a.family === 6 ? 'ipv6' : 'ipv4'));
+}
+
+/** Body up to `maxBytes`, or null if it exceeds that. Empty body → empty buffer
+ *  (the format sniff rejects it), so null means "too large" and nothing else. */
+async function readCapped(resp: Response, maxBytes: number): Promise<Buffer | null> {
+  // content-length is a cheap early out only: it is absent on chunked responses
+  // and freely lied about, so the streaming counter below is the real cap.
+  if (Number(resp.headers.get('content-length') ?? 0) > maxBytes) {
+    await resp.body?.cancel().catch(() => {});
+    return null;
+  }
+  const reader = resp.body?.getReader();
+  if (!reader) return Buffer.alloc(0);
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(Buffer.from(value));
+  }
+  return Buffer.concat(chunks);
+}
+
+export type ReferenceFetch =
+  | { ok: true; files: File[]; megapixels: number }
+  | { ok: false; response: Response };
+
+/**
+ * Fetch and validate reference images for images.edit.
+ *
+ * Every failure here is the caller's input, so each gets its own 400 code and an
+ * actionable message — never `prompt_rejected`, and never a charge: this runs
+ * before the ledger is touched.
+ *
+ * Checks, in order and all mandatory: https only, no private/loopback/metadata
+ * destination, no redirects, an accepted content-type, magic bytes that agree
+ * with it, a streamed byte cap, readable dimensions, and a total pixel ceiling.
+ * A URL on our own R2 public base is not special-cased — it takes the identical
+ * path, because "we host it" says nothing about its size or its bytes.
+ */
+export async function fetchReferenceImages(urls: string[]): Promise<ReferenceFetch> {
+  const deadline = Date.now() + REFERENCE_LIMITS.totalBudgetMs;
+  const files: File[] = [];
+  let pixels = 0;
+
+  for (const [i, raw] of urls.entries()) {
+    const bad = (code: string, message: string) =>
+      ({ ok: false as const, response: apiError(code, 400, message, { reference_url: raw }) });
+
+    let url: URL;
+    try {
+      url = new URL(raw);
+    } catch {
+      return bad('reference_url_rejected', 'Each reference_images entry must be an absolute https:// URL.');
+    }
+    if (url.protocol !== 'https:') {
+      return bad('reference_url_rejected', 'Reference images must be served over https. http:// and other schemes are refused.');
+    }
+    if (!(await isPublicHost(url.hostname))) {
+      return bad('reference_url_rejected', 'That host does not resolve to a public internet address, so we will not fetch it.');
+    }
+
+    const budget = Math.min(REFERENCE_LIMITS.perFetchMs, deadline - Date.now());
+    if (budget <= 0) {
+      return bad('reference_unfetchable', 'Fetching the reference images ran out of time. Serve them from a faster host, or send fewer.');
+    }
+
+    let resp: Response;
+    try {
+      resp = await fetch(url, {
+        headers: { 'User-Agent': 'sociafy/1.0', Accept: 'image/png,image/jpeg,image/webp' },
+        // Never follow: re-validating each hop is the part URL fetchers get
+        // wrong (fetch-url.ts validates only the first URL and then follows
+        // anywhere), and a product photo does not need a redirect.
+        redirect: 'manual',
+        signal: AbortSignal.timeout(budget),
+        cache: 'no-store',
+      });
+    } catch {
+      return bad('reference_unfetchable', `We could not fetch that URL. It must be publicly reachable within ${REFERENCE_LIMITS.perFetchMs / 1_000} seconds.`);
+    }
+
+    // status 0 is an opaque-redirect filtered response — same answer as a 3xx.
+    if (resp.status === 0 || (resp.status >= 300 && resp.status < 400)) {
+      return bad('reference_url_rejected', 'That URL redirects, and we do not follow redirects. Send the final image URL.');
+    }
+    if (!resp.ok) {
+      return bad('reference_unfetchable', `That URL answered ${resp.status}. It must return the image itself, with no authentication.`);
+    }
+
+    const declared = (resp.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
+    const expected = REFERENCE_TYPES[declared];
+    if (!expected) {
+      await resp.body?.cancel().catch(() => {});
+      return bad('reference_type_unsupported', 'Reference images must be image/png, image/jpeg or image/webp.');
+    }
+
+    const body = await readCapped(resp, REFERENCE_LIMITS.maxBytes);
+    if (!body) {
+      return bad('reference_too_large', `Each reference image must be under ${REFERENCE_LIMITS.maxBytes / 1024 / 1024} MB. Downscale it — pixels are billed as well.`);
+    }
+    // The bytes decide, not the header the caller's server chose to send.
+    if (imageFormat(body) !== expected) {
+      return bad('reference_type_unsupported', `That file is not really ${declared} — its content-type and its actual bytes disagree.`);
+    }
+    const dim = imageDimensions(body);
+    if (!dim) {
+      return bad('reference_dimensions_unreadable', 'We could not read that image\'s dimensions, and they price the request, so we will not guess. Re-export it as a standard PNG, JPEG or WebP.');
+    }
+    pixels += dim.width * dim.height;
+    if (pixels > REFERENCE_LIMITS.maxTotalMegapixels * 1e6) {
+      return bad('reference_pixels_exceeded', `Reference images may total at most ${REFERENCE_LIMITS.maxTotalMegapixels} megapixels. Downscale them — the model does not need more.`);
+    }
+    files.push(
+      // Uint8Array, not the Buffer itself: Blob's types only accept a view over
+      // a plain ArrayBuffer.
+      new File([new Uint8Array(body)], `reference-${i + 1}.${expected === 'jpeg' ? 'jpg' : expected}`, {
+        type: declared,
+      }),
+    );
+  }
+
+  return { ok: true, files, megapixels: pixels / 1e6 };
 }
 
 /** Resolve an idempotency source back to the job its original charge created. */

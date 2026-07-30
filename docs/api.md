@@ -237,14 +237,68 @@ curl -X POST https://sociafy.app/api/v1/images \
 | `prompt` | string, 2–2000 chars | required |
 | `size` | `1024x1024` \| `1536x1024` \| `1024x1536` | `1024x1024` |
 | `quality` | `low` \| `medium` \| `high` | `medium` |
+| `reference_images` | array of 1–4 `https` URLs — see below | omitted |
 
 Unknown fields are rejected with `400`, and there is no `count` — one request,
 one image, one charge.
 
-The request is held open for up to 90 seconds. If it takes longer, the connection
-ends without a result; see the refund caveat in §6.
+**Timing.** Text-only, `quality: "medium"` has been measured at **66–78 seconds**;
+`high` is slower, `low` is faster. Reference images add up to 45 seconds of
+fetching before generation starts, so plan for **up to ~2 minutes** on that path.
+The request is held open for up to 300 seconds. Set your client timeout to at
+least 180 s — a 60-second default fails on almost every request. If the
+connection ends without a result, see the refund caveat in §6.
 
 Status codes: `200`, `400`, `401`, `402`, `409`, `429`, `500`, `502`, `503`.
+
+### Reference images
+
+Pass photos of the real thing and the output is guided by them, not just by your
+words — the case this exists for is a catalogue: *"here is the product, here are
+its specs, shoot it on white marble."*
+
+```bash
+curl -X POST https://sociafy.app/api/v1/images \
+  -H "Authorization: Bearer $SOCIAFY_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: style-4471-hero" \
+  -d '{
+    "prompt": "this exact ring on white marble, soft window light, 45° three-quarter view",
+    "reference_images": [
+      "https://cdn.example.com/styles/4471/front.jpg",
+      "https://cdn.example.com/styles/4471/side.jpg"
+    ],
+    "size": "1024x1024",
+    "quality": "medium"
+  }'
+```
+
+One field covers both cases: a single reference is a one-element array. Several
+angles of the same product usually beat one.
+
+**Likeness is guided, not guaranteed.** The model reproduces the *character* of
+what you send — form, materials, finish, colour. It is not a compositor and it
+does not clone: expect a faithful rendition, not a pixel-accurate copy of your
+photograph, and do not use it where an exact reproduction is a legal or
+contractual requirement (a hallmark, a serial number, engraved text).
+
+Requirements, each of which is a distinct `400` if unmet:
+
+| Requirement | Why |
+|---|---|
+| `https` only, no redirects | We fetch these ourselves. `http` and a redirect chain are both refused; send the final URL. |
+| Publicly resolvable host | Private, loopback, link-local and metadata addresses are blocked in every notation. |
+| `image/png`, `image/jpeg` or `image/webp` | And the bytes must match the header — we check the magic bytes, not your `content-type`. |
+| Under 5 MB each | Enforced while downloading, so a missing or dishonest `content-length` does not help. |
+| Readable dimensions | They price the request (below). If we cannot read them we refuse rather than guess. |
+| 16 megapixels total, across all references | 4 × 4 MP, or 1 × 16 MP. Downscale — the model does not benefit from more. |
+| Reachable within 20 s each, 45 s in total | A slow host costs you the whole request. |
+
+URLs on our own media host are held to exactly the same checks — hosting an
+object says nothing about its size or its contents.
+
+Cost: the output price from §6 **plus a per-megapixel surcharge** on what you
+send. Nothing changes for a request without `reference_images`.
 
 ---
 
@@ -279,6 +333,27 @@ polling, for `GET /api/v1/me`, or for a request rejected with
 | medium | 6 | 6 |
 | high | 24 | 23 |
 
+**Image reference input** (`reference_images`), added to the price above:
+
+| Add-on | Credits |
+|---|---|
+| reference input | 4 credits per megapixel |
+
+Megapixels are summed across every reference you send, from the dimensions we
+read out of the files themselves, and the total is rounded **up** to a whole
+credit. Worked examples, at `quality: "medium"`, square:
+
+- one 1024×1024 reference → 1.05 MP → `6 + ceil(1.05 × 4)` = **11 credits**
+- four 1024×1024 references → 4.19 MP → `6 + ceil(4.19 × 4)` = **23 credits**
+- one 4000×3000 reference → 12 MP → `6 + 48` = **54 credits**
+
+That is not a markup for the sake of it: the provider bills us ~1,024 input
+tokens per megapixel of reference, which on a large photo costs more than
+generating the image does. **Downscale your references to what you actually
+need** — 1024 px on the long edge is plenty — and the surcharge stays small. A
+request with no `reference_images` is priced exactly as it was before this field
+existed.
+
 ### Refunds
 
 Credits come back automatically, to the credit, when we fail to deliver:
@@ -297,7 +372,7 @@ place.
 reconciler, so a video charge is closed out even if nothing ever polls it. Images
 are synchronous, and their refund runs inline in the request that failed. If that
 request's process dies before it can refund — an instance lost mid-flight, a
-deploy landing at the wrong moment, the 90-second ceiling reached — the charge
+deploy landing at the wrong moment, the 300-second ceiling reached — the charge
 stands with no image to show for it, and nothing retries it. This is rare, and
 we will refund it if you tell us, but **image refunds are best-effort rather than
 guaranteed** in v1. Videos are guaranteed.
@@ -405,7 +480,8 @@ Every error is JSON with a stable `error` code **and** a human `message`. Match 
 
 Some codes add machine-readable fields: `issues[]` on `invalid_request`,
 `balance`/`needed` on `insufficient_credits`, `spent`/`cap` on
-`daily_cap_exceeded`, `retry_after_sec` on `rate_limited`.
+`daily_cap_exceeded`, `retry_after_sec` on `rate_limited`, and `reference_url` on
+every `reference_*` code, naming which of your URLs was the problem.
 
 Codes are **not** global — each applies only where listed.
 
@@ -414,6 +490,12 @@ Codes are **not** global — each applies only where listed.
 | 400 | `invalid_request` | both POSTs | Body failed validation. `issues[]` holds up to 5 `{ "field": "...", "message": "..." }` objects. |
 | 400 | `invalid_idempotency_key` | both POSTs | Not 8–200 printable ASCII, space excluded. |
 | 400 | `prompt_rejected` | `POST /images` | The content filter refused this prompt. Credits were refunded. Change the prompt. |
+| 400 | `reference_url_rejected` | `POST /images` | A `reference_images` URL is not an `https` URL we will fetch: wrong scheme, a host that resolves to a private address, or a redirect. Nothing was charged. |
+| 400 | `reference_unfetchable` | `POST /images` | We reached the network but got no image: a non-2xx status, a connection failure, or a timeout. Nothing was charged. |
+| 400 | `reference_type_unsupported` | `POST /images` | Not `image/png`/`image/jpeg`/`image/webp`, or the bytes do not match the declared type. Nothing was charged. |
+| 400 | `reference_too_large` | `POST /images` | A reference exceeded 5 MB. Downscale it. Nothing was charged. |
+| 400 | `reference_dimensions_unreadable` | `POST /images` | We could not read the image's dimensions, and they price the request, so we refuse rather than guess. Re-export it. Nothing was charged. |
+| 400 | `reference_pixels_exceeded` | `POST /images` | References total more than 16 megapixels. Downscale them. Nothing was charged. |
 | 401 | `unauthorized` | everywhere | Missing, malformed, unknown, or revoked API key. |
 | 402 | `insufficient_credits` | both POSTs | Includes `balance` and `needed`. Top up and retry. |
 | 404 | `not_found` | `GET /videos/{id}` | No such generation for this account — including a malformed id. |
@@ -516,8 +598,8 @@ Named so you build around them rather than waiting:
 
 - **Outbound webhooks.** Poll instead; at this volume it is cheaper for both of
   us than you operating a public endpoint.
-- **Image-to-video and reference modes.** See §3 — a pricing correctness
-  problem, not an effort one.
+- **Image-to-video and video reference modes.** See §3 — a pricing correctness
+  problem, not an effort one. Reference input for *images* does exist (§5).
 - **Batch parameters.** One request, one job, one charge. Loop.
 - **Streaming or progress percentages.** `status` is `pending` until it isn't.
 - **Programmatic key management.** Session-only, see §1.

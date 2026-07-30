@@ -21,6 +21,7 @@ export type CreditAction =
   | 'image_medium_portrait'
   | 'image_high_1024'
   | 'image_high_portrait'
+  | 'image_reference_mp'
   | 'video_8s_480p_fast'
   | 'video_8s_480p_quality'
   | 'video_8s_720p_fast'
@@ -51,6 +52,16 @@ export const CREDIT_PRICES: Record<CreditAction, number> = {
   image_medium_portrait: 6,           // portrait/landscape med ~$0.046 → $0.072 (~57%)
   image_high_1024: 24,                // square high ~$0.216 → 24cr=$0.288 (~33%)
   image_high_portrait: 23,            // portrait/landscape high ~$0.170 → $0.276 (~62%)
+  // Reference-image input (images.edit), charged per megapixel of input. Measured
+  // against the live API: one 1024×1024 PNG reference billed input_tokens=1040
+  // (image=1024, text=16) vs image=0 text-only, i.e. ~1,024 image tokens per MP.
+  // OpenAI does not publish a gpt-image-2 *input* image token rate anywhere we
+  // can cite, so assume $20/1M — deliberately 2× the published gpt-image-1
+  // image-input rate ($10/1M). 1 MP ≈ 1024 tok ≈ $0.0205 cost; 4 cr = $0.048 at
+  // the Business rate ($0.012/credit) → ~57% margin, and still ~15% if the real
+  // rate turns out to be $40/1M. Surcharge is ceil()'d per request, so a
+  // 1024×1024 reference (1.05 MP) costs 5 cr.
+  image_reference_mp: 4,
   video_8s_480p_fast: 75,
   video_8s_480p_quality: 90,
   video_8s_720p_fast: 145,
@@ -85,10 +96,17 @@ export function creditsFor(action: CreditAction): number {
 export type ImageSize = '1024x1024' | '1536x1024' | '1024x1536';
 export type ImageQuality = 'low' | 'medium' | 'high';
 
+/**
+ * `referenceMegapixels` prices reference-image input (images.edit): the provider
+ * bills input image tokens on top of the output price, ~1,024 per megapixel —
+ * see image_reference_mp above. Omit it (or pass 0) and the result is
+ * byte-identical to before, so text-only generation is untouched.
+ */
 export function priceForImage(
   size: ImageSize,
   quality: ImageQuality,
-): { action: CreditAction; credits: number } {
+  referenceMegapixels?: number,
+): { action: CreditAction; credits: number; surcharge: number } {
   const isSquare = size === '1024x1024';
   let action: CreditAction;
   if (quality === 'low') {
@@ -99,7 +117,11 @@ export function priceForImage(
   } else {
     action = isSquare ? 'image_high_1024' : 'image_high_portrait';
   }
-  return { action, credits: CREDIT_PRICES[action] };
+  // ceil, not round: half a megapixel of input still costs us tokens, and the
+  // rounding error belongs to us rather than to the platform.
+  const mp = Math.max(0, referenceMegapixels ?? 0);
+  const surcharge = mp > 0 ? Math.ceil(mp * CREDIT_PRICES.image_reference_mp) : 0;
+  return { action, credits: CREDIT_PRICES[action] + surcharge, surcharge };
 }
 
 // =====================================================
@@ -210,6 +232,7 @@ export const ACTION_LABELS: Record<CreditAction, string> = {
   image_medium_portrait: 'Image · medium · portrait/landscape',
   image_high_1024: 'Image · high · square',
   image_high_portrait: 'Image · high · portrait/landscape',
+  image_reference_mp: 'Image · reference input (per MP)',
   video_8s_480p_fast: 'Video · 8s · 480p · Fast',
   video_8s_480p_quality: 'Video · 8s · 480p · Quality',
   video_8s_720p_fast: 'Video · 8s · 720p · Fast',

@@ -7,23 +7,31 @@ import { db } from '../../../../lib/db';
 import { mediaAssets } from '../../../../lib/db/schema';
 import { getOpenAI, MODELS } from '../../../../lib/ai/client';
 import { makeMediaKey, publicUrlFor, uploadBuffer } from '../../../../lib/storage/r2';
-import { charge, refund } from '../../../../lib/credits/ledger';
+import { charge, ensureBalance, InsufficientCreditsError, refund } from '../../../../lib/credits/ledger';
 import { priceForImage } from '../../../../lib/credits/pricing';
 import {
   apiError,
   classifyImageFailure,
+  fetchReferenceImages,
   findChargeBySource,
   isUniqueViolation,
   logImageFailure,
   patchChargeMeta,
   providerPreflight,
   readIdempotencyKey,
+  REFERENCE_LIMITS,
   releaseIdempotencySource,
 } from '../shared';
 
 export const runtime = 'nodejs';
-// Synchronous like the first-party route — a single image lands in ~10-40s.
-export const maxDuration = 90;
+// Synchronous like the first-party route. 90s was already marginal — medium
+// quality has been measured at 66-78s, and a client with a 60s default timed out
+// consistently. Reference images add up to REFERENCE_LIMITS.totalBudgetMs (45s)
+// of fetching before generation even starts, so the combined worst case is ~2
+// minutes. Timing out AFTER the charge is the worst outcome this route has, so
+// the ceiling goes to the platform maximum we already use elsewhere (the cron
+// sweeper and the PiAPI webhook are both 300).
+export const maxDuration = 300;
 
 /**
  * POST /api/v1/images — public metered image generation.
@@ -35,12 +43,23 @@ export const maxDuration = 90;
  * `count` is absent by design (as on /videos): one image per request keeps
  * Idempotency-Key a 1:1 mapping onto one charge, which removes the entire
  * partial-refund branch that the first-party route needs.
+ *
+ * `reference_images` switches the provider call to images.edit so the output can
+ * resemble a real product rather than a description of one. The URLs are fetched
+ * here, which makes this a trust boundary — see fetchReferenceImages in shared.
  */
 const bodySchema = z
   .object({
     prompt: z.string().min(2).max(2_000),
     size: z.enum(['1024x1024', '1536x1024', '1024x1536']).default('1024x1024'),
     quality: z.enum(['low', 'medium', 'high']).default('medium'),
+    /**
+     * Public https URLs of product photos to imitate. One field rather than a
+     * singular `image_url` plus a plural, so there is never a question of
+     * precedence; a one-element array is the single-reference case. Fetched,
+     * validated and priced by fetchReferenceImages — see REFERENCE_LIMITS.
+     */
+    reference_images: z.array(z.string()).min(1).max(REFERENCE_LIMITS.maxImages).optional(),
   })
   .strict();
 
@@ -62,7 +81,7 @@ export async function POST(req: NextRequest) {
         issues: parsed.error.issues.slice(0, 5).map((i) => ({ field: i.path.join('.'), message: i.message })),
       });
     }
-    const { prompt, size, quality } = parsed.data;
+    const { prompt, size, quality, reference_images: referenceUrls } = parsed.data;
 
     // Rate limit AFTER validation: §6 of the docs promises a 400 costs nothing,
     // and it used to cost a token — three typos burned the whole burst budget.
@@ -85,7 +104,23 @@ export async function POST(req: NextRequest) {
       if (replay) return replay;
     }
 
-    const unit = priceForImage(size, quality);
+    // Reference images are fetched BEFORE the charge: every way they can be
+    // wrong is the caller's own input, and §6 promises a 400 costs nothing. The
+    // pixel count they yield is a billing input, so this also has to happen
+    // before we can price the request at all.
+    let refs: { files: File[]; megapixels: number } | null = null;
+    if (referenceUrls) {
+      const fetched = await fetchReferenceImages(referenceUrls);
+      if (!fetched.ok) return fetched.response;
+      refs = fetched;
+    }
+
+    const unit = priceForImage(size, quality, refs?.megapixels);
+    // Pre-flight so an under-funded key doesn't get as far as the provider.
+    // `charge` below is still the authority (it re-checks under FOR UPDATE).
+    const funded = await ensureBalance(auth.userId, unit.credits);
+    if (!funded.ok) throw new InsufficientCreditsError(funded.balance, funded.needed);
+
     let charged;
     try {
       charged = await charge({
@@ -99,6 +134,9 @@ export async function POST(req: NextRequest) {
           quality,
           via: 'api_v1',
           prompt: prompt.slice(0, 200),
+          ...(refs
+            ? { referenceImages: refs.files.length, referenceMegapixels: Number(refs.megapixels.toFixed(3)), referenceSurcharge: unit.surcharge }
+            : {}),
           ...(source ? { source } : {}),
         },
       });
@@ -116,10 +154,19 @@ export async function POST(req: NextRequest) {
     // Any failure past this point must return the money. Charging for an image
     // we never delivered is the one bug this endpoint cannot ship with.
     try {
-      const res = await openai.images.generate(
-        { model: MODELS.image, prompt, size, quality, n: 1 },
-        { maxRetries: 0 },
-      );
+      // images.edit is the only mechanism that takes input images. NOT sending
+      // input_fidelity: the SDK's comment claims "gpt-image-1.5 and later", but
+      // the live API answers 400 invalid_input_fidelity_model on gpt-image-2
+      // (verified twice). Likeness is therefore guided, not pinned.
+      const res = refs
+        ? await openai.images.edit(
+            { model: MODELS.image, image: refs.files, prompt, size, quality, n: 1 },
+            { maxRetries: 0 },
+          )
+        : await openai.images.generate(
+            { model: MODELS.image, prompt, size, quality, n: 1 },
+            { maxRetries: 0 },
+          );
       const b64 = res.data?.[0]?.b64_json;
       if (!b64) throw new Error('no_image_returned');
 

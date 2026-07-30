@@ -170,7 +170,7 @@ curl -sS ${BASE}/me \\
         </div>
       </Endpoint>
 
-      <Endpoint method="POST" path="/images" blurb="Synchronous — one image in roughly 10–40s, returned as 200. The request is held open for up to 90 seconds.">
+      <Endpoint method="POST" path="/images" blurb="Synchronous — 66–78s measured at medium quality, up to ~2 minutes with reference images, returned as 200. The request is held open for up to 300 seconds, so set your client timeout to at least 180 — a 60s default fails every time.">
         <Code>{`curl -X POST ${BASE}/images \\
   -H "Authorization: Bearer $SOCIAFY_API_KEY" \\
   -H "Content-Type: application/json" \\
@@ -193,8 +193,33 @@ curl -sS ${BASE}/me \\
             <tr><td className="mono">prompt</td><td>string, 2–2000 chars</td><td>required</td></tr>
             <tr><td className="mono">size</td><td className="mono">1024x1024 · 1536x1024 · 1024x1536</td><td className="mono">1024x1024</td></tr>
             <tr><td className="mono">quality</td><td className="mono">low · medium · high</td><td className="mono">medium</td></tr>
+            <tr>
+              <td className="mono">reference_images</td>
+              <td>
+                1–4 <strong>https</strong> URLs of photos to work from —{' '}
+                <code className="mono">png</code> · <code className="mono">jpeg</code> ·{' '}
+                <code className="mono">webp</code>, under 5 MB each, 16 megapixels in total, no
+                redirects, no private hosts. Surcharged per megapixel (see below).
+              </td>
+              <td>omitted</td>
+            </tr>
           </tbody>
         </table>
+        <div className="sub" style={{ marginTop: 10 }}>
+          Send photos of the real product and the output follows them instead of only your words —
+          several angles of one item beat a single shot. <strong>Likeness is guided, not
+          guaranteed:</strong> you get a faithful rendition of the form, materials and finish, not a
+          pixel-accurate copy, so do not rely on it to reproduce a hallmark, a serial number or
+          engraved text. Anything wrong with a URL comes back as its own{' '}
+          <code className="mono">400</code> (<code className="mono">reference_url_rejected</code>,{' '}
+          <code className="mono">reference_unfetchable</code>,{' '}
+          <code className="mono">reference_type_unsupported</code>,{' '}
+          <code className="mono">reference_too_large</code>,{' '}
+          <code className="mono">reference_dimensions_unreadable</code>,{' '}
+          <code className="mono">reference_pixels_exceeded</code>) with the offending{' '}
+          <code className="mono">reference_url</code> — never as{' '}
+          <code className="mono">prompt_rejected</code>, and never charged.
+        </div>
       </Endpoint>
     </section>
 
@@ -278,6 +303,30 @@ echo "still pending after 5 minutes" >&2; exit 1`}</Code>
           <tr><td className="mono">high</td><td className="mono">{P.image_high_1024}</td><td className="mono">{P.image_high_portrait}</td></tr>
         </tbody>
       </table>
+
+      <div className="dev-cost-label mono">
+        Image reference input <span>(added to the price above)</span>
+      </div>
+      <table className="dev-table">
+        <thead><tr><th>Add-on</th><th>Credits</th></tr></thead>
+        <tbody>
+          <tr>
+            <td className="mono">reference_images</td>
+            <td className="mono">{P.image_reference_mp} per megapixel of input</td>
+          </tr>
+        </tbody>
+      </table>
+      <div className="sub" style={{ marginTop: 6 }}>
+        Megapixels are summed across every reference, read from the files themselves, and rounded up
+        to a whole credit: one 1024×1024 reference on a medium square image is{' '}
+        {P.image_medium_1024} + {Math.ceil(1.048576 * P.image_reference_mp)} ={' '}
+        {P.image_medium_1024 + Math.ceil(1.048576 * P.image_reference_mp)} credits, four of them are{' '}
+        {P.image_medium_1024 + Math.ceil(4 * 1.048576 * P.image_reference_mp)}, and one 4000×3000
+        photo is {P.image_medium_1024 + 12 * P.image_reference_mp}. The provider bills us ~1,024
+        input tokens per megapixel, so a big photo genuinely costs more than the image it guides —
+        downscale to about 1024 px on the long edge and this stays small. Requests without{' '}
+        <code className="mono">reference_images</code> are priced exactly as before.
+      </div>
 
       <div className="sub" style={{ marginTop: 12 }}>
         <strong>Failed generations refund automatically</strong>, to the credit — a provider failure, a
