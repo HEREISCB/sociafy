@@ -116,6 +116,41 @@ export const Sidebar: React.FC<SidebarProps> = ({ page, onNav, showTTS = true, m
           ))}
         </div>
 
+        {/* Separate section because these are real routes, not dashboard tabs —
+            the items above switch a tab via onNav, these navigate. /usage and
+            /billing previously had no entry at all, so the API-keys panel was
+            reachable only by typing the URL. */}
+        <div className="nav-section">
+          <div className="nav-label">Account</div>
+          <Link
+            href="/usage#api-keys"
+            className="nav-item"
+            style={{ textDecoration: 'none' }}
+            onClick={onMobileClose}
+          >
+            <Icon name="lock" className="ic" />
+            API keys
+          </Link>
+          <Link
+            href="/usage"
+            className="nav-item"
+            style={{ textDecoration: 'none' }}
+            onClick={onMobileClose}
+          >
+            <Icon name="chart" className="ic" />
+            Usage
+          </Link>
+          <Link
+            href="/billing"
+            className="nav-item"
+            style={{ textDecoration: 'none' }}
+            onClick={onMobileClose}
+          >
+            <Icon name="bolt" className="ic" />
+            Billing
+          </Link>
+        </div>
+
         <div className="sidebar-foot">
           {showTTS && (
             <Link

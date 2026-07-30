@@ -54,12 +54,15 @@ export const ApiKeys: React.FC = () => {
     }
   }
 
+  // id="api-keys" is the sidebar link's target — this panel sits below the
+  // ledger, so without the anchor /usage opens well above it.
   return (
-    <section className="usage-card" style={{ marginTop: 28 }}>
+    <section className="usage-card" id="api-keys" style={{ marginTop: 28, scrollMarginTop: 24 }}>
       <h3>API keys</h3>
       <div className="sub" style={{ marginBottom: 14 }}>
         Call the Sociafy API from your own code. Requests authenticate with{' '}
         <code className="mono">Authorization: Bearer sfy_live_…</code> and spend credits from this account.
+        {' '}<a href="https://github.com/HEREISCB/sociafy/blob/main/docs/api.md" target="_blank" rel="noreferrer">API docs →</a>
       </div>
 
       {fresh && (
