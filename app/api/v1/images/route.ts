@@ -1,10 +1,10 @@
-import { NextRequest } from 'next/server';
+import { after, NextRequest } from 'next/server';
 import { z } from 'zod';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { withApiKey } from '../../../../lib/api-key';
 import { rateLimit } from '../../../../lib/rate-limit';
 import { db } from '../../../../lib/db';
-import { mediaAssets } from '../../../../lib/db/schema';
+import { genJobs, mediaAssets } from '../../../../lib/db/schema';
 import { getOpenAI, MODELS } from '../../../../lib/ai/client';
 import { makeMediaKey, publicUrlFor, uploadBuffer } from '../../../../lib/storage/r2';
 import { charge, ensureBalance, InsufficientCreditsError, refund } from '../../../../lib/credits/ledger';
@@ -12,8 +12,11 @@ import { priceForImage } from '../../../../lib/credits/pricing';
 import {
   apiError,
   classifyImageFailure,
+  failImageJob,
   fetchReferenceImages,
   findChargeBySource,
+  type ImageJob,
+  insertImageJob,
   isUniqueViolation,
   logImageFailure,
   patchChargeMeta,
@@ -21,17 +24,19 @@ import {
   readIdempotencyKey,
   REFERENCE_LIMITS,
   releaseIdempotencySource,
+  runImageJob,
 } from '../shared';
 
 export const runtime = 'nodejs';
-// Synchronous like the first-party route. 90s was already marginal — medium
-// quality has been measured at 66-78s, and a client with a 60s default timed out
-// consistently. Reference images add up to REFERENCE_LIMITS.totalBudgetMs (45s)
-// of fetching before generation even starts, plus the time to upload up to 48MB
-// of them to the provider, so the combined worst case is ~2-3 minutes. Timing out
-// AFTER the charge is the worst outcome this route has, so
-// the ceiling goes to the platform maximum we already use elsewhere (the cron
-// sweeper and the PiAPI webhook are both 300).
+// Bounds the synchronous path AND the `after()` callback on the async one (per
+// next/server's docs, `after` runs for the route's configured maxDuration).
+// 90s was already marginal — medium quality has been measured at 66-78s, and a
+// client with a 60s default timed out consistently. Reference images add up to
+// REFERENCE_LIMITS.totalBudgetMs (45s) of fetching before generation even starts,
+// plus the time to upload up to 48MB of them to the provider, so the combined
+// worst case is ~2-3 minutes. Timing out AFTER the charge is the worst outcome
+// this route has, so the ceiling goes to the platform maximum we already use
+// elsewhere (the cron sweeper and the PiAPI webhook are both 300).
 export const maxDuration = 300;
 
 /**
@@ -48,6 +53,13 @@ export const maxDuration = 300;
  * `reference_images` switches the provider call to images.edit so the output can
  * resemble a real product rather than a description of one. The URLs are fetched
  * here, which makes this a trust boundary — see fetchReferenceImages in shared.
+ *
+ * `async: true` opts into the video-shaped flow instead: 202 + poll_url, with the
+ * generation done in `after()`. It exists because the synchronous path holds the
+ * connection open for 66-83s, which trips the 60s default most HTTP clients ship
+ * with — and a client-side timeout leaves the caller unable to tell whether they
+ * were charged. Absent or false is byte-identical to the old behaviour, so no
+ * working integration changes; async is nonetheless the recommended path.
  */
 const bodySchema = z
   .object({
@@ -61,6 +73,9 @@ const bodySchema = z
      * validated by fetchReferenceImages — see REFERENCE_LIMITS.
      */
     reference_images: z.array(z.string()).min(1).max(REFERENCE_LIMITS.maxImages).optional(),
+    /** Opt-in, not a default: flipping it would change the status code and the
+     *  response body of every existing caller's working code. */
+    async: z.boolean().default(false),
   })
   .strict();
 
@@ -82,7 +97,7 @@ export async function POST(req: NextRequest) {
         issues: parsed.error.issues.slice(0, 5).map((i) => ({ field: i.path.join('.'), message: i.message })),
       });
     }
-    const { prompt, size, quality, reference_images: referenceUrls } = parsed.data;
+    const { prompt, size, quality, reference_images: referenceUrls, async: wantAsync } = parsed.data;
 
     // Rate limit AFTER validation: §6 of the docs promises a 400 costs nothing,
     // and it used to cost a token — three typos burned the whole burst budget.
@@ -123,6 +138,20 @@ export async function POST(req: NextRequest) {
     const funded = await ensureBalance(auth.userId, unit.credits);
     if (!funded.ok) throw new InsufficientCreditsError(funded.balance, funded.needed);
 
+    // Async: the gen_jobs row goes in BEFORE the charge, mirroring submitVideo, so
+    // a charge always has a row explaining it — that row is the caller's only
+    // record of this request once we have answered 202.
+    let job: ImageJob | null = null;
+    if (wantAsync) {
+      job = await insertImageJob(auth.userId, {
+        prompt,
+        size,
+        quality,
+        referenceCount: refs?.length ?? 0,
+        source,
+      });
+    }
+
     let charged;
     try {
       charged = await charge({
@@ -138,9 +167,15 @@ export async function POST(req: NextRequest) {
           prompt: prompt.slice(0, 200),
           ...(refs ? { referenceImages: refs.length, referenceSurcharge: unit.surcharge } : {}),
           ...(source ? { source } : {}),
+          // Lets a replay of this key resolve back to the job (and its 202)
+          // rather than to an asset id the caller cannot poll.
+          ...(job ? { imageJobId: job.id } : {}),
         },
       });
     } catch (e) {
+      // Close the row either way so it doesn't sit pending for the sweeper. No
+      // ledger row exists yet, so failImageJob has nothing to refund.
+      if (job) await failImageJob(job, isUniqueViolation(e) ? 'duplicate_request' : 'charge_failed');
       if (source && isUniqueViolation(e)) {
         const replay = await replayOf(auth.userId, source);
         if (replay) return replay;
@@ -149,6 +184,25 @@ export async function POST(req: NextRequest) {
         return apiError('request_in_progress', 409, 'A request with this Idempotency-Key is still in flight.');
       }
       throw e; // InsufficientCreditsError → withApiKey renders the 402.
+    }
+
+    if (job) {
+      // Cross-link before responding: the cron sweeper refunds against
+      // gen_jobs.credit_ledger_id, so a charge whose row never got it is a charge
+      // nothing can reverse.
+      await db()
+        .update(genJobs)
+        .set({ creditLedgerId: charged.ledgerId, creditsCharged: unit.credits, updatedAt: new Date() })
+        .where(eq(genJobs.id, job.id));
+      const row: ImageJob = { ...job, creditLedgerId: charged.ledgerId, creditsCharged: unit.credits };
+      // The generation itself, after the response is sent. `after` honours this
+      // route's maxDuration (300) and is backed by waitUntil on serverless, so the
+      // ~83s of work survives on both the long-running Node server and Vercel.
+      // runImageJob handles its own failures — it leaves the row terminal and the
+      // money settled. Only a database fault can escape it, and the cron sweeper
+      // closes that row out after its grace window.
+      after(() => runImageJob(row, refs));
+      return asyncResponse(row, unit.credits, false);
     }
 
     // Any failure past this point must return the money. Charging for an image
@@ -228,10 +282,45 @@ export async function POST(req: NextRequest) {
   });
 }
 
-/** Resolve an idempotency source back to the asset its original charge produced. */
+/**
+ * The 202 for an async job. Identical on a fresh submit and on a replay, and the
+ * same shape POST /videos returns — including the relative poll_url.
+ */
+function asyncResponse(job: ImageJob, credits: number, replayed: boolean): Response {
+  return new Response(
+    JSON.stringify({
+      id: job.id,
+      status: job.status,
+      credits_charged: credits,
+      // So a replay of an already-failed job doesn't send the caller off to poll
+      // something that will never succeed. The stored value is already a public
+      // code — see runImageJob.
+      ...(job.status === 'failed' ? { error: job.error } : {}),
+      poll_url: `/api/v1/images/${job.id}`,
+    }),
+    {
+      status: 202,
+      headers: { 'content-type': 'application/json', 'idempotency-replay': String(replayed) },
+    },
+  );
+}
+
+/** Resolve an idempotency source back to the asset — or the job — its original
+ *  charge produced. */
 async function replayOf(userId: string, source: string): Promise<Response | null> {
   const original = await findChargeBySource(userId, source);
   if (!original) return null;
+  // An async original replays as its own 202: `id` there is a job id, so handing
+  // back the synchronous 200 would give the caller an id its poll loop cannot use.
+  const jobId = (original.meta as { imageJobId?: unknown } | null)?.imageJobId;
+  if (typeof jobId === 'string') {
+    const [job] = await db()
+      .select()
+      .from(genJobs)
+      .where(and(eq(genJobs.id, jobId), eq(genJobs.userId, userId)))
+      .limit(1);
+    if (job) return asyncResponse(job, Math.abs(original.credits), true);
+  }
   const assetId = (original.meta as { mediaAssetId?: unknown } | null)?.mediaAssetId;
   if (typeof assetId !== 'string') {
     return apiError('request_in_progress', 409, 'A request with this Idempotency-Key is still in flight.');

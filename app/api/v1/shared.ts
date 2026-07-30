@@ -1,14 +1,17 @@
 import { BlockList, isIP } from 'node:net';
 import { lookup } from 'node:dns/promises';
-import { and, eq, sql } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
+import { and, eq, ne, notInArray, sql } from 'drizzle-orm';
 import type { ApiKeyAuth } from '../../../lib/api-key';
 import { db } from '../../../lib/db';
-import { creditLedger, videoJobs } from '../../../lib/db/schema';
+import { creditLedger, genJobs, mediaAssets, videoJobs } from '../../../lib/db/schema';
 import { isStubMode } from '../../../lib/env';
 import { charge, ensureBalance, InsufficientCreditsError, refund } from '../../../lib/credits/ledger';
-import { priceForVideo, type VideoQuality } from '../../../lib/credits/pricing';
+import { priceForVideo, type ImageQuality, type ImageSize, type VideoQuality } from '../../../lib/credits/pricing';
 import { imageFormat, type ImageFormat } from '../../../lib/media/probe';
 import { createSeedanceTask, type SeedanceAspect } from '../../../lib/ai/piapi';
+import { getOpenAI, MODELS } from '../../../lib/ai/client';
+import { makeMediaKey, publicUrlFor, uploadBuffer } from '../../../lib/storage/r2';
 
 /**
  * Shared plumbing for the public v1 API. Not a route (no `route.ts`), just a
@@ -729,6 +732,170 @@ export async function fetchReferenceImages(urls: string[]): Promise<ReferenceFet
   }
 
   return { ok: true, files };
+}
+
+// =====================================================
+// Async image jobs for POST /images (`async: true`)
+// =====================================================
+
+export type ImageJob = typeof genJobs.$inferSelect;
+
+/** gen_jobs.kind for these rows. Part of every lookup's WHERE clause, so a tts
+ *  or avatar job can never surface through the images endpoints. */
+export const IMAGE_JOB_KIND = 'image';
+
+/** What runImageJob needs, persisted for the sweeper and for debugging. `source`
+ *  is here so a failed job can release its Idempotency-Key exactly as the
+ *  synchronous path does — see failImageJob. */
+export type ImageJobInput = {
+  prompt: string;
+  size: ImageSize;
+  quality: ImageQuality;
+  referenceCount: number;
+  source: string | null;
+};
+
+/**
+ * The pending gen_jobs row for an async /images request. Written BEFORE the
+ * charge — submitVideo's discipline for the same reason: a charge must never
+ * exist without a row explaining it, because that row is both what the caller
+ * polls and what the sweeper refunds against.
+ *
+ * `provider_call_id` is NOT NULL and OpenAI's images API returns no job id of its
+ * own, so the row's own id goes there: unique, meaningful, and it keeps
+ * gen_jobs_call_idx a useful index instead of a column of empty strings.
+ */
+export async function insertImageJob(userId: string, input: ImageJobInput): Promise<ImageJob> {
+  const id = randomUUID();
+  const [row] = await db()
+    .insert(genJobs)
+    .values({
+      id,
+      userId,
+      kind: IMAGE_JOB_KIND,
+      provider: 'openai-images',
+      providerCallId: id,
+      status: 'pending',
+      inputJson: input,
+      // creditsCharged stays null until the charge lands, like videoJobs — a row
+      // whose charge failed must not report a price it never took.
+    })
+    .returning();
+  return row;
+}
+
+/**
+ * Generate, store and close out one async image job.
+ *
+ * Runs inside `after()`, so the caller is already gone and the row IS the answer:
+ * every exit has to leave it terminal with the money settled, and nothing may
+ * throw out of here — an unhandled rejection would strand a pending row and its
+ * charge until the cron sweeper's grace window expires.
+ */
+export async function runImageJob(job: ImageJob, refs: File[] | null): Promise<void> {
+  const { prompt, size, quality } = job.inputJson as ImageJobInput;
+  try {
+    const openai = getOpenAI();
+    if (!openai) throw new Error('openai_not_configured');
+    // Same two calls with the same arguments as the synchronous path — see the
+    // comment there for why input_fidelity is not sent.
+    const res = refs
+      ? await openai.images.edit(
+          { model: MODELS.image, image: refs, prompt, size, quality, n: 1 },
+          { maxRetries: 0 },
+        )
+      : await openai.images.generate(
+          { model: MODELS.image, prompt, size, quality, n: 1 },
+          { maxRetries: 0 },
+        );
+    const b64 = res.data?.[0]?.b64_json;
+    if (!b64) throw new Error('no_image_returned');
+
+    const buf = Buffer.from(b64, 'base64');
+    const key = makeMediaKey(job.userId, `api-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.png`);
+    // Upload BEFORE claiming the row: a row claimed 'completed' with no asset is
+    // a zombie the caller polls forever.
+    await uploadBuffer({ key, body: buf, contentType: 'image/png' });
+    await completeImageJob(job, key, buf.length);
+  } catch (e) {
+    const failure = classifyImageFailure(e);
+    logImageFailure('v1/images async', e, failure);
+    // The public code is stored verbatim, so GET /images/{id} needs no
+    // internal→public mapping step of its own to get wrong.
+    await failImageJob(job, failure.code);
+  }
+}
+
+/**
+ * Claim the row, then record the asset. Only the finaliser whose UPDATE matches
+ * inserts a media_assets row, so a cron tick racing `after()` yields one asset
+ * and not two — the protection finalizeVideoJob relies on, for the same reason.
+ */
+async function completeImageJob(job: ImageJob, key: string, sizeBytes: number): Promise<void> {
+  const { prompt, size } = job.inputJson as ImageJobInput;
+  const claimed = await db()
+    .update(genJobs)
+    .set({ status: 'completed', error: null, updatedAt: new Date() })
+    .where(and(eq(genJobs.id, job.id), ne(genJobs.status, 'completed')))
+    .returning({ id: genJobs.id });
+  if (claimed.length === 0) return; // Lost the race. Our R2 object is a harmless orphan.
+
+  const [w, h] = size.split('x').map((n) => parseInt(n, 10));
+  const [asset] = await db()
+    .insert(mediaAssets)
+    .values({
+      userId: job.userId,
+      storageKey: key,
+      publicUrl: publicUrlFor(key),
+      mimeType: 'image/png',
+      sizeBytes,
+      width: w,
+      height: h,
+      label: prompt.slice(0, 80),
+    })
+    .returning();
+
+  await db().update(genJobs).set({ mediaAssetId: asset.id, updatedAt: new Date() }).where(eq(genJobs.id, job.id));
+}
+
+/**
+ * Mark an image job failed and return its credits. The UPDATE is conditional on
+ * the row not already being terminal and the refund only fires if we claimed it,
+ * so the in-request finaliser and a cron sweep cannot double-refund.
+ *
+ * Releases the Idempotency-Key too, for the reason the synchronous path does: the
+ * refund does not delete the charge row, so without this every retry of that key
+ * is a permanent 409 and the documented "retry the same key" could never work.
+ * Gated on the refund landing — releasing an unrefunded claim would let the retry
+ * bill a second time.
+ */
+export async function failImageJob(job: ImageJob, error: string): Promise<void> {
+  const claimed = await db()
+    .update(genJobs)
+    .set({ status: 'failed', error: error.slice(0, 500), updatedAt: new Date() })
+    .where(and(eq(genJobs.id, job.id), notInArray(genJobs.status, ['completed', 'failed'])))
+    .returning({ id: genJobs.id });
+  // No ledger row means the charge never landed (it is written after the row), so
+  // there is nothing to give back.
+  if (claimed.length === 0 || !job.creditLedgerId) return;
+
+  let refunded = false;
+  try {
+    refunded = (await refund({
+      userId: job.userId,
+      ledgerId: job.creditLedgerId,
+      reason: error.slice(0, 120),
+    })).refunded;
+  } catch (e) {
+    console.warn('[v1/images] refund failed:', e instanceof Error ? e.message : e);
+  }
+
+  const source = (job.inputJson as ImageJobInput | null)?.source;
+  if (source && refunded) {
+    await releaseIdempotencySource(job.creditLedgerId);
+  } else if (source) {
+    console.error('[v1/images] refund not confirmed, keeping idempotency claim on', job.creditLedgerId);
+  }
 }
 
 /** Resolve an idempotency source back to the job its original charge created. */

@@ -32,6 +32,20 @@ describe('docs/api.md agrees with the credit price table', () => {
   });
 });
 
+// The async image flow is the answer to "a client-side timeout leaves us unable
+// to tell whether we were charged", so the docs have to actually describe it —
+// the field, the 202, the poll endpoint, and the recovery rule for the sync path.
+describe('docs/api.md documents the async image flow', () => {
+  it.each([
+    '"async": true',
+    '`poll_url`',
+    '`GET /api/v1/images/{id}`',
+    'retry the exact same',
+  ])('mentions %s', (needle) => {
+    expect(doc).toContain(needle);
+  });
+});
+
 describe('key-management location', () => {
   it('docs point at /developers, not the retired /usage anchor', () => {
     expect(doc).toContain('/developers');

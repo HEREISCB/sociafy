@@ -1,6 +1,6 @@
 # Sociafy Media API — v1
 
-Four endpoints. Generate video and images with your own API key, metered against
+Five endpoints. Generate video and images with your own API key, metered against
 your Sociafy credit balance. You do not need an account with any generation
 provider — Sociafy calls them with its own credentials and bills you in credits.
 
@@ -10,14 +10,24 @@ Base URL: `https://sociafy.app`
 call this API directly — and should not, since the credential is a secret that
 spends money.
 
-**Set your client timeout to at least 180 seconds before you send anything.**
-`POST /api/v1/images` is synchronous and has been measured at 66.5 / 68.9 / 69.0 /
-77.6 / 78.3 s text-only and 83.1 s with a reference image. The 60-second default
-that most HTTP clients apply unasked therefore fails by about ten seconds on
-*every* call, and it surfaces as a bare read timeout with no way to tell whether
-you were charged. Reference images make it worse: we allow up to 20 MB each and
-48 MB per request, and that upload happens before generation starts. `POST
-/api/v1/videos` returns in a second or two — this is about `/images`.
+**`POST /api/v1/images` has two modes, and you want the asynchronous one.** Send
+`"async": true` and it answers `202` in well under a second with an id you poll —
+the same shape `POST /api/v1/videos` has always had. The synchronous mode is still
+the default, so existing integrations are untouched, but it holds the connection
+open for the whole generation: measured at 66.5 / 68.9 / 69.0 / 77.6 / 78.3 s
+text-only and 83.1 s with one reference image. The 60-second default that most
+HTTP clients apply unasked therefore fails by about ten seconds on *nearly every*
+synchronous call, as a bare read timeout that cannot tell you whether you were
+charged. Reference images make it worse: up to 20 MB each and 48 MB per request,
+uploaded before generation starts.
+
+If you stay synchronous, **set your client timeout to at least 180 seconds**, and
+read §7 — a timed-out request's charge is recoverable by retrying the same
+`Idempotency-Key`. `POST /api/v1/videos` returns in a second or two; none of this
+is about it.
+
+We may make `async: true` the default in a future version of this API, announced
+before it happens. Sending it explicitly today is how you become immune to that.
 
 ---
 
@@ -218,8 +228,81 @@ storage decisions, copy it into your own bucket.**
 
 ## 5. `POST /api/v1/images`
 
-Synchronous — a single image lands in roughly 10–40 seconds. Returns `200`, on
-both a fresh generation and a replay.
+Two modes on one endpoint. **Prefer `async: true`** — it books and charges the job,
+answers `202` immediately, and you poll for the result exactly as you do for
+video. The synchronous mode is the default only so that code written before
+`async` existed keeps behaving identically.
+
+### Asynchronous (recommended)
+
+```bash
+curl -X POST https://sociafy.app/api/v1/images \
+  -H "Authorization: Bearer $SOCIAFY_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: order-8891-hero" \
+  -d '{
+    "prompt": "overhead flat-lay of a matcha latte on warm oak, soft window light",
+    "size": "1024x1024",
+    "quality": "medium",
+    "async": true
+  }'
+```
+
+```json
+{
+  "id": "b4d1f0c9-7e52-4a18-9c3b-2f7a41d0e6b5",
+  "status": "pending",
+  "credits_charged": 6,
+  "poll_url": "/api/v1/images/b4d1f0c9-7e52-4a18-9c3b-2f7a41d0e6b5"
+}
+```
+
+`202` on both a fresh submit and a replay, like `POST /api/v1/videos`. Credits are
+charged here, at submission, before the response is sent — so the answer to "was I
+charged?" is in the response body, and if you never get a response you can find
+out by replaying the key (§7).
+
+`status` is the stored job's real status, so a replay of a key whose job already
+finished says `completed` rather than `pending`, and a replay resolving to a
+`failed` job also carries `error`.
+
+The generation itself runs after the response, on our side. Then poll:
+
+### `GET /api/v1/images/{id}`
+
+```bash
+curl https://sociafy.app/api/v1/images/b4d1f0c9-7e52-4a18-9c3b-2f7a41d0e6b5 \
+  -H "Authorization: Bearer $SOCIAFY_API_KEY"
+```
+
+```json
+{
+  "id": "b4d1f0c9-7e52-4a18-9c3b-2f7a41d0e6b5",
+  "status": "completed",
+  "image_url": "https://<your-media-host>/users/user_2ab.../api-1753538330-7b1a.png",
+  "credits_charged": 6,
+  "error": null
+}
+```
+
+`status` is one of `pending`, `completed`, `failed`; while `pending`, `image_url`
+and `error` are both `null`. A `failed` job names its reason in `error` (§9) and
+its credits are refunded automatically. Poll every 5 seconds — most jobs land in
+70–90 seconds, and `high` quality or several references take longer. Reads are
+free, uncapped and not rate-limited, but please stay under one request a second.
+
+Unlike video, polling only *reports*: the job finishes whether or not anyone
+polls, and a job whose generation is lost mid-flight is failed and refunded by a
+background sweeper within about ten minutes. An id belonging to another account
+returns `404`, identical to one that never existed, and so does a malformed id.
+
+Status codes: `200`, `401`, `404`, `500`, `503`.
+
+### Synchronous (the default)
+
+Omit `async` (or send `false`) and the connection is held open until the image is
+generated, then answered `200` — unchanged from the first version of this
+endpoint.
 
 ```bash
 curl -X POST https://sociafy.app/api/v1/images \
@@ -241,25 +324,37 @@ curl -X POST https://sociafy.app/api/v1/images \
 }
 ```
 
+Note that `id` means different things in the two modes: the id of the **image**
+here, the id of the **job** on the async path. Only the async id is pollable.
+
+### Fields
+
 | Field | Type | Default |
 |---|---|---|
 | `prompt` | string, 2–2000 chars | required |
 | `size` | `1024x1024` \| `1536x1024` \| `1024x1536` | `1024x1024` |
 | `quality` | `low` \| `medium` \| `high` | `medium` |
 | `reference_images` | array of 1–4 `https` URLs — see below | omitted |
+| `async` | boolean — `true` returns `202` + `poll_url` instead of holding the connection open | `false` |
 
 Unknown fields are rejected with `400`, and there is no `count` — one request,
-one image, one charge.
+one image, one charge. Everything else is identical between the two modes: same
+validation, same prices, same refunds, same idempotency, same reference-image
+handling.
 
 **Timing.** Text-only, `quality: "medium"` has been measured at **66–78 seconds**
 (66.5 / 68.9 / 69.0 / 77.6 / 78.3); with one reference image, **83.1 s**. `high` is
 slower, `low` is faster. References add up to 45 seconds of fetching plus the time
-to upload up to 48 MB of them, so plan for **up to ~3 minutes** on that path. The
-request is held open for up to 300 seconds. Set your client timeout to at least
-180 s — a 60-second default fails on almost every request. If the connection ends
-without a result, see the refund caveat in §6.
+to upload up to 48 MB of them, so plan for **up to ~3 minutes** on that path.
+Asynchronously none of that reaches your client, which sees a `202` in under a
+second. **Synchronously it is all wall-clock time on your socket:** the request is
+held open for up to 300 seconds, so set your client timeout to at least 180 s — a
+60-second default fails on almost every request. If the connection ends without a
+result, retry the same `Idempotency-Key` (§7) to find out whether you were
+charged; the refund caveat in §6 also applies to that path only.
 
-Status codes: `200`, `400`, `401`, `402`, `409`, `429`, `500`, `502`, `503`.
+Status codes: `200` (sync), `202` (async), `400`, `401`, `402`, `409`, `429`,
+`500`, `502`, `503`.
 
 ### Reference images
 
@@ -402,19 +497,22 @@ Credits come back automatically, to the credit, when we fail to deliver:
 - A video submission is never acknowledged (refunded after a 10-minute grace
   window).
 - A video job is still unfinished after 2 hours.
+- An **asynchronous** image job's generation is lost mid-flight (refunded after a
+  10-minute grace window, and reported as `generation_timeout`).
 
 Refunds are applied at most once per charge, and you never need to ask. If a
 request returns `4xx` before generation starts, nothing was charged in the first
 place.
 
-**One honest caveat, images only.** Video jobs are also swept by a background
-reconciler, so a video charge is closed out even if nothing ever polls it. Images
-are synchronous, and their refund runs inline in the request that failed. If that
-request's process dies before it can refund — an instance lost mid-flight, a
-deploy landing at the wrong moment, the 300-second ceiling reached — the charge
-stands with no image to show for it, and nothing retries it. This is rare, and
-we will refund it if you tell us, but **image refunds are best-effort rather than
-guaranteed** in v1. Videos are guaranteed.
+**One honest caveat, synchronous images only.** Video jobs and async image jobs are
+both swept by a background reconciler, so their charges are closed out even if
+nothing ever polls them. A *synchronous* image refund runs inline in the request
+that failed, and there is no row to sweep. If that request's process dies before it
+can refund — an instance lost mid-flight, a deploy landing at the wrong moment, the
+300-second ceiling reached — the charge stands with no image to show for it and
+nothing retries it. Retrying the same `Idempotency-Key` (§7) is how you resolve it
+yourself; failing that we will refund it if you tell us. **`async: true` removes
+this caveat entirely** — it is the reason to prefer it beyond the timeouts.
 
 ---
 
@@ -439,12 +537,14 @@ Semantics:
 
 - **Same key, replayed after the first request succeeded** → the original result.
   Same `id`, same `credits_charged`, no second charge, no second generation, and
-  for videos the original job's real status and parameters.
-- **Same key, replayed while the first request is still in flight** → for videos,
-  the original job (the charge lands before the provider is called, so the id
-  already exists). For images, `409 request_in_progress` — the image is not
-  stored yet, and we will not invent a result or charge you twice. Retry the same
-  key in a few seconds.
+  for videos and async images the original job's real status and parameters.
+- **Same key, replayed while the first request is still in flight** → for videos
+  and async images, the original job (the charge and its row land before we
+  respond, so the id already exists — an async replay is a `202` with the same
+  `poll_url`, never the synchronous `200`, because only the job id is pollable).
+  For synchronous images, `409 request_in_progress` — the image is not stored yet,
+  and we will not invent a result or charge you twice. Retry the same key in a few
+  seconds.
 - **Same key, different body** → the original result. The key is the identity of
   the request; we do not re-generate with new parameters under an old key. Use a
   new key when the parameters change.
@@ -453,13 +553,31 @@ Semantics:
   key from last month returns last month's result, so derive keys from something
   already unique on your side (`order-8891-clip-1`), not from a timestamp.
 
+### After a client-side timeout on a synchronous image
+
+This is the case a 60-second default client timeout puts you in, and the reason to
+send `async: true` instead. If it happens anyway: **retry the exact same
+`Idempotency-Key`.** That one call tells you everything and cannot cost you twice.
+
+- The generation had in fact succeeded → you get `200` with the original
+  `image_url`, `Idempotency-Replay: true`, and no second charge. You were charged
+  once, and here is what for.
+- The generation had failed → that attempt already refunded itself and released
+  the key, so your retry is a genuine fresh attempt at the normal price.
+- It is still running → `409 request_in_progress`. Wait a few seconds and retry the
+  same key again; you have lost nothing.
+
+The one thing not to do is retry with a *new* key: that is a second charge for the
+same image. Never derive the key from a timestamp or a random value, or a retry
+cannot be recognised as one.
+
 ### After a failure
 
-The two endpoints deliberately differ, because the useful answer differs.
+The endpoints deliberately differ, because the useful answer differs.
 
-- **Images.** A failed attempt *releases* its key once the refund lands, so
-  retrying the same key is a genuine new attempt. You are not billed twice: the
-  first charge was already refunded.
+- **Images**, both modes. A failed attempt *releases* its key once the refund
+  lands, so retrying the same key is a genuine new attempt. You are not billed
+  twice: the first charge was already refunded.
 - **Videos.** A failed job *keeps* its key. Retrying returns that failed job with
   a `202` and its `error` code — informative, but it will never become
   `completed`. **Use a new `Idempotency-Key` to try again.**
@@ -480,6 +598,7 @@ burst guard.
 | `POST /api/v1/videos` | per API key | 3 immediately, then 1 per 100 s |
 | `POST /api/v1/images` | per API key | 3 immediately, then 1 per 100 s |
 | `GET /api/v1/videos/{id}` | — | not rate-limited |
+| `GET /api/v1/images/{id}` | — | not rate-limited |
 | `GET /api/v1/me` | — | not rate-limited |
 
 It is a token bucket of capacity 3 refilling at 3 tokens per 300 seconds. The two
@@ -535,7 +654,7 @@ Codes are **not** global — each applies only where listed.
 | 400 | `reference_too_large` | `POST /images` | A reference exceeded 20 MB, or all of them together exceeded 48 MB. Nothing was charged. |
 | 401 | `unauthorized` | everywhere | Missing, malformed, unknown, or revoked API key. |
 | 402 | `insufficient_credits` | both POSTs | Includes `balance` and `needed`. Top up and retry. |
-| 404 | `not_found` | `GET /videos/{id}` | No such generation for this account — including a malformed id. |
+| 404 | `not_found` | both `GET /{id}`s | No such generation for this account — including a malformed id. |
 | 409 | `request_in_progress` | both POSTs | Another request with this `Idempotency-Key` has not finished. Retry the same key in a few seconds. |
 | 429 | `rate_limited` | both POSTs | Burst limit (§8). Honour `Retry-After`. |
 | 429 | `daily_cap_exceeded` | both POSTs | This key hit its rolling 24-hour credit cap. Includes `spent` and `cap`. Raise the cap in the dashboard or wait. |
@@ -569,6 +688,24 @@ HTTP layer, since the request that fetched it succeeded:
 
 All of these are refunded. All of them require a **new** `Idempotency-Key` to try
 again (§7).
+
+### Failed image jobs
+
+On the synchronous path a generation failure is the HTTP response, with the codes
+above. On the asynchronous path the `POST` already returned `202`, so the same
+codes arrive in the `error` field of `GET /api/v1/images/{id}` instead — identical
+meanings, identical refunds:
+
+| `error` | Meaning |
+|---|---|
+| `prompt_rejected` | The content filter refused this prompt. Change it. |
+| `configuration_error` | Our misconfiguration, not your prompt. Retrying will not help until we fix it. |
+| `upstream_error` | Generation failed, or succeeded and could not be stored. Safe to retry. |
+| `service_unavailable` | Our provider account or storage was unavailable. Retry later. |
+| `generation_timeout` | The generation was lost mid-flight and closed out by the sweeper after 10 minutes. Safe to retry. |
+
+All of these release their `Idempotency-Key`, so retrying with the **same** key is
+a genuine fresh attempt (§7) — the opposite of the video rule.
 
 ---
 
@@ -624,6 +761,23 @@ Re-running the script with the same `IDEM` is free and returns the same clip —
 long as it succeeded. If it ended `failed`, change `IDEM` before retrying, or you
 will keep being handed the same dead job (§7).
 
+Images take the identical shape once you send `"async": true` — same `202`, same
+`poll_url`, same loop, and no client timeout to tune:
+
+```bash
+id=$(curl -sS -X POST https://sociafy.app/api/v1/images \
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -H "Idempotency-Key: $IDEM-hero" \
+  -d '{"prompt":"overhead flat-lay of a matcha latte on warm oak","async":true}' \
+  | python3 -c 'import sys,json; print(json.load(sys.stdin)["id"])')
+
+# 70-90s is typical. Same loop as above against /api/v1/images/$id; on
+# "completed" take image_url, on "failed" read error — credits are already back.
+```
+
+Unlike video, retrying a *failed* image with the same `IDEM` is correct and is a
+real new attempt (§7).
+
 Submitting several clips? Space the `POST`s out, or expect `429 rate_limited`
 after the third (§8).
 
@@ -641,7 +795,8 @@ Named so you build around them rather than waiting:
 - **Streaming or progress percentages.** `status` is `pending` until it isn't.
 - **Programmatic key management.** Session-only, see §1.
 - **CORS / browser access.** Server-to-server only.
-- **A guaranteed image refund sweeper.** See §6.
+- **A refund sweeper for *synchronous* images.** There is nothing to sweep — the
+  row that makes one possible is what `async: true` creates. See §6.
 - **A likeness/fidelity parameter for images.** The model does not support one;
   see §5.
 - **Postpaid billing.** Prepaid credits are also the spend cap; a balance cannot

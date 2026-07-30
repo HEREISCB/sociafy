@@ -55,18 +55,24 @@ export const DeveloperDocs: React.FC = () => (
     <section className="usage-card" style={{ marginTop: 28 }}>
       <h3>Quickstart</h3>
       <div className="sub" style={{ marginBottom: 6 }}>
-        Four endpoints, one Bearer key, metered in credits from the same balance the
+        Five endpoints, one Bearer key, metered in credits from the same balance the
         dashboard spends. You do not need an account with any generation provider.
         <br />
         Base URL <code className="mono">{BASE}</code> · <strong>server-to-server only</strong> —
         no endpoint sends CORS headers, and the key is a secret that spends money.
         <br />
-        <strong>Set your client timeout to at least 180 s before you send anything.</strong>{' '}
-        <code className="mono">POST /images</code> is synchronous and measures 66.5 / 68.9 / 69.0 /
-        77.6 / 78.3 s text-only, 83.1 s with a reference — so the 60 s default most HTTP clients
-        apply unasked fails by about ten seconds on <em>every</em> call, as a bare read timeout that
-        cannot tell you whether you were charged. References make it worse: up to 20 MB each and
-        48 MB per request, uploaded before generation starts.
+        <strong>
+          On <code className="mono">POST /images</code>, send{' '}
+          <code className="mono">&quot;async&quot;: true</code> and poll.
+        </strong>{' '}
+        It answers <code className="mono">202</code> in well under a second. The synchronous mode is
+        still the default so existing code is untouched, but it holds the connection open for the
+        whole generation — 66.5 / 68.9 / 69.0 / 77.6 / 78.3 s text-only, 83.1 s with a reference — so
+        the 60 s default most HTTP clients apply unasked fails by about ten seconds on <em>nearly
+        every</em> synchronous call, as a bare read timeout that cannot tell you whether you were
+        charged. References make it worse: up to 20 MB each and 48 MB per request, uploaded before
+        generation starts. Staying synchronous? Set your client timeout to at least 180 s, and read
+        the recovery rule below.
       </div>
 
       <ol className="dev-steps">
@@ -177,7 +183,7 @@ curl -sS ${BASE}/me \\
         </div>
       </Endpoint>
 
-      <Endpoint method="POST" path="/images" blurb="Synchronous — 66–78s measured at medium quality, 83s with a reference, up to ~3 minutes once 48 MB of references have to be uploaded. Returned as 200. The request is held open for up to 300 seconds, so set your client timeout to at least 180 — a 60s default fails every time.">
+      <Endpoint method="POST" path="/images" blurb='Two modes. With "async": true it books and charges the job, answers 202 with a poll_url, and generates on our side — the same shape as /videos. Without it the connection is held open for the whole generation (66–78s at medium, 83s with a reference, up to ~3 minutes with 48 MB of them) and answers 200; that mode needs a client timeout of at least 180s.'>
         <Code>{`curl -X POST ${BASE}/images \\
   -H "Authorization: Bearer $SOCIAFY_API_KEY" \\
   -H "Content-Type: application/json" \\
@@ -185,13 +191,22 @@ curl -sS ${BASE}/me \\
   -d '{
     "prompt": "overhead flat-lay of a matcha latte on warm oak, soft window light",
     "size": "1024x1024",
-    "quality": "medium"
+    "quality": "medium",
+    "async": true
   }'`}</Code>
         <Code>{`{
-  "id": "c11e8a4f-2d33-4c9a-8b71-0a5e6f2c4d18",
-  "image_url": "https://<media-host>/users/user_2ab.../api-175353-7b1a.png",
-  "credits_charged": ${P.image_medium_1024}
+  "id": "b4d1f0c9-7e52-4a18-9c3b-2f7a41d0e6b5",
+  "status": "pending",
+  "credits_charged": ${P.image_medium_1024},
+  "poll_url": "/api/v1/images/b4d1f0c9-7e52-4a18-9c3b-2f7a41d0e6b5"
 }`}</Code>
+        <div className="sub" style={{ marginBottom: 10 }}>
+          Drop <code className="mono">async</code> and the same request answers{' '}
+          <code className="mono">200</code> with the finished image instead —{' '}
+          <code className="mono">{`{ "id", "image_url", "credits_charged" }`}</code>. Note that{' '}
+          <code className="mono">id</code> is the <em>image</em> id there and the <em>job</em> id on
+          the async path; only the job id is pollable.
+        </div>
         <table className="dev-table">
           <thead>
             <tr><th>Field</th><th>Allowed</th><th>Default</th></tr>
@@ -200,6 +215,16 @@ curl -sS ${BASE}/me \\
             <tr><td className="mono">prompt</td><td>string, 2–2000 chars</td><td>required</td></tr>
             <tr><td className="mono">size</td><td className="mono">1024x1024 · 1536x1024 · 1024x1536</td><td className="mono">1024x1024</td></tr>
             <tr><td className="mono">quality</td><td className="mono">low · medium · high</td><td className="mono">medium</td></tr>
+            <tr>
+              <td className="mono">async</td>
+              <td>
+                boolean — <code className="mono">true</code> returns{' '}
+                <code className="mono">202</code> and a <code className="mono">poll_url</code>{' '}
+                instead of holding the connection open. Recommended; the default may flip in a
+                future version.
+              </td>
+              <td className="mono">false</td>
+            </tr>
             <tr>
               <td className="mono">reference_images</td>
               <td>
@@ -231,12 +256,40 @@ curl -sS ${BASE}/me \\
           <code className="mono">prompt_rejected</code>, and never charged.
         </div>
       </Endpoint>
+
+      <Endpoint method="GET" path="/images/{id}" blurb="Poll an async: true generation every 5s. Free, uncapped, never rate-limited. Most jobs land in 70–90s.">
+        <Code>{`curl -sS ${BASE}/images/b4d1f0c9-7e52-4a18-9c3b-2f7a41d0e6b5 \\
+  -H "Authorization: Bearer $SOCIAFY_API_KEY"`}</Code>
+        <Code>{`{
+  "id": "b4d1f0c9-7e52-4a18-9c3b-2f7a41d0e6b5",
+  "status": "completed",
+  "image_url": "https://<media-host>/users/user_2ab.../api-175353-7b1a.png",
+  "credits_charged": ${P.image_medium_1024},
+  "error": null
+}`}</Code>
+        <div className="sub" style={{ marginTop: 10 }}>
+          <code className="mono">status</code> is <code className="mono">pending</code>,{' '}
+          <code className="mono">completed</code> or <code className="mono">failed</code>; while
+          pending, <code className="mono">image_url</code> and{' '}
+          <code className="mono">error</code> are both null. Polling only reports — the job finishes
+          whether or not you poll, and one whose generation is lost mid-flight is failed and refunded
+          by a background sweeper within about ten minutes. A failed job names its reason in{' '}
+          <code className="mono">error</code> (<code className="mono">prompt_rejected</code>,{' '}
+          <code className="mono">configuration_error</code>,{' '}
+          <code className="mono">upstream_error</code>,{' '}
+          <code className="mono">service_unavailable</code>,{' '}
+          <code className="mono">generation_timeout</code>) and refunds its credits. An id belonging
+          to another account returns <code className="mono">404</code>, same as one that never
+          existed.
+        </div>
+      </Endpoint>
     </section>
 
     <section className="usage-card" style={{ marginTop: 20 }}>
-      <h3>The video flow, in full</h3>
+      <h3>The async flow, in full</h3>
       <div className="sub" style={{ marginBottom: 6 }}>
-        This is the part integrators get wrong. Video is <strong>asynchronous</strong>: the{' '}
+        This is the part integrators get wrong. Video is always <strong>asynchronous</strong>, and
+        images are too once you send <code className="mono">&quot;async&quot;: true</code>: the{' '}
         <code className="mono">POST</code> only books and charges the job.
       </div>
       <ol className="dev-steps">
@@ -269,10 +322,29 @@ for _ in $(seq 1 60); do
 done
 echo "still pending after 5 minutes" >&2; exit 1`}</Code>
       <div className="sub" style={{ marginTop: 10 }}>
+        Images take the identical shape — <code className="mono">202</code>, the same{' '}
+        <code className="mono">poll_url</code>, the same loop against{' '}
+        <code className="mono">{`${BASE}/images/$id`}</code>, and no client timeout to tune. One
+        difference: a <em>failed</em> image releases its{' '}
+        <code className="mono">Idempotency-Key</code>, so retrying with the <strong>same</strong> key
+        is correct and is a real new attempt. A failed video keeps its key and needs a new one.
+      </div>
+      <div className="sub" style={{ marginTop: 10 }}>
         Send an <code className="mono">Idempotency-Key</code> (8–200 printable ASCII, no spaces) on
         every <code className="mono">POST</code>. It is optional, but without one a retry is a second
         charge. Replaying a key returns the original result — same id, same charge, no second
         generation. Derive it from something already unique on your side, never a timestamp.
+      </div>
+      <div className="sub" style={{ marginTop: 10 }}>
+        <strong>Timed out on a synchronous image?</strong> Retry the <strong>same</strong>{' '}
+        <code className="mono">Idempotency-Key</code>. That one call resolves the charge question and
+        cannot bill you twice: if the generation had succeeded you get{' '}
+        <code className="mono">200</code> with the original{' '}
+        <code className="mono">image_url</code> and{' '}
+        <code className="mono">Idempotency-Replay: true</code>; if it had failed, it already refunded
+        itself and released the key, so your retry is a fresh attempt; if it is still running you get{' '}
+        <code className="mono">409</code> — wait and retry the same key. Retrying with a{' '}
+        <em>new</em> key is the one mistake that costs you twice.
       </div>
     </section>
 
@@ -360,9 +432,11 @@ echo "still pending after 5 minutes" >&2; exit 1`}</Code>
       <div className="sub" style={{ marginTop: 12 }}>
         <strong>Failed generations refund automatically</strong>, to the credit — a provider failure, a
         result we could not store, an unacknowledged submission, or a job still unfinished after 2
-        hours. You never have to ask. One honest caveat: image refunds run inline in the failing
-        request, so if that process dies mid-flight nothing retries it — image refunds are best-effort
-        in v1, video refunds are guaranteed by a background reconciler.
+        hours. You never have to ask. One honest caveat, <em>synchronous</em> images only: that
+        refund runs inline in the failing request, so if the process dies mid-flight nothing retries
+        it. Videos and <code className="mono">async</code> images both leave a job row a background
+        reconciler sweeps, which is another reason to prefer{' '}
+        <code className="mono">&quot;async&quot;: true</code>.
       </div>
     </section>
 

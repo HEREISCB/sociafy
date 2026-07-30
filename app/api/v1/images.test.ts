@@ -9,8 +9,15 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 const col = (name: string) => ({ __name: name });
 
 const state = vi.hoisted(() => ({
+  userId: 'user_1',
   ledger: [] as Record<string, unknown>[],
   assets: [] as Record<string, unknown>[],
+  /** gen_jobs rows — the async path's record of a request. */
+  jobs: [] as Record<string, unknown>[],
+  videoJobs: [] as Record<string, unknown>[],
+  /** Callbacks handed to `after()`. Nothing runs them but a test, which is what
+   *  makes "charged and answered before any generation" observable. */
+  afters: [] as (() => unknown)[],
   charges: [] as Record<string, unknown>[],
   refunds: [] as Record<string, unknown>[],
   uploads: 0,
@@ -29,11 +36,29 @@ const state = vi.hoisted(() => ({
 
 vi.mock('../../../lib/api-key', () => ({
   withApiKey: (_req: unknown, handler: (a: { userId: string; apiKeyId: string }) => unknown) =>
-    Promise.resolve(handler({ userId: 'user_1', apiKeyId: 'key_1' })),
+    Promise.resolve(handler({ userId: state.userId, apiKeyId: 'key_1' })),
+}));
+
+// `after` is the whole async mechanism: the callback must not have run by the
+// time the 202 is returned, so the fake only collects them.
+vi.mock('next/server', () => ({
+  after: (fn: () => unknown) => void state.afters.push(fn),
+  // The cron route (exercised at the bottom of this file) answers with it.
+  NextResponse: { json: (body: unknown, init?: ResponseInit) => Response.json(body, init) },
+}));
+
+vi.mock('../../../lib/api', () => ({ checkCronAuth: () => true }));
+vi.mock('../../../lib/media/finalizeVideoJob', () => ({
+  finalizeVideoJob: () => Promise.resolve({ status: 'pending' }),
 }));
 
 vi.mock('../../../lib/db/schema', () => ({
-  videoJobs: { __t: 'jobs', id: col('id'), userId: col('userId') },
+  videoJobs: { __t: 'videojobs', id: col('id'), userId: col('userId'), status: col('status'), updatedAt: col('updatedAt') },
+  genJobs: {
+    __t: 'genjobs',
+    id: col('id'), userId: col('userId'), kind: col('kind'), status: col('status'),
+    createdAt: col('createdAt'), updatedAt: col('updatedAt'),
+  },
   creditLedger: {
     __t: 'ledger',
     id: col('id'), userId: col('userId'), kind: col('kind'), credits: col('credits'), meta: col('meta'),
@@ -45,6 +70,10 @@ vi.mock('../../../lib/db/schema', () => ({
 
 vi.mock('drizzle-orm', () => ({
   eq: (c: { __name: string }, v: unknown) => (r: Record<string, unknown>) => r[c.__name] === v,
+  ne: (c: { __name: string }, v: unknown) => (r: Record<string, unknown>) => r[c.__name] !== v,
+  notInArray: (c: { __name: string }, vs: unknown[]) => (r: Record<string, unknown>) => !vs.includes(r[c.__name]),
+  lt: (c: { __name: string }, v: Date) => (r: Record<string, unknown>) => (r[c.__name] as Date) < v,
+  asc: () => undefined,
   and: (...ps: unknown[]) => (r: Record<string, unknown>) =>
     ps.every((p) => (typeof p === 'function' ? (p as (x: unknown) => boolean)(r) : true)),
   gte: () => () => true,
@@ -67,13 +96,21 @@ vi.mock('drizzle-orm', () => ({
 }));
 
 type Pred = (r: Record<string, unknown>) => boolean;
-const storeFor = (t: { __t?: string }) => (t.__t === 'ledger' ? state.ledger : state.assets);
+const storeFor = (t: { __t?: string }) => {
+  if (t.__t === 'ledger') return state.ledger;
+  if (t.__t === 'genjobs') return state.jobs;
+  if (t.__t === 'videojobs') return state.videoJobs;
+  return state.assets;
+};
 
 vi.mock('../../../lib/db', () => ({
   db: () => ({
     select: () => ({
       from: (t: { __t?: string }) => ({
-        where: (pred: Pred) => ({ limit: () => Promise.resolve(storeFor(t).filter((r) => pred(r))) }),
+        where: (pred: Pred) => {
+          const hit = () => Promise.resolve(storeFor(t).filter((r) => pred(r)));
+          return { limit: hit, orderBy: () => ({ limit: hit }) };
+        },
       }),
     }),
     insert: (t: { __t?: string }) => ({
@@ -89,7 +126,11 @@ vi.mock('../../../lib/db', () => ({
     update: (t: { __t?: string }) => ({
       set: (v: Record<string, unknown>) => ({
         where: (pred: Pred) => {
-          for (const r of storeFor(t).filter((x) => pred(x))) {
+          // Matched BEFORE mutating: `returning` has to report what the UPDATE
+          // claimed, and the conditional claims in completeImageJob /
+          // failImageJob predicate on the very column they are about to set.
+          const hit = storeFor(t).filter((x) => pred(x));
+          for (const r of hit) {
             const op = v.meta as
               | { __merge?: Record<string, unknown>; __releaseSource?: boolean }
               | undefined;
@@ -105,7 +146,7 @@ vi.mock('../../../lib/db', () => ({
             }
           }
           return {
-            returning: () => Promise.resolve([]),
+            returning: () => Promise.resolve(hit),
             then: (r: (x: unknown) => unknown) => Promise.resolve(undefined).then(r),
           };
         },
@@ -173,6 +214,8 @@ vi.mock('../../../lib/ai/client', () => {
 });
 
 const { POST } = await import('./images/route');
+const { GET } = await import('./images/[id]/route');
+const { GET: CRON } = await import('../cron/finalize-video-jobs/route');
 
 // ---- reference-image fixtures ----------------------------------------------
 
@@ -218,8 +261,12 @@ function post(body: unknown, idempotencyKey?: string) {
 }
 
 beforeEach(() => {
+  state.userId = 'user_1';
   state.ledger = [];
   state.assets = [];
+  state.jobs = [];
+  state.videoJobs = [];
+  state.afters = [];
   state.charges = [];
   state.refunds = [];
   state.uploads = 0;
@@ -625,5 +672,220 @@ describe('POST /api/v1/images — reference_images', () => {
     expect(res.status).toBe(502);
     expect(state.refunds).toHaveLength(1);
     expect((state.charges[0] as { credits: number }).credits).toBe(12);
+  });
+});
+
+/**
+ * The async path (`async: true`). It exists because holding the connection open
+ * for 66-83s trips the 60s default most clients ship with, and a client-side
+ * timeout leaves the caller unable to tell whether they were charged.
+ *
+ * So the invariants are: the row and the charge both exist BEFORE we answer, and
+ * however the generation ends the row is terminal with the money settled — once.
+ */
+describe('POST /api/v1/images — async: true', () => {
+  /** Runs the collected `after()` callbacks. Not cleared, so a test can run the
+   *  same finalise twice and assert the second is a no-op. */
+  async function runAfters() {
+    for (const fn of state.afters) await fn();
+  }
+  const params = (id: string) => ({ params: Promise.resolve({ id }) });
+  const poll = (id: string) => GET(new Request('https://sociafy.test/x') as never, params(id));
+
+  it('answers 202 with a charged job row before anything is generated', async () => {
+    const res = await post({ prompt: 'a red bicycle', async: true });
+    expect(res.status).toBe(202);
+    const body = await res.json();
+    expect(body).toMatchObject({ status: 'pending', credits_charged: 6 });
+    expect(body.poll_url).toBe(`/api/v1/images/${body.id}`);
+    expect(res.headers.get('idempotency-replay')).toBe('false');
+
+    // The point of the whole design: the money question is already answered.
+    expect(state.charges).toHaveLength(1);
+    expect(state.jobs).toHaveLength(1);
+    expect(state.jobs[0]).toMatchObject({
+      kind: 'image',
+      provider: 'openai-images',
+      status: 'pending',
+      creditLedgerId: 'ledger_1',
+      creditsCharged: 6,
+    });
+    // provider_call_id is NOT NULL and OpenAI gives us no job id — the row's own.
+    expect(state.jobs[0].providerCallId).toBe(body.id);
+    // And nothing has been generated yet.
+    expect(state.generateCalls).toHaveLength(0);
+    expect(state.uploads).toBe(0);
+  });
+
+  it('generates, stores and completes the job in the after() callback', async () => {
+    const body = await (await post({ prompt: 'a red bicycle', async: true })).json();
+    await runAfters();
+
+    expect(state.generateCalls).toHaveLength(1);
+    expect(state.uploads).toBe(1);
+    expect(state.assets).toHaveLength(1);
+    expect(state.jobs[0]).toMatchObject({ status: 'completed', mediaAssetId: state.assets[0].id });
+
+    const res = await poll(body.id);
+    expect(res.status).toBe(200);
+    const polled = await res.json();
+    expect(polled).toMatchObject({ id: body.id, status: 'completed', credits_charged: 6, error: null });
+    expect(polled.image_url).toMatch(/^https:\/\/cdn\.test\/users\/user_1\//);
+  });
+
+  it('takes the reference path and its surcharge asynchronously too', async () => {
+    const res = await post({
+      prompt: 'this exact ring, on white marble',
+      reference_images: [REF_URL],
+      async: true,
+    });
+    expect((await res.json()).credits_charged).toBe(12);
+    await runAfters();
+    expect(state.editCalls).toHaveLength(1);
+    expect(state.generateCalls).toHaveLength(0);
+    expect(state.jobs[0].status).toBe('completed');
+  });
+
+  it('fails the job with a public code and refunds when the provider fails', async () => {
+    state.genError = apiErr(500, { message: 'internal error' });
+    const body = await (await post({ prompt: 'a red bicycle', async: true })).json();
+    await runAfters();
+
+    expect(state.jobs[0]).toMatchObject({ status: 'failed', error: 'upstream_error' });
+    expect(state.refunds).toHaveLength(1);
+    expect(state.assets).toHaveLength(0);
+
+    const polled = await (await poll(body.id)).json();
+    expect(polled).toMatchObject({ status: 'failed', error: 'upstream_error', image_url: null });
+    expect(JSON.stringify(polled)).not.toMatch(/openai|internal error/i);
+  });
+
+  it('reports a moderation refusal as prompt_rejected on the job, not as a 202 error', async () => {
+    state.genError = apiErr(400, { code: 'moderation_blocked', message: 'rejected' });
+    const body = await (await post({ prompt: 'a red bicycle', async: true })).json();
+    await runAfters();
+    expect((await (await poll(body.id)).json()).error).toBe('prompt_rejected');
+    expect(state.refunds).toHaveLength(1);
+  });
+
+  // Two finalisers can overlap (an `after()` callback and a cron sweep), and the
+  // conditional claim is what keeps that from producing two assets or two refunds.
+  it('is a no-op the second time a completed job is finalised', async () => {
+    await post({ prompt: 'a red bicycle', async: true });
+    await runAfters();
+    await runAfters();
+    expect(state.assets).toHaveLength(1);
+    expect(state.jobs[0]).toMatchObject({ status: 'completed', mediaAssetId: 'assets_1' });
+    expect(state.refunds).toHaveLength(0);
+  });
+
+  it('never refunds a failed job twice', async () => {
+    state.genError = apiErr(500, { message: 'internal error' });
+    await post({ prompt: 'a red bicycle', async: true });
+    await runAfters();
+    await runAfters();
+    expect(state.refunds).toHaveLength(1);
+  });
+
+  it('replays an Idempotency-Key as the same job, not as a synchronous 200', async () => {
+    const first = await (await post({ prompt: 'a red bicycle', async: true }, 'img-async-0001')).json();
+    await runAfters();
+
+    const second = await post({ prompt: 'a red bicycle', async: true }, 'img-async-0001');
+    expect(second.status).toBe(202);
+    expect(second.headers.get('idempotency-replay')).toBe('true');
+    const body = await second.json();
+    // The id must stay pollable — an asset id here would 404 on the poll_url.
+    expect(body.id).toBe(first.id);
+    expect(body.status).toBe('completed');
+    expect(body.poll_url).toBe(`/api/v1/images/${first.id}`);
+    expect(state.ledger).toHaveLength(1);
+    expect(state.assets).toHaveLength(1);
+  });
+
+  it('leaves the synchronous path exactly as it was', async () => {
+    for (const body of [{ prompt: 'a red bicycle' }, { prompt: 'a red bicycle', async: false }]) {
+      state.jobs = [];
+      state.afters = [];
+      const res = await post(body);
+      expect(res.status).toBe(200);
+      expect(Object.keys(await res.json()).sort()).toEqual(['credits_charged', 'id', 'image_url']);
+      // No job row, no post-response work: the old flow, unchanged.
+      expect(state.jobs).toHaveLength(0);
+      expect(state.afters).toHaveLength(0);
+    }
+  });
+});
+
+describe('GET /api/v1/images/{id}', () => {
+  const params = (id: string) => ({ params: Promise.resolve({ id }) });
+  const poll = (id: string) => GET(new Request('https://sociafy.test/x') as never, params(id));
+
+  it('returns another tenant\'s job as 404, not 403', async () => {
+    const created = await (await post({ prompt: 'a red bicycle', async: true })).json();
+    state.userId = 'user_2';
+    const res = await poll(created.id);
+    expect(res.status).toBe(404);
+    expect((await res.json()).error).toBe('not_found');
+  });
+
+  it('404s a malformed id without touching the db', async () => {
+    for (const bad of ['../../etc/passwd', '0000000000000000-0000-4000-8000-0000', 'not-a-uuid']) {
+      const res = await poll(bad);
+      expect(res.status).toBe(404);
+      expect(typeof (await res.json()).message).toBe('string');
+    }
+  });
+
+  it('reports a job that has not finished as pending, with no url and no error', async () => {
+    const created = await (await post({ prompt: 'a red bicycle', async: true })).json();
+    expect(await (await poll(created.id)).json()).toEqual({
+      id: created.id,
+      status: 'pending',
+      image_url: null,
+      credits_charged: 6,
+      error: null,
+    });
+  });
+});
+
+/**
+ * The orphan sweeper. `after()` work dies with its process — an instance
+ * recycled, a deploy landing mid-flight — and that leaves the row pending with
+ * the credits held. Nothing else would ever return them.
+ */
+describe('cron sweep of stranded async image jobs', () => {
+  const cron = () => CRON(new Request('https://sociafy.test/api/cron/finalize-video-jobs') as never);
+
+  it('fails and refunds a job stranded past its grace window', async () => {
+    await post({ prompt: 'a red bicycle', async: true }, 'img-strand-0001');
+    state.afters = []; // the process died before the callback ran
+    state.jobs[0].createdAt = new Date(Date.now() - 20 * 60_000);
+
+    const res = await cron();
+    expect((await res.json()).sweptImages).toBe(1);
+    expect(state.jobs[0]).toMatchObject({ status: 'failed', error: 'generation_timeout' });
+    expect(state.refunds).toHaveLength(1);
+
+    // Refunded, so the key is released and an honest retry generates fresh.
+    const retry = await post({ prompt: 'a red bicycle', async: true }, 'img-strand-0001');
+    expect(retry.status).toBe(202);
+    expect(state.charges).toHaveLength(2);
+  });
+
+  it('leaves a job inside its grace window alone', async () => {
+    await post({ prompt: 'a red bicycle', async: true });
+    state.jobs[0].createdAt = new Date();
+    expect((await (await cron()).json()).sweptImages).toBe(0);
+    expect(state.jobs[0].status).toBe('pending');
+    expect(state.refunds).toHaveLength(0);
+  });
+
+  it('does not refund a swept job a second time', async () => {
+    await post({ prompt: 'a red bicycle', async: true });
+    state.jobs[0].createdAt = new Date(Date.now() - 20 * 60_000);
+    await cron();
+    await cron();
+    expect(state.refunds).toHaveLength(1);
   });
 });
