@@ -48,9 +48,9 @@ vi.mock('./api', () => ({
 
 import { generateApiKey, hashApiKey, withApiKey } from './api-key';
 
-const req = (auth?: string) =>
+const req = (auth?: string, method = 'POST') =>
   new Request('https://sociafy.app/api/v1/images', {
-    method: 'POST',
+    method,
     headers: auth ? { authorization: auth } : {},
   });
 
@@ -154,6 +154,16 @@ describe('withApiKey daily caps', () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
+  // A GET never charges, and capping it locked the caller out of GET /api/v1/me
+  // — the endpoint the docs point at to explain the 429 — and out of polling a
+  // job they had already paid for.
+  it('does not apply either spend cap to a read', async () => {
+    state.spend = { key: 10_000, all: 10_000_000 };
+    const handler = vi.fn(() => new Response('ok'));
+    expect((await withApiKey(req(`Bearer ${generateApiKey().full}`, 'GET'), handler)).status).toBe(200);
+    expect(handler).toHaveBeenCalledOnce();
+  });
+
   it('429s on the platform-wide kill switch even when the key is under its own cap', async () => {
     state.keyRow = { id: 'key-1', userId: 'user_abc', dailyCreditCap: 100_000, lastUsedAt: null };
     state.spend = { key: 0, all: 50_000 }; // default API_DAILY_CREDIT_CAP
@@ -162,5 +172,56 @@ describe('withApiKey daily caps', () => {
     expect(res.status).toBe(429);
     expect(await res.json()).toMatchObject({ error: 'api_capacity_exceeded' });
     expect(handler).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * W1: docs/api.md §8 promises every error is `{ error, message }`. `err()` used
+ * to emit `{ error, hint }`, so a client printing `message` — which the docs tell
+ * it to have — showed `undefined` on exactly the errors a human must read.
+ */
+describe('error envelope', () => {
+  const cases: Array<[string, () => Promise<Response>]> = [
+    ['no credential', () => withApiKey(req(), vi.fn())],
+    ['wrong scheme', () => withApiKey(req('Basic sfy_live_abc'), vi.fn())],
+    ['unknown key', () => {
+      state.keyRow = null;
+      return withApiKey(req(`Bearer ${generateApiKey().full}`), vi.fn());
+    }],
+    ['per-key cap', () => {
+      state.spend = { key: 100, all: 100 };
+      return withApiKey(req(`Bearer ${generateApiKey().full}`), vi.fn());
+    }],
+    ['platform cap', () => {
+      state.keyRow = { id: 'key-1', userId: 'user_abc', dailyCreditCap: 100_000, lastUsedAt: null };
+      state.spend = { key: 0, all: 50_000 };
+      return withApiKey(req(`Bearer ${generateApiKey().full}`), vi.fn());
+    }],
+    ['handler blew up', () => withApiKey(req(`Bearer ${generateApiKey().full}`), () => {
+      throw new Error('boom');
+    })],
+  ];
+
+  for (const [label, run] of cases) {
+    it(`carries error + message: ${label}`, async () => {
+      const body = (await (await run()).json()) as { error?: unknown; message?: unknown };
+      expect(typeof body.error).toBe('string');
+      expect(typeof body.message).toBe('string');
+      expect(String(body.message).length).toBeGreaterThan(0);
+    });
+  }
+
+  it('keeps the machine-readable extras alongside the message', async () => {
+    state.spend = { key: 100, all: 100 };
+    const body = await (await withApiKey(req(`Bearer ${generateApiKey().full}`), vi.fn())).json();
+    expect(body).toMatchObject({ error: 'daily_cap_exceeded', spent: 100, cap: 100 });
+    // `hint` was the message under another name — collapsed, not duplicated.
+    expect(body.hint).toBeUndefined();
+  });
+
+  it('points the cap hint at a control that actually exists', async () => {
+    state.spend = { key: 100, all: 100 };
+    const body = await (await withApiKey(req(`Bearer ${generateApiKey().full}`), vi.fn())).json();
+    expect(body.message).toMatch(/API keys/);
   });
 });

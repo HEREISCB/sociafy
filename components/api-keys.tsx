@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { Icon } from './icons';
-import { apiDelete, apiPost, useApi, friendlyApiError } from '../lib/ui/fetcher';
+import { apiDelete, apiPatch, apiPost, useApi, friendlyApiError } from '../lib/ui/fetcher';
 
 type ApiKey = {
   id: string;
@@ -13,11 +13,16 @@ type ApiKey = {
   createdAt: string;
 };
 
+/** Schema default for api_keys.daily_credit_cap. Shown as the input's
+ *  placeholder so the number a new key gets is never a mystery. */
+const DEFAULT_CAP = 2_000;
+
 /** Developer API keys panel. Keys authenticate /api/v1 requests and spend from
  *  this account's credit balance, so revoking is the kill switch. */
 export const ApiKeys: React.FC = () => {
   const { data, isLoading, mutate } = useApi<ApiKey[]>('/api/keys');
   const [name, setName] = useState('');
+  const [cap, setCap] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // The plaintext key, held in memory only until dismissed — there is no
@@ -31,15 +36,38 @@ export const ApiKeys: React.FC = () => {
     setBusy(true);
     setError(null);
     try {
-      const r = await apiPost<{ prefix: string; key: string }>('/api/keys', { name: name.trim() || undefined });
+      // dailyCreditCap was previously never sent, which made every cap other
+      // than the 2,000 default unreachable from the UI even though the API
+      // accepted one.
+      const parsedCap = Number(cap);
+      const r = await apiPost<{ prefix: string; key: string }>('/api/keys', {
+        name: name.trim() || undefined,
+        dailyCreditCap: Number.isInteger(parsedCap) && parsedCap > 0 ? parsedCap : undefined,
+      });
       setFresh({ prefix: r.prefix, key: r.key });
       setName('');
+      setCap('');
       setCopied(false);
       await mutate();
     } catch (e) {
       setError(friendlyApiError(e));
     } finally {
       setBusy(false);
+    }
+  }
+
+  /** Caps are adjustable in place: the API's 429 tells developers to raise it
+   *  here, and rotating a live key just to widen a limit is not a fix. */
+  async function saveCap(k: ApiKey, next: string) {
+    const value = Number(next);
+    if (!Number.isInteger(value) || value < 1 || value === k.dailyCreditCap) return;
+    setError(null);
+    try {
+      await apiPatch(`/api/keys/${k.id}`, { dailyCreditCap: value });
+      await mutate();
+    } catch (e) {
+      setError(friendlyApiError(e));
+      await mutate();
     }
   }
 
@@ -63,6 +91,9 @@ export const ApiKeys: React.FC = () => {
         Call the Sociafy API from your own code. Requests authenticate with{' '}
         <code className="mono">Authorization: Bearer sfy_live_…</code> and spend credits from this account.
         {' '}<a href="https://github.com/HEREISCB/sociafy/blob/main/docs/api.md" target="_blank" rel="noreferrer">API docs →</a>
+        <br />
+        Each key has its own rolling 24-hour credit cap (default {DEFAULT_CAP.toLocaleString()}). Edit a
+        key&apos;s cap below to change it — no need to rotate the key.
       </div>
 
       {fresh && (
@@ -104,6 +135,17 @@ export const ApiKeys: React.FC = () => {
             border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg)',
           }}
         />
+        <input
+          value={cap}
+          onChange={(e) => setCap(e.target.value.replace(/[^0-9]/g, ''))}
+          placeholder={`${DEFAULT_CAP} cr/day`}
+          inputMode="numeric"
+          title="Rolling 24-hour credit cap for this key"
+          style={{
+            width: 110, padding: '6px 10px', fontSize: 12.5,
+            border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg)',
+          }}
+        />
         <button className="btn primary sm" onClick={create} disabled={busy}>
           <Icon name="plus" size={12} /> {busy ? 'Creating…' : 'New key'}
         </button>
@@ -127,8 +169,20 @@ export const ApiKeys: React.FC = () => {
           <Icon name="lock" size={13} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 13, fontWeight: 500 }}>{k.name || 'Untitled key'}</div>
-            <div className="mono" style={{ fontSize: 11, color: 'var(--ink-3)' }}>
-              {k.prefix}… · {k.dailyCreditCap.toLocaleString()} cr/day cap ·{' '}
+            <div className="mono" style={{ fontSize: 11, color: 'var(--ink-3)', display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+              {k.prefix}… ·{' '}
+              <input
+                defaultValue={k.dailyCreditCap}
+                onBlur={(e) => saveCap(k, e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                inputMode="numeric"
+                title="Rolling 24-hour credit cap. Saves on blur."
+                style={{
+                  width: 68, padding: '1px 4px', fontSize: 11, font: 'inherit',
+                  border: '1px solid var(--line)', borderRadius: 5, background: 'var(--bg)',
+                }}
+              />
+              cr/day cap ·{' '}
               {k.lastUsedAt ? `used ${new Date(k.lastUsedAt).toLocaleDateString()}` : 'never used'}
             </div>
           </div>

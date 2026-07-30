@@ -13,6 +13,10 @@ import { makeMediaKey, publicUrlFor, uploadBuffer } from '../../../../lib/storag
 import { isStubMode } from '../../../../lib/env';
 import { priceForImage } from '../../../../lib/credits/pricing';
 import { ensureBalance, charge, refund, partialRefund, insufficientCreditsResponse } from '../../../../lib/credits/ledger';
+// Imported from the v1 module rather than duplicated: both routes call the same
+// images API and must agree on whose fault a failure is. Duplicating the
+// classifier is how one copy drifts back into blaming the user for our 400s.
+import { classifyImageFailure, logImageFailure } from '../../v1/shared';
 
 /**
  * Direct https.request fallback to api.openai.com/v1/images/generations.
@@ -74,7 +78,17 @@ function generateImageDirect(args: {
         res.on('end', () => {
           const text = Buffer.concat(chunks).toString('utf-8');
           if (!res.statusCode || res.statusCode >= 400) {
-            reject(new Error(`openai_${res.statusCode}: ${text.slice(0, 500)}`));
+            // Carry `status` and the parsed `error` body so classifyImageFailure
+            // can tell a moderation refusal from our own misconfiguration on this
+            // path too — the SDK sets the same fields on APIError.
+            let body: { code?: unknown; type?: unknown; message?: unknown } | undefined;
+            try { body = JSON.parse(text)?.error; } catch { /* non-JSON body */ }
+            reject(Object.assign(new Error(`openai_${res.statusCode}: ${text.slice(0, 500)}`), {
+              status: res.statusCode,
+              error: body,
+              code: body?.code,
+              type: body?.type,
+            }));
             return;
           }
           try {
@@ -146,8 +160,8 @@ const bodySchema = z.object({
  * POST /api/media/generate-image
  *
  * 1. Auto-enhances the user's loose prompt via the prompt-rewriter (loads
- *    lib/ai/skills/prompts/gpt-image-1.md into the system prompt).
- * 2. Generates `count` images in parallel via gpt-image-1.
+ *    lib/ai/skills/prompts/gpt-image-2.md into the system prompt).
+ * 2. Generates `count` images in parallel via gpt-image-2.
  * 3. Uploads each PNG to R2 and inserts a media_assets row.
  *
  * Returns: { items: [...media_asset rows], rewrittenPrompt, enhanced }
@@ -229,12 +243,12 @@ export async function POST(req: NextRequest) {
       const brandBlock = renderBrandBlock(brandCtx, 'media');
       const rewrite = rawPrompt
         ? { prompt, enhanced: false }
-        : await rewritePromptForMedia({ userPrompt: prompt, target: 'gpt-image-1', caption, brandBlock });
+        : await rewritePromptForMedia({ userPrompt: prompt, target: 'gpt-image-2', caption, brandBlock });
       console.log('[generate-image] step=rewrite done, enhanced=', rewrite.enhanced, 'brand=', !!brandBlock);
 
       const [w, h] = size.split('x').map((n) => parseInt(n, 10));
 
-      // 2. Generate N in parallel. Each gpt-image-1 call returns one image.
+      // 2. Generate N in parallel. Each gpt-image-2 call returns one image.
       //    Strategy per call: try the SDK once, fall back to direct
       //    node:https.request on any TLS / network error.
       const apiKey = process.env.OPENAI_API_KEY ?? '';
@@ -319,13 +333,22 @@ export async function POST(req: NextRequest) {
       }
 
       if (rows.length === 0) {
-        const reason = firstReject?.reason as { message?: string; status?: number } | null;
-        console.error('[generate-image] no image returned. first reject:', reason?.message);
+        // Classify instead of collapsing everything into `no_image_returned`: a
+        // moderation refusal is the user's prompt and they can fix it, an unknown
+        // model or unsupported parameter is ours and they cannot. Same rules as
+        // /api/v1/images so the two routes never disagree.
+        const failure = classifyImageFailure(firstReject?.reason);
+        logImageFailure('generate-image', firstReject?.reason, failure);
         if (chargeInfo) {
-          await refund({ userId: user.id, ledgerId: chargeInfo.ledgerId, reason: 'no_image_returned' });
+          await refund({ userId: user.id, ledgerId: chargeInfo.ledgerId, reason: failure.code });
           chargeInfo = null;
         }
-        return jsonError('no_image_returned', 502, { detail: (reason?.message ?? '').slice(0, 400) });
+        // `hint` (not `message`) because lib/ui/fetcher's friendlyApiError renders
+        // that field — this route answers the dashboard, not the public envelope.
+        return jsonError(failure.code, failure.status, {
+          hint: failure.message,
+          detail: String((firstReject?.reason as { message?: string } | null)?.message ?? '').slice(0, 400),
+        });
       }
 
       // Partial refund: user paid for `count` images but only `rows.length`

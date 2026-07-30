@@ -92,7 +92,7 @@ export function priceForImage(
   const isSquare = size === '1024x1024';
   let action: CreditAction;
   if (quality === 'low') {
-    // gpt-image-1 low pricing is flat across aspect — both stay at 2 credits.
+    // gpt-image-2 low pricing is flat across aspect — both stay at 2 credits.
     action = 'image_low_1024';
   } else if (quality === 'medium') {
     action = isSquare ? 'image_medium_1024' : 'image_medium_portrait';

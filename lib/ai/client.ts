@@ -27,10 +27,14 @@ export const getAnthropic = getOpenAI;
 // to remain stable — OpenAI rotates image-gen model names faster than chat
 // models. Keep it env-configurable so we never have to ship a code change
 // when a new generation drops.
+// Deliberately the floating `gpt-image-2` tag, not the `-2026-04-21` snapshot:
+// the tag picks up quality/latency improvements for free, and we have no
+// image-output regression tests that would catch a bad snapshot anyway — so
+// pinning would buy us nothing but a stale model. Pin via env if that changes.
 export const MODELS = {
   fast: process.env.OPENAI_MODEL_FAST || 'gpt-5-mini',
   smart: process.env.OPENAI_MODEL || 'gpt-5',
-  image: process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1',
+  image: process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2',
 } as const;
 
 // Groq — OpenAI-compatible endpoint. Used as fallback when OPENAI_API_KEY

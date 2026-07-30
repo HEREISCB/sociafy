@@ -22,6 +22,9 @@ const state = vi.hoisted(() => ({
   refunds: [] as Record<string, unknown>[],
   submits: [] as Record<string, unknown>[],
   submitError: null as Error | null,
+  /** Simulates a database fault after the charge landed — not a provider
+   *  rejection, and it must not be reported as one. */
+  failUpdates: false,
 }));
 
 vi.mock('../../../lib/api-key', () => ({
@@ -92,6 +95,7 @@ vi.mock('../../../lib/db', () => ({
     update: (t: { __t?: string }) => ({
       set: (v: Record<string, unknown>) => ({
         where: (pred: Pred) => {
+          if (state.failUpdates) throw new Error('db_connection_lost');
           const hit = storeFor(t).filter((r) => pred(r));
           for (const r of hit) Object.assign(r, v);
           return {
@@ -180,6 +184,7 @@ beforeEach(() => {
   state.refunds = [];
   state.submits = [];
   state.submitError = null;
+  state.failUpdates = false;
   process.env.PIAPI_API_KEY = 'test-key';
   delete process.env.PIAPI_WEBHOOK_SECRET;
   delete process.env.NEXT_PUBLIC_APP_URL;
@@ -222,6 +227,61 @@ describe('POST /api/v1/videos', () => {
     expect(state.refunds).toHaveLength(0);
   });
 
+  // W7/W8: a replay used to hardcode "pending" and echo the NEW request's
+  // parameters, so replaying a key whose job finished last week reported a
+  // pending job with mixed params and the original's price.
+  it('reports the ORIGINAL job\'s real status and parameters on a replay', async () => {
+    const first = await (await post(
+      { prompt: 'a cat surfing', duration_sec: 8, quality: '720p', aspect: '9:16' },
+      'client-key-0003',
+    )).json();
+
+    // The job finishes out-of-band, as it would in production.
+    state.jobs[0].status = 'completed';
+
+    const replay = await post(
+      { prompt: 'something else', duration_sec: 15, quality: '1080p', aspect: '16:9' },
+      'client-key-0003',
+    );
+    const body = await replay.json();
+    expect(replay.headers.get('idempotency-replay')).toBe('true');
+    expect(body.id).toBe(first.id);
+    expect(body.status).toBe('completed');
+    expect(body.duration_sec).toBe(8);
+    expect(body.quality).toBe('720p');
+    expect(body.aspect).toBe('9:16');
+    expect(body.credits_charged).toBe(first.credits_charged);
+    expect(state.ledger).toHaveLength(1);
+  });
+
+  it('surfaces the public error code when a replay resolves to a failed job', async () => {
+    await post({ prompt: 'a cat surfing' }, 'client-key-0004');
+    state.jobs[0].status = 'failed';
+    state.jobs[0].error = 'submit_failed: piapi_400 {"detail":"nope"}';
+
+    const body = await (await post({ prompt: 'a cat surfing' }, 'client-key-0004')).json();
+    expect(body.status).toBe('failed');
+    expect(body.error).toBe('generation_rejected');
+    expect(JSON.stringify(body)).not.toMatch(/piapi|nope/i);
+  });
+
+  it('scopes the idempotency source to the endpoint', async () => {
+    await post({ prompt: 'a cat surfing' }, 'shared-key-0001');
+    expect((state.charges[0] as { meta: { source: string } }).meta.source).toBe('api:videos:shared-key-0001');
+  });
+
+  it('409s rather than 502s when a charge exists but no job resolves from it', async () => {
+    // The unique index fires but replayOf finds nothing — an in-flight twin owns
+    // the key. Previously this fell into the generic "provider rejected" 502.
+    state.ledger.push({
+      id: 'ledger_x', userId: 'user_1', kind: 'charge', credits: -180,
+      meta: { source: 'api:videos:client-key-0005' }, // no videoJobId
+    });
+    const res = await post({ prompt: 'a cat surfing' }, 'client-key-0005');
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe('request_in_progress');
+  });
+
   it('treats a different Idempotency-Key as a new job', async () => {
     await post({ prompt: 'a' .repeat(10) }, 'client-key-0001');
     await post({ prompt: 'a' .repeat(10) }, 'client-key-0002');
@@ -257,6 +317,36 @@ describe('POST /api/v1/videos', () => {
     expect(body.error).toBe('upstream_error');
     expect(JSON.stringify(body)).not.toMatch(/piapi|bad prompt/i);
     expect(state.refunds).toHaveLength(1);
+    // W5: the old copy said "No credits were charged", which was false —
+    // credits are charged and then refunded (shared.ts refunds on this path).
+    expect(body.message).not.toMatch(/no credits were charged/i);
+    expect(body.message).toMatch(/refunded/i);
+  });
+
+  // W5: a DB fault after the charge is not a provider rejection, and claiming it
+  // was told the caller their money was safe when it might not be.
+  it('does not dress a post-charge database fault up as a provider rejection', async () => {
+    state.failUpdates = true;
+    const res = await post({ prompt: 'a cat surfing' });
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toBe('internal');
+    expect(body.message).toMatch(/our side/i);
+    expect(body.message).not.toMatch(/provider rejected/i);
+  });
+
+  it('carries a human message on every error response', async () => {
+    const responses = [
+      await post({ prompt: 'x' }),                        // invalid_request
+      await post({ prompt: 'a cat surfing' }, 'nope'),    // invalid_idempotency_key
+    ];
+    state.submitError = new Error('piapi_400: nope');
+    responses.push(await post({ prompt: 'a cat surfing' })); // upstream_error
+    for (const r of responses) {
+      const body = await r.json();
+      expect(typeof body.message).toBe('string');
+      expect(body.message.length).toBeGreaterThan(0);
+    }
   });
 
   it('keeps an ambiguous submit failure pending for the sweeper instead of refunding', async () => {
@@ -308,5 +398,22 @@ describe('GET /api/v1/videos/{id}', () => {
   it('404s a non-uuid id without touching the db', async () => {
     const res = await GET(new Request('https://sociafy.test/x') as never, params('../../etc/passwd'));
     expect(res.status).toBe(404);
+  });
+
+  // U3: `[0-9a-f-]{36}` admitted these, then Postgres' uuid cast threw inside the
+  // query and withApiKey rendered 500 internal for what is only a miss.
+  it('404s a 36-char string that is not a valid uuid, not 500', async () => {
+    for (const bad of [
+      '----------------------------------aa',
+      '0000000000000000-0000-4000-8000-0000',
+      'gggggggg-0000-4000-8000-000000000001'.slice(0, 36),
+      '00000000-0000-4000-8000-00000000000',   // 35 chars
+    ]) {
+      const res = await GET(new Request('https://sociafy.test/x') as never, params(bad));
+      expect(res.status).toBe(404);
+      const body = await res.json();
+      expect(body.error).toBe('not_found');
+      expect(typeof body.message).toBe('string');
+    }
   });
 });

@@ -13,8 +13,8 @@ _Last updated: 2026-05-21 · Major revision: PiAPI Seedance pricing scales steep
 | **OpenAI GPT-5** | Caption variants with `withTools=true`; autopilot trend → draft | $1.25 / 1M input tokens, $10 / 1M output tokens |
 | **OpenAI GPT-5-mini** | Caption variants (default), prompt rewriter for image and video gen | $0.25 / 1M input tokens, $2.00 / 1M output tokens |
 | **OpenAI Web Search tool** | "With research" caption mode, autopilot trend verification | Tool call + ~8K-token block at the calling model's rate |
-| **OpenAI gpt-image-1 (1024×1024)** | Image generation, square | Low: $0.009 · Medium: $0.034 · High: $0.133 per image |
-| **OpenAI gpt-image-1 (portrait/landscape)** | Image generation, vertical/horizontal | Low: $0.013 · Medium: $0.051 · High: $0.20 per image |
+| **OpenAI gpt-image-2 (1024×1024)** | Image generation, square | Low: $0.006 · Medium: $0.053 · High: $0.211 per image |
+| **OpenAI gpt-image-2 (portrait/landscape)** | Image generation, vertical/horizontal | Low: $0.005 · Medium: $0.041 · High: $0.165 per image |
 | **PiAPI Seedance 2.0 — 480p** | Video generation, Quality model | $0.10 per second |
 | **PiAPI Seedance 2.0 — 720p** | Video generation, Quality model | $0.20 per second |
 | **PiAPI Seedance 2.0 — 1080p** | Video generation, Quality model | $0.50 per second |
@@ -50,11 +50,11 @@ X is the only paid platform. Amortized at ~$2-4/user/month at small scale.
 |---|---|---:|
 | Text post (no tools) | GPT-5-mini variants + per-platform | **$0.005** |
 | Text post (with research) | GPT-5 + web_search tool | **$0.050** |
-| Image (low, 1024) | GPT-5-mini rewriter + gpt-image-1 low | **$0.010** |
-| Image (medium, 1024) | GPT-5-mini rewriter + gpt-image-1 medium | **$0.035** |
-| Image (medium portrait/landscape) | GPT-5-mini rewriter + gpt-image-1 medium portrait | **$0.052** |
-| Image (high, 1024) | GPT-5-mini rewriter + gpt-image-1 high | **$0.134** |
-| Image (high portrait/landscape) | GPT-5-mini rewriter + gpt-image-1 high portrait | **$0.201** |
+| Image (low, 1024) | GPT-5-mini rewriter + gpt-image-2 low | **$0.011** |
+| Image (medium, 1024) | GPT-5-mini rewriter + gpt-image-2 medium | **$0.058** |
+| Image (medium portrait/landscape) | GPT-5-mini rewriter + gpt-image-2 medium portrait | **$0.046** |
+| Image (high, 1024) | GPT-5-mini rewriter + gpt-image-2 high | **$0.216** |
+| Image (high portrait/landscape) | GPT-5-mini rewriter + gpt-image-2 high portrait | **$0.170** |
 | Video (8s, 480p, Fast) | rewriter + Seedance-fast-480p | **$0.641** |
 | Video (8s, 480p, Quality) | rewriter + Seedance-2-480p | **$0.801** |
 | Video (8s, 720p, Fast) | rewriter + Seedance-fast-720p | **$1.281** |
@@ -258,8 +258,8 @@ At the **most discounted** rate (Business-tier $0.012/credit):
 | Action | Credits | Customer (Business rate) | Our cost | Margin |
 |---|---:|---:|---:|---:|
 | Text | 1 | $0.012 | $0.005 | 58% ✓ |
-| Image medium | 4 | $0.048 | $0.035 | 27% ✓ |
-| Image high portrait/landscape | 23 | $0.276 | $0.201 | 27% ✓ |
+| Image medium (square) | 6 | $0.072 | $0.058 | 19% ✓ |
+| Image high portrait/landscape | 23 | $0.276 | $0.170 | 38% ✓ |
 | Video 8s 720p Quality | 180 | $2.160 | $1.601 | 26% ✓ |
 | Video 8s 1080p Quality | 445 | $5.340 | $4.001 | 25% ✓ |
 | Video 15s 1080p Quality | 835 | $10.020 | $7.501 | 25% ✓ |

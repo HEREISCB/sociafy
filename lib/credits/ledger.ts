@@ -278,14 +278,24 @@ export async function recentLedger(userId: string, limit = 50) {
     .limit(limit);
 }
 
-/** Insufficient-credits Response builder. 402 with a structured payload the UI can render. */
+/**
+ * Insufficient-credits Response builder. 402 with a structured payload the UI
+ * can render.
+ *
+ * `message`, not `hint`: this is also the 402 the public API returns (via
+ * withApiKey), and docs/api.md promises every error carries `error` + `message`.
+ * The two strings were identical, so `hint` collapsed into `message` rather than
+ * shipping both. Safe for the five session callers too — lib/ui/fetcher's
+ * friendlyApiError special-cases `insufficient_credits` above its `body.hint`
+ * branch, so no UI copy came from this field.
+ */
 export function insufficientCreditsResponse(args: { balance: number; needed: number }): Response {
   return new Response(
     JSON.stringify({
       error: 'insufficient_credits',
+      message: `You need ${args.needed} credits but have ${args.balance}. Top up or upgrade your plan.`,
       balance: args.balance,
       needed: args.needed,
-      hint: `You need ${args.needed} credits but have ${args.balance}. Top up or upgrade your plan.`,
     }),
     {
       status: 402,

@@ -6,26 +6,54 @@ provider — Sociafy calls them with its own credentials and bills you in credit
 
 Base URL: `https://sociafy.app`
 
+**Server-to-server only.** No endpoint sends CORS headers, so a browser cannot
+call this API directly — and should not, since the credential is a secret that
+spends money.
+
 ---
 
 ## 1. Authentication
 
 Every request needs a Bearer API key. Create one in your dashboard under
-**Settings → API keys**; the plaintext key is shown exactly once.
+**Account → API keys** (`/usage#api-keys`); the plaintext key is shown exactly
+once.
 
 ```
 Authorization: Bearer sfy_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
 Keys are hashed at rest, so a lost key cannot be recovered — revoke it and make
-a new one. A revoked key returns `401` immediately.
+a new one. A revoked key returns `401` immediately. You may hold up to **10
+active keys**; an eleventh returns `400 too_many_keys` until you revoke one.
+
+Key management is **session-only**. `/api/keys` authenticates with your dashboard
+session, not with an API key, so a key cannot list, create, or rotate keys —
+including itself. Rotation is a human action in the dashboard: create the new
+key, deploy it, then revoke the old one.
 
 Two things every key has:
 
 - **A credit balance**, shared across your whole account (dashboard usage and API
   usage draw from the same ledger).
 - **A 24-hour credit cap**, per key. This is a rolling window, not a calendar
-  day, and it is a spend limit, not a request limit. Raise it in the dashboard.
+  day, and it is a spend limit, not a request limit. New keys default to **2,000
+  credits/day**. Set a different cap when you create the key, or edit an existing
+  key's cap in place under Account → API keys.
+
+The cap is checked *before* a request is priced, not against its price, so the
+request that crosses the line is allowed through in full and **one job can
+overshoot the cap by its own cost**. A 1080p video submitted at 1,999 of a 2,000
+cap lands you at 2,444 spent. Size the cap with one maximum-priced job of
+headroom if that matters to you.
+
+There is also a platform-wide 24-hour ceiling across all API customers, default
+**50,000 credits**, which exists to protect our upstream provider balance. It
+surfaces as `429 api_capacity_exceeded` and is not about your key.
+
+Spend caps apply to the `POST` endpoints only. A `GET` never charges, so it is
+never capped — you can always poll a job you already paid for, and `GET
+/api/v1/me` keeps working while you are over the cap, which is exactly when you
+need it.
 
 ---
 
@@ -53,12 +81,14 @@ hours. Refunds (see §6) are **not** netted out of it, so a run of failed
 generations still counts against the cap until the window rolls off. `balance`
 is always exact and does reflect refunds.
 
+Status codes: `200`, `401`, `500`, `503`.
+
 ---
 
 ## 3. `POST /api/v1/videos`
 
-Submit a text-to-video generation. Returns immediately with `202` — generation
-takes 30–120 seconds, so you poll (§4) rather than holding a connection open.
+Submit a text-to-video generation. Returns `202` immediately — generation takes
+30–120 seconds, so you poll (§4) rather than holding a connection open.
 
 ```bash
 curl -X POST https://sociafy.app/api/v1/videos \
@@ -98,6 +128,15 @@ curl -X POST https://sociafy.app/api/v1/videos \
 **Unknown fields are rejected with `400`.** A typo in `quality` should not
 silently bill you for a default you did not choose.
 
+`status`, `duration_sec`, `quality` and `aspect` always describe the **stored
+job**, which matters on an idempotent replay: replaying a key whose job already
+finished returns that job's real status and its original parameters, not the
+parameters you just sent. A replay that resolves to a `failed` job also carries
+an `error` field with the same code `GET /api/v1/videos/{id}` would give, so you
+do not go off and poll something that can never succeed.
+
+`202` is returned on both a fresh submit and a replay.
+
 **Image-to-video and reference/character modes are not available in v1.** They
 carry a per-input-second surcharge derived from probing the length of the clip
 you supply, and that probe returns nothing for fragmented MP4 and for WebM —
@@ -107,13 +146,19 @@ invalid_request`.
 
 Generate several clips by making several requests, each with its own
 `Idempotency-Key`. There is no `count` parameter — one request is one job, one
-charge, one id.
+charge, one id. **Mind the burst limit while you do** (§8): three submits, then
+one every 100 seconds. A batch of ten clips takes about fifteen minutes to get
+in the door.
+
+Status codes: `202`, `400`, `401`, `402`, `409`, `429`, `500`, `502`, `503`.
 
 ---
 
 ## 4. `GET /api/v1/videos/{id}`
 
-Poll every 5–10 seconds until `status` is `completed` or `failed`.
+Poll every 5–10 seconds until `status` is `completed` or `failed`. Polling is not
+rate-limited; 5 seconds is advice about not wasting your own sockets, not a limit
+we enforce. Please do not poll faster than once a second.
 
 ```bash
 curl https://sociafy.app/api/v1/videos/8f2c1d6e-4a71-4b0e-9a3c-77c1e5b2d901 \
@@ -124,7 +169,7 @@ curl https://sociafy.app/api/v1/videos/8f2c1d6e-4a71-4b0e-9a3c-77c1e5b2d901 \
 {
   "id": "8f2c1d6e-4a71-4b0e-9a3c-77c1e5b2d901",
   "status": "completed",
-  "video_url": "https://cdn.sociafy.app/users/user_2ab.../vid-1753538201-9f3c.mp4",
+  "video_url": "https://<your-media-host>/users/user_2ab.../vid-1753538201-9f3c.mp4",
   "credits_charged": 180,
   "error": null
 }
@@ -139,18 +184,32 @@ balance, not this field.
 
 Polling is what drives delivery, but it is not the only thing that does: a job
 completes and is stored even if you stop polling, so a crashed worker loses
-nothing. `video_url` is served from Sociafy storage and is durable — the
-generation provider's own URL expires within hours, and we copy the file before
-handing you a link.
+nothing. `video_url` is served from Sociafy storage — the generation provider's
+own URL expires within hours, and we copy the file before handing you a link.
 
 A job id belonging to another account returns `404`, identical to an id that
-never existed.
+never existed. So does a malformed id.
+
+This endpoint can also return `503 service_unavailable` if storage or the
+generation backend is offline: the poll cannot finalize the job, but nothing is
+lost and nothing is charged — retry.
+
+Status codes: `200`, `401`, `404`, `500`, `503`.
+
+### Output URLs
+
+Media URLs are unsigned, public, and permanent for as long as the object exists.
+The host comes from our storage configuration, so treat it as opaque — do not
+hardcode it or parse it. There is no expiry and no deletion schedule today, but
+we do not offer a retention SLA in v1: **if you need the asset to outlive our
+storage decisions, copy it into your own bucket.**
 
 ---
 
 ## 5. `POST /api/v1/images`
 
-Synchronous — a single image lands in roughly 10–40 seconds.
+Synchronous — a single image lands in roughly 10–40 seconds. Returns `200`, on
+both a fresh generation and a replay.
 
 ```bash
 curl -X POST https://sociafy.app/api/v1/images \
@@ -167,7 +226,7 @@ curl -X POST https://sociafy.app/api/v1/images \
 ```json
 {
   "id": "c11e8a4f-2d33-4c9a-8b71-0a5e6f2c4d18",
-  "image_url": "https://cdn.sociafy.app/users/user_2ab.../api-1753538330-7b1a.png",
+  "image_url": "https://<your-media-host>/users/user_2ab.../api-1753538330-7b1a.png",
   "credits_charged": 6
 }
 ```
@@ -181,12 +240,18 @@ curl -X POST https://sociafy.app/api/v1/images \
 Unknown fields are rejected with `400`, and there is no `count` — one request,
 one image, one charge.
 
+The request is held open for up to 90 seconds. If it takes longer, the connection
+ends without a result; see the refund caveat in §6.
+
+Status codes: `200`, `400`, `401`, `402`, `409`, `429`, `500`, `502`, `503`.
+
 ---
 
 ## 6. Credit costs
 
 Charged at submission. Nothing else on the request is billable — no charge for
-polling, for `GET /api/v1/me`, or for a request rejected with `400`/`401`/`429`.
+polling, for `GET /api/v1/me`, or for a request rejected with
+`400`/`401`/`404`/`429`.
 
 **Video, 4–12 s** (scaled pro-rata from the 8 s price, e.g. 6 s at 720p quality
 = `180 × 6/8` = 135):
@@ -219,12 +284,22 @@ Credits come back automatically, to the credit, when we fail to deliver:
 
 - The provider rejects or fails the generation.
 - The generation finishes but we cannot store the result.
-- A submission is never acknowledged (refunded after a 10-minute grace window).
-- A job is still unfinished after 2 hours.
+- A video submission is never acknowledged (refunded after a 10-minute grace
+  window).
+- A video job is still unfinished after 2 hours.
 
-You never need to ask for these, and they are applied at most once per charge.
-If a request returns `4xx` before generation starts, nothing was charged in the
-first place.
+Refunds are applied at most once per charge, and you never need to ask. If a
+request returns `4xx` before generation starts, nothing was charged in the first
+place.
+
+**One honest caveat, images only.** Video jobs are also swept by a background
+reconciler, so a video charge is closed out even if nothing ever polls it. Images
+are synchronous, and their refund runs inline in the request that failed. If that
+request's process dies before it can refund — an instance lost mid-flight, a
+deploy landing at the wrong moment, the 90-second ceiling reached — the charge
+stands with no image to show for it, and nothing retries it. This is rare, and
+we will refund it if you tell us, but **image refunds are best-effort rather than
+guaranteed** in v1. Videos are guaranteed.
 
 ---
 
@@ -237,26 +312,42 @@ a retried request is a second charge.
 Idempotency-Key: order-8891-clip-1
 ```
 
-8–200 printable ASCII characters. A malformed key is rejected with `400` rather
-than ignored — if you sent a key you are relying on it, so silently dropping it
-would be worse than failing.
+8–200 characters from printable ASCII `!` through `~` — **space is not allowed**,
+nor are tabs, newlines, or any non-ASCII byte. A malformed key is rejected with
+`400` rather than ignored: if you sent a key you are relying on it, so silently
+dropping it would be worse than failing.
+
+Both `POST` endpoints put an `Idempotency-Replay: true|false` header on every
+success response, whether or not you sent a key. Error responses do not carry it.
 
 Semantics:
 
-- **Same key, replayed after the first request completed** → the original job.
-  Same `id`, same `credits_charged`, no second charge, no second generation. The
-  response carries `Idempotency-Replay: true`.
+- **Same key, replayed after the first request succeeded** → the original result.
+  Same `id`, same `credits_charged`, no second charge, no second generation, and
+  for videos the original job's real status and parameters.
 - **Same key, replayed while the first request is still in flight** → for videos,
   the original job (the charge lands before the provider is called, so the id
   already exists). For images, `409 request_in_progress` — the image is not
-  stored yet, and we will not invent a result or charge you twice. Retry the
-  same key in a few seconds.
-- **Same key, different body** → the original job. The key is the identity of the
-  request; we do not re-generate with new parameters under an old key. Use a new
-  key when the parameters change.
-- **Keys are scoped to your account** and never expire. Reusing a key from last
-  month returns last month's job. Derive keys from something already unique on
-  your side (`order-8891-clip-1`), not from a timestamp.
+  stored yet, and we will not invent a result or charge you twice. Retry the same
+  key in a few seconds.
+- **Same key, different body** → the original result. The key is the identity of
+  the request; we do not re-generate with new parameters under an old key. Use a
+  new key when the parameters change.
+- **Keys are scoped to your account and to the endpoint**, and never expire. The
+  same raw key on `/videos` and on `/images` is two independent keys. Reusing a
+  key from last month returns last month's result, so derive keys from something
+  already unique on your side (`order-8891-clip-1`), not from a timestamp.
+
+### After a failure
+
+The two endpoints deliberately differ, because the useful answer differs.
+
+- **Images.** A failed attempt *releases* its key once the refund lands, so
+  retrying the same key is a genuine new attempt. You are not billed twice: the
+  first charge was already refunded.
+- **Videos.** A failed job *keeps* its key. Retrying returns that failed job with
+  a `202` and its `error` code — informative, but it will never become
+  `completed`. **Use a new `Idempotency-Key` to try again.**
 
 Idempotency covers the *charge*, which is the part that costs money. It does not
 deduplicate at the network layer: two requests fired in the same millisecond
@@ -264,43 +355,125 @@ still both reach us, but only one of them pays.
 
 ---
 
-## 8. Errors
+## 8. Rate limits
 
-Every error is JSON with a stable `error` code and a human `message`. Match on
-`error`, never on `message`.
+Two independent mechanisms. The spend caps in §1 are the real ceiling; this is a
+burst guard.
 
-| Status | `error` | Meaning |
+| Scope | Bucket | Limit |
 |---|---|---|
-| 400 | `invalid_request` | Body failed validation. `issues[]` names up to 5 offending fields. |
-| 400 | `invalid_idempotency_key` | Not 8–200 printable ASCII characters. |
-| 400 | `prompt_rejected` | The content filter refused the prompt. Credits were refunded. |
-| 401 | `unauthorized` | Missing, malformed, unknown, or revoked API key. |
-| 402 | `insufficient_credits` | Includes `balance` and `needed`. Top up and retry. |
-| 404 | `not_found` | No such generation for this account. |
-| 409 | `request_in_progress` | An image request with this `Idempotency-Key` has not finished yet. Retry the same key. |
-| 429 | `rate_limited` | Short-term burst limit. Honour `retry_after_sec`. |
-| 429 | `daily_cap_exceeded` | This key hit its rolling 24-hour credit cap. Includes `spent` and `cap`. |
-| 429 | `api_capacity_exceeded` | Platform-wide daily limit. Not your fault; retry later. |
-| 502 | `upstream_error` | Generation failed at the provider. Credits were refunded. Safe to retry with a **new** idempotency key. |
-| 503 | `service_unavailable` | Generation is temporarily offline. Nothing was charged. |
-| 500 | `internal` | Our bug. Nothing was charged, or it was refunded. |
+| `POST /api/v1/videos` | per API key | 3 immediately, then 1 per 100 s |
+| `POST /api/v1/images` | per API key | 3 immediately, then 1 per 100 s |
+| `GET /api/v1/videos/{id}` | — | not rate-limited |
+| `GET /api/v1/me` | — | not rate-limited |
 
-Failed video jobs report a code in the `error` field of `GET /api/v1/videos/{id}`
-rather than at the HTTP layer, since the request that fetched them succeeded:
+It is a token bucket of capacity 3 refilling at 3 tokens per 300 seconds. The two
+`POST` endpoints have **separate buckets**, so images do not consume the video
+budget. A token is taken *after* your body validates, so a rejected `400` costs
+you nothing — neither credits nor burst budget.
 
-| `error` | Meaning |
-|---|---|
-| `generation_rejected` | The provider refused the request outright. |
-| `generation_failed` | Generation started and did not produce a usable clip. |
-| `generation_timeout` | The job never finished. |
-| `storage_failed` | Generated, but we could not store it. |
-| `charge_failed` | The charge did not go through; nothing was generated. |
+Over the limit returns `429 rate_limited` with both a `Retry-After` header and a
+`retry_after_sec` body field. Honour either.
 
-All five are refunded.
+Two caveats worth designing around:
+
+- The limiter is **in-process**, not shared. On a multi-instance deployment each
+  instance keeps its own bucket, so the effective limit is somewhere between 3
+  and 3 × instances and is not deterministic. Treat the documented numbers as the
+  guaranteed floor, not a quota you can ride.
+- The `429` from a spend cap (`daily_cap_exceeded`, `api_capacity_exceeded`)
+  carries **no** `Retry-After`. Those windows are rolling 24-hour and there is no
+  single correct number; back off in minutes and read `daily_cap_remaining` from
+  `GET /api/v1/me`.
 
 ---
 
-## 9. Putting it together
+## 9. Errors
+
+Every error is JSON with a stable `error` code **and** a human `message`. Match on
+`error`, never on `message` — the codes are stable, the prose is not.
+
+```json
+{
+  "error": "insufficient_credits",
+  "message": "You need 180 credits but have 45. Top up or upgrade your plan.",
+  "balance": 45,
+  "needed": 180
+}
+```
+
+Some codes add machine-readable fields: `issues[]` on `invalid_request`,
+`balance`/`needed` on `insufficient_credits`, `spent`/`cap` on
+`daily_cap_exceeded`, `retry_after_sec` on `rate_limited`.
+
+Codes are **not** global — each applies only where listed.
+
+| Status | `error` | Where | Meaning |
+|---|---|---|---|
+| 400 | `invalid_request` | both POSTs | Body failed validation. `issues[]` holds up to 5 `{ "field": "...", "message": "..." }` objects. |
+| 400 | `invalid_idempotency_key` | both POSTs | Not 8–200 printable ASCII, space excluded. |
+| 400 | `prompt_rejected` | `POST /images` | The content filter refused this prompt. Credits were refunded. Change the prompt. |
+| 401 | `unauthorized` | everywhere | Missing, malformed, unknown, or revoked API key. |
+| 402 | `insufficient_credits` | both POSTs | Includes `balance` and `needed`. Top up and retry. |
+| 404 | `not_found` | `GET /videos/{id}` | No such generation for this account — including a malformed id. |
+| 409 | `request_in_progress` | both POSTs | Another request with this `Idempotency-Key` has not finished. Retry the same key in a few seconds. |
+| 429 | `rate_limited` | both POSTs | Burst limit (§8). Honour `Retry-After`. |
+| 429 | `daily_cap_exceeded` | both POSTs | This key hit its rolling 24-hour credit cap. Includes `spent` and `cap`. Raise the cap in the dashboard or wait. |
+| 429 | `api_capacity_exceeded` | both POSTs | Platform-wide daily limit. Not your fault; retry later. |
+| 500 | `internal` | everywhere | Our bug, and logged as one. Usually nothing was charged; on the rare variant that fails *after* the charge we cannot promise the automatic refund, so check `GET /api/v1/me` and tell us if your balance looks wrong. |
+| 502 | `upstream_error` | both POSTs | Generation failed, or succeeded and could not be delivered. Credits were refunded. Safe to retry. |
+| 502 | `configuration_error` | `POST /images` | **Our misconfiguration**, not your prompt. Credits were refunded. Retrying will not help until we fix it — tell us. |
+| 503 | `service_unavailable` | everywhere | Generation or storage is temporarily offline, or our provider account is. Credits, if any were taken, were refunded. |
+
+`configuration_error` exists because it used to be reported as
+`prompt_rejected`. Any provider `400` — an unsupported parameter, a model we had
+misnamed, an account-verification failure — was blamed on the caller's prompt
+and the caller went looking for a content filter that was never involved. If you
+receive `prompt_rejected` now, moderation genuinely refused; if the problem is
+ours you will be told so.
+
+### Failed video jobs
+
+A failed video reports its reason in the `error` field of `GET
+/api/v1/videos/{id}` — and of a `POST /api/v1/videos` replay — rather than at the
+HTTP layer, since the request that fetched it succeeded:
+
+| `error` | Meaning |
+|---|---|
+| `generation_rejected` | The provider refused the submission outright. |
+| `generation_failed` | Generation started and did not produce a usable clip. |
+| `generation_timeout` | The job never finished (closed out after 2 hours). |
+| `storage_failed` | Generated, but we could not store it. |
+| `submit_unconfirmed` | Our submission was never acknowledged, so we could not tell whether it was accepted. Closed out after a 10-minute grace window. |
+| `duplicate_request` | Another request with the same `Idempotency-Key` won the race; that one is the real job. |
+
+All of these are refunded. All of them require a **new** `Idempotency-Key` to try
+again (§7).
+
+---
+
+## 10. Versioning and stability
+
+`/api/v1` is stable. While it is v1 we will:
+
+- add response fields, add optional request fields, add new `error` codes, and
+  add new endpoints — **without notice**;
+- never remove or repurpose a documented response field, never change the meaning
+  of an existing `error` code, never make an optional request field required,
+  and never change a price without notice in `docs/pricing.md`.
+
+So: parse leniently, ignore fields you do not recognise, and treat an unknown
+`error` code by falling back on the HTTP status class. A breaking change means
+`/api/v2` alongside `/api/v1`, not a change under your feet.
+
+Provider neutrality is part of the contract. Which upstream models we use is
+deliberately not documented and not observable from a response, and we reserve
+the right to change them. If you need a specific named model, this is not the
+right API.
+
+---
+
+## 11. Putting it together
 
 ```bash
 #!/usr/bin/env bash
@@ -316,7 +489,7 @@ id=$(curl -sS -X POST https://sociafy.app/api/v1/videos \
   -d '{"prompt":"aerial push over a foggy pine ridge at sunrise","quality":"720p","aspect":"16:9"}' \
   | python3 -c 'import sys,json; print(json.load(sys.stdin)["id"])')
 
-# Seedance-class models resolve in 30-120s; 5s polling is plenty.
+# 30-120s is typical; 5s polling is plenty and GETs are not rate-limited.
 for _ in $(seq 1 60); do
   body=$(curl -sS "https://sociafy.app/api/v1/videos/$id" -H "Authorization: Bearer $KEY")
   status=$(printf '%s' "$body" | python3 -c 'import sys,json; print(json.load(sys.stdin)["status"])')
@@ -327,12 +500,16 @@ done
 echo "still pending after 5 minutes" >&2; exit 1
 ```
 
-Retrying the whole script with the same `IDEM` is free and returns the same
-clip.
+Re-running the script with the same `IDEM` is free and returns the same clip — as
+long as it succeeded. If it ended `failed`, change `IDEM` before retrying, or you
+will keep being handed the same dead job (§7).
+
+Submitting several clips? Space the `POST`s out, or expect `429 rate_limited`
+after the third (§8).
 
 ---
 
-## 10. Not in v1
+## 12. Not in v1
 
 Named so you build around them rather than waiting:
 
@@ -342,5 +519,8 @@ Named so you build around them rather than waiting:
   problem, not an effort one.
 - **Batch parameters.** One request, one job, one charge. Loop.
 - **Streaming or progress percentages.** `status` is `pending` until it isn't.
+- **Programmatic key management.** Session-only, see §1.
+- **CORS / browser access.** Server-to-server only.
+- **A guaranteed image refund sweeper.** See §6.
 - **Postpaid billing.** Prepaid credits are also the spend cap; a balance cannot
   go negative.

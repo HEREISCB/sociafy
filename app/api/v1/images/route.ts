@@ -11,11 +11,14 @@ import { charge, refund } from '../../../../lib/credits/ledger';
 import { priceForImage } from '../../../../lib/credits/pricing';
 import {
   apiError,
+  classifyImageFailure,
   findChargeBySource,
   isUniqueViolation,
+  logImageFailure,
   patchChargeMeta,
   providerPreflight,
   readIdempotencyKey,
+  releaseIdempotencySource,
 } from '../shared';
 
 export const runtime = 'nodejs';
@@ -48,14 +51,7 @@ export async function POST(req: NextRequest) {
     const openai = getOpenAI();
     if (!openai) return apiError('service_unavailable', 503, 'Image generation is temporarily unavailable.');
 
-    const rl = rateLimit('agentRun', `v1img:${auth.apiKeyId}`);
-    if (!rl.ok) {
-      return apiError('rate_limited', 429, 'Too many requests. Retry shortly.', {
-        retry_after_sec: rl.retryAfterSec,
-      });
-    }
-
-    const idem = readIdempotencyKey(req);
+    const idem = readIdempotencyKey(req, 'images');
     if (!idem.ok) return idem.response;
     const source = idem.source;
 
@@ -67,6 +63,20 @@ export async function POST(req: NextRequest) {
       });
     }
     const { prompt, size, quality } = parsed.data;
+
+    // Rate limit AFTER validation: §6 of the docs promises a 400 costs nothing,
+    // and it used to cost a token — three typos burned the whole burst budget.
+    // Still before the charge, which is the thing worth limiting.
+    const rl = rateLimit('agentRun', `v1img:${auth.apiKeyId}`);
+    if (!rl.ok) {
+      return apiError(
+        'rate_limited',
+        429,
+        'Too many requests. Retry shortly.',
+        { retry_after_sec: rl.retryAfterSec },
+        { 'retry-after': String(rl.retryAfterSec) },
+      );
+    }
 
     // Fast path for a retry whose original charge already landed. The unique
     // index in the catch below is the authority.
@@ -134,21 +144,39 @@ export async function POST(req: NextRequest) {
       // Lets an idempotent replay resolve to this asset instead of a 409.
       if (source) await patchChargeMeta(charged.ledgerId, { mediaAssetId: asset.id });
 
-      return Response.json({ id: asset.id, image_url: asset.publicUrl, credits_charged: unit.credits });
+      // Header on the fresh path too, so `Idempotency-Replay` is always present
+      // on both POSTs rather than only appearing on an images replay.
+      return Response.json(
+        { id: asset.id, image_url: asset.publicUrl, credits_charged: unit.credits },
+        { headers: { 'idempotency-replay': 'false' } },
+      );
     } catch (e) {
+      let refunded = false;
       try {
-        await refund({ userId: auth.userId, ledgerId: charged.ledgerId, reason: 'image_generation_failed' });
+        refunded = (await refund({
+          userId: auth.userId,
+          ledgerId: charged.ledgerId,
+          reason: 'image_generation_failed',
+        })).refunded;
       } catch (re) {
         console.warn('[v1/images] refund failed:', re instanceof Error ? re.message : re);
       }
-      const status = (e as { status?: number }).status;
-      console.error('[v1/images] generation failed:', e instanceof Error ? e.message : e);
-      // A 400 from the provider is the caller's prompt (moderation, unsupported
-      // content), not our outage — say so without echoing the provider's body.
-      if (status === 400) {
-        return apiError('prompt_rejected', 400, 'The prompt was rejected by the content filter. Credits were refunded.');
+      // A definitively failed attempt must give its Idempotency-Key back, or the
+      // charge row (which a refund does not delete) makes every later retry a
+      // permanent 409 — the docs' "retry the same key" could never succeed.
+      // Gated on the refund landing: releasing an unrefunded charge's claim would
+      // let the retry bill a second time.
+      if (source && refunded) {
+        await releaseIdempotencySource(charged.ledgerId);
+      } else if (source) {
+        console.error('[v1/images] refund not confirmed, keeping idempotency claim on', charged.ledgerId);
       }
-      return apiError('upstream_error', 502, 'Image generation failed upstream. Credits were refunded.');
+
+      // Never `prompt_rejected` on a bare 400 — see classifyImageFailure. The
+      // provider's real code and message go to the log, never to the caller.
+      const failure = classifyImageFailure(e);
+      logImageFailure('v1/images', e, failure);
+      return apiError(failure.code, failure.status, failure.message);
     }
   });
 }

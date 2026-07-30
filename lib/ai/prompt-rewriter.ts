@@ -6,7 +6,7 @@ import { getTextAI, completeText } from './client';
  * Media-prompt rewriter.
  *
  * Image and video models have very different prompting conventions — concrete
- * camera-language for gpt-image-1, verb-led motion for Seedance, etc. Rather
+ * camera-language for gpt-image-2, verb-led motion for Seedance, etc. Rather
  * than make the user learn that, we keep human-authored "skill" files next to
  * the code and push them into the rewriter's system prompt at call time.
  *
@@ -17,10 +17,10 @@ import { getTextAI, completeText } from './client';
 
 const SKILLS_DIR = path.join(process.cwd(), 'lib', 'ai', 'skills', 'prompts');
 
-export type RewriteTarget = 'gpt-image-1' | 'seedance-2';
+export type RewriteTarget = 'gpt-image-2' | 'seedance-2';
 
 const SKILL_BY_TARGET: Record<RewriteTarget, string> = {
-  'gpt-image-1': 'gpt-image-1.md',
+  'gpt-image-2': 'gpt-image-2.md',
   'seedance-2': 'seedance-2.md',
 };
 

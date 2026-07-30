@@ -4,7 +4,7 @@ import { withApiKey } from '../../../../../lib/api-key';
 import { db } from '../../../../../lib/db';
 import { videoJobs } from '../../../../../lib/db/schema';
 import { finalizeVideoJob } from '../../../../../lib/media/finalizeVideoJob';
-import { apiError, providerPreflight, publicVideoError } from '../../shared';
+import { apiError, providerPreflight, publicVideoError, UUID_RX } from '../../shared';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -27,7 +27,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     const { id } = await ctx.params;
     // Tenant scoping is the WHERE clause, not a post-hoc check: another
     // tenant's id is indistinguishable from a nonexistent one.
-    if (!/^[0-9a-f-]{36}$/i.test(id)) return apiError('not_found', 404, 'No such generation.');
+    // Strict uuid: `[0-9a-f-]{36}` let through 36-char strings Postgres cannot
+    // cast, and that cast threw inside the query, so a typo rendered a 500.
+    if (!UUID_RX.test(id)) return apiError('not_found', 404, 'No such generation.');
 
     const pre = providerPreflight({ r2: true, piapi: true });
     if (pre) return pre;

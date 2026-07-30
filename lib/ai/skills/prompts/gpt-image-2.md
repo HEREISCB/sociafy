@@ -1,4 +1,4 @@
-# Prompting gpt-image-1
+# Prompting gpt-image-2
 
 OpenAI's image model produces its best output when prompts read like a director's brief — concrete, visual, and shot from one specific point of view. Convert the user's loose description into ONE coherent scene.
 
