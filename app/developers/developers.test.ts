@@ -21,9 +21,12 @@ describe('docs/api.md agrees with the credit price table', () => {
     ['images', `| low | ${P.image_low_1024} | ${P.image_low_1024} |`],
     ['images', `| medium | ${P.image_medium_1024} | ${P.image_medium_portrait} |`],
     ['images', `| high | ${P.image_high_1024} | ${P.image_high_portrait} |`],
-    ['image reference input', `| reference input | ${P.image_reference_mp} credits per megapixel |`],
-    // The worked example in §5 is arithmetic on the same constant.
-    ['image reference example', `\`6 + ceil(1.05 × ${P.image_reference_mp})\` = **11 credits**`],
+    ['image reference input', `| reference input | ${P.image_reference} credits per reference image |`],
+    // The worked examples in §6 are arithmetic on the same constants — and they
+    // are stated at catalogue sizes, because 1024² is not what a product
+    // catalogue contains.
+    ['image reference example, 4000×4000', `\`${P.image_medium_1024} + ${P.image_reference}\` = **${P.image_medium_1024 + P.image_reference} credits**`],
+    ['image reference example, four refs', `\`${P.image_medium_1024} + 4 × ${P.image_reference}\` = **${P.image_medium_1024 + 4 * P.image_reference} credits**`],
   ])('%s row %s', (_section, row) => {
     expect(doc).toContain(row);
   });

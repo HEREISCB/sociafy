@@ -10,6 +10,15 @@ Base URL: `https://sociafy.app`
 call this API directly — and should not, since the credential is a secret that
 spends money.
 
+**Set your client timeout to at least 180 seconds before you send anything.**
+`POST /api/v1/images` is synchronous and has been measured at 66.5 / 68.9 / 69.0 /
+77.6 / 78.3 s text-only and 83.1 s with a reference image. The 60-second default
+that most HTTP clients apply unasked therefore fails by about ten seconds on
+*every* call, and it surfaces as a bare read timeout with no way to tell whether
+you were charged. Reference images make it worse: we allow up to 20 MB each and
+48 MB per request, and that upload happens before generation starts. `POST
+/api/v1/videos` returns in a second or two — this is about `/images`.
+
 ---
 
 ## 1. Authentication
@@ -242,12 +251,13 @@ curl -X POST https://sociafy.app/api/v1/images \
 Unknown fields are rejected with `400`, and there is no `count` — one request,
 one image, one charge.
 
-**Timing.** Text-only, `quality: "medium"` has been measured at **66–78 seconds**;
-`high` is slower, `low` is faster. Reference images add up to 45 seconds of
-fetching before generation starts, so plan for **up to ~2 minutes** on that path.
-The request is held open for up to 300 seconds. Set your client timeout to at
-least 180 s — a 60-second default fails on almost every request. If the
-connection ends without a result, see the refund caveat in §6.
+**Timing.** Text-only, `quality: "medium"` has been measured at **66–78 seconds**
+(66.5 / 68.9 / 69.0 / 77.6 / 78.3); with one reference image, **83.1 s**. `high` is
+slower, `low` is faster. References add up to 45 seconds of fetching plus the time
+to upload up to 48 MB of them, so plan for **up to ~3 minutes** on that path. The
+request is held open for up to 300 seconds. Set your client timeout to at least
+180 s — a 60-second default fails on almost every request. If the connection ends
+without a result, see the refund caveat in §6.
 
 Status codes: `200`, `400`, `401`, `402`, `409`, `429`, `500`, `502`, `503`.
 
@@ -282,6 +292,13 @@ does not clone: expect a faithful rendition, not a pixel-accurate copy of your
 photograph, and do not use it where an exact reproduction is a legal or
 contractual requirement (a hallmark, a serial number, engraved text).
 
+**There is no fidelity knob.** `input_fidelity` — the first parameter anyone
+integrating for product likeness reaches for — is not supported by the model
+behind this endpoint, which answers `invalid_input_fidelity_model`, so we do not
+send it and there is no field to set. Likeness is guided, not tunable. Send more
+angles rather than a bigger file: see the token table in §6 for why resolution
+does not help.
+
 Requirements, each of which is a distinct `400` if unmet:
 
 | Requirement | Why |
@@ -289,16 +306,19 @@ Requirements, each of which is a distinct `400` if unmet:
 | `https` only, no redirects | We fetch these ourselves. `http` and a redirect chain are both refused; send the final URL. |
 | Publicly resolvable host | Private, loopback, link-local and metadata addresses are blocked in every notation. |
 | `image/png`, `image/jpeg` or `image/webp` | And the bytes must match the header — we check the magic bytes, not your `content-type`. |
-| Under 5 MB each | Enforced while downloading, so a missing or dishonest `content-length` does not help. |
-| Readable dimensions | They price the request (below). If we cannot read them we refuse rather than guess. |
-| 16 megapixels total, across all references | 4 × 4 MP, or 1 × 16 MP. Downscale — the model does not benefit from more. |
+| Under 20 MB each, 48 MB in total | Enforced while downloading, so a missing or dishonest `content-length` does not help. We buffer every reference in memory at once, which is what the shared budget bounds — not the price. |
 | Reachable within 20 s each, 45 s in total | A slow host costs you the whole request. |
 
 URLs on our own media host are held to exactly the same checks — hosting an
 object says nothing about its size or its contents.
 
-Cost: the output price from §6 **plus a per-megapixel surcharge** on what you
-send. Nothing changes for a request without `reference_images`.
+There is **no megapixel limit and no dimension requirement**. Both used to exist,
+purely to bound a per-megapixel charge that no longer exists (§6), so an image we
+cannot measure is no longer refused.
+
+Cost: the output price from §6 **plus a flat surcharge per reference image**,
+independent of its resolution. Nothing changes for a request without
+`reference_images`.
 
 ---
 
@@ -337,22 +357,41 @@ polling, for `GET /api/v1/me`, or for a request rejected with
 
 | Add-on | Credits |
 |---|---|
-| reference input | 4 credits per megapixel |
+| reference input | 6 credits per reference image |
 
-Megapixels are summed across every reference you send, from the dimensions we
-read out of the files themselves, and the total is rounded **up** to a whole
-credit. Worked examples, at `quality: "medium"`, square:
+**Flat per image, whatever its resolution.** Worked examples at `quality:
+"medium"`, square:
 
-- one 1024×1024 reference → 1.05 MP → `6 + ceil(1.05 × 4)` = **11 credits**
-- four 1024×1024 references → 4.19 MP → `6 + ceil(4.19 × 4)` = **23 credits**
-- one 4000×3000 reference → 12 MP → `6 + 48` = **54 credits**
+- one 4000×4000 catalogue photo → `6 + 6` = **12 credits**
+- one 512×512 thumbnail → also **12 credits**
+- four references, any sizes → `6 + 4 × 6` = **30 credits**
 
-That is not a markup for the sake of it: the provider bills us ~1,024 input
-tokens per megapixel of reference, which on a large photo costs more than
-generating the image does. **Downscale your references to what you actually
-need** — 1024 px on the long edge is plenty — and the surcharge stays small. A
-request with no `reference_images` is priced exactly as it was before this field
-existed.
+Because the price is per image, `credits_charged` is fully computable from your
+request body before you send it: output tier + 6 × `len(reference_images)`.
+
+Why resolution is not in that formula: the provider bills reference input as
+image *tokens*, which are patch-based and clamped, and it downscales your file
+internally before the model sees it. Measured on the live API — same model, one
+reference each, `size: "1024x1024"`, `quality: "low"`:
+
+| Reference | Megapixels | Input image tokens | Output tokens |
+|---|---|---|---|
+| 512×512 | 0.25 | 1,024 | 196 |
+| 1024×1024 | 1.05 | 1,024 | 196 |
+| 2048×2048 | 4.0 | **1,521** | 196 |
+| 4000×4000 | 16.0 | **1,521** | 196 |
+
+A floor of 1,024 and a ceiling of 1,521, i.e. a 16 MP source costs us exactly
+what a 4 MP one does. So **uploading a larger source neither costs you more nor
+improves likeness** — those pixels are discarded before the model sees them. Send
+another angle instead; it does more for the result than more pixels ever will. The
+20 MB cap exists so masters do not have to be re-exported, not because big files
+are better.
+
+This used to be priced per megapixel, which billed a 4000×4000 photo 64 credits of
+surcharge — 70 in total — against a provider cost bounded at 1,521 tokens. That
+was wrong and it is fixed; the same request is now 12. A request with no
+`reference_images` is priced exactly as it was before this field existed.
 
 ### Refunds
 
@@ -493,9 +532,7 @@ Codes are **not** global — each applies only where listed.
 | 400 | `reference_url_rejected` | `POST /images` | A `reference_images` URL is not an `https` URL we will fetch: wrong scheme, a host that resolves to a private address, or a redirect. Nothing was charged. |
 | 400 | `reference_unfetchable` | `POST /images` | We reached the network but got no image: a non-2xx status, a connection failure, or a timeout. Nothing was charged. |
 | 400 | `reference_type_unsupported` | `POST /images` | Not `image/png`/`image/jpeg`/`image/webp`, or the bytes do not match the declared type. Nothing was charged. |
-| 400 | `reference_too_large` | `POST /images` | A reference exceeded 5 MB. Downscale it. Nothing was charged. |
-| 400 | `reference_dimensions_unreadable` | `POST /images` | We could not read the image's dimensions, and they price the request, so we refuse rather than guess. Re-export it. Nothing was charged. |
-| 400 | `reference_pixels_exceeded` | `POST /images` | References total more than 16 megapixels. Downscale them. Nothing was charged. |
+| 400 | `reference_too_large` | `POST /images` | A reference exceeded 20 MB, or all of them together exceeded 48 MB. Nothing was charged. |
 | 401 | `unauthorized` | everywhere | Missing, malformed, unknown, or revoked API key. |
 | 402 | `insufficient_credits` | both POSTs | Includes `balance` and `needed`. Top up and retry. |
 | 404 | `not_found` | `GET /videos/{id}` | No such generation for this account — including a malformed id. |
@@ -605,5 +642,7 @@ Named so you build around them rather than waiting:
 - **Programmatic key management.** Session-only, see §1.
 - **CORS / browser access.** Server-to-server only.
 - **A guaranteed image refund sweeper.** See §6.
+- **A likeness/fidelity parameter for images.** The model does not support one;
+  see §5.
 - **Postpaid billing.** Prepaid credits are also the spend cap; a balance cannot
   go negative.

@@ -176,7 +176,8 @@ const { POST } = await import('./images/route');
 
 // ---- reference-image fixtures ----------------------------------------------
 
-/** Minimal but real PNG header — imageDimensions parses IHDR, nothing else. */
+/** Minimal but real PNG — only the magic bytes are inspected now that dimensions
+ *  do not price anything, but keep a valid IHDR so the fixture stays honest. */
 function png(width: number, height: number): Buffer {
   const b = Buffer.alloc(33);
   Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(b, 0);
@@ -186,6 +187,9 @@ function png(width: number, height: number): Buffer {
   b.writeUInt32BE(height, 20);
   return b;
 }
+
+/** A PNG padded out to `bytes` — the byte cap is the only size limit left. */
+const bigPng = (bytes: number) => Buffer.concat([png(4_000, 4_000), Buffer.alloc(bytes - 33)]);
 
 const imageResponse = (body: Buffer | ReadableStream, type = 'image/png') =>
   new Response(body as BodyInit, { status: 200, headers: { 'content-type': type } });
@@ -397,10 +401,10 @@ describe('POST /api/v1/images', () => {
 });
 
 /**
- * Reference input. Two things are being protected here: the trust boundary (we
- * fetch URLs a stranger chose, on a public money-spending endpoint) and the
- * bill (pixels are priced, so an unreadable header must refuse, never guess).
- * Every rejection has to happen before the ledger is touched.
+ * Reference input. What is being protected here is the trust boundary — we fetch
+ * URLs a stranger chose, on a public money-spending endpoint — and the property
+ * that every rejection happens before the ledger is touched. Pricing is flat per
+ * reference, so nothing about the file's dimensions is a billing input.
  */
 describe('POST /api/v1/images — reference_images', () => {
   const ref = (body: unknown = {}) => ({
@@ -423,11 +427,11 @@ describe('POST /api/v1/images — reference_images', () => {
     return json;
   }
 
-  it('calls images.edit with the fetched files and prices the input pixels', async () => {
+  it('calls images.edit with the fetched files and charges a flat surcharge', async () => {
     const res = await post(ref());
     expect(res.status).toBe(200);
-    // 6 (medium square) + ceil(1024×1024 px = 1.048576 MP × 4 cr) = 6 + 5.
-    expect((await res.json()).credits_charged).toBe(11);
+    // 6 (medium square) + 6 (one reference, flat) = 12.
+    expect((await res.json()).credits_charged).toBe(12);
 
     expect(state.generateCalls).toHaveLength(0);
     expect(state.editCalls).toHaveLength(1);
@@ -444,7 +448,7 @@ describe('POST /api/v1/images — reference_images', () => {
 
     const meta = (state.charges[0] as { meta: Record<string, unknown> }).meta;
     expect(meta.referenceImages).toBe(1);
-    expect(meta.referenceSurcharge).toBe(5);
+    expect(meta.referenceSurcharge).toBe(6);
     expect(state.uploads).toBe(1);
   });
 
@@ -456,14 +460,25 @@ describe('POST /api/v1/images — reference_images', () => {
     expect(state.fetched).toHaveLength(0);
   });
 
-  it('accepts several angles and charges for all of their pixels', async () => {
+  it('accepts several angles and charges the flat surcharge for each', async () => {
     const urls = [1, 2, 3, 4].map((n) => `https://93.184.216.34/rings/ref-${n}.png`);
     const res = await post(ref({ reference_images: urls }));
     expect(res.status).toBe(200);
-    // 4 × 1.048576 MP = 4.194 MP → ceil(16.78) = 17.
-    expect((await res.json()).credits_charged).toBe(6 + 17);
+    expect((await res.json()).credits_charged).toBe(6 + 4 * 6);
     expect((state.editCalls[0] as { image: File[] }).image).toHaveLength(4);
     expect(state.fetched).toHaveLength(4);
+  });
+
+  // The bug this endpoint shipped with: a 4000×4000 catalogue photo was charged
+  // 64 credits of surcharge on top of a 6-credit base, for provider input tokens
+  // that are clamped at 1,521 either way. Resolution is not a billing input.
+  it('charges a 16 MP reference exactly what it charges a 1 MP one', async () => {
+    state.refFetch = () => imageResponse(png(4_000, 4_000)); // 16 MP
+    const big = await (await post(ref())).json();
+    expect(big.credits_charged).toBe(12); // not 70
+
+    state.refFetch = () => imageResponse(png(1_024, 1_024)); // 1.05 MP
+    expect((await (await post(ref())).json()).credits_charged).toBe(big.credits_charged);
   });
 
   it('rejects a 5th reference, an empty array and a non-array', async () => {
@@ -542,6 +557,30 @@ describe('POST /api/v1/images — reference_images', () => {
     await expectRejected(ref(), 'reference_type_unsupported');
   });
 
+  // 5 MB rejected real catalogue photography — a 4000² master is ~3.4 MB and
+  // less-compressed ones routinely exceed 5. The provider's own limit is <50 MB.
+  it('accepts a reference larger than the old 5 MB cap', async () => {
+    state.refFetch = () => imageResponse(bigPng(8 * 1024 * 1024));
+    const res = await post(ref());
+    expect(res.status).toBe(200);
+    expect((await res.json()).credits_charged).toBe(12);
+  });
+
+  it('rejects a reference over 20 MB', async () => {
+    state.refFetch = () => imageResponse(bigPng(21 * 1024 * 1024));
+    await expectRejected(ref(), 'reference_too_large');
+  });
+
+  // Per-image is not enough on its own: four 20 MB references are 80 MB buffered
+  // in one request, so the budget is shared as well.
+  it('rejects references that together exceed the total byte budget', async () => {
+    state.refFetch = () => imageResponse(bigPng(15 * 1024 * 1024)); // 4 × 15 = 60 MB
+    await expectRejected(
+      ref({ reference_images: [1, 2, 3, 4].map((n) => `https://93.184.216.34/${n}.png`) }),
+      'reference_too_large',
+    );
+  });
+
   it('enforces the byte cap while streaming, with no content-length to go on', async () => {
     state.refFetch = () =>
       imageResponse(
@@ -552,22 +591,26 @@ describe('POST /api/v1/images — reference_images', () => {
     await expectRejected(ref(), 'reference_too_large');
   });
 
-  it('refuses an image whose dimensions it cannot read, rather than guessing', async () => {
-    // Right magic bytes, no parsable IHDR: unpriceable, so it must fail closed.
+  // Both of these used to be 400s that existed only to bound a per-megapixel
+  // charge. With a flat surcharge neither has a cost to protect, so refusing an
+  // image because we cannot measure it is no longer justified.
+  it('no longer refuses an image whose dimensions it cannot read', async () => {
+    // Right magic bytes, no parsable IHDR — unmeasurable, and now unremarkable.
     state.refFetch = () =>
       imageResponse(Buffer.concat([png(1, 1).subarray(0, 8), Buffer.alloc(64, 7)]));
-    await expectRejected(ref(), 'reference_dimensions_unreadable');
+    const res = await post(ref());
+    expect(res.status).toBe(200);
+    expect((await res.json()).credits_charged).toBe(12);
   });
 
-  it('refuses more than the total megapixel ceiling, per image and cumulatively', async () => {
+  it('no longer imposes a megapixel ceiling', async () => {
     state.refFetch = () => imageResponse(png(5_000, 4_000)); // 20 MP in one file
-    await expectRejected(ref(), 'reference_pixels_exceeded');
+    expect((await post(ref())).status).toBe(200);
 
-    state.refFetch = () => imageResponse(png(2_500, 2_000)); // 5 MP each, 20 MP total
-    await expectRejected(
-      ref({ reference_images: [1, 2, 3, 4].map((n) => `https://93.184.216.34/${n}.png`) }),
-      'reference_pixels_exceeded',
-    );
+    state.refFetch = () => imageResponse(png(4_000, 4_000)); // 4 × 16 MP = 64 MP
+    const res = await post(ref({ reference_images: [1, 2, 3, 4].map((n) => `https://93.184.216.34/${n}.png`) }));
+    expect(res.status).toBe(200);
+    expect((await res.json()).credits_charged).toBe(6 + 4 * 6);
   });
 
   it('gives no bypass to a URL on our own media host', async () => {
@@ -581,6 +624,6 @@ describe('POST /api/v1/images — reference_images', () => {
     const res = await post(ref());
     expect(res.status).toBe(502);
     expect(state.refunds).toHaveLength(1);
-    expect((state.charges[0] as { credits: number }).credits).toBe(11);
+    expect((state.charges[0] as { credits: number }).credits).toBe(12);
   });
 });

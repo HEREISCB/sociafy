@@ -27,8 +27,9 @@ export const runtime = 'nodejs';
 // Synchronous like the first-party route. 90s was already marginal — medium
 // quality has been measured at 66-78s, and a client with a 60s default timed out
 // consistently. Reference images add up to REFERENCE_LIMITS.totalBudgetMs (45s)
-// of fetching before generation even starts, so the combined worst case is ~2
-// minutes. Timing out AFTER the charge is the worst outcome this route has, so
+// of fetching before generation even starts, plus the time to upload up to 48MB
+// of them to the provider, so the combined worst case is ~2-3 minutes. Timing out
+// AFTER the charge is the worst outcome this route has, so
 // the ceiling goes to the platform maximum we already use elsewhere (the cron
 // sweeper and the PiAPI webhook are both 300).
 export const maxDuration = 300;
@@ -56,8 +57,8 @@ const bodySchema = z
     /**
      * Public https URLs of product photos to imitate. One field rather than a
      * singular `image_url` plus a plural, so there is never a question of
-     * precedence; a one-element array is the single-reference case. Fetched,
-     * validated and priced by fetchReferenceImages — see REFERENCE_LIMITS.
+     * precedence; a one-element array is the single-reference case. Fetched and
+     * validated by fetchReferenceImages — see REFERENCE_LIMITS.
      */
     reference_images: z.array(z.string()).min(1).max(REFERENCE_LIMITS.maxImages).optional(),
   })
@@ -105,17 +106,18 @@ export async function POST(req: NextRequest) {
     }
 
     // Reference images are fetched BEFORE the charge: every way they can be
-    // wrong is the caller's own input, and §6 promises a 400 costs nothing. The
-    // pixel count they yield is a billing input, so this also has to happen
-    // before we can price the request at all.
-    let refs: { files: File[]; megapixels: number } | null = null;
+    // wrong is the caller's own input, and §6 promises a 400 costs nothing. A
+    // rejected reference must not be a charged reference.
+    let refs: File[] | null = null;
     if (referenceUrls) {
       const fetched = await fetchReferenceImages(referenceUrls);
       if (!fetched.ok) return fetched.response;
-      refs = fetched;
+      refs = fetched.files;
     }
 
-    const unit = priceForImage(size, quality, refs?.megapixels);
+    // Flat per reference — their resolution does not enter into it, because the
+    // provider's input token count is bounded either way.
+    const unit = priceForImage(size, quality, refs?.length);
     // Pre-flight so an under-funded key doesn't get as far as the provider.
     // `charge` below is still the authority (it re-checks under FOR UPDATE).
     const funded = await ensureBalance(auth.userId, unit.credits);
@@ -134,9 +136,7 @@ export async function POST(req: NextRequest) {
           quality,
           via: 'api_v1',
           prompt: prompt.slice(0, 200),
-          ...(refs
-            ? { referenceImages: refs.files.length, referenceMegapixels: Number(refs.megapixels.toFixed(3)), referenceSurcharge: unit.surcharge }
-            : {}),
+          ...(refs ? { referenceImages: refs.length, referenceSurcharge: unit.surcharge } : {}),
           ...(source ? { source } : {}),
         },
       });
@@ -160,7 +160,7 @@ export async function POST(req: NextRequest) {
       // (verified twice). Likeness is therefore guided, not pinned.
       const res = refs
         ? await openai.images.edit(
-            { model: MODELS.image, image: refs.files, prompt, size, quality, n: 1 },
+            { model: MODELS.image, image: refs, prompt, size, quality, n: 1 },
             { maxRetries: 0 },
           )
         : await openai.images.generate(

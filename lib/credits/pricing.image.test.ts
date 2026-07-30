@@ -12,9 +12,9 @@ describe('priceForImage — output pricing is unchanged', () => {
     expect(priceForImage('1024x1536', 'high')).toEqual({ action: 'image_high_portrait', credits: 23, surcharge: 0 });
   });
 
-  it('charges nothing extra for absent, zero or negative megapixels', () => {
-    for (const mp of [undefined, 0, -3]) {
-      expect(priceForImage('1024x1024', 'medium', mp)).toEqual({
+  it('charges nothing extra for absent, zero or negative reference counts', () => {
+    for (const refs of [undefined, 0, -3]) {
+      expect(priceForImage('1024x1024', 'medium', refs)).toEqual({
         action: 'image_medium_1024', credits: 6, surcharge: 0,
       });
     }
@@ -22,14 +22,22 @@ describe('priceForImage — output pricing is unchanged', () => {
 });
 
 describe('priceForImage — reference-image surcharge', () => {
-  const rate = CREDIT_PRICES.image_reference_mp;
+  const rate = CREDIT_PRICES.image_reference;
 
-  it('is credits-per-megapixel, rounded up', () => {
+  it('is a flat charge per reference image', () => {
     expect(priceForImage('1024x1024', 'medium', 1).surcharge).toBe(rate);
     expect(priceForImage('1024x1024', 'medium', 4).surcharge).toBe(4 * rate);
-    // A 1024×1024 reference is 1.048 MP: ceil keeps the rounding error ours.
-    expect(priceForImage('1024x1024', 'medium', 1.048576).surcharge).toBe(Math.ceil(1.048576 * rate));
-    expect(priceForImage('1024x1024', 'medium', 0.1).surcharge).toBe(1);
+  });
+
+  // The bug: input image tokens are clamped to 1024–1521 whatever the source
+  // resolution, so a 16 MP master cost 64 credits of surcharge for a bill
+  // identical to a 1 MP one. Resolution must not be an input to the price.
+  it('does not depend on the resolution of the reference', () => {
+    // The caller passes a count, so there is no dimension to charge for at all:
+    // one 4000×4000 (16 MP) reference and one 1024×1024 (1 MP) are both 1.
+    expect(priceForImage('1024x1024', 'medium', 1).credits).toBe(CREDIT_PRICES.image_medium_1024 + rate);
+    // GDC's case: 4000×4000 catalogue photo, medium square. 12, not 70.
+    expect(priceForImage('1024x1024', 'medium', 1).credits).toBe(12);
   });
 
   it('adds the surcharge to the output price and reports it separately', () => {
@@ -41,19 +49,19 @@ describe('priceForImage — reference-image surcharge', () => {
   });
 
   it('is independent of size and quality', () => {
-    const mp = 3.5;
     const surcharges = (['low', 'medium', 'high'] as const).flatMap((q) =>
-      (['1024x1024', '1536x1024', '1024x1536'] as const).map((s) => priceForImage(s, q, mp).surcharge),
+      (['1024x1024', '1536x1024', '1024x1536'] as const).map((s) => priceForImage(s, q, 3).surcharge),
     );
     expect(new Set(surcharges).size).toBe(1);
   });
 
   it('stays profitable at the assumed provider rate', () => {
-    // ~1,024 input image tokens per MP (measured), assumed at $20 per 1M tokens
-    // — 2× the published gpt-image-1 image-input rate. Revenue is $0.012/credit.
-    const costPerMp = (1_024 / 1_000_000) * 20;
-    expect(rate * 0.012).toBeGreaterThan(costPerMp);
+    // Worst case 1,521 input image tokens per reference (measured ceiling),
+    // assumed at $20 per 1M tokens — 2× the published gpt-image-1 image-input
+    // rate. Revenue is $0.012/credit.
+    const costPerRef = (1_521 / 1_000_000) * 20;
+    expect(rate * 0.012).toBeGreaterThan(costPerRef);
     // …and still profitable if the true rate is double what we assumed.
-    expect(rate * 0.012).toBeGreaterThan(costPerMp * 2);
+    expect(rate * 0.012).toBeGreaterThan(costPerRef * 2);
   });
 });

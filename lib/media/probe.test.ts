@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { imageDimensions, imageFormat, videoDurationSec } from './probe';
+import { imageFormat, videoDurationSec } from './probe';
 
 /** Minimal ISO-BMFF box builder — enough to exercise the atom walk. */
 function box(type: string, body: Buffer): Buffer {
@@ -103,8 +103,8 @@ describe('videoDurationSec (mvhd parser)', () => {
 });
 
 // =====================================================
-// Still images — these numbers price /api/v1/images reference input, so a
-// wrong parse is a wrong bill and an unreadable header must stay unreadable.
+// Still images — the format sniff is what stops a caller's content-type header
+// from deciding what we hand to the image provider.
 // =====================================================
 
 const PNG_SIG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -154,20 +154,6 @@ function webpLossy(width: number, height: number): Buffer {
   return riff('VP8 ', p);
 }
 
-function webpLossless(width: number, height: number): Buffer {
-  const p = Buffer.alloc(5);
-  p[0] = 0x2f;
-  p.writeUInt32LE(((height - 1) << 14) | (width - 1), 1);
-  return riff('VP8L', p);
-}
-
-function webpExtended(width: number, height: number): Buffer {
-  const p = Buffer.alloc(10);
-  p.writeUIntLE(width - 1, 4, 3);
-  p.writeUIntLE(height - 1, 7, 3);
-  return riff('VP8X', p);
-}
-
 describe('imageFormat (magic bytes)', () => {
   it('identifies the three formats we accept', () => {
     expect(imageFormat(png(1, 1))).toBe('png');
@@ -181,51 +167,5 @@ describe('imageFormat (magic bytes)', () => {
     // RIFF, but a WAV rather than a WEBP.
     expect(imageFormat(Buffer.from('RIFF....WAVEfmt ', 'latin1'))).toBeNull();
     expect(imageFormat(Buffer.alloc(0))).toBeNull();
-  });
-});
-
-describe('imageDimensions', () => {
-  it('reads PNG IHDR', () => {
-    expect(imageDimensions(png(1024, 1024))).toEqual({ width: 1024, height: 1024 });
-    expect(imageDimensions(png(4032, 3024))).toEqual({ width: 4032, height: 3024 });
-  });
-
-  it('reads a JPEG SOF0 past an APP0 segment', () => {
-    expect(imageDimensions(jpeg(1600, 1200))).toEqual({ width: 1600, height: 1200 });
-  });
-
-  it('reads a progressive JPEG (SOF2)', () => {
-    expect(imageDimensions(jpeg(800, 600, 0xc2))).toEqual({ width: 800, height: 600 });
-  });
-
-  it('reads all three WebP chunk layouts', () => {
-    expect(imageDimensions(webpLossy(1024, 768))).toEqual({ width: 1024, height: 768 });
-    expect(imageDimensions(webpLossless(2000, 1500))).toEqual({ width: 2000, height: 1500 });
-    expect(imageDimensions(webpExtended(3000, 2000))).toEqual({ width: 3000, height: 2000 });
-  });
-
-  it('returns null for garbage and for truncated headers', () => {
-    expect(imageDimensions(Buffer.from('not an image, just some text bytes'))).toBeNull();
-    expect(imageDimensions(Buffer.alloc(0))).toBeNull();
-    expect(imageDimensions(Buffer.alloc(64))).toBeNull();
-    // Right magic bytes, nothing behind them — the case that must NOT be guessed.
-    expect(imageDimensions(PNG_SIG)).toBeNull();
-    expect(imageDimensions(Buffer.concat([PNG_SIG, Buffer.alloc(16, 9)]))).toBeNull();
-    expect(imageDimensions(png(1024, 1024).subarray(0, 19))).toBeNull();
-    expect(imageDimensions(jpeg(1600, 1200).subarray(0, 24))).toBeNull();
-    expect(imageDimensions(webpLossy(1024, 768).subarray(0, 24))).toBeNull();
-  });
-
-  it('returns null for a JPEG whose only marker is SOS, and for a bad WebP sync code', () => {
-    const sos = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xda, 0x00, 0x08]), Buffer.alloc(8)]);
-    expect(imageDimensions(sos)).toBeNull();
-    const broken = webpLossy(1024, 768);
-    broken[23] = 0x00; // corrupt the 0x9d 0x01 0x2a sync code
-    expect(imageDimensions(broken)).toBeNull();
-  });
-
-  it('treats a zero dimension as unknown rather than free', () => {
-    expect(imageDimensions(png(0, 1024))).toBeNull();
-    expect(imageDimensions(jpeg(1024, 0))).toBeNull();
   });
 });

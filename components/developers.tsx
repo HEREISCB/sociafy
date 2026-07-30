@@ -60,6 +60,13 @@ export const DeveloperDocs: React.FC = () => (
         <br />
         Base URL <code className="mono">{BASE}</code> · <strong>server-to-server only</strong> —
         no endpoint sends CORS headers, and the key is a secret that spends money.
+        <br />
+        <strong>Set your client timeout to at least 180 s before you send anything.</strong>{' '}
+        <code className="mono">POST /images</code> is synchronous and measures 66.5 / 68.9 / 69.0 /
+        77.6 / 78.3 s text-only, 83.1 s with a reference — so the 60 s default most HTTP clients
+        apply unasked fails by about ten seconds on <em>every</em> call, as a bare read timeout that
+        cannot tell you whether you were charged. References make it worse: up to 20 MB each and
+        48 MB per request, uploaded before generation starts.
       </div>
 
       <ol className="dev-steps">
@@ -170,7 +177,7 @@ curl -sS ${BASE}/me \\
         </div>
       </Endpoint>
 
-      <Endpoint method="POST" path="/images" blurb="Synchronous — 66–78s measured at medium quality, up to ~2 minutes with reference images, returned as 200. The request is held open for up to 300 seconds, so set your client timeout to at least 180 — a 60s default fails every time.">
+      <Endpoint method="POST" path="/images" blurb="Synchronous — 66–78s measured at medium quality, 83s with a reference, up to ~3 minutes once 48 MB of references have to be uploaded. Returned as 200. The request is held open for up to 300 seconds, so set your client timeout to at least 180 — a 60s default fails every time.">
         <Code>{`curl -X POST ${BASE}/images \\
   -H "Authorization: Bearer $SOCIAFY_API_KEY" \\
   -H "Content-Type: application/json" \\
@@ -198,8 +205,10 @@ curl -sS ${BASE}/me \\
               <td>
                 1–4 <strong>https</strong> URLs of photos to work from —{' '}
                 <code className="mono">png</code> · <code className="mono">jpeg</code> ·{' '}
-                <code className="mono">webp</code>, under 5 MB each, 16 megapixels in total, no
-                redirects, no private hosts. Surcharged per megapixel (see below).
+                <code className="mono">webp</code>, under 20 MB each and 48 MB in total, no
+                redirects, no private hosts. No megapixel limit. Surcharged{' '}
+                <strong>{P.image_reference} credits per image</strong>, whatever its resolution
+                (see below).
               </td>
               <td>omitted</td>
             </tr>
@@ -210,13 +219,14 @@ curl -sS ${BASE}/me \\
           several angles of one item beat a single shot. <strong>Likeness is guided, not
           guaranteed:</strong> you get a faithful rendition of the form, materials and finish, not a
           pixel-accurate copy, so do not rely on it to reproduce a hallmark, a serial number or
-          engraved text. Anything wrong with a URL comes back as its own{' '}
+          engraved text. <strong>There is no fidelity knob:</strong>{' '}
+          <code className="mono">input_fidelity</code> is not supported by the model behind this
+          endpoint (it answers <code className="mono">invalid_input_fidelity_model</code>), so
+          likeness is guided, not tunable. Anything wrong with a URL comes back as its own{' '}
           <code className="mono">400</code> (<code className="mono">reference_url_rejected</code>,{' '}
           <code className="mono">reference_unfetchable</code>,{' '}
           <code className="mono">reference_type_unsupported</code>,{' '}
-          <code className="mono">reference_too_large</code>,{' '}
-          <code className="mono">reference_dimensions_unreadable</code>,{' '}
-          <code className="mono">reference_pixels_exceeded</code>) with the offending{' '}
+          <code className="mono">reference_too_large</code>) with the offending{' '}
           <code className="mono">reference_url</code> — never as{' '}
           <code className="mono">prompt_rejected</code>, and never charged.
         </div>
@@ -312,19 +322,38 @@ echo "still pending after 5 minutes" >&2; exit 1`}</Code>
         <tbody>
           <tr>
             <td className="mono">reference_images</td>
-            <td className="mono">{P.image_reference_mp} per megapixel of input</td>
+            <td className="mono">{P.image_reference} per reference image</td>
           </tr>
         </tbody>
       </table>
       <div className="sub" style={{ marginTop: 6 }}>
-        Megapixels are summed across every reference, read from the files themselves, and rounded up
-        to a whole credit: one 1024×1024 reference on a medium square image is{' '}
-        {P.image_medium_1024} + {Math.ceil(1.048576 * P.image_reference_mp)} ={' '}
-        {P.image_medium_1024 + Math.ceil(1.048576 * P.image_reference_mp)} credits, four of them are{' '}
-        {P.image_medium_1024 + Math.ceil(4 * 1.048576 * P.image_reference_mp)}, and one 4000×3000
-        photo is {P.image_medium_1024 + 12 * P.image_reference_mp}. The provider bills us ~1,024
-        input tokens per megapixel, so a big photo genuinely costs more than the image it guides —
-        downscale to about 1024 px on the long edge and this stays small. Requests without{' '}
+        <strong>Flat per image, whatever its resolution.</strong> On a medium square image, one
+        4000×4000 catalogue photo is {P.image_medium_1024} + {P.image_reference} ={' '}
+        {P.image_medium_1024 + P.image_reference} credits — and so is one 512×512 thumbnail; four
+        references of any size are {P.image_medium_1024} + 4 × {P.image_reference} ={' '}
+        {P.image_medium_1024 + 4 * P.image_reference}. So the charge is computable before you send
+        the request: output tier + {P.image_reference} × the number of references.
+      </div>
+      <div className="sub" style={{ marginTop: 6 }}>
+        Resolution is absent from that formula because the provider bills reference input as
+        patch-based image <em>tokens</em> and downscales your file before the model sees it. Measured
+        on the live API, one reference each at <code className="mono">1024x1024</code> /{' '}
+        <code className="mono">low</code>:
+      </div>
+      <table className="dev-table">
+        <thead><tr><th>Reference</th><th>Megapixels</th><th>Input image tokens</th><th>Output tokens</th></tr></thead>
+        <tbody>
+          <tr><td className="mono">512×512</td><td className="mono">0.25</td><td className="mono">1,024</td><td className="mono">196</td></tr>
+          <tr><td className="mono">1024×1024</td><td className="mono">1.05</td><td className="mono">1,024</td><td className="mono">196</td></tr>
+          <tr><td className="mono">2048×2048</td><td className="mono">4.0</td><td className="mono">1,521</td><td className="mono">196</td></tr>
+          <tr><td className="mono">4000×4000</td><td className="mono">16.0</td><td className="mono">1,521</td><td className="mono">196</td></tr>
+        </tbody>
+      </table>
+      <div className="sub" style={{ marginTop: 6 }}>
+        A floor of 1,024 tokens and a ceiling of 1,521: a 16 MP source costs exactly what a 4 MP one
+        does. <strong>Uploading a larger source neither costs you more nor improves likeness</strong>{' '}
+        — send another angle instead. The 20 MB cap is there so you need not re-export your masters,
+        not because big files help. Requests without{' '}
         <code className="mono">reference_images</code> are priced exactly as before.
       </div>
 

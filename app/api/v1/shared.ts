@@ -7,7 +7,7 @@ import { creditLedger, videoJobs } from '../../../lib/db/schema';
 import { isStubMode } from '../../../lib/env';
 import { charge, ensureBalance, InsufficientCreditsError, refund } from '../../../lib/credits/ledger';
 import { priceForVideo, type VideoQuality } from '../../../lib/credits/pricing';
-import { imageDimensions, imageFormat, type ImageFormat } from '../../../lib/media/probe';
+import { imageFormat, type ImageFormat } from '../../../lib/media/probe';
 import { createSeedanceTask, type SeedanceAspect } from '../../../lib/ai/piapi';
 
 /**
@@ -520,21 +520,29 @@ export async function submitVideo(args: SubmitVideoArgs): Promise<SubmitVideoRes
 // =====================================================
 
 /**
- * Limits on caller-supplied reference images. Tight on purpose: /images is a
- * public, money-spending endpoint, and each URL is both an SSRF surface and a
- * billing input (pixels are charged — see priceForImage's referenceMegapixels).
- * 5MB and 16MP together clear product photography with room to spare while
- * bounding what one request can make us fetch, buffer and pay for.
+ * Limits on caller-supplied reference images. /images is a public,
+ * money-spending endpoint and each URL is an SSRF surface, so every one of these
+ * is mandatory — but none of them is about price any more: the surcharge is flat
+ * per reference (see image_reference in lib/credits/pricing.ts), so dimensions
+ * and bytes no longer affect the bill. What is left is memory and latency.
+ *
+ * 20MB per image clears catalogue masters (the provider's own limit is <50MB) and
+ * 48MB across all four bounds the buffered total, since we hold every reference in
+ * memory at once. Four 20MB uploads would add minutes to a call already measured
+ * at 66–83s, which the total budget also keeps in check.
  */
 export const REFERENCE_LIMITS = {
   maxImages: 4,
-  maxBytes: 5 * 1024 * 1024,
-  maxTotalMegapixels: 16,
+  maxBytes: 20 * 1024 * 1024,
+  /** All references together — 4 × maxBytes of buffered memory is not acceptable. */
+  maxTotalBytes: 48 * 1024 * 1024,
   perFetchMs: 20_000,
   /** All fetches together. Four slow hosts must not eat the route's maxDuration
    *  and strand us mid-generation after the charge. */
   totalBudgetMs: 45_000,
 } as const;
+
+const mb = (bytes: number) => bytes / 1024 / 1024;
 
 /** The only content types we accept, mapped to the magic-byte format that must
  *  back them up. `image/jpg` is deliberately absent — it isn't a real type. */
@@ -626,7 +634,7 @@ async function readCapped(resp: Response, maxBytes: number): Promise<Buffer | nu
 }
 
 export type ReferenceFetch =
-  | { ok: true; files: File[]; megapixels: number }
+  | { ok: true; files: File[] }
   | { ok: false; response: Response };
 
 /**
@@ -638,14 +646,14 @@ export type ReferenceFetch =
  *
  * Checks, in order and all mandatory: https only, no private/loopback/metadata
  * destination, no redirects, an accepted content-type, magic bytes that agree
- * with it, a streamed byte cap, readable dimensions, and a total pixel ceiling.
- * A URL on our own R2 public base is not special-cased — it takes the identical
- * path, because "we host it" says nothing about its size or its bytes.
+ * with it, and a streamed byte cap (per image and across all of them). A URL on
+ * our own R2 public base is not special-cased — it takes the identical path,
+ * because "we host it" says nothing about its bytes.
  */
 export async function fetchReferenceImages(urls: string[]): Promise<ReferenceFetch> {
   const deadline = Date.now() + REFERENCE_LIMITS.totalBudgetMs;
   const files: File[] = [];
-  let pixels = 0;
+  let bytes = 0;
 
   for (const [i, raw] of urls.entries()) {
     const bad = (code: string, message: string) =>
@@ -699,21 +707,17 @@ export async function fetchReferenceImages(urls: string[]): Promise<ReferenceFet
       return bad('reference_type_unsupported', 'Reference images must be image/png, image/jpeg or image/webp.');
     }
 
-    const body = await readCapped(resp, REFERENCE_LIMITS.maxBytes);
+    // One cap, whichever binds first: what is left of the shared budget, never
+    // more than one image's own allowance. Both are enforced by the streaming
+    // counter, so a missing or dishonest content-length changes nothing.
+    const body = await readCapped(resp, Math.min(REFERENCE_LIMITS.maxBytes, REFERENCE_LIMITS.maxTotalBytes - bytes));
     if (!body) {
-      return bad('reference_too_large', `Each reference image must be under ${REFERENCE_LIMITS.maxBytes / 1024 / 1024} MB. Downscale it — pixels are billed as well.`);
+      return bad('reference_too_large', `Each reference image must be under ${mb(REFERENCE_LIMITS.maxBytes)} MB, and all of them together under ${mb(REFERENCE_LIMITS.maxTotalBytes)} MB.`);
     }
+    bytes += body.length;
     // The bytes decide, not the header the caller's server chose to send.
     if (imageFormat(body) !== expected) {
       return bad('reference_type_unsupported', `That file is not really ${declared} — its content-type and its actual bytes disagree.`);
-    }
-    const dim = imageDimensions(body);
-    if (!dim) {
-      return bad('reference_dimensions_unreadable', 'We could not read that image\'s dimensions, and they price the request, so we will not guess. Re-export it as a standard PNG, JPEG or WebP.');
-    }
-    pixels += dim.width * dim.height;
-    if (pixels > REFERENCE_LIMITS.maxTotalMegapixels * 1e6) {
-      return bad('reference_pixels_exceeded', `Reference images may total at most ${REFERENCE_LIMITS.maxTotalMegapixels} megapixels. Downscale them — the model does not need more.`);
     }
     files.push(
       // Uint8Array, not the Buffer itself: Blob's types only accept a view over
@@ -724,7 +728,7 @@ export async function fetchReferenceImages(urls: string[]): Promise<ReferenceFet
     );
   }
 
-  return { ok: true, files, megapixels: pixels / 1e6 };
+  return { ok: true, files };
 }
 
 /** Resolve an idempotency source back to the job its original charge created. */
