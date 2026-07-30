@@ -17,7 +17,8 @@ import { isStubMode } from '../env';
  * Concurrency-safe: the transition to 'completed' is a conditional UPDATE and
  * only the caller that actually claims the row writes the media_assets row.
  * Two overlapping polls therefore produce one asset, not two, and the failure
- * path refunds once.
+ * path refunds once. The claim and the asset commit in one transaction, so no
+ * reader can see 'completed' before the asset it needs exists.
  */
 
 export type VideoJob = typeof videoJobs.$inferSelect;
@@ -99,14 +100,46 @@ export async function finalizeVideoJob(job: VideoJob): Promise<FinalizeVideoResu
     return failAndRefund(job, `store_failed: ${msg.slice(0, 200)}`);
   }
 
-  // Claim. Only the caller whose UPDATE matches a row inserts the asset.
-  const claimed = await db()
-    .update(videoJobs)
-    .set({ status: 'completed', error: null, updatedAt: new Date() })
-    .where(and(eq(videoJobs.id, job.id), ne(videoJobs.status, 'completed')))
-    .returning({ id: videoJobs.id });
+  // Claim, insert the asset and link it — in ONE transaction, and MANDATORY that
+  // it stays one. As three separate commits the row was briefly
+  // status='completed' with media_asset_id IS NULL, which GET /api/v1/videos/{id}
+  // reports as a completion carrying no video_url; the image path shipped the
+  // same ordering and a caller acted on that completion and discarded an asset
+  // they had paid for. Committing together makes status and asset visible
+  // together. Do not split this back apart.
+  //
+  // Only the caller whose conditional UPDATE matches inserts the asset, so two
+  // overlapping finalizes still produce one asset — and the loser inserts
+  // nothing, so it cannot leave an orphan row in the user's library.
+  //
+  // The download and upload stay above: a transaction is never held open across
+  // a network hop (the deploy connects through a transaction-mode pooler).
+  const asset = await db().transaction(async (tx) => {
+    const claimed = await tx
+      .update(videoJobs)
+      .set({ status: 'completed', error: null, updatedAt: new Date() })
+      .where(and(eq(videoJobs.id, job.id), ne(videoJobs.status, 'completed')))
+      .returning({ id: videoJobs.id });
+    if (claimed.length === 0) return null; // Lost the race — insert nothing.
 
-  if (claimed.length === 0) {
+    const [row] = await tx
+      .insert(mediaAssets)
+      .values({
+        userId: job.userId,
+        storageKey: key,
+        publicUrl: publicUrlFor(key),
+        mimeType: contentType,
+        sizeBytes,
+        durationS: String(job.durationSec),
+        label: job.prompt.slice(0, 80),
+      })
+      .returning();
+
+    await tx.update(videoJobs).set({ mediaAssetId: row.id, updatedAt: new Date() }).where(eq(videoJobs.id, job.id));
+    return row;
+  });
+
+  if (!asset) {
     // Lost the race. Our R2 object is a harmless orphan; report the winner's.
     const [fresh] = await db().select().from(videoJobs).where(eq(videoJobs.id, job.id)).limit(1);
     if (fresh?.mediaAssetId) {
@@ -114,21 +147,6 @@ export async function finalizeVideoJob(job: VideoJob): Promise<FinalizeVideoResu
     }
     return { status: 'pending', providerStatus: 'finalizing' };
   }
-
-  const [asset] = await db()
-    .insert(mediaAssets)
-    .values({
-      userId: job.userId,
-      storageKey: key,
-      publicUrl: publicUrlFor(key),
-      mimeType: contentType,
-      sizeBytes,
-      durationS: String(job.durationSec),
-      label: job.prompt.slice(0, 80),
-    })
-    .returning();
-
-  await db().update(videoJobs).set({ mediaAssetId: asset.id, updatedAt: new Date() }).where(eq(videoJobs.id, job.id));
 
   return { status: 'completed', asset, rewrittenPrompt: job.rewrittenPrompt };
 }

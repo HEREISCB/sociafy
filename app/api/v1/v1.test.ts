@@ -22,6 +22,9 @@ const state = vi.hoisted(() => ({
   refunds: [] as Record<string, unknown>[],
   submits: [] as Record<string, unknown>[],
   submitError: null as Error | null,
+  /** Overrides what finalizeVideoJob answers, so the reader's own handling of a
+   *  completion it cannot resolve is testable without racing anything. */
+  finalizeResult: null as Record<string, unknown> | null,
   /** Simulates a database fault after the charge landed — not a provider
    *  rejection, and it must not be reported as one. */
   failUpdates: false,
@@ -156,7 +159,8 @@ vi.mock('../../../lib/ai/piapi', () => ({
 }));
 
 vi.mock('../../../lib/media/finalizeVideoJob', () => ({
-  finalizeVideoJob: (job: Record<string, unknown>) => Promise.resolve({ status: job.status ?? 'pending' }),
+  finalizeVideoJob: (job: Record<string, unknown>) =>
+    Promise.resolve(state.finalizeResult ?? { status: job.status ?? 'pending' }),
 }));
 
 const { POST } = await import('./videos/route');
@@ -184,6 +188,7 @@ beforeEach(() => {
   state.refunds = [];
   state.submits = [];
   state.submitError = null;
+  state.finalizeResult = null;
   state.failUpdates = false;
   process.env.PIAPI_API_KEY = 'test-key';
   delete process.env.PIAPI_WEBHOOK_SECRET;
@@ -393,6 +398,30 @@ describe('GET /api/v1/videos/{id}', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toMatchObject({ id: created.id, status: 'pending', video_url: null, credits_charged: 180 });
+  });
+
+  it('serves a completed job with the stored url', async () => {
+    const created = await (await post({ prompt: 'a cat surfing' })).json();
+    state.finalizeResult = { status: 'completed', asset: { publicUrl: 'https://cdn.test/users/user_1/vid.mp4' } };
+    const body = await (await GET(new Request('https://sociafy.test/x') as never, params(created.id))).json();
+    expect(body).toMatchObject({ status: 'completed', video_url: 'https://cdn.test/users/user_1/vid.mp4', error: null });
+  });
+
+  // A `completed` with a null url is what made an integrator discard an asset
+  // they had paid for. Not deliverable yet = pending, so the poll loop continues.
+  it('reports a completion it cannot resolve a url for as pending', async () => {
+    const created = await (await post({ prompt: 'a cat surfing' })).json();
+    state.finalizeResult = { status: 'completed' };
+    const body = await (await GET(new Request('https://sociafy.test/x') as never, params(created.id))).json();
+    expect(body).toMatchObject({ status: 'pending', video_url: null, error: null });
+  });
+
+  it('still terminates a genuine failure with its public code', async () => {
+    const created = await (await post({ prompt: 'a cat surfing' })).json();
+    state.finalizeResult = { status: 'failed', error: 'submit_failed: piapi_400 {"detail":"nope"}' };
+    const body = await (await GET(new Request('https://sociafy.test/x') as never, params(created.id))).json();
+    expect(body).toMatchObject({ status: 'failed', error: 'generation_rejected', video_url: null });
+    expect(JSON.stringify(body)).not.toMatch(/piapi|nope/i);
   });
 
   it('404s a non-uuid id without touching the db', async () => {

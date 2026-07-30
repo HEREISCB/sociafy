@@ -198,6 +198,11 @@ curl https://sociafy.app/api/v1/videos/8f2c1d6e-4a71-4b0e-9a3c-77c1e5b2d901 \
 `status` is one of `pending`, `completed`, `failed`. While `pending`,
 `video_url` and `error` are both `null`.
 
+**`completed` always carries a usable `video_url`.** The status and the URL become
+visible in the same commit, so you never need to defend against a `completed` with
+a null URL — if the file is not deliverable yet the job still reads `pending`, and
+you keep polling. Treat `completed` as "take `video_url`", nothing more.
+
 `credits_charged` is what the job debited, as history. On a `failed` job those
 credits are refunded automatically — check `GET /api/v1/me` for your live
 balance, not this field.
@@ -286,7 +291,10 @@ curl https://sociafy.app/api/v1/images/b4d1f0c9-7e52-4a18-9c3b-2f7a41d0e6b5 \
 ```
 
 `status` is one of `pending`, `completed`, `failed`; while `pending`, `image_url`
-and `error` are both `null`. A `failed` job names its reason in `error` (§9) and
+and `error` are both `null`. **`completed` always carries a usable `image_url`** —
+status and URL become visible in the same commit, so a `completed` with a null URL
+is not a shape you have to handle; a job that is not deliverable yet still reads
+`pending`. A `failed` job names its reason in `error` (§9) and
 its credits are refunded automatically. Poll every 5 seconds — most jobs land in
 70–90 seconds, and `high` quality or several references take longer. Reads are
 free, uncapped and not rate-limited, but please stay under one request a second.

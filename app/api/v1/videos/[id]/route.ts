@@ -43,10 +43,21 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
 
     const result = await finalizeVideoJob(job);
 
+    // Never announce a completion we cannot deliver: a caller who believes a
+    // `completed` carrying a null url discards an asset they already paid for.
+    // If the asset does not resolve the work is not deliverable yet, so report it
+    // as pending and let the poll loop continue. finalizeVideoJob's transaction
+    // should make this unreachable; the warn is how we learn if it isn't.
+    const videoUrl = result.status === 'completed' ? (result.asset?.publicUrl ?? null) : null;
+    const status = result.status === 'completed' && !videoUrl ? 'pending' : result.status;
+    if (status !== result.status) {
+      console.warn('[v1/videos] job', job.id, 'is completed with no resolvable asset; reporting pending');
+    }
+
     return Response.json({
       id: job.id,
-      status: result.status,
-      video_url: result.status === 'completed' ? (result.asset?.publicUrl ?? null) : null,
+      status,
+      video_url: videoUrl,
       // What the ledger debited. A failed job is refunded automatically, so
       // this is history, not your current balance — see GET /api/v1/me.
       credits_charged: job.creditsCharged ?? 0,

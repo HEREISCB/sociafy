@@ -42,10 +42,21 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       ? await db().select().from(mediaAssets).where(eq(mediaAssets.id, job.mediaAssetId)).limit(1)
       : [];
 
+    // Never announce a completion we cannot deliver. `completed` with a null
+    // image_url is what made an integrator discard an image they had paid for, so
+    // an unresolvable asset is reported as still pending — the honest answer, and
+    // the caller's poll loop simply continues. completeImageJob's transaction
+    // should make this unreachable; the warn is how we learn if it isn't.
+    const imageUrl = job.status === 'completed' ? (asset?.publicUrl ?? null) : null;
+    const status = job.status === 'completed' && !imageUrl ? 'pending' : job.status;
+    if (status !== job.status) {
+      console.warn('[v1/images] job', job.id, 'is completed with no resolvable asset; reporting pending');
+    }
+
     return Response.json({
       id: job.id,
-      status: job.status,
-      image_url: job.status === 'completed' ? (asset?.publicUrl ?? null) : null,
+      status,
+      image_url: imageUrl,
       // What the ledger debited. A failed job is refunded automatically, so this
       // is history, not your current balance — see GET /api/v1/me.
       credits_charged: job.creditsCharged ?? 0,

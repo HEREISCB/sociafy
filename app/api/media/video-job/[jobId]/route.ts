@@ -36,6 +36,16 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ jobId: stri
       .limit(1);
     if (!job) return jsonError('job_not_found', 404);
 
-    return finalizeVideoJob(job);
+    const result = await finalizeVideoJob(job);
+    // Same invariant the /api/v1 readers enforce: never announce a completion we
+    // cannot hand over. Completion is atomic now, so this only fires if the asset
+    // row was deleted out from under the job — in which case "still working" is
+    // honest and the UI keeps polling, rather than rendering a finished job with
+    // no video in it.
+    if (result.status === 'completed' && !result.asset) {
+      console.warn('[video-job] completed with no asset, reporting pending:', job.id);
+      return { status: 'pending' as const };
+    }
+    return result;
   }, req);
 }

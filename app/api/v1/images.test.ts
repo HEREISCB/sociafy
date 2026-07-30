@@ -21,6 +21,8 @@ const state = vi.hoisted(() => ({
   charges: [] as Record<string, unknown>[],
   refunds: [] as Record<string, unknown>[],
   uploads: 0,
+  /** How many times the completion ran as one transaction. */
+  transactions: 0,
   genError: null as (Error & { status?: number }) | null,
   /** Provider calls, split by mechanism: reference input must go to images.edit
    *  and text-only must stay on images.generate. */
@@ -103,8 +105,11 @@ const storeFor = (t: { __t?: string }) => {
   return state.assets;
 };
 
-vi.mock('../../../lib/db', () => ({
-  db: () => ({
+// `transaction` hands back the same client: completeImageJob's claim, asset
+// insert and link must all go through `tx`, and nothing there depends on a
+// rollback — a lost claim inserts nothing at all.
+vi.mock('../../../lib/db', () => {
+  const client = {
     select: () => ({
       from: (t: { __t?: string }) => ({
         where: (pred: Pred) => {
@@ -152,8 +157,17 @@ vi.mock('../../../lib/db', () => ({
         },
       }),
     }),
-  }),
-}));
+  };
+  return {
+    db: () => ({
+      ...client,
+      transaction: (fn: (tx: typeof client) => unknown) => {
+        state.transactions += 1;
+        return Promise.resolve(fn(client));
+      },
+    }),
+  };
+});
 
 vi.mock('../../../lib/rate-limit', () => ({ rateLimit: () => ({ ok: true, remaining: 9, retryAfterSec: 0 }) }));
 vi.mock('../../../lib/env', () => ({ isStubMode: { r2: () => false, database: () => false } }));
@@ -270,6 +284,7 @@ beforeEach(() => {
   state.charges = [];
   state.refunds = [];
   state.uploads = 0;
+  state.transactions = 0;
   state.genError = null;
   state.refundLands = true;
   state.generateCalls = [];
@@ -779,6 +794,38 @@ describe('POST /api/v1/images — async: true', () => {
     expect(state.refunds).toHaveLength(0);
   });
 
+  // The paid-work-loss bug: claim, asset insert and link were three separate
+  // commits, so the row was briefly 'completed' with mediaAssetId null and the
+  // poll answered `completed` with `image_url: null`. A caller believed that and
+  // discarded an image they had paid 6 credits for.
+  it('never reports completed without a resolvable image_url, and commits both together', async () => {
+    const body = await (await post({ prompt: 'a red bicycle', async: true })).json();
+    await runAfters();
+
+    // status and mediaAssetId were written inside one transaction, with the R2
+    // upload outside it.
+    expect(state.transactions).toBe(1);
+    expect(state.uploads).toBe(1);
+    expect(state.jobs[0]).toMatchObject({ status: 'completed', mediaAssetId: state.assets[0].id });
+
+    const polled = await (await poll(body.id)).json();
+    expect(polled.status).toBe('completed');
+    expect(polled.image_url).toBe(state.assets[0].publicUrl);
+  });
+
+  it('inserts no second asset and no second refund when the claim is lost', async () => {
+    const body = await (await post({ prompt: 'a red bicycle', async: true })).json();
+    // A cron tick won the claim while this caller was still uploading to R2.
+    state.assets.push({ id: 'assets_winner', publicUrl: 'https://cdn.test/winner.png' });
+    Object.assign(state.jobs[0], { status: 'completed', mediaAssetId: 'assets_winner' });
+
+    await runAfters();
+    expect(state.assets).toHaveLength(1); // no orphan row in the user's library
+    expect(state.refunds).toHaveLength(0);
+    expect(state.jobs[0].mediaAssetId).toBe('assets_winner');
+    expect((await (await poll(body.id)).json()).image_url).toBe('https://cdn.test/winner.png');
+  });
+
   it('never refunds a failed job twice', async () => {
     state.genError = apiErr(500, { message: 'internal error' });
     await post({ prompt: 'a red bicycle', async: true });
@@ -835,6 +882,31 @@ describe('GET /api/v1/images/{id}', () => {
       expect(res.status).toBe(404);
       expect(typeof (await res.json()).message).toBe('string');
     }
+  });
+
+  // Belt and braces for the invariant the transaction now guarantees: even if a
+  // future ordering slip reintroduced this row state, the reader must not
+  // announce a completion it cannot fulfil — that turns a delay into a lost
+  // paid asset.
+  it('reports a completed row with no asset as pending, not completed with a null url', async () => {
+    const created = await (await post({ prompt: 'a red bicycle', async: true })).json();
+    Object.assign(state.jobs[0], { status: 'completed', mediaAssetId: null });
+
+    expect(await (await poll(created.id)).json()).toEqual({
+      id: created.id,
+      status: 'pending',
+      image_url: null,
+      credits_charged: 6,
+      error: null,
+    });
+  });
+
+  it('still reports a genuine failure as failed, never as pending', async () => {
+    const created = await (await post({ prompt: 'a red bicycle', async: true })).json();
+    Object.assign(state.jobs[0], { status: 'failed', error: 'prompt_rejected', mediaAssetId: null });
+
+    const polled = await (await poll(created.id)).json();
+    expect(polled).toMatchObject({ status: 'failed', error: 'prompt_rejected', image_url: null });
   });
 
   it('reports a job that has not finished as pending, with no url and no error', async () => {

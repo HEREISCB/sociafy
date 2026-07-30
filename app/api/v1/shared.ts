@@ -827,35 +827,56 @@ export async function runImageJob(job: ImageJob, refs: File[] | null): Promise<v
 }
 
 /**
- * Claim the row, then record the asset. Only the finaliser whose UPDATE matches
- * inserts a media_assets row, so a cron tick racing `after()` yields one asset
- * and not two — the protection finalizeVideoJob relies on, for the same reason.
+ * Claim the row and record the asset, in ONE transaction.
+ *
+ * MANDATORY: keep these three statements in a single transaction. As three
+ * separate commits the row was briefly `status='completed'` with
+ * `media_asset_id IS NULL`, and GET /api/v1/images/{id} answered `completed` with
+ * `image_url: null` — an integrator believed that completion and threw away an
+ * image they had already paid 6 credits for (production `no_image`). Committing
+ * together makes status and asset visible together; nobody may "simplify" this
+ * back into three statements.
+ *
+ * Only the finaliser whose conditional UPDATE matches inserts a media_assets
+ * row, so a cron tick racing `after()` yields one asset and not two — the
+ * protection finalizeVideoJob relies on, for the same reason. The loser inserts
+ * nothing at all, so a lost race cannot leave an orphan asset in the user's
+ * library either.
+ *
+ * The R2 upload deliberately stays outside (see runImageJob): a transaction must
+ * never be held open across a network hop, least of all through a
+ * transaction-mode pooler.
  */
 async function completeImageJob(job: ImageJob, key: string, sizeBytes: number): Promise<void> {
   const { prompt, size } = job.inputJson as ImageJobInput;
-  const claimed = await db()
-    .update(genJobs)
-    .set({ status: 'completed', error: null, updatedAt: new Date() })
-    .where(and(eq(genJobs.id, job.id), ne(genJobs.status, 'completed')))
-    .returning({ id: genJobs.id });
-  if (claimed.length === 0) return; // Lost the race. Our R2 object is a harmless orphan.
-
   const [w, h] = size.split('x').map((n) => parseInt(n, 10));
-  const [asset] = await db()
-    .insert(mediaAssets)
-    .values({
-      userId: job.userId,
-      storageKey: key,
-      publicUrl: publicUrlFor(key),
-      mimeType: 'image/png',
-      sizeBytes,
-      width: w,
-      height: h,
-      label: prompt.slice(0, 80),
-    })
-    .returning();
 
-  await db().update(genJobs).set({ mediaAssetId: asset.id, updatedAt: new Date() }).where(eq(genJobs.id, job.id));
+  await db().transaction(async (tx) => {
+    const claimed = await tx
+      .update(genJobs)
+      .set({ status: 'completed', error: null, updatedAt: new Date() })
+      .where(and(eq(genJobs.id, job.id), ne(genJobs.status, 'completed')))
+      .returning({ id: genJobs.id });
+    // Lost the race — abort before inserting anything. Our R2 object is a
+    // harmless orphan and the winner's asset is what the poll will read.
+    if (claimed.length === 0) return;
+
+    const [asset] = await tx
+      .insert(mediaAssets)
+      .values({
+        userId: job.userId,
+        storageKey: key,
+        publicUrl: publicUrlFor(key),
+        mimeType: 'image/png',
+        sizeBytes,
+        width: w,
+        height: h,
+        label: prompt.slice(0, 80),
+      })
+      .returning();
+
+    await tx.update(genJobs).set({ mediaAssetId: asset.id, updatedAt: new Date() }).where(eq(genJobs.id, job.id));
+  });
 }
 
 /**

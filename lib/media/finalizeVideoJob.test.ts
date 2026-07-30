@@ -12,6 +12,8 @@ const state = vi.hoisted(() => ({
   updates: [] as Record<string, unknown>[],
   refunds: [] as Record<string, unknown>[],
   uploads: 0,
+  /** How many times the completion ran as one transaction. */
+  transactions: 0,
   uploadFails: false,
   r2Stub: false,
   task: { status: 'completed', videoUrl: 'https://cdn.piapi/x.mp4' } as
@@ -20,9 +22,11 @@ const state = vi.hoisted(() => ({
 
 // The mock db models exactly what finalizeVideoJob needs: selects return the
 // current row, and update() applies the predicate against it so a conditional
-// claim returns [] when the row no longer qualifies.
-vi.mock('../db', () => ({
-  db: () => ({
+// claim returns [] when the row no longer qualifies. `transaction` hands back the
+// same client — the claim/insert/link must go through `tx`, and nothing in the
+// finaliser depends on a rollback (a lost claim inserts nothing at all).
+vi.mock('../db', () => {
+  const client = {
     select: () => ({
       from: (t: { __t?: string }) => ({
         where: (pred: (r: Record<string, unknown>) => boolean) => ({
@@ -58,8 +62,17 @@ vi.mock('../db', () => ({
         },
       }),
     }),
-  }),
-}));
+  };
+  return {
+    db: () => ({
+      ...client,
+      transaction: (fn: (tx: typeof client) => unknown) => {
+        state.transactions += 1;
+        return Promise.resolve(fn(client));
+      },
+    }),
+  };
+});
 
 // Predicate-building drizzle stubs — each returns a row predicate.
 vi.mock('drizzle-orm', () => ({
@@ -115,7 +128,7 @@ function job(over: Record<string, unknown> = {}) {
 beforeEach(() => {
   process.env.PIAPI_API_KEY = 'k';
   state.assets = []; state.updates = []; state.refunds = []; state.uploads = 0;
-  state.uploadFails = false; state.r2Stub = false;
+  state.transactions = 0; state.uploadFails = false; state.r2Stub = false;
   state.task = { status: 'completed', videoUrl: 'https://cdn.piapi/x.mp4' };
 });
 
@@ -127,6 +140,53 @@ describe('finalizeVideoJob', () => {
     expect(state.assets).toHaveLength(1);
     expect(state.job!.status).toBe('completed');
     expect(state.job!.mediaAssetId).toBe('asset_1');
+  });
+
+  // The paid-work-loss bug: as three separate commits the row was briefly
+  // 'completed' with mediaAssetId null, which the API reports as a completion
+  // carrying no url. One transaction is what makes the pair inseparable.
+  it('never reports completed without a resolvable url, and commits both together', async () => {
+    const res = await finalizeVideoJob(job());
+    expect(res.status).toBe('completed');
+    expect((res as { asset?: { publicUrl?: string } }).asset?.publicUrl).toMatch(/^https:\/\/cdn\.test\//);
+    // status and mediaAssetId were written inside one transaction, and the R2
+    // upload stayed outside it.
+    expect(state.transactions).toBe(1);
+    expect(state.uploads).toBe(1);
+    expect(state.job!.status).toBe('completed');
+    expect(state.job!.mediaAssetId).toBe('asset_1');
+  });
+
+  it('reports a completed row that carries no asset as pending, never as completed', async () => {
+    // Seeded directly: the state a pre-transaction ordering slip would leave.
+    const res = await finalizeVideoJob(job({ status: 'completed', mediaAssetId: null }));
+    expect(res).toEqual({ status: 'pending', providerStatus: 'finalizing' });
+  });
+
+  it('inserts no second asset and no second refund when the claim is lost', async () => {
+    // A cron tick won the claim while this caller was still uploading.
+    const stale = job();
+    const snapshot = { ...stale } as VideoJob;
+    state.job!.status = 'completed';
+    state.job!.mediaAssetId = 'asset_winner';
+    state.assets.push({ id: 'asset_winner', publicUrl: 'https://cdn.test/winner.mp4' });
+
+    const res = await finalizeVideoJob(snapshot);
+    expect(res.status).toBe('completed');
+    expect((res as { asset?: { id: string } }).asset?.id).toBe('asset_winner');
+    expect(state.assets).toHaveLength(1); // no orphan from the loser
+    expect(state.refunds).toHaveLength(0);
+  });
+
+  it('terminates a genuine provider failure immediately with its reason', async () => {
+    state.task = { status: 'failed', error: 'nsfw' };
+    const res = await finalizeVideoJob(job());
+    expect(res.status).toBe('failed');
+    expect((res as { error: string }).error).toContain('piapi_failed');
+    expect(state.job!.status).toBe('failed');
+    // And it stays failed on a re-poll — never pending forever.
+    expect((await finalizeVideoJob(state.job as unknown as VideoJob)).status).toBe('failed');
+    expect(state.refunds).toHaveLength(1);
   });
 
   it('is a no-op for a second finalize racing on the same stale snapshot', async () => {
