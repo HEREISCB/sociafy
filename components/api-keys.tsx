@@ -14,8 +14,9 @@ type ApiKey = {
 };
 
 /** Schema default for api_keys.daily_credit_cap. Shown as the input's
- *  placeholder so the number a new key gets is never a mystery. */
-const DEFAULT_CAP = 2_000;
+ *  placeholder so the number a new key gets is never a mystery. Exported so the
+ *  limits table on /developers quotes this number rather than a second copy. */
+export const DEFAULT_CAP = 2_000;
 
 /** Developer API keys panel. Keys authenticate /api/v1 requests and spend from
  *  this account's credit balance, so revoking is the kill switch. */
@@ -82,15 +83,14 @@ export const ApiKeys: React.FC = () => {
     }
   }
 
-  // id="api-keys" is the sidebar link's target — this panel sits below the
-  // ledger, so without the anchor /usage opens well above it.
+  // id="api-keys" kept as the anchor target: it outlived the /usage panel and is
+  // still what older links point at.
   return (
-    <section className="usage-card" id="api-keys" style={{ marginTop: 28, scrollMarginTop: 24 }}>
+    <section className="usage-card" id="api-keys" style={{ scrollMarginTop: 24 }}>
       <h3>API keys</h3>
       <div className="sub" style={{ marginBottom: 14 }}>
         Call the Sociafy API from your own code. Requests authenticate with{' '}
         <code className="mono">Authorization: Bearer sfy_live_…</code> and spend credits from this account.
-        {' '}<a href="https://github.com/HEREISCB/sociafy/blob/main/docs/api.md" target="_blank" rel="noreferrer">API docs →</a>
         <br />
         Each key has its own rolling 24-hour credit cap (default {DEFAULT_CAP.toLocaleString()}). Edit a
         key&apos;s cap below to change it — no need to rotate the key.

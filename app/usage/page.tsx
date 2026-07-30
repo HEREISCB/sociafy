@@ -6,7 +6,6 @@ import { useRouter } from 'next/navigation';
 import { Sidebar, Topbar } from '../../components/shell';
 import { Icon } from '../../components/icons';
 import { useApi } from '../../lib/ui/fetcher';
-import { ApiKeys } from '../../components/api-keys';
 import type { CreditsPayload } from '../../components/credits';
 
 type Page = 'dashboard' | 'compose' | 'agent' | 'calendar' | 'connections' | 'onboarding';
@@ -115,7 +114,16 @@ export default function UsagePage() {
               ))}
             </section>
 
-            <ApiKeys />
+            {/* Keys moved to /developers so there is exactly one home for them.
+                id="api-keys" stays here because older links (docs, 429 hints)
+                still target /usage#api-keys. */}
+            <div className="usage-card" id="api-keys" style={{ marginTop: 28, scrollMarginTop: 24 }}>
+              <h3>API keys</h3>
+              <div className="sub" style={{ marginTop: 6 }}>
+                API keys, the quickstart, endpoint reference, prices and limits now live on{' '}
+                <Link href="/developers">Developers</Link>.
+              </div>
+            </div>
           </div>
         </div>
       </div>

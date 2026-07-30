@@ -15,8 +15,9 @@ spends money.
 ## 1. Authentication
 
 Every request needs a Bearer API key. Create one in your dashboard under
-**Account → API keys** (`/usage#api-keys`); the plaintext key is shown exactly
-once.
+**Account → API** (`/developers`), which is also where this reference, the
+quickstart, the prices and the limits are rendered in-app; the plaintext key is
+shown exactly once.
 
 ```
 Authorization: Bearer sfy_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
@@ -38,7 +39,7 @@ Two things every key has:
 - **A 24-hour credit cap**, per key. This is a rolling window, not a calendar
   day, and it is a spend limit, not a request limit. New keys default to **2,000
   credits/day**. Set a different cap when you create the key, or edit an existing
-  key's cap in place under Account → API keys.
+  key's cap in place under Account → API.
 
 The cap is checked *before* a request is priced, not against its price, so the
 request that crosses the line is allowed through in full and **one job can

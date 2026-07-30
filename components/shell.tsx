@@ -123,13 +123,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ page, onNav, showTTS = true, m
         <div className="nav-section">
           <div className="nav-label">Account</div>
           <Link
-            href="/usage#api-keys"
+            href="/developers"
             className="nav-item"
             style={{ textDecoration: 'none' }}
             onClick={onMobileClose}
           >
             <Icon name="lock" className="ic" />
-            API keys
+            API
           </Link>
           <Link
             href="/usage"
