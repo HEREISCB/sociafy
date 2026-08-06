@@ -5,7 +5,9 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
  *   - the same Idempotency-Key charges ONCE and returns the SAME job
  *   - every charge carries meta.apiKeyId (the auth layer's spend cap reads it;
  *     omit it and the cap silently stops working)
- *   - reference-mode video is rejected (it is unpriceable today)
+ *   - reference stills are re-hosted before the provider ever sees a caller URL,
+ *     and reference *video* stays rejected (it is unpriceable today)
+ *   - a provider content refusal reads as prompt_rejected, not generation_failed
  *   - GET /api/v1/videos/{id} is tenant-scoped in its WHERE clause
  *
  * The db fake applies real predicates so the tenant scoping can actually fail.
@@ -22,6 +24,12 @@ const state = vi.hoisted(() => ({
   refunds: [] as Record<string, unknown>[],
   submits: [] as Record<string, unknown>[],
   submitError: null as Error | null,
+  /** Reference stills we re-hosted, and the URLs we fetched to get them.
+   *  Stands in for the whole internet — no test makes a real request. */
+  uploads: [] as string[],
+  fetched: [] as string[],
+  refFetch: null as ((url: URL) => Response) | null,
+  uploadFails: false,
   /** Overrides what finalizeVideoJob answers, so the reader's own handling of a
    *  completion it cannot resolve is testable without racing anything. */
   finalizeResult: null as Record<string, unknown> | null,
@@ -163,6 +171,34 @@ vi.mock('../../../lib/media/finalizeVideoJob', () => ({
     Promise.resolve(state.finalizeResult ?? { status: job.status ?? 'pending' }),
 }));
 
+vi.mock('../../../lib/storage/r2', () => ({
+  makeMediaKey: (u: string, n: string) => `users/${u}/${n}`,
+  publicUrlFor: (k: string) => `https://cdn.test/${k}`,
+  uploadBuffer: (a: { key: string }) => {
+    if (state.uploadFails) return Promise.reject(new Error('r2 down'));
+    state.uploads.push(a.key);
+    return Promise.resolve();
+  },
+}));
+
+/** Minimal real PNG — fetchReferenceImages verifies magic bytes, not pixels. */
+const PNG = Buffer.concat([
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+  Buffer.alloc(25),
+]);
+/** Public literal IPs, so isPublicHost answers without touching DNS. */
+const REF_A = 'https://93.184.216.34/rings/front.png';
+const REF_B = 'https://93.184.216.34/rings/side.png';
+
+vi.stubGlobal('fetch', (input: URL | string) => {
+  const url = new URL(String(input));
+  state.fetched.push(url.toString());
+  return Promise.resolve(
+    state.refFetch?.(url) ??
+      new Response(PNG as unknown as BodyInit, { status: 200, headers: { 'content-type': 'image/png' } }),
+  );
+});
+
 const { POST } = await import('./videos/route');
 const { GET } = await import('./videos/[id]/route');
 
@@ -190,6 +226,10 @@ beforeEach(() => {
   state.submitError = null;
   state.finalizeResult = null;
   state.failUpdates = false;
+  state.uploads = [];
+  state.fetched = [];
+  state.refFetch = null;
+  state.uploadFails = false;
   process.env.PIAPI_API_KEY = 'test-key';
   delete process.env.PIAPI_WEBHOOK_SECRET;
   delete process.env.NEXT_PUBLIC_APP_URL;
@@ -294,13 +334,8 @@ describe('POST /api/v1/videos', () => {
     expect(state.submits).toHaveLength(2);
   });
 
-  it('rejects reference mode without charging', async () => {
-    const res = await post({ prompt: 'a cat surfing', gen_mode: 'reference' });
-    expect(res.status).toBe(400);
-    expect((await res.json()).error).toBe('invalid_request');
-    expect(state.charges).toHaveLength(0);
-  });
-
+  // Reference VIDEO is the withheld mode — it carries the input-duration
+  // surcharge. An unknown field is how it stays out.
   it('rejects unknown fields rather than silently billing a default', async () => {
     const res = await post({ prompt: 'a cat surfing', reference_video_url: 'https://x/y.mp4' });
     expect(res.status).toBe(400);
@@ -366,6 +401,13 @@ describe('POST /api/v1/videos', () => {
     expect(state.ledger).toHaveLength(1);
   });
 
+  it('records the job id on the refund so a charge and its reversal reconcile', async () => {
+    state.submitError = new Error('piapi_400: {"message":"bad prompt"}');
+    await post({ prompt: 'a cat surfing' });
+    expect(state.refunds).toHaveLength(1);
+    expect((state.refunds[0] as { meta: { videoJobId: string } }).meta.videoJobId).toBe(state.jobs[0].id);
+  });
+
   it('only sends webhook_config when a real secret and https origin exist', async () => {
     await post({ prompt: 'a cat surfing' });
     expect(state.submits[0].webhookConfig).toBeUndefined();
@@ -377,6 +419,100 @@ describe('POST /api/v1/videos', () => {
       endpoint: 'https://sociafy.test/api/piapi/webhook',
       secret: 'x'.repeat(32),
     });
+  });
+});
+
+/**
+ * Still-image inputs. Two things are load-bearing: the provider gets OUR urls
+ * and never the caller's, and a contradictory body is refused rather than
+ * resolved by precedence — silently preferring one field spends credits on a
+ * request nobody made.
+ */
+describe('POST /api/v1/videos — reference stills', () => {
+  it('submits omni_reference with re-hosted urls, at the text-mode price', async () => {
+    const res = await post({
+      prompt: 'this exact ring rotating on white marble',
+      gen_mode: 'reference',
+      reference_images: [REF_A, REF_B],
+    });
+    expect(res.status).toBe(202);
+    expect((await res.json()).credits_charged).toBe(180); // identical to text-only
+
+    expect(state.fetched).toEqual([REF_A, REF_B]);
+    expect(state.uploads).toHaveLength(2);
+    const submit = state.submits[0] as { mode: string; imageUrls: string[] };
+    expect(submit.mode).toBe('omni_reference');
+    expect(submit.imageUrls).toHaveLength(2);
+    // The caller's host must not reach the provider.
+    for (const u of submit.imageUrls) expect(u.startsWith('https://cdn.test/users/user_1/')).toBe(true);
+    expect(JSON.stringify(submit.imageUrls)).not.toContain('93.184.216.34');
+  });
+
+  it('submits first_last_frames as [start, end] in that order', async () => {
+    await post({ prompt: 'the ring, slowly rotating', gen_mode: 'image-to-video', start_frame: REF_A, end_frame: REF_B });
+    const submit = state.submits[0] as { mode: string; imageUrls: string[] };
+    expect(submit.mode).toBe('first_last_frames');
+    expect(state.fetched).toEqual([REF_A, REF_B]);
+    expect(submit.imageUrls).toHaveLength(2);
+    expect(submit.imageUrls[0]).toContain('reference-1.png');
+    expect(submit.imageUrls[1]).toContain('reference-2.png');
+  });
+
+  it('accepts image-to-video with only a start frame', async () => {
+    await post({ prompt: 'the ring, slowly rotating', gen_mode: 'image-to-video', start_frame: REF_A });
+    expect((state.submits[0] as { imageUrls: string[] }).imageUrls).toHaveLength(1);
+  });
+
+  it('records the mode and the reference count on the charge', async () => {
+    await post({ prompt: 'this exact ring', gen_mode: 'reference', reference_images: [REF_A] });
+    const meta = (state.charges[0] as { meta: Record<string, unknown> }).meta;
+    expect(meta.genMode).toBe('reference');
+    expect(meta.referenceImages).toBe(1);
+  });
+
+  it('leaves text-only submission untouched', async () => {
+    await post({ prompt: 'a cat surfing' });
+    const submit = state.submits[0] as { mode: string; imageUrls?: string[] };
+    expect(submit.mode).toBe('text_to_video');
+    expect(submit.imageUrls).toBeUndefined();
+    expect(state.fetched).toHaveLength(0);
+    expect(state.uploads).toHaveLength(0);
+  });
+
+  it('400s every contradictory combination, fetching and charging nothing', async () => {
+    const bodies = [
+      { gen_mode: 'reference' },                                        // no stills
+      { gen_mode: 'image-to-video' },                                   // no start frame
+      { gen_mode: 'text', reference_images: [REF_A] },                  // stills without the mode
+      { gen_mode: 'text', start_frame: REF_A },                         // frame without the mode
+      { gen_mode: 'reference', reference_images: [REF_A], start_frame: REF_B },
+      { gen_mode: 'image-to-video', start_frame: REF_A, reference_images: [REF_B] },
+      { gen_mode: 'reference', reference_images: [REF_A, REF_A, REF_A, REF_A, REF_A] }, // over the cap
+      { gen_mode: 'video-reference', start_frame: REF_A },              // the withheld mode
+    ];
+    for (const b of bodies) {
+      const res = await post({ prompt: 'a cat surfing', ...b });
+      expect(res.status, JSON.stringify(b)).toBe(400);
+      expect((await res.json()).error).toBe('invalid_request');
+    }
+    expect(state.charges).toHaveLength(0);
+    expect(state.fetched).toHaveLength(0);
+  });
+
+  it('rejects a bad reference url with its own code, before charging', async () => {
+    const res = await post({ prompt: 'x'.repeat(10), gen_mode: 'reference', reference_images: ['http://cdn.test/a.png'] });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe('reference_url_rejected');
+    expect(state.charges).toHaveLength(0);
+    expect(state.submits).toHaveLength(0);
+  });
+
+  it('does not charge when a reference cannot be stored on our side', async () => {
+    state.uploadFails = true;
+    const res = await post({ prompt: 'x'.repeat(10), gen_mode: 'reference', reference_images: [REF_A] });
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toBe('service_unavailable');
+    expect(state.charges).toHaveLength(0);
   });
 });
 
@@ -422,6 +558,38 @@ describe('GET /api/v1/videos/{id}', () => {
     const body = await (await GET(new Request('https://sociafy.test/x') as never, params(created.id))).json();
     expect(body).toMatchObject({ status: 'failed', error: 'generation_rejected', video_url: null });
     expect(JSON.stringify(body)).not.toMatch(/piapi|nope/i);
+  });
+
+  // Production: two 90-credit jobs failed with "piapi_failed: Your content
+  // violated community guidelines" and both reported generation_failed, so the
+  // customer could not tell "change your prompt" from "their infrastructure
+  // broke". Moderation is the caller's input and gets the image endpoint's code.
+  it('maps a provider content refusal to prompt_rejected, neutrally', async () => {
+    const created = await (await post({ prompt: 'a cat surfing' })).json();
+    for (const raw of [
+      'piapi_failed: Your content violated community guidelines.',
+      'piapi_failed: request blocked by content policy',
+      'piapi_failed: NSFW content detected',
+    ]) {
+      state.finalizeResult = { status: 'failed', error: raw };
+      const res = await GET(new Request('https://sociafy.test/x') as never, params(created.id));
+      const body = await res.json();
+      expect(body.error, raw).toBe('prompt_rejected');
+      expect(JSON.stringify(body)).not.toMatch(/piapi|seedance|community guidelines|nsfw/i);
+    }
+  });
+
+  it('keeps other provider failures as generation_failed', async () => {
+    const created = await (await post({ prompt: 'a cat surfing' })).json();
+    for (const raw of [
+      'piapi_failed: internal server error',
+      'piapi_failed: gpu allocation timeout',
+      'piapi_failed: unknown',
+    ]) {
+      state.finalizeResult = { status: 'failed', error: raw };
+      const body = await (await GET(new Request('https://sociafy.test/x') as never, params(created.id))).json();
+      expect(body.error, raw).toBe('generation_failed');
+    }
   });
 
   it('404s a non-uuid id without touching the db', async () => {

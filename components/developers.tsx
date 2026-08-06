@@ -121,7 +121,7 @@ curl -sS ${BASE}/me \\
         </div>
       </Endpoint>
 
-      <Endpoint method="POST" path="/videos" blurb="Submit a text-to-video generation. Returns 202 immediately — generation takes 30–120s, so you poll rather than hold a connection open.">
+      <Endpoint method="POST" path="/videos" blurb="Submit a video generation — from a prompt alone, or from still images of the real product. Returns 202 immediately — generation takes 30–120s, so you poll rather than hold a connection open.">
         <Code>{`curl -X POST ${BASE}/videos \\
   -H "Authorization: Bearer $SOCIAFY_API_KEY" \\
   -H "Content-Type: application/json" \\
@@ -152,13 +152,62 @@ curl -sS ${BASE}/me \\
             <tr><td className="mono">quality</td><td className="mono">480p · 720p · 1080p</td><td className="mono">720p</td></tr>
             <tr><td className="mono">aspect</td><td className="mono">9:16 · 1:1 · 16:9</td><td className="mono">9:16</td></tr>
             <tr><td className="mono">fast</td><td>boolean — cheaper and quicker, slightly lower fidelity. Ignored at 1080p, which has no fast tier.</td><td className="mono">false</td></tr>
-            <tr><td className="mono">gen_mode</td><td className="mono">&quot;text&quot;</td><td className="mono">&quot;text&quot;</td></tr>
+            <tr><td className="mono">gen_mode</td><td className="mono">text · reference · image-to-video</td><td className="mono">text</td></tr>
+            <tr>
+              <td className="mono">reference_images</td>
+              <td>
+                1–4 <strong>https</strong> URLs of photos of the real subject —{' '}
+                <code className="mono">gen_mode: &quot;reference&quot;</code> only, and required by
+                it. Same rules as on <code className="mono">/images</code>:{' '}
+                <code className="mono">png</code> · <code className="mono">jpeg</code> ·{' '}
+                <code className="mono">webp</code>, under 20 MB each and 48 MB in total, no
+                redirects, no private hosts. <strong>No surcharge.</strong>
+              </td>
+              <td>omitted</td>
+            </tr>
+            <tr>
+              <td className="mono">start_frame</td>
+              <td>
+                One <strong>https</strong> URL, the clip&apos;s first frame —{' '}
+                <code className="mono">gen_mode: &quot;image-to-video&quot;</code> only, and
+                required by it.
+              </td>
+              <td>omitted</td>
+            </tr>
+            <tr>
+              <td className="mono">end_frame</td>
+              <td>
+                Optional last frame, <code className="mono">gen_mode: &quot;image-to-video&quot;</code>{' '}
+                only.
+              </td>
+              <td>omitted</td>
+            </tr>
           </tbody>
         </table>
         <div className="sub" style={{ marginTop: 10 }}>
-          Image-to-video and reference/character modes are not in v1 — we cannot price them
-          correctly, and would rather refuse than guess with your money. There is no{' '}
-          <code className="mono">count</code>: one request is one job, one charge, one id.
+          Send photos and the clip shows <em>your</em> product instead of an approximation of it —{' '}
+          <code className="mono">reference</code> for up to four angles of one subject,{' '}
+          <code className="mono">image-to-video</code> to animate a photo you already have. Both
+          cost <strong>exactly what text-to-video costs</strong>: video is priced per second of
+          output, and still input adds nothing. Send only the field your mode requires — a
+          contradictory body (a <code className="mono">start_frame</code> on{' '}
+          <code className="mono">reference</code>, a mode without its images) is a{' '}
+          <code className="mono">400</code> naming the field, never a silent guess about which one
+          you meant. <strong>We fetch and re-host each URL</strong>, so it must be reachable by us
+          when you submit — a signed or private URL fails here, cheaply, instead of failing on the
+          provider&apos;s side after you have been charged; anything wrong with one comes back as
+          its own <code className="mono">400</code> (<code className="mono">reference_url_rejected</code>,{' '}
+          <code className="mono">reference_unfetchable</code>,{' '}
+          <code className="mono">reference_type_unsupported</code>,{' '}
+          <code className="mono">reference_too_large</code>) with the offending{' '}
+          <code className="mono">reference_url</code>, and nothing is charged.
+        </div>
+        <div className="sub" style={{ marginTop: 10 }}>
+          Reference <em>video</em> is still not offered: it alone carries a per-input-second
+          surcharge we cannot price, because the probe that reads a clip&apos;s length returns
+          nothing for fragmented MP4 and WebM — we would rather refuse than guess with your money.
+          There is no <code className="mono">count</code> either: one request is one job, one
+          charge, one id.
         </div>
       </Endpoint>
 
@@ -176,7 +225,18 @@ curl -sS ${BASE}/me \\
           <code className="mono">status</code> is <code className="mono">pending</code>,{' '}
           <code className="mono">completed</code> or <code className="mono">failed</code>; while pending,{' '}
           <code className="mono">video_url</code> and <code className="mono">error</code> are both null.
-          A failed job reports its reason in <code className="mono">error</code> and refunds its credits.
+          A failed job reports its reason in <code className="mono">error</code> (
+          <code className="mono">prompt_rejected</code>,{' '}
+          <code className="mono">generation_rejected</code>,{' '}
+          <code className="mono">generation_failed</code>,{' '}
+          <code className="mono">generation_timeout</code>,{' '}
+          <code className="mono">storage_failed</code>,{' '}
+          <code className="mono">submit_unconfirmed</code>,{' '}
+          <code className="mono">duplicate_request</code>) and refunds its credits.{' '}
+          <code className="mono">prompt_rejected</code> is the one that will not fix itself:
+          the content filter refused this prompt or these reference images, so change them —
+          the same code, meaning the same thing, as on <code className="mono">/images</code>.
+          Everything else is safe to retry with a new <code className="mono">Idempotency-Key</code>.
           Jobs complete and are stored even if you stop polling, so a crashed worker loses nothing.
           An id belonging to another account returns <code className="mono">404</code>, same as one that
           never existed.
@@ -375,6 +435,16 @@ echo "still pending after 5 minutes" >&2; exit 1`}</Code>
           <tr><td className="mono">1080p</td><td className="mono">{P.video_15s_1080p_quality}</td></tr>
         </tbody>
       </table>
+
+      <div className="sub" style={{ marginTop: 6 }}>
+        <strong>Video reference stills cost nothing extra.</strong>{' '}
+        <code className="mono">gen_mode: &quot;reference&quot;</code> and{' '}
+        <code className="mono">&quot;image-to-video&quot;</code> are priced at the tables above —
+        video is billed per second of <em>output</em>, so images on the input side add nothing. (A
+        reference <em>video</em> would be surcharged per input second, which is why it is not
+        offered.) Image references are the opposite case: that provider bills input image tokens,
+        so they carry the flat surcharge below.
+      </div>
 
       <div className="dev-cost-label mono">Images</div>
       <table className="dev-table">

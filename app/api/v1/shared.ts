@@ -9,7 +9,7 @@ import { isStubMode } from '../../../lib/env';
 import { charge, ensureBalance, InsufficientCreditsError, refund } from '../../../lib/credits/ledger';
 import { priceForVideo, type ImageQuality, type ImageSize, type VideoQuality } from '../../../lib/credits/pricing';
 import { imageFormat, type ImageFormat } from '../../../lib/media/probe';
-import { createSeedanceTask, type SeedanceAspect } from '../../../lib/ai/piapi';
+import { createSeedanceTask, type SeedanceAspect, type SeedanceMode } from '../../../lib/ai/piapi';
 import { getOpenAI, MODELS } from '../../../lib/ai/client';
 import { makeMediaKey, publicUrlFor, uploadBuffer } from '../../../lib/storage/r2';
 
@@ -175,6 +175,14 @@ export function publicVideoError(raw: string | null | undefined): string | null 
   // charge_failed is internal only: that path rethrows, so the caller gets a
   // 402/502/500 and never learns this job id. Not in the public table.
   if (raw.startsWith('charge_failed')) return 'generation_failed';
+  // The provider ran the job and refused it. A content-policy refusal is the
+  // caller's prompt and gets the same code the image path uses, so one code
+  // means one thing across the API; anything else is ours or the model's. The
+  // prose is the provider's and never leaves this process — logged, per rule 1.
+  if (raw.startsWith('piapi_failed')) {
+    console.error('[v1/videos] provider reported a failed job:', raw.slice(0, 300));
+    return MODERATION_MSG_RX.test(raw) ? 'prompt_rejected' : 'generation_failed';
+  }
   return 'generation_failed';
 }
 
@@ -221,9 +229,16 @@ const MODERATION_SIGNALS = new Set([
   'image_generation_user_error',
   'invalid_prompt',
 ]);
-/** Refusals sometimes arrive with a null code and only prose. Only consulted on
- *  a 400, and only for phrases the provider uses exclusively for refusals. */
-const MODERATION_MSG_RX = /safety system|content policy|moderation|not allowed by our|rejected as a result of/i;
+/**
+ * Refusals sometimes arrive with a null code and only prose. Consulted on an
+ * image 400 and on a failed video job (publicVideoError), and only for phrases a
+ * provider uses exclusively for a content refusal — the wording is prose and
+ * changes without notice, so match defensively but never on a phrase an
+ * infrastructure failure could also contain. `prompt_rejected` tells the caller
+ * to change their prompt, which is a lie if the provider merely fell over.
+ */
+const MODERATION_MSG_RX =
+  /safety system|content polic|community guidelines|moderation|sensitive content|nsfw|prohibited content|not allowed by our|rejected as a result of/i;
 
 export type ImageFailure = { code: string; status: number; message: string };
 
@@ -352,6 +367,21 @@ export function webhookConfigFor(req: Request): { endpoint: string; secret: stri
  *  here: those never reached PiAPI, so they're definitive and refund now. */
 const AMBIGUOUS_SUBMIT_RX = /ETIMEDOUT|ECONNRESET|ECONNABORTED|EPIPE|socket hang up/i;
 
+/**
+ * The modes v1 offers. Reference *video* is absent on purpose: it alone carries
+ * the per-input-second surcharge we cannot price (COSTS.md:77). Values match the
+ * first-party route's genMode so video_jobs.gen_mode stays one vocabulary.
+ */
+export type VideoGenMode = 'text' | 'reference' | 'image-to-video';
+
+/** Our vocabulary → the provider's. `imageUrls` for first_last_frames is
+ *  [start, ...end?]; for omni_reference it is the reference set. */
+const SEEDANCE_MODE: Record<VideoGenMode, SeedanceMode> = {
+  text: 'text_to_video',
+  reference: 'omni_reference',
+  'image-to-video': 'first_last_frames',
+};
+
 export type SubmitVideoArgs = {
   auth: ApiKeyAuth;
   prompt: string;
@@ -359,6 +389,10 @@ export type SubmitVideoArgs = {
   quality: VideoQuality;
   aspect: SeedanceAspect;
   fast: boolean;
+  genMode?: VideoGenMode;
+  /** Stills for a non-text mode, already re-hosted by us — see rehostReferences.
+   *  Order is meaningful for image-to-video. */
+  imageUrls?: string[];
   /** `api:<Idempotency-Key>`, or null when the caller opted out. */
   source: string | null;
   webhookConfig?: { endpoint: string; secret: string };
@@ -384,6 +418,7 @@ export type SubmitVideoResult = { job: VideoJob; creditsCharged: number; replaye
  */
 export async function submitVideo(args: SubmitVideoArgs): Promise<SubmitVideoResult> {
   const { auth, source } = args;
+  const genMode: VideoGenMode = args.genMode ?? 'text';
 
   // Fast path: a retry whose original charge already landed. Authority is the
   // unique index below, not this read — it just spares us an orphan job row.
@@ -414,7 +449,7 @@ export async function submitVideo(args: SubmitVideoArgs): Promise<SubmitVideoRes
       durationSec: args.durationSec,
       aspect: args.aspect,
       quality: args.quality,
-      genMode: 'text',
+      genMode,
     })
     .returning();
 
@@ -433,7 +468,10 @@ export async function submitVideo(args: SubmitVideoArgs): Promise<SubmitVideoRes
         quality: args.quality,
         aspect: args.aspect,
         fast: args.fast,
-        genMode: 'text',
+        genMode,
+        // Reference stills carry no surcharge (COSTS.md prices only reference
+        // *video* input), so this explains the mode, not the price.
+        ...(args.imageUrls?.length ? { referenceImages: args.imageUrls.length } : {}),
         via: 'api_v1',
         ...(source ? { source } : {}),
       },
@@ -469,7 +507,8 @@ export async function submitVideo(args: SubmitVideoArgs): Promise<SubmitVideoRes
   try {
     const taskId = await createSeedanceTask({
       prompt: args.prompt,
-      mode: 'text_to_video',
+      mode: SEEDANCE_MODE[genMode],
+      imageUrls: args.imageUrls,
       durationSec: args.durationSec,
       aspect: args.aspect,
       resolution: args.quality,
@@ -505,6 +544,8 @@ export async function submitVideo(args: SubmitVideoArgs): Promise<SubmitVideoRes
         userId: auth.userId,
         ledgerId: charged.ledgerId,
         reason: `submit_failed: ${msg.slice(0, 80)}`,
+        // So a refund row can be reconciled against the job that caused it.
+        meta: { videoJobId: row.id },
       })).refunded;
     } catch (re) {
       console.warn('[v1/videos] refund failed:', re instanceof Error ? re.message : re);
@@ -732,6 +773,25 @@ export async function fetchReferenceImages(urls: string[]): Promise<ReferenceFet
   }
 
   return { ok: true, files };
+}
+
+/**
+ * Copy vetted references into our own bucket and return OUR urls, in order.
+ *
+ * Used by /videos, where the references are handed to the generation provider
+ * rather than uploaded in the request body. We never forward a caller's URL: a
+ * signed or private one fails opaquely on their side after we have charged, and
+ * a customer's own host is not ours to disclose to a third party. The bytes are
+ * already vetted here — fetchReferenceImages is the trust boundary.
+ */
+export async function rehostReferences(userId: string, files: File[]): Promise<string[]> {
+  return Promise.all(
+    files.map(async (file) => {
+      const key = makeMediaKey(userId, `api-ref-${Date.now()}-${file.name}`);
+      await uploadBuffer({ key, body: Buffer.from(await file.arrayBuffer()), contentType: file.type });
+      return publicUrlFor(key);
+    }),
+  );
 }
 
 // =====================================================

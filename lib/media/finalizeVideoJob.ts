@@ -171,7 +171,14 @@ async function failAndRefund(job: VideoJob, error: string): Promise<FinalizeVide
 
   if (claimed.length > 0 && job.creditLedgerId) {
     try {
-      await refund({ userId: job.userId, ledgerId: job.creditLedgerId, reason: error.slice(0, 120) });
+      // videoJobId so an API customer can reconcile a refund row against the
+      // job that caused it — the charge carries it, the refund used not to.
+      await refund({
+        userId: job.userId,
+        ledgerId: job.creditLedgerId,
+        reason: error.slice(0, 120),
+        meta: { videoJobId: job.id },
+      });
     } catch (e) {
       console.warn('[finalize-video] refund failed:', e instanceof Error ? e.message : e);
     }

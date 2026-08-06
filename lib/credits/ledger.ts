@@ -189,13 +189,17 @@ export async function refund(args: {
   userId: string;
   ledgerId: string;
   reason: string;
+  /** Merged into the refund row's meta. Callers put the id of the job that
+   *  failed here, so a refund can be reconciled against what caused it. Cannot
+   *  clobber `reason`/`refundOf` — those are written after it. */
+  meta?: Record<string, unknown>;
 }): Promise<{ refunded: boolean; balanceAfter: number }> {
   return refundOnce({
     userId: args.userId,
     ledgerId: args.ledgerId,
     credits: null,
     action: null,
-    meta: { reason: args.reason, refundOf: args.ledgerId },
+    meta: { ...args.meta, reason: args.reason, refundOf: args.ledgerId },
   });
 }
 
