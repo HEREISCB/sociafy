@@ -45,6 +45,31 @@ loadEnv('.env.local');
 loadEnv('.env');
 
 /**
+ * Fail here, with the file name, rather than six frames deep inside the postgres
+ * driver as a bare "TypeError: Invalid URL".
+ *
+ * This bites specifically because there are two sources of truth: the web
+ * process is started once and keeps its env in memory, so the app can be serving
+ * happily while .env.local on disk holds a placeholder — and only cron, which
+ * reads the file fresh every run, ever notices.
+ */
+const dbUrl = process.env.DATABASE_URL;
+if (!dbUrl) {
+  console.error('[cron] DATABASE_URL is not set. Looked in .env.local and .env under', root);
+  process.exit(2);
+}
+try {
+  new URL(dbUrl);
+} catch {
+  // Never print the value — it carries the password.
+  const placeholder = /<[^>]+>|YOUR-PASSWORD|CHANGEME/i.test(dbUrl)
+    ? ' It still contains a placeholder such as <REGION> or [YOUR-PASSWORD].'
+    : '';
+  console.error(`[cron] DATABASE_URL is not a valid URL.${placeholder} Check .env.local under ${root}`);
+  process.exit(2);
+}
+
+/**
  * tsx MUST be preloaded by the node invocation — `node --import tsx <this>` —
  * so the .ts cron modules can be imported without a build step.
  *
