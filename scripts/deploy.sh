@@ -2,7 +2,7 @@
 # Deploy Sociafy on the box. Run this ON the EC2 host, not from your laptop.
 #
 # What it does:
-#   1. Preflight: app dir is a git repo, tree is clean, .env.local + node + npm
+#   1. Preflight: app dir is a git repo, tree is clean, .env.local or .env,
 #      + curl are present.
 #   2. Records the current commit so it can report what changed and you can roll
 #      back to it.
@@ -95,7 +95,10 @@ bold "1. Preflight"
 [[ -d "$SOCIAFY_DIR/.git" ]] || fail "$SOCIAFY_DIR is not a git checkout — nothing to pull."
 cd "$SOCIAFY_DIR"
 
-[[ -f ".env.local" ]] || fail ".env.local not found in $SOCIAFY_DIR — the build and the app both need it."
+# Next loads .env.local AND .env, so either satisfies the app. Deployments in
+# the wild use one or the other; demanding .env.local specifically blocked a
+# perfectly healthy box.
+[[ -f ".env.local" || -f ".env" ]] || fail "neither .env.local nor .env found in $SOCIAFY_DIR — the build and the app both need one."
 
 NODE_BIN="$(command -v node || true)"
 [[ -n "$NODE_BIN" ]] || fail "node not found on PATH."

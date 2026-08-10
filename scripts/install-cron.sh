@@ -2,7 +2,7 @@
 # Install Sociafy's scheduled jobs into the system crontab.
 #
 # What it does:
-#   1. Validates the app dir exists, has .env.local, and node + npm deps are present.
+#   1. Validates the app dir exists, has .env.local or .env, and node + npm deps.
 #   2. Creates /var/log/sociafy (or wherever LOG_DIR points) with the right owner.
 #   3. Renders etc/cron.d/sociafy with your local values for user/dir/node and
 #      installs it to /etc/cron.d/sociafy with 0644 perms (required by cron).
@@ -70,7 +70,8 @@ bold "1. Preflight"
 [[ "$EUID" -eq 0 ]] || fail "Run with sudo — this script writes to /etc/cron.d and /var/log."
 [[ -d "$SOCIAFY_DIR" ]] || fail "App dir not found: $SOCIAFY_DIR"
 [[ -f "$SOCIAFY_DIR/package.json" ]] || fail "No package.json in $SOCIAFY_DIR — is this the right --dir?"
-[[ -f "$SOCIAFY_DIR/.env.local" ]] || warn ".env.local not found in $SOCIAFY_DIR — cron tasks will fail without DATABASE_URL etc."
+# cron-run.mjs loads .env.local then .env — either one is enough.
+[[ -f "$SOCIAFY_DIR/.env.local" || -f "$SOCIAFY_DIR/.env" ]] || warn "no .env.local or .env in $SOCIAFY_DIR — cron tasks will fail without DATABASE_URL etc."
 [[ -x "$NODE_BIN" ]] || fail "node binary not executable: $NODE_BIN"
 [[ -f "$SOCIAFY_DIR/scripts/cron-run.mjs" ]] || fail "Missing scripts/cron-run.mjs — repo out of date?"
 
