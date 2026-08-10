@@ -20,7 +20,6 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { register } from 'node:module';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..');
@@ -45,13 +44,39 @@ function loadEnv(file) {
 loadEnv('.env.local');
 loadEnv('.env');
 
-// Load tsx so we can import the .ts cron modules directly without a build step.
-// The cron modules are short and don't pull in client-only deps.
-try {
-  register('tsx/esm', import.meta.url);
-} catch (e) {
-  console.error('[cron] failed to register tsx/esm — install tsx as a devDependency:', e?.message);
-  process.exit(2);
+/**
+ * tsx MUST be preloaded by the node invocation — `node --import tsx <this>` —
+ * so the .ts cron modules can be imported without a build step.
+ *
+ * Registering it from inside this file does not work on a current Node. The old
+ * `register('tsx/esm')` routes through the --loader hook deprecated in 20.6 and
+ * now fails outright ("tsx must be loaded with --import instead of --loader"),
+ * and tsx's own register() installs the hook too late — the module graph is
+ * already being built, so every import dies with ERR_REQUIRE_CYCLE_MODULE.
+ * Either way all six tasks failed, not one.
+ *
+ * etc/cron.d/sociafy passes the flag. This check exists so a hand-run without it
+ * prints the fix instead of a stack trace about missing exports.
+ */
+async function loadCronModule(specifier, exportName) {
+  let mod;
+  try {
+    mod = await import(specifier);
+  } catch (e) {
+    console.error(`[cron] cannot load ${specifier}: ${e?.message}`);
+    console.error('[cron] run it as:  node --import tsx scripts/cron-run.mjs <task>');
+    process.exit(2);
+  }
+  // Under --import tsx the .ts modules come back CJS-interop'd, so the named
+  // export lives on `default` rather than on the namespace. Accept both so this
+  // keeps working if that ever changes.
+  const fn = mod[exportName] ?? mod.default?.[exportName];
+  if (typeof fn !== 'function') {
+    console.error(`[cron] ${specifier} has no export "${exportName}" (got: ${Object.keys(mod).join(', ')})`);
+    console.error('[cron] run it as:  node --import tsx scripts/cron-run.mjs <task>');
+    process.exit(2);
+  }
+  return fn;
 }
 
 const which = process.argv[2];
@@ -68,25 +93,19 @@ console.log(`[cron] ${which} starting at ${startedAt.toISOString()}`);
 try {
   let payload;
   if (which === 'publish') {
-    const { runPublish } = await import('../lib/cron/publish.ts');
-    payload = await runPublish();
+    payload = await (await loadCronModule('../lib/cron/publish.ts', 'runPublish'))();
   } else if (which === 'finalize-video-jobs') {
     // Same module the HTTP route calls — sweeps stale video_jobs and stale
     // async image gen_jobs, failing and refunding what nothing else will close.
-    const { runFinalizeJobs } = await import('../lib/cron/finalizeJobs.ts');
-    payload = await runFinalizeJobs();
+    payload = await (await loadCronModule('../lib/cron/finalizeJobs.ts', 'runFinalizeJobs'))();
   } else if (which === 'shield-monitor') {
-    const { runShieldMonitor } = await import('../lib/cron/shieldMonitor.ts');
-    payload = await runShieldMonitor();
+    payload = await (await loadCronModule('../lib/cron/shieldMonitor.ts', 'runShieldMonitor'))();
   } else if (which === 'trends') {
-    const { runTrends } = await import('../lib/cron/trends.ts');
-    payload = { users: await runTrends() };
+    payload = { users: await (await loadCronModule('../lib/cron/trends.ts', 'runTrends'))() };
   } else if (which === 'agent') {
-    const { runAgentForAll } = await import('../lib/agent/run.ts');
-    payload = { users: await runAgentForAll() };
+    payload = { users: await (await loadCronModule('../lib/agent/run.ts', 'runAgentForAll'))() };
   } else if (which === 'refresh-tokens') {
-    const { runRefreshTokens } = await import('../lib/cron/refreshTokens.ts');
-    payload = await runRefreshTokens();
+    payload = await (await loadCronModule('../lib/cron/refreshTokens.ts', 'runRefreshTokens'))();
   } else {
     console.error(`[cron] unknown task: ${which}`);
     process.exit(2);

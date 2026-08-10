@@ -155,7 +155,7 @@ fi
 
 # ---------- smoke test ----------
 bold "6. Smoke test (refresh-tokens, dry on empty DB is fast)"
-if sudo -u "$SOCIAFY_USER" -H bash -c "cd '$SOCIAFY_DIR' && '$NODE_BIN' scripts/cron-run.mjs refresh-tokens" 2>&1 | tail -20; then
+if sudo -u "$SOCIAFY_USER" -H bash -c "cd '$SOCIAFY_DIR' && '$NODE_BIN' --import tsx scripts/cron-run.mjs refresh-tokens" 2>&1 | tail -20; then
   ok "refresh-tokens ran cleanly as $SOCIAFY_USER"
 else
   warn "smoke test failed — check the output above. Common causes: missing env vars, wrong NODE_BIN, .env.local not readable by $SOCIAFY_USER"

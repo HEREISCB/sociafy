@@ -30,9 +30,9 @@ NODE_BIN=/usr/bin/node
 LOG_DIR=/var/log/sociafy
 
 # m    h   dom mon dow user           command
-*/5    *   *   *   *   $SOCIAFY_USER  cd $SOCIAFY_DIR && $NODE_BIN scripts/cron-run.mjs publish             >> $LOG_DIR/cron-publish.log             2>&1
-*/5    *   *   *   *   $SOCIAFY_USER  cd $SOCIAFY_DIR && $NODE_BIN scripts/cron-run.mjs finalize-video-jobs >> $LOG_DIR/cron-finalize-video-jobs.log 2>&1
-*/15   *   *   *   *   $SOCIAFY_USER  cd $SOCIAFY_DIR && $NODE_BIN scripts/cron-run.mjs shield-monitor      >> $LOG_DIR/cron-shield-monitor.log      2>&1
-0      */6 *   *   *   $SOCIAFY_USER  cd $SOCIAFY_DIR && $NODE_BIN scripts/cron-run.mjs refresh-tokens      >> $LOG_DIR/cron-refresh-tokens.log      2>&1
-0      *   *   *   *   $SOCIAFY_USER  cd $SOCIAFY_DIR && $NODE_BIN scripts/cron-run.mjs trends              >> $LOG_DIR/cron-trends.log              2>&1
-0      */2 *   *   *   $SOCIAFY_USER  cd $SOCIAFY_DIR && $NODE_BIN scripts/cron-run.mjs agent               >> $LOG_DIR/cron-agent.log               2>&1
+*/5    *   *   *   *   $SOCIAFY_USER  cd $SOCIAFY_DIR && $NODE_BIN --import tsx scripts/cron-run.mjs publish             >> $LOG_DIR/cron-publish.log             2>&1
+*/5    *   *   *   *   $SOCIAFY_USER  cd $SOCIAFY_DIR && $NODE_BIN --import tsx scripts/cron-run.mjs finalize-video-jobs >> $LOG_DIR/cron-finalize-video-jobs.log 2>&1
+*/15   *   *   *   *   $SOCIAFY_USER  cd $SOCIAFY_DIR && $NODE_BIN --import tsx scripts/cron-run.mjs shield-monitor      >> $LOG_DIR/cron-shield-monitor.log      2>&1
+0      */6 *   *   *   $SOCIAFY_USER  cd $SOCIAFY_DIR && $NODE_BIN --import tsx scripts/cron-run.mjs refresh-tokens      >> $LOG_DIR/cron-refresh-tokens.log      2>&1
+0      *   *   *   *   $SOCIAFY_USER  cd $SOCIAFY_DIR && $NODE_BIN --import tsx scripts/cron-run.mjs trends              >> $LOG_DIR/cron-trends.log              2>&1
+0      */2 *   *   *   $SOCIAFY_USER  cd $SOCIAFY_DIR && $NODE_BIN --import tsx scripts/cron-run.mjs agent               >> $LOG_DIR/cron-agent.log               2>&1
