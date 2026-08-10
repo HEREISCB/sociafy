@@ -57,9 +57,131 @@ const VIDEO_FAIL_COPY: Record<string, string> = {
   submit_unconfirmed: 'We never got confirmation the clip was accepted. Credits are refunded automatically — try again.',
   duplicate_request: 'That request was already running, so it was not charged twice.',
   generation_rejected: 'The request was rejected before rendering started. Credits were refunded.',
-  poll_timeout: 'Still rendering after 5 minutes — it will appear in your library once it lands, and nothing extra is charged.',
+  poll_timeout: 'Still rendering after 15 minutes — it will appear in your library once it lands, and nothing extra is charged.',
 };
 const videoFailCopy = (code: string) => VIDEO_FAIL_COPY[code] ?? 'The clip failed to render. Credits were refunded.';
+
+/**
+ * Where one clip is, as far as we can actually tell. Derived from the
+ * providerStatus the poll route already returns (PiAPI's own state) — we do not
+ * guess a percentage, because nothing in the pipeline reports one.
+ */
+type ClipPhase = 'queued' | 'rendering' | 'storing' | 'done' | 'failed';
+const PHASE_LABEL: Record<ClipPhase, string> = {
+  queued: 'Queued at the provider',
+  rendering: 'Rendering',
+  storing: 'Storing to your library',
+  done: 'Done',
+  failed: 'Failed',
+};
+/** 'submitting' and 'pending' are pre-render; 'finalizing' means the clip
+ *  exists and we are writing it to storage. */
+const phaseFromProvider = (s: string | undefined): ClipPhase =>
+  s === 'processing' || s === 'staged' ? 'rendering' : s === 'finalizing' ? 'storing' : 'queued';
+
+const mmss = (sec: number) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+
+/**
+ * Live render card. Replaces the frozen one-line toast that made a legitimately
+ * running 4- or 11-minute job look hung. Real production renders measured
+ * 2m12s–11m06s, so the headline estimate says ~2–4 min and the card stops
+ * pretending it knows more than that: elapsed time is real, the phase is real,
+ * the bar is deliberately indeterminate.
+ *
+ * Accessibility: the ticking clock is aria-hidden — a per-second live region is
+ * unusable with a screen reader. Only the phase summary sits in the live
+ * region, so it speaks on phase changes and stays quiet otherwise.
+ */
+function VideoRenderCard({ startedAt, phases, note }: { startedAt: number; phases: ClipPhase[]; note?: string }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(t);
+  }, []);
+
+  const elapsed = Math.max(0, Math.floor((now - startedAt) / 1_000));
+  const done = phases.filter((p) => p === 'done').length;
+  const multi = phases.length > 1;
+  // Headline phase = the least-advanced clip still in flight, so the card never
+  // claims "storing" while another clip is still queued.
+  const order: ClipPhase[] = ['queued', 'rendering', 'storing', 'done', 'failed'];
+  const active = phases.filter((p) => p !== 'done' && p !== 'failed');
+  const headline: ClipPhase = active.length
+    ? active.reduce((a, b) => (order.indexOf(b) < order.indexOf(a) ? b : a))
+    : 'done';
+  const summary = multi ? `${PHASE_LABEL[headline]} — ${done} of ${phases.length} done` : PHASE_LABEL[headline];
+
+  return (
+    <div
+      style={{
+        padding: 12,
+        marginBottom: 12,
+        border: '1px solid var(--line)',
+        borderRadius: 'var(--r)',
+        background: 'var(--bg-elev)',
+        boxShadow: 'var(--shadow-1)',
+      }}
+    >
+      {/* Phase changes only — never the seconds. */}
+      <div role="status" aria-live="polite" className="sr-only">{summary}</div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5 }}>
+        <Icon name="sparkle" size={13} style={{ color: 'var(--accent)' }} />
+        <span style={{ fontWeight: 600 }}>{summary}</span>
+        <span
+          className="mono tnum"
+          aria-hidden="true"
+          style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--ink-3)' }}
+        >
+          {mmss(elapsed)}
+        </span>
+      </div>
+
+      <div className="render-bar" style={{ marginTop: 10 }} />
+
+      <div className="cost-line" style={{ marginTop: 8 }}>
+        <Icon name="clock" size={11} />
+        <span>Video renders usually take ~2–4 min.</span>
+      </div>
+
+      {note && (
+        <div style={{ marginTop: 6, fontSize: 11.5, color: 'var(--ink-3)' }}>{note}</div>
+      )}
+
+      {multi && (
+        <div style={{ marginTop: 10, display: 'grid', gap: 4 }}>
+          {phases.map((p, i) => (
+            <div
+              key={i}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 11.5,
+                color: p === 'done' ? 'var(--ink-2)' : 'var(--ink-3)',
+              }}
+            >
+              {p === 'done'
+                ? <Icon name="check" size={11} style={{ color: 'var(--good)' }} />
+                : p === 'failed'
+                  ? <Icon name="x" size={10} style={{ color: 'var(--danger)' }} />
+                  : <span className="render-dot" />}
+              <span>Clip {i + 1}</span>
+              <span style={{ marginLeft: 'auto' }}>{PHASE_LABEL[p]}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {elapsed >= 240 && (
+        <div style={{ marginTop: 10, fontSize: 11.5, color: 'var(--accent-ink)' }}>
+          Longer than usual — still rendering. This clip will land in your library even if you leave
+          this page.
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** Mirrors REFERENCE_LIMITS.maxImages in app/api/v1/shared.ts. Not imported:
  *  that module pulls in node:dns and the database. */
@@ -687,6 +809,8 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
   // pricing and the provider call have to agree on that.
   const effectiveFast = videoFast && videoQuality !== '1080p';
   const [videoBusy, setVideoBusy] = useState(false);
+  /** Live state for the video render card. One phase per requested clip. */
+  const [videoRender, setVideoRender] = useState<{ startedAt: number; phases: ClipPhase[]; note?: string } | null>(null);
   // Generation type picker + all the possible anchors.
   const [videoGenMode, setVideoGenMode] = useState<VideoGenMode>('text');
   const [startFrameUrl, setStartFrameUrl] = useState<string | null>(null);
@@ -1082,35 +1206,51 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
         return;
       }
 
-      setToast(
-        submitData.enhanced
-          ? `Queued ${jobs.length} · enhanced prompt: "${(submitData.rewrittenPrompt ?? '').slice(0, 90)}…" — rendering, ~30–120s`
-          : `Queued ${jobs.length} video${jobs.length === 1 ? '' : 's'} — rendering, ~30–120s`,
-      );
+      // The card carries the status now; a stale toast underneath it would just
+      // contradict it.
+      setToast(null);
+      setVideoRender({
+        startedAt: Date.now(),
+        phases: jobs.map(() => 'queued' as ClipPhase),
+        note: submitData.enhanced
+          ? `Enhanced prompt: "${(submitData.rewrittenPrompt ?? '').slice(0, 90)}…"`
+          : undefined,
+      });
+      const setPhase = (i: number, phase: ClipPhase) =>
+        setVideoRender((v) => (v ? { ...v, phases: v.phases.map((p, k) => (k === i ? phase : p)) } : v));
 
-      // Poll each job in parallel. PiAPI Seedance typically resolves in
-      // 30–120s; we cap at 5 minutes and back off slightly over time.
+      // Poll each job in parallel. Measured production renders run 2m12s–11m06s,
+      // so the cap is 15 minutes: at 5 the poller was reporting a timeout for
+      // jobs that were still rendering fine. Backs off slightly over time.
       // Resolves to the clip, or to why this specific job didn't produce one —
       // one blanket message for every kind of failure is what sent users off
       // retrying a content refusal at a lower resolution.
-      const pollOne = async (jobId: string): Promise<MediaItem | { failed: string }> => {
+      const pollOne = async (jobId: string, idx: number): Promise<MediaItem | { failed: string }> => {
         const startedAt = Date.now();
-        const maxMs = 5 * 60_000;
+        const maxMs = 15 * 60_000;
         let interval = 4_000;
         while (Date.now() - startedAt < maxMs) {
           await new Promise((res) => setTimeout(res, interval));
           interval = Math.min(interval + 500, 8_000);
           let pr: Response;
+          // A poll normally answers in well under a second. The one that hangs
+          // is the one where the route is downloading the clip from the provider
+          // and uploading it to R2 — so a slow request IS the storing phase, not
+          // a guess at one.
+          const storing = setTimeout(() => setPhase(idx, 'storing'), 3_000);
           try {
             pr = await fetch(`/api/media/video-job/${jobId}`, { credentials: 'include' });
-          } catch { continue; }
+          } catch { continue; } finally { clearTimeout(storing); }
           if (!pr.ok) continue;
           const pd = await pr.json().catch(() => ({} as Record<string, unknown>)) as {
             status?: 'pending' | 'completed' | 'failed';
+            providerStatus?: string;
             asset?: { id: string; publicUrl: string; mimeType: string; label?: string };
             error?: string;
           };
+          if (pd.status === 'pending') setPhase(idx, phaseFromProvider(pd.providerStatus));
           if (pd.status === 'completed' && pd.asset) {
+            setPhase(idx, 'done');
             return {
               kind: 'video',
               label: pd.asset.label || p.slice(0, 60),
@@ -1125,15 +1265,18 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
             // pd.error is a public code, mapped server-side — never the
             // provider's own text.
             console.warn('[generateVideo] job failed:', jobId, pd.error);
+            setPhase(idx, 'failed');
             return { failed: pd.error || 'generation_failed' };
           }
         }
         // We stopped watching; the job may still land via the cron sweeper.
         console.warn('[generateVideo] job timed out:', jobId);
+        setPhase(idx, 'failed');
         return { failed: 'poll_timeout' };
       };
 
-      const settled = await Promise.all(jobs.map((j) => pollOne(j.id)));
+      const settled = await Promise.all(jobs.map((j, i) => pollOne(j.id, i)));
+      setVideoRender(null);
       const added = settled.filter((m): m is MediaItem => !('failed' in m));
       const failed = settled.filter((m): m is { failed: string } => 'failed' in m);
       // Refresh credits — refunds may have landed for failed jobs.
@@ -1157,6 +1300,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
       const msg = e instanceof Error ? e.message : String(e);
       setToast(`Video generation failed: ${msg}`);
     } finally {
+      setVideoRender(null);
       setVideoBusy(false);
     }
   };
@@ -2405,6 +2549,13 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
           )}
         </div>
 
+        {videoRender && (
+          <VideoRenderCard
+            startedAt={videoRender.startedAt}
+            phases={videoRender.phases}
+            note={videoRender.note}
+          />
+        )}
         {toast && (
           <div role="status" aria-live="polite" style={{ padding: 12, fontSize: 12.5, background: 'rgba(124,77,255,0.06)', border: '1px solid rgba(124,77,255,0.2)', borderRadius: 10, marginBottom: 12 }}>
             {toast}

@@ -3228,6 +3228,59 @@ a { color: inherit; text-decoration: none; }
 .cost-line .danger { color: #b03333; }
 
 /* ===================================================================
+   Video render card — indeterminate on purpose. Nothing in the render
+   pipeline reports progress, so a sweeping bar is the honest signal;
+   a percentage would be invented.
+   =================================================================== */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+.render-bar {
+  position: relative;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--bg-sunk);
+  overflow: hidden;
+}
+.render-bar::after {
+  content: '';
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 38%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: render-sweep 1.7s ease-in-out infinite;
+}
+@keyframes render-sweep {
+  from { left: -40%; }
+  to   { left: 100%; }
+}
+.render-dot {
+  display: inline-block;
+  flex: 0 0 auto;
+  margin: 0 2px;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.5;
+  animation: render-dot-pulse 1.6s ease-in-out infinite;
+}
+@keyframes render-dot-pulse {
+  0%, 100% { opacity: 0.25; }
+  50%      { opacity: 0.8; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .render-bar::after { animation: none; left: 0; width: 100%; opacity: 0.3; }
+  .render-dot { animation: none; }
+}
+
+/* ===================================================================
    Mobile drawer infrastructure — desktop hides these, mobile shows them
    =================================================================== */
 .topbar-menu-btn {
