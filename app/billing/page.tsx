@@ -486,18 +486,13 @@ function BillingPageInner() {
         <div
           role="dialog"
           aria-modal="true"
+          className="modal-scrim"
           onClick={() => setTopupOpen(false)}
-          style={{
-            position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
-          }}
         >
           <div
+            className="modal-sheet"
             onClick={(e) => e.stopPropagation()}
-            style={{
-              background: 'var(--surface)', borderRadius: 12, padding: 20,
-              width: 'min(420px, 92vw)', boxShadow: '0 20px 60px rgba(0,0,0,.3)',
-            }}
+            style={{ width: 'min(420px, 92vw)' }}
           >
             <h3 style={{ marginTop: 0 }}>Top up credits</h3>
             <p className="muted" style={{ fontSize: 13 }}>
@@ -532,16 +527,13 @@ function BillingPageInner() {
         <div
           role="dialog"
           aria-modal="true"
+          className="modal-scrim"
           onClick={() => { if (!cancelBusy) setCancelOpen(false); }}
-          style={{
-            position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
-          }}
         >
           <div
+            className="modal-sheet"
             onClick={(e) => e.stopPropagation()}
             style={{
-              background: 'var(--surface)', borderRadius: 12, padding: 20,
               width: 'min(420px, 92vw)', boxShadow: '0 20px 60px rgba(0,0,0,.3)',
             }}
           >

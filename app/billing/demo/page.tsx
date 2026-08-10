@@ -121,7 +121,7 @@ export default function DemoBillingPage() {
               border: '1px solid var(--border)',
               borderRadius: 12,
               marginBottom: 20,
-              background: 'var(--surface)',
+              background: 'var(--bg-elev)',
             }}
           >
             <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 4 }}>
