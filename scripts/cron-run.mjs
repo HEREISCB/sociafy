@@ -5,6 +5,8 @@
  *
  * Usage:
  *   node scripts/cron-run.mjs publish
+ *   node scripts/cron-run.mjs finalize-video-jobs
+ *   node scripts/cron-run.mjs shield-monitor
  *   node scripts/cron-run.mjs trends
  *   node scripts/cron-run.mjs agent
  *   node scripts/cron-run.mjs refresh-tokens
@@ -54,7 +56,9 @@ try {
 
 const which = process.argv[2];
 if (!which) {
-  console.error('Usage: node scripts/cron-run.mjs <publish|trends|agent|refresh-tokens>');
+  console.error(
+    'Usage: node scripts/cron-run.mjs <publish|finalize-video-jobs|shield-monitor|trends|agent|refresh-tokens>',
+  );
   process.exit(2);
 }
 
@@ -66,6 +70,14 @@ try {
   if (which === 'publish') {
     const { runPublish } = await import('../lib/cron/publish.ts');
     payload = await runPublish();
+  } else if (which === 'finalize-video-jobs') {
+    // Same module the HTTP route calls — sweeps stale video_jobs and stale
+    // async image gen_jobs, failing and refunding what nothing else will close.
+    const { runFinalizeJobs } = await import('../lib/cron/finalizeJobs.ts');
+    payload = await runFinalizeJobs();
+  } else if (which === 'shield-monitor') {
+    const { runShieldMonitor } = await import('../lib/cron/shieldMonitor.ts');
+    payload = await runShieldMonitor();
   } else if (which === 'trends') {
     const { runTrends } = await import('../lib/cron/trends.ts');
     payload = { users: await runTrends() };

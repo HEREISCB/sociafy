@@ -14,9 +14,16 @@ import { mediaAssets, videoJobs } from '../../../../lib/db/schema';
 import { createSeedanceTask, type SeedanceMode, type SeedanceAspect, type SeedanceQuality } from '../../../../lib/ai/piapi';
 import { priceForVideo } from '../../../../lib/credits/pricing';
 import { ensureBalance, charge, refund, insufficientCreditsResponse } from '../../../../lib/credits/ledger';
+// Same fetcher + re-hoster /api/v1/videos uses. Imported rather than
+// reimplemented: a second copy of an SSRF guard is a second copy to get wrong.
+import { fetchReferenceImages, rehostReferences } from '../../v1/shared';
 
 export const runtime = 'nodejs';
-export const maxDuration = 60;
+// Submitting a non-text mode now fetches the caller's stills first (up to
+// REFERENCE_LIMITS.totalBudgetMs), re-hosts them, and then waits on PiAPI's own
+// 30s submit timeout — which does not fit in 60. Matches /api/v1/videos. A text
+// submit still answers in a second or two; this is a ceiling, not a delay.
+export const maxDuration = 300;
 
 const bodySchema = z.object({
   prompt: z.string().min(2).max(2_000),
@@ -29,6 +36,9 @@ const bodySchema = z.object({
   genMode: z.enum(['text', 'image-to-video', 'reference', 'audio-driven']).default('text'),
   startFrameUrl: z.string().url().max(2_000).optional(),
   endFrameUrl: z.string().url().max(2_000).optional(),
+  /** Still 9 where v1 caps at 4: REFERENCE_LIMITS.maxTotalBytes bounds the
+   *  buffered memory whatever the count is, so nine URLs only means each gets a
+   *  smaller share of the same 48MB — a clean 400, never an OOM. */
   referenceImageUrls: z.array(z.string().url().max(2_000)).max(9).optional(),
   referenceVideoUrl: z.string().url().max(2_000).optional(),
   audioUrl: z.string().url().max(2_000).optional(),
@@ -176,6 +186,31 @@ export async function POST(req: NextRequest) {
       refInputSec = secs;
     }
 
+    // Stills the provider would otherwise fetch from a URL the caller chose.
+    // Fetch, validate and re-host them BEFORE the charge — a signed or private
+    // URL fails opaquely inside PiAPI after we have already billed, and a
+    // customer's own host is not ours to hand to a third party. Every rejection
+    // here is the caller's input and costs nothing.
+    let stills = genMode === 'reference'
+      ? referenceImageUrls
+      : genMode === 'image-to-video'
+        ? [startFrameUrl!, ...(endFrameUrl ? [endFrameUrl] : [])]
+        : undefined;
+    if (stills?.length) {
+      const fetched = await fetchReferenceImages(stills);
+      if (!fetched.ok) return fetched.response;
+      try {
+        stills = await rehostReferences(user.id, fetched.files);
+      } catch (e) {
+        // Nothing is charged yet, and the provider cannot fetch what we could
+        // not store.
+        console.error('[generate-video] reference re-host failed:', e instanceof Error ? e.message : e);
+        return jsonError('r2_not_configured', 503, {
+          hint: 'We could not store your reference images. Nothing was charged — try again.',
+        });
+      }
+    }
+
     // Credit pre-flight. Pricing is per-job and depends on duration+quality
     // (1080p costs 5× 480p — see docs/pricing.md). We reserve the worst case
     // (all submissions succeed) upfront, then refund any that fail submission.
@@ -211,8 +246,14 @@ export async function POST(req: NextRequest) {
     //    row. Now the row always exists before we can be billed, and the
     //    charge's meta.videoJobId cross-links the two.
     const apiKey = process.env.PIAPI_API_KEY;
+    // OUR urls, never the caller's — see the re-host above.
     const seedance = mapToSeedanceInput({
-      genMode, startFrameUrl, endFrameUrl, referenceImageUrls, referenceVideoUrl, audioUrl,
+      genMode,
+      startFrameUrl: stills?.[0],
+      endFrameUrl: stills?.[1],
+      referenceImageUrls: stills,
+      referenceVideoUrl,
+      audioUrl,
     });
     // The row → charge → submit ordering below is duplicated by submitVideo() in
     // app/api/v1/shared.ts. Kept separate on purpose: this route carries count,

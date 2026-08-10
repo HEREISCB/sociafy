@@ -16,7 +16,7 @@ import { ensureBalance, charge, refund, partialRefund, insufficientCreditsRespon
 // Imported from the v1 module rather than duplicated: both routes call the same
 // images API and must agree on whose fault a failure is. Duplicating the
 // classifier is how one copy drifts back into blaming the user for our 400s.
-import { classifyImageFailure, logImageFailure } from '../../v1/shared';
+import { classifyImageFailure, fetchReferenceImages, logImageFailure, REFERENCE_LIMITS } from '../../v1/shared';
 
 /**
  * Direct https.request fallback to api.openai.com/v1/images/generations.
@@ -107,7 +107,11 @@ function generateImageDirect(args: {
 }
 
 export const runtime = 'nodejs';
-export const maxDuration = 90;
+// 90 was already marginal (medium quality measures 66-78s, and `count` runs in
+// parallel). Reference images add up to REFERENCE_LIMITS.totalBudgetMs of
+// fetching plus the upload of up to 48MB to the provider before generation even
+// starts, so the ceiling matches /api/v1/images. A ceiling, not a delay.
+export const maxDuration = 300;
 
 /**
  * GET /api/media/generate-image — TLS diagnostic.
@@ -154,6 +158,12 @@ const bodySchema = z.object({
   caption: z.string().max(2_000).optional(),
   /** Skip the auto-rewriter (default false). */
   rawPrompt: z.boolean().default(false),
+  /**
+   * Public https URLs of images the output should resemble — a product shot, so
+   * the generated ring is *their* ring. Same field name, same limits and the
+   * same fetcher as /api/v1/images' `reference_images`.
+   */
+  referenceImageUrls: z.array(z.string()).min(1).max(REFERENCE_LIMITS.maxImages).optional(),
 });
 
 /**
@@ -209,12 +219,27 @@ export async function POST(req: NextRequest) {
       const raw = await req.json().catch(() => ({}));
       const parsed = parseBody(bodySchema, raw);
       if (!parsed.ok) return parsed.response;
-      const { prompt, size, quality, count, caption, rawPrompt } = parsed.data;
+      const { prompt, size, quality, count, caption, rawPrompt, referenceImageUrls } = parsed.data;
+
+      // Fetched BEFORE the charge: every way a reference URL can be wrong is the
+      // caller's own input, and a rejected reference must never be a charged
+      // one. fetchReferenceImages is the trust boundary (https only, no
+      // private/metadata hosts, no redirects, magic bytes checked against the
+      // declared type, streamed per-image and total byte caps) — the same one
+      // /api/v1/images uses, because a second copy is how the two drift apart.
+      let refs: File[] | null = null;
+      if (referenceImageUrls) {
+        const fetched = await fetchReferenceImages(referenceImageUrls);
+        if (!fetched.ok) return fetched.response;
+        refs = fetched.files;
+      }
 
       // Credit pre-flight. We reserve the FULL cost upfront, then refund
       // any unfulfilled image after generation. This prevents a user from
       // racing two large requests that together exceed balance.
-      const unit = priceForImage(size, quality);
+      // The reference surcharge is flat per image (priceForImage), and it is per
+      // generated image, so it multiplies by `count` like the base does.
+      const unit = priceForImage(size, quality, refs?.length);
       const totalCost = unit.credits * count;
       const pre = await ensureBalance(user.id, totalCost);
       if (!pre.ok) {
@@ -227,7 +252,10 @@ export async function POST(req: NextRequest) {
         userId: user.id,
         action: unit.action,
         credits: totalCost,
-        meta: { size, quality, count, prompt: prompt.slice(0, 200) },
+        meta: {
+          size, quality, count, prompt: prompt.slice(0, 200),
+          ...(refs ? { referenceImages: refs.length, referenceSurcharge: unit.surcharge } : {}),
+        },
       });
       chargeInfo = { ledgerId: charged.ledgerId, action: unit.action, totalCost, unitCredits: unit.credits };
       console.log(`[generate-image] charged ${totalCost} credits (${unit.action} ×${count}), balance=${charged.balanceAfter}`);
@@ -257,6 +285,17 @@ export async function POST(req: NextRequest) {
           // maxRetries: 0 — the SDK's default of 2 retries on a network
           // error means a TLS-broken machine sits there for ~50s before
           // our fallback kicks in. Fail fast, hand off to direct.
+          //
+          // images.edit is the only call that accepts input images. NOT sending
+          // input_fidelity: the live API answers 400
+          // invalid_input_fidelity_model on gpt-image-2, so likeness is guided,
+          // not pinned. Same arguments as /api/v1/images.
+          if (refs) {
+            return await openai.images.edit(
+              { model: MODELS.image, image: refs, prompt: rewrite.prompt, size, quality, n: 1 },
+              { maxRetries: 0 },
+            );
+          }
           return await openai.images.generate(
             {
               model: MODELS.image,
@@ -268,7 +307,9 @@ export async function POST(req: NextRequest) {
             { maxRetries: 0 },
           );
         } catch (e) {
-          if (!isNetworkErr(e)) throw e;
+          // The direct fallback POSTs JSON to /images/generations, so it cannot
+          // carry file uploads — the reference path has no TLS workaround.
+          if (refs || !isNetworkErr(e)) throw e;
           console.warn('[generate-image] SDK failed with network error, falling back to direct https.request:', flattenErr(e).slice(0, 200));
           return await generateImageDirect({ prompt: rewrite.prompt, size, quality, apiKey });
         }

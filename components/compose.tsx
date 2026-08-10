@@ -41,6 +41,30 @@ const PROMPT_TEMPLATES: Array<{ label: string; prompt: string; preset: string; m
   { label: '🎯 Hook + CTA',      prompt: 'A 15-second video hook for [topic]. First 2s: visual pattern interrupt + question. Last 2s: clear CTA.', preset: 'hook-cta', modes: ['video'] },
 ];
 
+/**
+ * Public failure codes from /api/media/video-job (publicVideoError in
+ * app/api/v1/shared.ts) → copy the user can act on. `poll_timeout` is ours: the
+ * tab gave up, the job did not.
+ *
+ * A content refusal must never read as a capacity problem — "try 720p" costs
+ * another ~90 credits on a retry that fails identically, where "reword it" is
+ * the only thing that works.
+ */
+const VIDEO_FAIL_COPY: Record<string, string> = {
+  prompt_rejected: 'The prompt was rejected by the content filter — reword it before retrying, because the same prompt will be refused again. Credits were refunded.',
+  generation_timeout: 'The clip never finished rendering. Credits were refunded — a shorter clip or 720p usually gets through.',
+  storage_failed: 'The clip rendered but we could not store it. Credits were refunded — try again.',
+  submit_unconfirmed: 'We never got confirmation the clip was accepted. Credits are refunded automatically — try again.',
+  duplicate_request: 'That request was already running, so it was not charged twice.',
+  generation_rejected: 'The request was rejected before rendering started. Credits were refunded.',
+  poll_timeout: 'Still rendering after 5 minutes — it will appear in your library once it lands, and nothing extra is charged.',
+};
+const videoFailCopy = (code: string) => VIDEO_FAIL_COPY[code] ?? 'The clip failed to render. Credits were refunded.';
+
+/** Mirrors REFERENCE_LIMITS.maxImages in app/api/v1/shared.ts. Not imported:
+ *  that module pulls in node:dns and the database. */
+const MAX_IMAGE_REFS = 4;
+
 type Variant = { id: string; name: string; score: number; text: string; rationale?: string };
 
 // First load starts empty — no fabricated pre-generated copy or fake scores.
@@ -639,6 +663,17 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
   const [imageCount, setImageCount] = useState<number>(2);
   const [imageBusy, setImageBusy] = useState(false);
   const [autoEnhance, setAutoEnhance] = useState<boolean>(true);
+  /** Images the generation should imitate — picked from the gallery below, so
+   *  there is no second upload flow. Priced by priceForImage, flat per ref. */
+  const [imageRefUrls, setImageRefUrls] = useState<string[]>([]);
+  const toggleImageRef = (url: string) => {
+    if (imageRefUrls.includes(url)) { setImageRefUrls((c) => c.filter((u) => u !== url)); return; }
+    if (imageRefUrls.length >= MAX_IMAGE_REFS) {
+      setToast(`Up to ${MAX_IMAGE_REFS} reference images — remove one first.`);
+      return;
+    }
+    setImageRefUrls((c) => [...c, url]);
+  };
 
   // Video generation state.
   const [videoCount, setVideoCount] = useState<number>(1);
@@ -761,9 +796,16 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
   // always knows what each click will cost.
   useEffect(() => {
     if (mode === 'image') {
-      const { credits: unit, action } = priceForImage(imageSize, imageQuality);
+      // References carry a flat surcharge each, folded into `unit` by the same
+      // helper the server prices with — so the pill is what gets charged.
+      const { credits: unit, action } = priceForImage(imageSize, imageQuality, imageRefUrls.length);
       const total = unit * imageCount;
-      setPreviewCost({ credits: total, action, label: ACTION_LABELS[action] });
+      const refs = imageRefUrls.length;
+      setPreviewCost({
+        credits: total,
+        action,
+        label: refs ? `${ACTION_LABELS[action]} + ${refs} reference${refs === 1 ? '' : 's'}` : ACTION_LABELS[action],
+      });
     } else if (mode === 'video' && videoGenMode === 'avatar') {
       const q = videoQuality === '1080p' ? '720p' : videoQuality;
       const per = priceForAvatar(q);
@@ -783,7 +825,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
       const p = priceForCompose({ withTools: withResearch, extraSearches: 0 });
       setPreviewCost({ credits: p.credits, action: p.action, label: ACTION_LABELS[p.action] });
     }
-  }, [mode, imageSize, imageQuality, imageCount, videoDuration, videoQuality, videoCount, videoGenMode, effectiveFast, refVideoSec, withResearch]);
+  }, [mode, imageSize, imageQuality, imageCount, imageRefUrls, videoDuration, videoQuality, videoCount, videoGenMode, effectiveFast, refVideoSec, withResearch]);
 
   /** Full-screen media preview. null = closed. Handles both images and videos. */
   const [lightbox, setLightbox] = useState<{ url: string; label?: string; kind?: 'image' | 'video' } | null>(null);
@@ -903,13 +945,14 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
           count: imageCount,
           caption: variant?.text?.slice(0, 600),
           rawPrompt: !autoEnhance,
+          referenceImageUrls: imageRefUrls.length ? imageRefUrls : undefined,
         }),
       });
       if (!r.ok) {
         // Try to read a structured error from the response so the user gets a
         // real hint instead of a bare status code. The new generate-image
         // route returns { error, hint, detail } for network failures.
-        const body = await r.json().catch(() => ({} as { error?: string; hint?: string; detail?: string; balance?: number; needed?: number }));
+        const body = await r.json().catch(() => ({} as { error?: string; hint?: string; message?: string; detail?: string; balance?: number; needed?: number }));
         if (r.status === 402 && body?.error === 'insufficient_credits') {
           setCreditError({ balance: Number(body.balance ?? 0), needed: Number(body.needed ?? 0) });
           setToast(null);
@@ -921,7 +964,11 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
         else if (r.status === 401) setToast('Sign in to generate images.');
         else if (body?.error === 'upstream_network_error') {
           setToast(body.hint ?? 'Your network blocked the image provider — antivirus or proxy is likely intercepting TLS.');
-        } else setToast(`Image generation failed: ${r.status}${body?.detail ? ` · ${body.detail.slice(0, 140)}` : ''}`);
+        }
+        // Reference rejections come back in the shared `{ error, message }`
+        // envelope and each message says exactly which URL and why.
+        else if (body?.hint || body?.message) setToast(body.hint ?? body.message!);
+        else setToast(`Image generation failed: ${r.status}${body?.detail ? ` · ${body.detail.slice(0, 140)}` : ''}`);
         return;
       }
       const data = (await r.json()) as {
@@ -1008,10 +1055,12 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
       if (!r.ok && r.status !== 202) {
         if (r.status === 429) setToast('Slow down — too many video generations. Try again shortly.');
         else if (r.status === 401) setToast('Sign in to generate videos.');
-        else if (r.status === 400 && (data as { hint?: string }).hint) {
-          // Reference-video rejections (too long / unreadable length) carry an
-          // actionable hint — show it rather than a bare status code.
-          setToast((data as { hint: string }).hint);
+        else if (r.status === 400 && ((data as { hint?: string }).hint || (data as { message?: string }).message)) {
+          // Reference rejections (a URL we refuse to fetch, a clip that is too
+          // long or whose length we can't read) carry an actionable message —
+          // show it rather than a bare status code. `message` is the shared
+          // envelope fetchReferenceImages answers with.
+          setToast((data as { hint?: string; message?: string }).hint ?? (data as { message: string }).message);
         }
         else {
           const detail = (data as { detail?: string }).detail;
@@ -1041,7 +1090,10 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
 
       // Poll each job in parallel. PiAPI Seedance typically resolves in
       // 30–120s; we cap at 5 minutes and back off slightly over time.
-      const pollOne = async (jobId: string): Promise<MediaItem | null> => {
+      // Resolves to the clip, or to why this specific job didn't produce one —
+      // one blanket message for every kind of failure is what sent users off
+      // retrying a content refusal at a lower resolution.
+      const pollOne = async (jobId: string): Promise<MediaItem | { failed: string }> => {
         const startedAt = Date.now();
         const maxMs = 5 * 60_000;
         let interval = 4_000;
@@ -1070,28 +1122,37 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
             };
           }
           if (pd.status === 'failed') {
+            // pd.error is a public code, mapped server-side — never the
+            // provider's own text.
             console.warn('[generateVideo] job failed:', jobId, pd.error);
-            return null;
+            return { failed: pd.error || 'generation_failed' };
           }
         }
+        // We stopped watching; the job may still land via the cron sweeper.
         console.warn('[generateVideo] job timed out:', jobId);
-        return null;
+        return { failed: 'poll_timeout' };
       };
 
       const settled = await Promise.all(jobs.map((j) => pollOne(j.id)));
-      const added = settled.filter((m): m is MediaItem => m !== null);
+      const added = settled.filter((m): m is MediaItem => !('failed' in m));
+      const failed = settled.filter((m): m is { failed: string } => 'failed' in m);
       // Refresh credits — refunds may have landed for failed jobs.
       refreshCredits();
       if (added.length > 0) {
         setMedia((m) => [...m, ...added]);
-        setToast(`Generated ${added.length} video${added.length === 1 ? '' : 's'}.`);
         setTimeout(() => {
           generatedMediaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }, 80);
-      } else {
-        setToast('Video generation timed out or failed. Try a shorter clip or 720p.');
       }
-      setTimeout(() => setToast(null), 5000);
+      if (failed.length === 0) {
+        setToast(`Generated ${added.length} video${added.length === 1 ? '' : 's'}.`);
+      } else {
+        // One line per distinct reason: a moderation refusal and a timeout ask
+        // opposite things of the user, so they must not be merged.
+        const reasons = [...new Set(failed.map((f) => f.failed))].map(videoFailCopy);
+        setToast([added.length ? `Generated ${added.length} of ${jobs.length}.` : null, ...reasons].filter(Boolean).join(' '));
+      }
+      setTimeout(() => setToast(null), failed.length ? 12_000 : 5_000);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setToast(`Video generation failed: ${msg}`);
@@ -1126,7 +1187,9 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
       refreshCredits();
       const jobId = (data as { job?: { id: string } }).job?.id;
       if (!jobId) { setToast('Voice preview returned no job.'); return; }
-      // TTS resolves fast — poll up to 90s.
+      // TTS resolves fast — poll up to 90s. `outcome` separates "the engine
+      // refused it" from "we stopped watching": only the first is final.
+      let outcome: 'done' | 'failed' | 'timeout' = 'timeout';
       const startedAt = Date.now();
       let interval = 2_000;
       while (Date.now() - startedAt < 90_000) {
@@ -1138,10 +1201,19 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
         const pd = await pr.json().catch(() => ({} as Record<string, unknown>)) as {
           status?: 'pending' | 'completed' | 'failed';
           asset?: { publicUrl: string };
+          error?: string;
         };
-        if (pd.status === 'completed' && pd.asset) { setVoicePreviewUrl(pd.asset.publicUrl); break; }
-        if (pd.status === 'failed') { setToast('Voice preview failed to render.'); break; }
+        if (pd.status === 'completed' && pd.asset) { setVoicePreviewUrl(pd.asset.publicUrl); outcome = 'done'; break; }
+        if (pd.status === 'failed') {
+          // The engine's own string is internal; log it, tell the user what it
+          // means for them.
+          console.warn('[previewVoice] failed:', pd.error);
+          outcome = 'failed';
+          break;
+        }
       }
+      if (outcome === 'failed') setToast('The voice engine could not render that. Credits were refunded — try a shorter script.');
+      else if (outcome === 'timeout') setToast('Still synthesizing — it is taking longer than usual. Try again in a moment.');
     } catch (e) {
       setToast(`Voice preview failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -1206,6 +1278,9 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
       const maxMs = 8 * 60_000;
       let interval = 5_000;
       let asset: { id: string; publicUrl: string; mimeType: string; label?: string } | null = null;
+      // Same distinction the video poller makes: the engine refusing the job is
+      // final and refunded, us giving up on the poll is neither.
+      let engineFailed = false;
       while (Date.now() - startedAt < maxMs) {
         await new Promise((res) => setTimeout(res, interval));
         interval = Math.min(interval + 1_000, 12_000);
@@ -1218,7 +1293,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
           error?: string;
         };
         if (pd.status === 'completed' && pd.asset) { asset = pd.asset; break; }
-        if (pd.status === 'failed') { console.warn('[generateAvatar] failed:', pd.error); break; }
+        if (pd.status === 'failed') { console.warn('[generateAvatar] failed:', pd.error); engineFailed = true; break; }
       }
       refreshCredits();
       if (asset) {
@@ -1236,9 +1311,11 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
           generatedMediaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }, 80);
       } else {
-        setToast('Avatar generation timed out or failed. Try a shorter script or 480p.');
+        setToast(engineFailed
+          ? 'The avatar engine could not render that. Credits were refunded — a clearer, front-facing photo or a shorter script usually fixes it.'
+          : 'Still rendering after 8 minutes — the clip will appear in your library once it lands.');
       }
-      setTimeout(() => setToast(null), 5000);
+      setTimeout(() => setToast(null), asset ? 5_000 : 12_000);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setToast(`Avatar generation failed: ${msg}`);
@@ -1481,6 +1558,40 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
             ))}
           </div>
         </div>
+      </div>
+
+      {/* Reference images — the output imitates these, so a generated ring can
+          be THEIR ring. Picked from the gallery below rather than uploaded
+          again; the surcharge is shown before they commit. */}
+      <div style={{ marginTop: 14 }}>
+        <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
+          References ({imageRefUrls.length}/{MAX_IMAGE_REFS})
+        </div>
+        {imageRefUrls.length === 0 ? (
+          <div style={{ fontSize: 11, color: 'var(--ink-4)' }}>
+            Hit <strong>Ref</strong> on any image below to copy its subject — +{priceForImage(imageSize, imageQuality, 1).surcharge} credits each.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+            {imageRefUrls.map((url, i) => (
+              <div key={url} style={{ width: 44, height: 44, borderRadius: 6, border: '1px solid var(--line-2)', position: 'relative', overflow: 'hidden', background: 'var(--bg-sunk)' }}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={url} alt={`reference ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                <button
+                  type="button"
+                  aria-label={`Remove reference ${i + 1}`}
+                  onClick={() => toggleImageRef(url)}
+                  style={{ position: 'absolute', top: 0, right: 0, width: 16, height: 16, background: 'rgba(10,10,10,0.7)', color: 'white', border: 0, display: 'grid', placeItems: 'center', cursor: 'pointer', padding: 0 }}
+                >
+                  <Icon name="x" size={9} />
+                </button>
+              </div>
+            ))}
+            <span style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>
+              +{priceForImage(imageSize, imageQuality, imageRefUrls.length).surcharge} credits{imageCount > 1 ? ` × ${imageCount}` : ''} · likeness is guided, not exact
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -2509,6 +2620,22 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                         {isHero && (
                           <span style={{ position: 'absolute', bottom: 6, left: 6, fontFamily: 'var(--mono)', fontSize: 9, padding: '2px 5px', background: 'var(--accent)', color: 'white', borderRadius: 3, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Hero</span>
                         )}
+                        {/* Reference toggle — reuses what the user already has
+                            in the library instead of a second upload flow. */}
+                        {m.url && (() => {
+                          const refIdx = imageRefUrls.indexOf(m.url);
+                          return (
+                            <button
+                              type="button"
+                              aria-pressed={refIdx >= 0}
+                              onClick={(e) => { e.stopPropagation(); toggleImageRef(m.url!); }}
+                              title={refIdx >= 0 ? 'Remove from references' : `Copy this subject in the next generation (+${priceForImage(imageSize, imageQuality, 1).surcharge} credits)`}
+                              style={{ position: 'absolute', bottom: 6, right: 6, fontFamily: 'var(--mono)', fontSize: 9, padding: '2px 5px', border: 0, borderRadius: 3, cursor: 'pointer', letterSpacing: '0.04em', textTransform: 'uppercase', color: 'white', background: refIdx >= 0 ? 'var(--accent)' : 'rgba(10,10,10,0.6)' }}
+                            >
+                              Ref{refIdx >= 0 ? ` ${refIdx + 1}` : ''}
+                            </button>
+                          );
+                        })()}
                         {m.url && (
                           <button
                             type="button"

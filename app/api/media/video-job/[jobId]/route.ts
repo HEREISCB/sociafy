@@ -5,6 +5,9 @@ import { db } from '../../../../../lib/db';
 import { videoJobs } from '../../../../../lib/db/schema';
 import { isStubMode } from '../../../../../lib/env';
 import { finalizeVideoJob } from '../../../../../lib/media/finalizeVideoJob';
+// The same mapping /api/v1/videos uses. Imported, not copied: two mappings mean
+// one failure eventually gets described two different ways.
+import { publicVideoError } from '../../../v1/shared';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -45,6 +48,13 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ jobId: stri
     if (result.status === 'completed' && !result.asset) {
       console.warn('[video-job] completed with no asset, reporting pending:', job.id);
       return { status: 'pending' as const };
+    }
+    // video_jobs.error is internal — it carries the provider's name and a slice
+    // of its response body. Collapse it to a public code so the browser gets a
+    // reason it can act on (`prompt_rejected` means "reword it", not "retry at
+    // 720p") without ever seeing the raw text.
+    if (result.status === 'failed') {
+      return { status: 'failed' as const, error: publicVideoError(result.error) ?? 'generation_failed' };
     }
     return result;
   }, req);

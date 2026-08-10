@@ -1,18 +1,43 @@
 name: Scheduled jobs
 
-# Drives the /api/cron/* routes from GitHub instead of vercel.json "crons".
+# FALLBACK scheduler. Drives the /api/cron/* routes over HTTPS from GitHub.
 #
-# Why not Vercel cron:
+# ┌─ READ THIS BEFORE ENABLING ────────────────────────────────────────────────┐
+# │ There are TWO cron mechanisms in this repo. Run ONE, not both.             │
+# │                                                                            │
+# │  A. On-box system cron — RECOMMENDED for this deployment. The app runs on  │
+# │     a plain EC2 box, so `sudo bash scripts/install-cron.sh` installs       │
+# │     /etc/cron.d/sociafy, which runs `node scripts/cron-run.mjs <task>`.    │
+# │     That imports lib/cron/*.ts directly: no HTTP hop, no dependency on the │
+# │     web process being healthy, and the cron user never needs CRON_SECRET.  │
+# │                                                                            │
+# │  B. THIS workflow — for hosts where cron cannot be installed (Vercel,      │
+# │     Railway, any managed host with no shell). Host- and plan-agnostic; it  │
+# │     only makes outbound HTTPS calls. Requires CRON_SECRET as a repo secret.│
+# │                                                                            │
+# │ Running both double-fires every job. That is SAFE — runPublish claims rows │
+# │ with an atomic UPDATE … RETURNING and the media finalisers claim           │
+# │ conditionally, so nothing double-posts or double-refunds — but it is       │
+# │ wasted work and unreadable logs.                                           │
+# │                                                                            │
+# │ Using on-box cron? Disable this workflow (Actions tab → Scheduled jobs →   │
+# │ ⋯ → Disable workflow). Do NOT delete the file: it is the fallback if this  │
+# │ ever moves off the box. Using this workflow? Remove the on-box schedule    │
+# │ with `sudo rm /etc/cron.d/sociafy && sudo systemctl reload cron`.          │
+# │ See SETUP.md step 5.                                                       │
+# └────────────────────────────────────────────────────────────────────────────┘
+#
+# Why not Vercel cron either:
 #   - On the Hobby plan ANY sub-daily expression fails at DEPLOY time, not at
 #     run time — so a single "*/5 * * * *" entry blocks the whole deployment.
 #   - sociafy.app answers from Cloudflare with no x-vercel-id header, so the
 #     origin is not confirmed to be Vercel. vercel.json crons only ever run on
 #     Vercel; anywhere else they are silently inert.
-#   This workflow is host-agnostic and plan-agnostic: it just makes HTTPS calls.
 #
 # Auth: every route checks `Authorization: Bearer $CRON_SECRET` via checkCronAuth
 # (lib/api.ts), which is constant-time and refuses to run when the secret is
-# missing or under 16 chars. The secret here MUST equal the deployment's.
+# missing or under 16 chars. The secret here MUST equal the deployment's. The
+# on-box runner needs no secret at all — that is the main reason to prefer it.
 #
 # Setup — repo Settings → Secrets and variables → Actions:
 #   secret    CRON_SECRET   required, must match the deployed environment

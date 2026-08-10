@@ -108,11 +108,19 @@ trap 'rm -f "$RENDERED"' EXIT
 # Substitute the env-style placeholders the template uses. We do this with
 # sed (not cron's own SHELL=...) so the installed file is fully resolved and
 # you can `cat /etc/cron.d/sociafy` to see exactly what runs.
+#
+# The [$]SOCIAFY_USER pass is not cosmetic: cron parses the user column itself,
+# BEFORE any shell sees the line, so it never expands a variable there — an
+# unsubstituted "$SOCIAFY_USER" is an unknown username and the entry silently
+# never runs. ($SOCIAFY_DIR / $LOG_DIR inside the command are fine; SHELL
+# expands those.) Ordered after the assignment rewrite above, which matches on
+# "^SOCIAFY_USER=" and so is untouched by this one.
 sed \
   -e "s|^SOCIAFY_USER=.*|SOCIAFY_USER=$SOCIAFY_USER|" \
   -e "s|^SOCIAFY_DIR=.*|SOCIAFY_DIR=$SOCIAFY_DIR|" \
   -e "s|^NODE_BIN=.*|NODE_BIN=$NODE_BIN|" \
   -e "s|^LOG_DIR=.*|LOG_DIR=$LOG_DIR|" \
+  -e "s|[$]SOCIAFY_USER|$SOCIAFY_USER|g" \
   "$TEMPLATE" > "$RENDERED"
 
 if [[ "$DRY_RUN" == "1" ]]; then
