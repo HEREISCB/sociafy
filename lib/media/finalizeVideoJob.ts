@@ -67,6 +67,13 @@ export async function finalizeVideoJob(job: VideoJob): Promise<FinalizeVideoResu
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error('[finalize-video] piapi poll failed:', msg.slice(0, 400));
+    // A poll that keeps erroring must still age out, or the job is immortal and
+    // the customer's credits are held forever. Observed in production: the
+    // provider purges old tasks, so an 11-day-old job answered "failed to find
+    // task" on every sweep and never reached the MAX_AGE_MS check below — it
+    // returned here first. A transient provider blip is covered because this
+    // only fires once the job is older than the same give-up window.
+    if (ageMs > MAX_AGE_MS) return failAndRefund(job, 'provider_stuck');
     return { status: 'pending', pollError: msg.slice(0, 200) };
   }
 
