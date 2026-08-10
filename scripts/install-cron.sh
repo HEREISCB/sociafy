@@ -13,7 +13,7 @@
 #
 # Usage:
 #   sudo bash scripts/install-cron.sh \
-#     --dir /opt/sociafy-app \
+#     --dir /home/ubuntu/sociafy \
 #     --user sociafy \
 #     --node "$(command -v node)"
 #
@@ -23,8 +23,8 @@
 set -euo pipefail
 
 # ---------- defaults ----------
-SOCIAFY_DIR="/opt/sociafy-app"
-SOCIAFY_USER="sociafy"
+SOCIAFY_DIR="/home/ubuntu/sociafy"
+SOCIAFY_USER="ubuntu"
 NODE_BIN="$(command -v node || echo /usr/bin/node)"
 LOG_DIR="/var/log/sociafy"
 CRON_DEST="/etc/cron.d/sociafy"

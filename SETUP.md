@@ -104,11 +104,11 @@ Choose one.
 
 **A. On-box system cron — recommended for this deployment.**
 
-This app runs on a plain EC2 box (`/opt/sociafy-app`, user `sociafy`), so cron is
+This app runs on a plain EC2 box (`/home/ubuntu/sociafy`, user `ubuntu`), so cron is
 right there:
 
 ```bash
-sudo bash scripts/install-cron.sh --dir /opt/sociafy-app --user sociafy
+sudo bash scripts/install-cron.sh --dir /home/ubuntu/sociafy --user ubuntu
 # preview first with --dry-run
 ```
 
@@ -213,7 +213,7 @@ For production **on the EC2 box** — deployment is manual, and a commit is not
 live until you run this:
 
 ```bash
-ssh <box> && bash /opt/sociafy-app/scripts/deploy.sh    # --dry-run to preview
+ssh <box> && bash /home/ubuntu/sociafy/scripts/deploy.sh    # --dry-run to preview
 ```
 
 It pulls, `npm ci`, builds, restarts the web process and verifies `/api/health`.

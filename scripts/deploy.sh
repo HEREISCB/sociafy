@@ -19,7 +19,7 @@
 #
 # Usage:
 #   bash scripts/deploy.sh \
-#     --dir /opt/sociafy-app \
+#     --dir /home/ubuntu/sociafy \
 #     --branch main \
 #     --service sociafy
 #
@@ -33,7 +33,7 @@
 set -euo pipefail
 
 # ---------- defaults ----------
-SOCIAFY_DIR="/opt/sociafy-app"
+SOCIAFY_DIR="/home/ubuntu/sociafy"
 BRANCH="main"
 SERVICE="sociafy"
 HEALTH_URL="http://127.0.0.1:3000/api/health"
