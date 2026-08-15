@@ -97,6 +97,10 @@ interface PglyphProps {
   className?: string;
 }
 
+/** Reddit's brand orange. Doubles as the plate background and as the colour the
+ *  snoo glyph punches its eyes and mouth out in, so the two can never drift. */
+const REDDIT_ORANGE = '#FF4500';
+
 const PLATFORM_LOGOS: Record<string, (s: number) => React.ReactNode> = {
   fb: (s) => (
     <svg width={s} height={s} viewBox="0 0 24 24" fill="currentColor" aria-hidden style={{ display: 'block' }}>
@@ -150,9 +154,27 @@ const PLATFORM_LOGOS: Record<string, (s: number) => React.ReactNode> = {
       <path d="M21.58 7.19c-.23-.86-.91-1.54-1.77-1.77C18.25 5 12 5 12 5s-6.25 0-7.81.42c-.86.23-1.54.91-1.77 1.77C2 8.75 2 12 2 12s0 3.25.42 4.81c.23.86.91 1.54 1.77 1.77 1.56.42 7.81.42 7.81.42s6.25 0 7.81-.42c.86-.23 1.54-.91 1.77-1.77C22 15.25 22 12 22 12s0-3.25-.42-4.81zM10 15V9l5.2 3L10 15z" />
     </svg>
   ),
+  // Reddit's snoo: antenna, wide head, two ears, eyes and a smile. Built from
+  // primitives rather than one compound path — the face has to stay legible at
+  // 17px, and eyes/mouth are punched in the plate colour so no winding rules are
+  // involved. White-on-orange like the other marks, so it sits in the same
+  // rounded-square plate as fb / li / tt.
   rd: (s) => (
     <svg width={s} height={s} viewBox="0 0 24 24" fill="currentColor" aria-hidden style={{ display: 'block' }}>
-      <path d="M12 0C5.37 0 0 5.37 0 12s5.37 12 12 12 12-5.37 12-12S18.63 0 12 0zm5.73 11.57a1.5 1.5 0 0 1 .77 2.79c.03.2.05.4.05.61 0 3.1-3.62 5.62-8.08 5.62S2.39 18.07 2.39 16.97c0-.21.02-.41.05-.61a1.5 1.5 0 1 1 1.67-2.33c.93-.65 2.22-1.07 3.65-1.11l.89-4.18.01-.05c.05-.2.25-.33.46-.28l2.94.62A1.25 1.25 0 1 1 13.25 10a1.25 1.25 0 0 1-1.21-.95l-2.61-.55-.72 3.38c1.37.07 2.6.48 3.49 1.11a1.5 1.5 0 1 1 1.67 2.33c.03.2.05.4.05.61 0 0 0 0 0 0h-.01c0-.21.02-.41.05-.61a1.5 1.5 0 0 1 .77-2.79v.04zM9 17c.55 0 1-.45 1-1s-.45-1-1-1-1 .45-1 1 .45 1 1 1zm6 0c.55 0 1-.45 1-1s-.45-1-1-1-1 .45-1 1 .45 1 1 1z"/>
+      <path d="M12.7 8.6L14.2 3.7" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <circle cx="16" cy="3.4" r="1.9" />
+      <circle cx="3.5" cy="12.6" r="2.7" />
+      <circle cx="20.5" cy="12.6" r="2.7" />
+      <ellipse cx="12" cy="14.6" rx="9" ry="6.8" />
+      <circle cx="8.6" cy="14" r="1.8" fill={REDDIT_ORANGE} />
+      <circle cx="15.4" cy="14" r="1.8" fill={REDDIT_ORANGE} />
+      <path
+        d="M8.3 17.7Q12 20.6 15.7 17.7"
+        fill="none"
+        stroke={REDDIT_ORANGE}
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
     </svg>
   ),
 };
@@ -163,7 +185,13 @@ export const Pglyph: React.FC<PglyphProps> = ({ p, size, className }) => {
   const key = size ?? 'sm';
   const render = PLATFORM_LOGOS[p];
   return (
-    <span className={`pglyph ${p}${size ? ' ' + size : ''}${className ? ' ' + className : ''}`}>
+    // globals.css carries a .pglyph.<p> background for every platform it knew
+    // about; Reddit arrived later, so it brings its own rather than rendering
+    // white-on-transparent.
+    <span
+      className={`pglyph ${p}${size ? ' ' + size : ''}${className ? ' ' + className : ''}`}
+      style={p === 'rd' ? { background: REDDIT_ORANGE } : undefined}
+    >
       {render ? render(ICON_PX[key]) : null}
     </span>
   );

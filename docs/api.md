@@ -14,8 +14,8 @@
     `"async": true` and it answers `202` in well under a second with an id you poll —
     the same shape `POST /api/v1/videos` has always had. The synchronous mode is still
     the default, so existing integrations are untouched, but it holds the connection
-    open for the whole generation: measured at 66.5 / 68.9 / 69.0 / 77.6 / 78.3 s
-    text-only and 83.1 s with one reference image. The 60-second default that most
+    open for the whole generation: measured at 66–78 s text-only and about 83 s
+    with one reference image. The 60-second default that most
     HTTP clients apply unasked therefore fails by about ten seconds on *nearly every*
     synchronous call, as a bare read timeout that cannot tell you whether you were
     charged. Reference images make it worse: up to 20 MB each and 48 MB per request,
@@ -402,7 +402,7 @@
     handling.
 
     **Timing.** Text-only, `quality: "medium"` has been measured at **66–78 seconds**
-    (66.5 / 68.9 / 69.0 / 77.6 / 78.3); with one reference image, **83.1 s**. `high` is
+    across five runs; with one reference image, **about 83 s**. `high` is
     slower, `low` is faster. References add up to 45 seconds of fetching plus the time
     to upload up to 48 MB of them, so plan for **up to ~3 minutes** on that path.
     Asynchronously none of that reaches your client, which sees a `202` in under a

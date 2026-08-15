@@ -5,6 +5,11 @@ import Link from 'next/link';
 import { Icon, Pglyph } from './icons';
 import { apiDelete, useApi } from '../lib/ui/fetcher';
 import type { Platform } from '../lib/db/schema';
+// Shared with the dashboard. Two copies drifted once already: this file's
+// version could not tell 'reconnect_required' (a platform with no refresh
+// flow at all, e.g. LinkedIn) from a refresh that genuinely failed — and
+// this is the page that shows the user that banner.
+import { healthFor, toneColor, type Health } from '../lib/ui/health';
 
 type Account = {
   id: string;
@@ -36,7 +41,7 @@ type ScheduledPost = {
 
 type PlatformDef = {
   id: Platform;
-  short: 'fb' | 'ig' | 'x' | 'li' | 'tt' | 'yt';
+  short: 'fb' | 'ig' | 'x' | 'li' | 'tt' | 'yt' | 'rd';
   name: string;
   color: string;
   tagline: string;
@@ -113,7 +118,7 @@ const PLATFORMS: PlatformDef[] = [
   },
   {
     id: 'reddit',
-    short: 'x' as const, // reuse a safe short glyph until Reddit glyph added
+    short: 'rd',
     name: 'Reddit',
     color: '#FF4500',
     tagline: 'Brand monitoring · community replies',
@@ -125,59 +130,6 @@ const PLATFORMS: PlatformDef[] = [
 
 const DAY = 86_400_000;
 
-type Health = {
-  status: 'live' | 'expiring' | 'expired' | 'persistent' | 'stub' | 'offline';
-  label: string;
-  detail: string;
-  pct: number; // 0-100 fill for the bar
-  tone: 'good' | 'warn' | 'bad' | 'neutral' | 'accent';
-};
-
-function healthFor(acct: Account | null, now: number): Health {
-  if (!acct) return { status: 'offline', label: 'Not connected', detail: '—', pct: 0, tone: 'neutral' };
-  if (acct.isStub) return { status: 'stub', label: 'Demo only', detail: 'won\'t post — placeholder account', pct: 100, tone: 'warn' };
-  if (acct.lastRefreshError) {
-    return { status: 'expired', label: 'Reconnect needed', detail: 'last refresh failed', pct: 100, tone: 'bad' };
-  }
-  if (!acct.tokenExpiresAt) {
-    return { status: 'persistent', label: 'Long-lived', detail: 'token does not expire', pct: 100, tone: 'good' };
-  }
-  const exp = new Date(acct.tokenExpiresAt).getTime();
-  const diff = exp - now;
-  if (diff <= 0) return { status: 'expired', label: 'Token expired', detail: 'reconnect to resume publishing', pct: 100, tone: 'bad' };
-  const days = Math.floor(diff / DAY);
-  const hrs = Math.floor((diff % DAY) / 3_600_000);
-  const timeLeft =
-    days >= 1
-      ? `${days}d ${hrs}h`
-      : diff > 3_600_000
-      ? `${hrs}h ${Math.floor((diff % 3_600_000) / 60_000)}m`
-      : `${Math.max(1, Math.floor(diff / 60_000))}m`;
-
-  // Auto-renewing tokens get a calmer status — the expiry is a number the
-  // user can see, but the platform will refresh before we hit it.
-  if (acct.autoRefresh) {
-    const SIXTY = 60 * DAY;
-    const pct = Math.max(12, Math.min(100, (diff / SIXTY) * 100));
-    return {
-      status: 'live',
-      label: 'Auto-renewing',
-      detail: `auto · ${timeLeft} left`,
-      pct,
-      tone: 'good',
-    };
-  }
-
-  if (diff < 24 * 3_600_000) {
-    const pct = Math.max(8, Math.min(100, (diff / (24 * 3_600_000)) * 100));
-    return { status: 'expiring', label: 'Refresh soon', detail: `expires in ${timeLeft}`, pct, tone: 'warn' };
-  }
-  // 60-day reference window for live bar fill
-  const SIXTY = 60 * DAY;
-  const pct = Math.max(12, Math.min(100, (diff / SIXTY) * 100));
-  return { status: 'live', label: 'Connected', detail: `expires in ${timeLeft}`, pct, tone: 'accent' };
-}
-
 function relTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   if (diff < 60_000) return 'just now';
@@ -187,13 +139,6 @@ function relTime(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-const toneColor: Record<Health['tone'], string> = {
-  good: 'var(--good)',
-  warn: 'var(--warn)',
-  bad: 'var(--bad)',
-  accent: 'var(--accent)',
-  neutral: 'var(--ink-4)',
-};
 
 type Flash =
   | { kind: 'success'; platform: string; handle: string | null }

@@ -40,7 +40,10 @@ export default function UsagePage() {
     ? Math.max(0, Math.ceil((nextReset.getTime() - now) / (24 * 60 * 60 * 1000)))
     : null;
 
-  const used30d = (data?.ledger ?? []).reduce((sum, row) => row.credits < 0 ? sum + Math.abs(row.credits) : sum, 0);
+  // The ledger endpoint returns the 50 most recent rows; the card sums the
+  // spends among exactly the rows rendered below it, so it must say that.
+  const entryCount = data?.ledger?.length ?? 0;
+  const spentRecently = (data?.ledger ?? []).reduce((sum, row) => row.credits < 0 ? sum + Math.abs(row.credits) : sum, 0);
 
   return (
     <div className="app">
@@ -78,7 +81,10 @@ export default function UsagePage() {
                 <div className="num">{balance.toLocaleString()}</div>
                 <div className="sub">
                   of {allocation.toLocaleString()} this cycle
-                  {daysLeft !== null && <> · resets in {daysLeft}d</>}
+                  {/* "resets in 0d" reads as a broken counter, not as "today". */}
+                  {daysLeft !== null && (
+                    <> · {daysLeft === 0 ? 'resets today' : daysLeft === 1 ? 'resets tomorrow' : `resets in ${daysLeft} days`}</>
+                  )}
                 </div>
                 <div className="bar"><div className="fill" style={{ width: `${pct}%` }} /></div>
                 <div className="actions">
@@ -90,10 +96,15 @@ export default function UsagePage() {
               </div>
 
               <div className="usage-card">
-                <h3>Used (last 50 actions)</h3>
-                <div className="num">{used30d.toLocaleString()}</div>
+                {/* Was "Used (last 50 actions)": it counts credits, not actions,
+                    and 50 is the ledger fetch ceiling, not what is on screen —
+                    so it read "3" directly above "5 ledger entries shown". */}
+                <h3>Credits spent in recent activity</h3>
+                <div className="num">{spentRecently.toLocaleString()}</div>
                 <div className="sub">
-                  {data?.ledger?.length ? `${data.ledger.length} ledger entries shown` : 'No activity yet — credits will appear here as you generate.'}
+                  {entryCount
+                    ? `Across the ${entryCount} ${entryCount === 1 ? 'entry' : 'entries'} listed below`
+                    : 'No activity yet — credits will appear here as you generate.'}
                 </div>
                 <div style={{ marginTop: 20, fontSize: 12, color: 'var(--ink-3)', lineHeight: 1.55 }}>
                   {/* Read off the charge table, not retyped — it advertised 4 cr per

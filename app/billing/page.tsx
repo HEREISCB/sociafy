@@ -62,6 +62,11 @@ const TIER_RANK: Record<BillingPayload['currentTier'], number> = { starter: 0, p
 const TIER_PERKS: Record<BillingPayload['currentTier'], string[]> = {
   starter: [
     '2,000 credits / month',
+    // SIX, not seven. Connections ships a seventh adapter (Reddit), but
+    // REDDIT_CLIENT_ID/SECRET are unset in production, so /api/oauth/reddit/start
+    // answers platform_not_configured and nobody can actually connect it.
+    // Advertising it would be a promise the product cannot keep. Raise this to
+    // seven when those credentials are provisioned, not before.
     'All 6 platforms',
     'Text, image & 720p video',
     'Manual posting + scheduling',
@@ -69,6 +74,11 @@ const TIER_PERKS: Record<BillingPayload['currentTier'], string[]> = {
   ],
   pro: [
     '6,000 credits / month',
+    // SIX, not seven. Connections ships a seventh adapter (Reddit), but
+    // REDDIT_CLIENT_ID/SECRET are unset in production, so /api/oauth/reddit/start
+    // answers platform_not_configured and nobody can actually connect it.
+    // Advertising it would be a promise the product cannot keep. Raise this to
+    // seven when those credentials are provisioned, not before.
     'All 6 platforms',
     'Autopilot — trend → draft → schedule',
     'Web research on captions',
@@ -76,6 +86,11 @@ const TIER_PERKS: Record<BillingPayload['currentTier'], string[]> = {
   ],
   business: [
     '25,000 credits / month',
+    // SIX, not seven. Connections ships a seventh adapter (Reddit), but
+    // REDDIT_CLIENT_ID/SECRET are unset in production, so /api/oauth/reddit/start
+    // answers platform_not_configured and nobody can actually connect it.
+    // Advertising it would be a promise the product cannot keep. Raise this to
+    // seven when those credentials are provisioned, not before.
     'All 6 platforms',
     '1080p hero clips included',
     'Autopilot with media generation',
@@ -257,6 +272,20 @@ function BillingPageInner() {
     ? Math.min(100, Math.round((data.balance / data.monthlyAllocation) * 100))
     : 0;
 
+  // Escape closes whichever modal is up, matching the shield modals. The scrim
+  // click below stays exactly as it was; this only adds a second way out. The
+  // cancel dialog honours the same in-flight guard its scrim does.
+  useEffect(() => {
+    if (!topupOpen && !cancelOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      setTopupOpen(false);
+      if (!cancelBusy) setCancelOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [topupOpen, cancelOpen, cancelBusy]);
+
   return (
     <div className="app">
       <Sidebar
@@ -320,7 +349,10 @@ function BillingPageInner() {
                   {data?.hasActiveSubscription ? (
                     <>
                       <div>Status · {data.subscriptionStatus}</div>
-                      {daysLeft !== null && <div>Renews in {daysLeft}d</div>}
+                      {/* Same as /usage: "Renews in 0d" reads broken, not "today". */}
+                      {daysLeft !== null && (
+                        <div>{daysLeft === 0 ? 'Renews today' : daysLeft === 1 ? 'Renews tomorrow' : `Renews in ${daysLeft} days`}</div>
+                      )}
                     </>
                   ) : (
                     <div>No active subscription</div>

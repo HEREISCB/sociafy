@@ -50,8 +50,19 @@ const Endpoint: React.FC<{ method: string; path: string; blurb: string; children
 
 const P = CREDIT_PRICES;
 
+/* globals.css pins .dev-table's first column to `white-space: nowrap`, which on
+   a 390px phone gives the Limits table a 360px min-content width inside a 364px
+   card and pushes the whole page 3px sideways. Let that column wrap on narrow
+   screens. Scoped here rather than added to globals.css. */
+const NARROW_TABLE_CSS = `
+@media (max-width: 560px) {
+  .dev-docs .dev-table td:first-child { white-space: normal; }
+}
+`;
+
 export const DeveloperDocs: React.FC = () => (
-  <>
+  <div className="dev-docs">
+    <style dangerouslySetInnerHTML={{ __html: NARROW_TABLE_CSS }} />
     <section className="usage-card" style={{ marginTop: 28 }}>
       <h3>Quickstart</h3>
       <div className="sub" style={{ marginBottom: 6 }}>
@@ -67,12 +78,11 @@ export const DeveloperDocs: React.FC = () => (
         </strong>{' '}
         It answers <code className="mono">202</code> in well under a second. The synchronous mode is
         still the default so existing code is untouched, but it holds the connection open for the
-        whole generation — 66.5 / 68.9 / 69.0 / 77.6 / 78.3 s text-only, 83.1 s with a reference — so
-        the 60 s default most HTTP clients apply unasked fails by about ten seconds on <em>nearly
-        every</em> synchronous call, as a bare read timeout that cannot tell you whether you were
-        charged. References make it worse: up to 20 MB each and 48 MB per request, uploaded before
-        generation starts. Staying synchronous? Set your client timeout to at least 180 s, and read
-        the recovery rule below.
+        whole generation, which typically takes <strong>65–85 seconds</strong> — so the 60 s default
+        most HTTP clients apply unasked fails on <em>nearly every</em> synchronous call, as a bare
+        read timeout that cannot tell you whether you were charged. References make it worse: up to
+        20 MB each and 48 MB per request, uploaded before generation starts. Staying synchronous?
+        Set your client timeout to at least 180 s, and read the recovery rule below.
       </div>
 
       <ol className="dev-steps">
@@ -584,5 +594,5 @@ echo "still pending after 5 minutes" >&2; exit 1`}</Code>
         <Icon name="book" size={13} /> Read the full API reference
       </Link>
     </section>
-  </>
+  </div>
 );
