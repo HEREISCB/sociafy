@@ -238,13 +238,18 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
 
   const finish = async () => {
     setEnabling(true);
+    setSaveError(null);
     try {
       await apiPatch('/api/agent/settings', { enabled: true });
-    } catch {
-      // continue regardless
+      onDone();
+    } catch (e) {
+      // "Enter Sociafy" is the button that turns autopilot ON. Walking the
+      // user into the dashboard with it still off — and saying nothing — meant
+      // they'd wait days for posts that were never coming.
+      setSaveError(`Couldn't enable autopilot: ${errText(e)}`);
+    } finally {
+      setEnabling(false);
     }
-    setEnabling(false);
-    onDone();
   };
 
   const steps = [
@@ -640,7 +645,9 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
             6 steps + OAuth before seeing any value. Available on every step
             except the final "Ready" step (where the primary CTA already
             enters the app). */}
-        {step < 5 && (
+        {/* …and on the last step too when a save failed, so a broken PATCH
+            can't trap the user on the final screen with no way into the app. */}
+        {(step < 5 || !!saveError) && (
           <div style={{ textAlign: 'center', marginTop: 16 }}>
             <button
               type="button"
@@ -648,7 +655,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
               onClick={onDone}
               style={{ color: 'var(--ink-3)' }}
             >
-              Skip setup <Icon name="arrow_right" size={11} />
+              {step < 5 ? 'Skip setup' : 'Continue without autopilot'} <Icon name="arrow_right" size={11} />
             </button>
           </div>
         )}

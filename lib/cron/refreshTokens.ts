@@ -1,7 +1,7 @@
 import { and, eq, isNotNull, lte } from 'drizzle-orm';
 import { db } from '../db';
 import { connectedAccounts } from '../db/schema';
-import { ensureFreshToken } from '../platforms/token';
+import { ensureFreshToken, RECONNECT_REQUIRED } from '../platforms/token';
 
 export type RefreshResult = {
   id: string;
@@ -17,8 +17,19 @@ export type RefreshResult = {
 // window still wait until they're close to expiry.
 const HORIZON_HOURS = 15 * 24;
 
-export async function runRefreshTokens(): Promise<{ scanned: number; results: RefreshResult[] }> {
+export type RefreshSummary = {
+  scanned: number;
+  /** Accounts stamped as needing a manual reconnect on this run. */
+  reconnectRequired: number;
+  results: RefreshResult[];
+};
+
+export async function runRefreshTokens(): Promise<RefreshSummary> {
   const horizon = new Date(Date.now() + HORIZON_HOURS * 60 * 60 * 1000);
+  // Deliberately NOT filtered on refresh_token: accounts that CAN'T refresh
+  // (LinkedIn, or rows the platform never issued a refresh token for) are
+  // exactly the ones that die silently. They get scanned too; ensureFreshToken
+  // stamps them 'reconnect_required' once they're near expiry.
   const candidates = await db()
     .select()
     .from(connectedAccounts)
@@ -26,12 +37,12 @@ export async function runRefreshTokens(): Promise<{ scanned: number; results: Re
       and(
         eq(connectedAccounts.isStub, false),
         isNotNull(connectedAccounts.tokenExpiresAt),
-        isNotNull(connectedAccounts.refreshToken),
         lte(connectedAccounts.tokenExpiresAt, horizon),
       ),
     );
 
   const results: RefreshResult[] = [];
+  let reconnectRequired = 0;
   for (const acct of candidates) {
     const beforeExp = acct.tokenExpiresAt?.getTime() ?? 0;
     const after = await ensureFreshToken(acct);
@@ -40,7 +51,10 @@ export async function runRefreshTokens(): Promise<{ scanned: number; results: Re
     // ensureFreshToken now writes lastRefreshError to the row on failure —
     // surface a short error string in the cron output so admins running it
     // by hand can see what failed at a glance.
-    const lastErr = (after as { lastRefreshError?: string | null }).lastRefreshError ?? null;
+    const lastErr = after.lastRefreshError ?? null;
+    if (lastErr === RECONNECT_REQUIRED && acct.lastRefreshError !== RECONNECT_REQUIRED) {
+      reconnectRequired += 1;
+    }
     results.push({
       id: acct.id,
       platform: acct.platform,
@@ -49,5 +63,5 @@ export async function runRefreshTokens(): Promise<{ scanned: number; results: Re
     });
   }
 
-  return { scanned: candidates.length, results };
+  return { scanned: candidates.length, reconnectRequired, results };
 }

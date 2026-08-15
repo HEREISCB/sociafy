@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { Icon } from './icons';
-import { useApi, apiPost } from '../lib/ui/fetcher';
+import { useApi, apiPost, friendlyApiError } from '../lib/ui/fetcher';
 import { VOICE_CONSENT_TEXT, VOICE_CONSENT_VERSION } from '../lib/legal/voiceConsent';
 
 export type Voice = {
@@ -199,7 +199,7 @@ export function VoiceCreatorDrawer({
             </label>
 
             <div style={{ fontSize: 11, color: 'var(--ink-3)', lineHeight: 1.5 }}>
-              Provide <strong>{MIN_S}–{MAX_S}s</strong> of clean, single-speaker speech — no music or background noise. {MIN_S}0–40s works best.
+              Provide <strong>{MIN_S}–{MAX_S}s</strong> of clean, single-speaker speech — no music or background noise. 20–40s works best.
             </div>
 
             <div style={{ display: 'flex', gap: 8 }}>
@@ -346,19 +346,45 @@ export function VoicesManager() {
   const [previewText, setPreviewText] = useState('Hi! This is my Voice Twin speaking.');
   const [previewBusy, setPreviewBusy] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  // Deleting a Voice Twin is irreversible and was a single unguarded click.
+  const [confirmDel, setConfirmDel] = useState<string | null>(null);
+  const [delError, setDelError] = useState<string | null>(null);
+
+  /** Open/close a preview panel, never leaving another voice's audio behind. */
+  const togglePreview = (id: string) => {
+    setPreviewFor((cur) => (cur === id ? null : id));
+    setPreviewUrl(null);
+    setPreviewError(null);
+  };
 
   const del = async (id: string) => {
-    await fetch(`/api/voices/${id}`, { method: 'DELETE', credentials: 'include' });
-    mutate();
+    setDelError(null);
+    try {
+      const r = await fetch(`/api/voices/${id}`, { method: 'DELETE', credentials: 'include' });
+      // A failed DELETE used to look exactly like a successful one.
+      if (!r.ok) throw new Error(String(r.status));
+      setConfirmDel(null);
+      await mutate();
+    } catch (e) {
+      setDelError(friendlyApiError(e));
+    }
   };
 
   const preview = async (voiceId: string) => {
-    setPreviewBusy(true); setPreviewUrl(null);
+    setPreviewBusy(true); setPreviewUrl(null); setPreviewError(null);
     try {
       const res = await apiPost<{ job: { id: string } }>('/api/tts', { voiceId, text: previewText.slice(0, 300) });
       const url = await pollTts(res.job.id);
+      // pollTts returns null on failure AND on timeout. Either way the button
+      // used to just go back to idle with nothing to show and nothing to say.
+      if (!url) setPreviewError('The preview didn\'t come back. Try again in a moment.');
       setPreviewUrl(url);
-    } catch { setPreviewUrl(null); } finally { setPreviewBusy(false); }
+    } catch (e) {
+      setPreviewError(friendlyApiError(e));
+    } finally {
+      setPreviewBusy(false);
+    }
   };
 
   return (
@@ -384,13 +410,28 @@ export function VoicesManager() {
             </div>
             <div style={{ display: 'flex', gap: 6 }}>
               {v.status === 'ready' && (
-                <button className="btn sm ghost" onClick={() => setPreviewFor(previewFor === v.id ? null : v.id)} aria-label="Preview">
+                <button className="btn sm ghost" onClick={() => togglePreview(v.id)} aria-label="Preview">
                   <Icon name="play" size={11} />
                 </button>
               )}
-              <button className="btn sm ghost" onClick={() => del(v.id)} aria-label="Delete"><Icon name="trash" size={11} /></button>
+              {confirmDel === v.id ? (
+                <>
+                  <button className="btn sm ghost" onClick={() => { setConfirmDel(null); setDelError(null); }}>Keep</button>
+                  <button className="btn sm" onClick={() => del(v.id)} style={{ color: 'var(--danger, #c0392b)' }}>Delete for good</button>
+                </>
+              ) : (
+                <button className="btn sm ghost" onClick={() => { setConfirmDel(v.id); setDelError(null); }} aria-label="Delete"><Icon name="trash" size={11} /></button>
+              )}
             </div>
           </div>
+          {confirmDel === v.id && (
+            <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>
+              This deletes the Voice Twin permanently. Anything already generated with it keeps working.
+            </div>
+          )}
+          {delError && confirmDel === v.id && (
+            <div style={{ fontSize: 11, color: 'var(--danger, #c0392b)' }}>{delError}</div>
+          )}
 
           {previewFor === v.id && v.status === 'ready' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -405,6 +446,7 @@ export function VoicesManager() {
                 <button className="btn sm" disabled={previewBusy} onClick={() => preview(v.id)}>{previewBusy ? 'Synthesizing…' : 'Preview speech'}</button>
                 {previewUrl && <audio src={previewUrl} controls style={{ flex: 1, height: 30 }} />}
               </div>
+              {previewError && <div style={{ fontSize: 11, color: 'var(--danger, #c0392b)' }}>{previewError}</div>}
             </div>
           )}
         </div>

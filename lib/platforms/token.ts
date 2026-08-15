@@ -6,6 +6,12 @@ import { decryptToken, encryptToken, isEncrypted } from '../crypto/tokens';
 
 const DEFAULT_REFRESH_WINDOW_MS = 5 * 60 * 1000;
 
+/** How close to expiry a non-refreshable token gets before we tell the user. */
+const RECONNECT_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
+
+/** Sentinel stamped on lastRefreshError when the account can never self-renew. */
+export const RECONNECT_REQUIRED = 'reconnect_required';
+
 type AccountRow = typeof connectedAccounts.$inferSelect;
 
 /**
@@ -53,14 +59,22 @@ export async function ensureFreshToken(acct: AccountRow): Promise<AccountRow> {
     }
     return plain;
   }
-  if (!plain.refreshToken) return plain;
-
   const adapter = getAdapter(plain.platform as Platform);
+  const remaining = new Date(plain.tokenExpiresAt).getTime() - Date.now();
+
+  // No way to renew this one — either the platform has no refresh flow at all
+  // (LinkedIn) or the row never got a refresh_token. Silence was the bug: the
+  // token just died and nothing anywhere said so. We can't fix the token, so
+  // say it out loud instead, once, as it comes up on expiry.
+  if (!plain.refreshToken || !adapter.refresh) {
+    if (remaining <= RECONNECT_WINDOW_MS) return markReconnectRequired(plain);
+    return plain;
+  }
+
   // Each adapter owns its refresh policy. Long-lived tokens (Instagram 60d)
   // refresh well before expiry; short-lived (X 2h, YouTube 1h) wait until
   // the last few minutes. Default when an adapter doesn't override: refresh
   // when ≤ 5 min remain.
-  const remaining = new Date(plain.tokenExpiresAt).getTime() - Date.now();
   const needsRefresh = adapter.shouldRefresh
     ? adapter.shouldRefresh(remaining)
     : remaining <= DEFAULT_REFRESH_WINDOW_MS;
@@ -78,8 +92,6 @@ export async function ensureFreshToken(acct: AccountRow): Promise<AccountRow> {
     }
     return plain;
   }
-
-  if (!adapter.refresh) return plain;
 
   try {
     const tokens = await adapter.refresh(plain.refreshToken);
@@ -141,4 +153,42 @@ export async function ensureFreshToken(acct: AccountRow): Promise<AccountRow> {
     }
     return { ...plain, lastRefreshError: truncated, lastRefreshErrorAt: now };
   }
+}
+
+/**
+ * Stamp an account that cannot refresh as needing a manual reconnect, and drop
+ * one activity_log row so it shows up on the dashboard feed.
+ *
+ * Idempotent: both the cron and every /api/accounts load call through here, so
+ * the write only happens on the transition into the reconnect state. Clearing
+ * lastRefreshError (a successful reconnect does that) re-arms it.
+ */
+async function markReconnectRequired(acct: AccountRow): Promise<AccountRow> {
+  if (acct.lastRefreshError === RECONNECT_REQUIRED) return acct;
+  const now = new Date();
+  const expired = !!acct.tokenExpiresAt && acct.tokenExpiresAt.getTime() <= now.getTime();
+  try {
+    await db()
+      .update(connectedAccounts)
+      .set({ lastRefreshError: RECONNECT_REQUIRED, lastRefreshErrorAt: now, updatedAt: now })
+      .where(eq(connectedAccounts.id, acct.id));
+    await db().insert(activityLog).values({
+      userId: acct.userId,
+      kind: 'platform_refresh_failed',
+      title: `Reconnect needed: ${acct.platform}`,
+      body: expired
+        ? `Your ${acct.platform} access token has expired and can't be renewed automatically. Reconnect the account to resume publishing.`
+        : `Your ${acct.platform} access token expires soon and can't be renewed automatically. Reconnect the account to keep publishing.`,
+      meta: {
+        platform: acct.platform,
+        accountId: acct.id,
+        handle: acct.handle ?? null,
+        reason: RECONNECT_REQUIRED,
+      },
+    });
+  } catch {
+    // DB write failed — leave the row untouched so the next run tries again.
+    return acct;
+  }
+  return { ...acct, lastRefreshError: RECONNECT_REQUIRED, lastRefreshErrorAt: now };
 }

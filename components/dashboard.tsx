@@ -1,9 +1,11 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Icon, Pglyph } from './icons';
-import { apiDelete, apiPost, useApi } from '../lib/ui/fetcher';
+import { apiDelete, apiPost, friendlyApiError, useApi } from '../lib/ui/fetcher';
 import { PLATFORM_TO_SHORT } from '../lib/ui/platforms';
+import { healthFor, toneColor } from '../lib/ui/health';
+import { activityMeta } from '../lib/ui/activity';
 import type { Platform } from '../lib/db/schema';
 
 type ScheduledRow = {
@@ -39,6 +41,11 @@ type AccountRow = {
   displayName: string | null;
   avatarUrl: string | null;
   isStub: boolean;
+  // Health fields. /api/accounts has always returned these; leaving them off
+  // this type is why the dashboard called a dead account "Live".
+  tokenExpiresAt: string | null;
+  autoRefresh: boolean;
+  lastRefreshError: string | null;
   meta: { pageName?: string; pageId?: string } | null;
 };
 type ActivityRow = {
@@ -79,20 +86,34 @@ interface DashboardProps {
 
 const Dashboard: React.FC<DashboardProps> = ({ onCompose, onEditDraft }) => {
   const [tab, setTab] = useState<'upcoming' | 'drafts' | 'posted'>('upcoming');
+  // Ticking "now" so token-expiry math stays pure during render and matches
+  // the server render on hydration. Same pattern as the Connections page.
+  const [now, setNow] = useState(0);
+  useEffect(() => {
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
-  const { data: scheduled, unauth } = useApi<ScheduledRow[]>('/api/schedule');
-  const { data: drafts } = useApi<DraftRow[]>('/api/drafts');
-  const { data: trends } = useApi<TrendRow[]>('/api/trends?limit=5');
-  const { data: accounts, mutate: refetchAccounts } = useApi<AccountRow[]>('/api/accounts');
+  // `error` matters as much as `data`: a 500 used to render as "you have
+  // nothing yet", which is a different and much worse thing to tell someone.
+  const { data: scheduled, error: scheduledError, unauth } = useApi<ScheduledRow[]>('/api/schedule');
+  const { data: drafts, error: draftsError } = useApi<DraftRow[]>('/api/drafts');
+  const { data: trends, error: trendsError } = useApi<TrendRow[]>('/api/trends?limit=5');
+  const { data: accounts, error: accountsError, mutate: refetchAccounts } = useApi<AccountRow[]>('/api/accounts');
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
+  const [disconnectError, setDisconnectError] = useState<string | null>(null);
   // In-app confirm (replaces native confirm()) — consistent with .modal-sheet.
   const [confirmDisconnect, setConfirmDisconnect] = useState<AccountRow | null>(null);
   const disconnect = async (id: string) => {
     setDisconnecting(id);
+    setDisconnectError(null);
     try {
       await apiDelete(`/api/accounts/${id}`);
       await refetchAccounts();
       setConfirmDisconnect(null);
+    } catch (e) {
+      setDisconnectError(friendlyApiError(e));
     } finally {
       setDisconnecting(null);
     }
@@ -104,18 +125,28 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose, onEditDraft }) => {
     fbConnected ? '/api/platforms/facebook/insights' : null,
   );
   const [syncingInsights, setSyncingInsights] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const syncInsights = async () => {
     setSyncingInsights(true);
+    setSyncError(null);
     try {
       await apiPost('/api/platforms/facebook/insights', {});
       await refetchInsights();
+    } catch (e) {
+      setSyncError(friendlyApiError(e));
     } finally {
       setSyncingInsights(false);
     }
   };
 
+  // Each tab depends on ONE query. Gating all three on `scheduled && drafts`
+  // meant a single failing endpoint blanked tabs that had nothing to do with it.
+  const tabQuery = tab === 'drafts'
+    ? { data: drafts, error: draftsError, label: 'drafts' }
+    : { data: scheduled, error: scheduledError, label: 'posts' };
+
   const queueRows = useMemo(() => {
-    if (!scheduled || !drafts) return null;
+    if (tab === 'drafts' ? !drafts : !scheduled) return null;
     if (tab === 'upcoming') {
       return (scheduled ?? [])
         .filter((s) => s.status === 'pending' || s.status === 'publishing')
@@ -179,30 +210,37 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose, onEditDraft }) => {
   const pendingCount = (scheduled ?? []).filter((s) => s.status === 'pending').length;
   const pendingConnected = totalConnected - realConnected;
 
+  // A failed query has no number to show. "0" is a lie; "—" is not.
   const stats = [
     {
       label: 'Scheduled (pending)',
-      value: String(pendingCount),
-      hint: 'awaiting publish',
+      value: scheduledError ? '—' : String(pendingCount),
+      hint: scheduledError ? "couldn't load" : 'awaiting publish',
     },
     {
       label: 'Drafts in queue',
-      value: String((drafts ?? []).filter((d) => d.status === 'draft').length),
-      hint: 'not yet scheduled',
+      value: draftsError ? '—' : String((drafts ?? []).filter((d) => d.status === 'draft').length),
+      hint: draftsError ? "couldn't load" : 'not yet scheduled',
     },
     {
       label: 'Trends watching',
-      value: String((trends ?? []).length),
-      hint: 'in your niches',
+      value: trendsError ? '—' : String((trends ?? []).length),
+      hint: trendsError ? "couldn't load" : 'in your niches',
     },
     {
       label: 'Connected platforms',
-      value: String(realConnected),
-      hint: pendingConnected > 0
+      value: accountsError ? '—' : String(realConnected),
+      hint: accountsError
+        ? "couldn't load"
+        : pendingConnected > 0
         ? `${realConnected} live · ${pendingConnected} pending`
         : `${realConnected} live`,
     },
   ];
+
+  const needsReconnect = (accounts ?? []).filter(
+    (a) => !a.isStub && healthFor(a, now).tone === 'bad',
+  );
 
   return (
     <>
@@ -216,7 +254,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose, onEditDraft }) => {
             Morning briefing · {new Date().toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
           </div>
           <h2>
-            {(scheduled ?? []).filter((s) => s.status === 'pending').length > 0
+            {scheduledError
+              ? <>I couldn&apos;t load your queue. <em>This is a problem on our side, not an empty queue — retry in a moment.</em></>
+              : (scheduled ?? []).filter((s) => s.status === 'pending').length > 0
               ? <><strong>{(scheduled ?? []).filter((s) => s.status === 'pending').length}</strong> posts queued for the coming days. <em>Open compose to draft another angle.</em></>
               : trends && trends.length > 0
                 ? <>I&apos;m watching <strong>{trends.length}</strong> trends in your niches. <em>Open compose to draft an angle.</em></>
@@ -255,6 +295,38 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose, onEditDraft }) => {
         ))}
       </div>
 
+      {/* A dead connection is the loudest thing on this page, because publishing
+          to it fails 401 forever and nothing else here would say so. */}
+      {needsReconnect.length > 0 && (
+        <div
+          style={{
+            display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16,
+            padding: '12px 16px', borderRadius: 10,
+            border: '1px solid var(--bad)', background: 'var(--bg-elev)',
+            borderLeft: '4px solid var(--bad)',
+          }}
+        >
+          <Icon name="bolt" size={14} style={{ color: 'var(--bad)', flexShrink: 0 }} />
+          <div style={{ flex: 1, minWidth: 0, fontSize: 13, lineHeight: 1.5 }}>
+            <strong>
+              {needsReconnect.length === 1
+                ? `Your ${needsReconnect[0].platform} connection needs reconnecting.`
+                : `${needsReconnect.length} connections need reconnecting.`}
+            </strong>{' '}
+            <span style={{ color: 'var(--ink-3)' }}>
+              Scheduled posts to {needsReconnect.length === 1 ? 'it' : 'them'} will keep failing until you do.
+            </span>
+          </div>
+          <a className="btn sm" href="/dashboard?tab=connections" style={{ flexShrink: 0, textDecoration: 'none' }}>
+            Reconnect
+          </a>
+        </div>
+      )}
+
+      {accountsError && (
+        <ErrorNote what="your connected accounts" style={{ marginBottom: 16 }} />
+      )}
+
       {facebookMe && !facebookMe.stub && (
         <FacebookPageCard data={facebookMe} />
       )}
@@ -277,6 +349,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose, onEditDraft }) => {
               <Icon name="refresh" size={11} /> {syncingInsights ? 'Syncing…' : 'Sync from Facebook'}
             </button>
           </div>
+          {syncError && (
+            <div style={{ padding: '10px 16px', fontSize: 12.5, color: 'var(--bad)', borderBottom: '1px solid var(--line)' }}>
+              {syncError}
+            </div>
+          )}
           <div className="card-body flush">
             {insightsData.posts.slice(0, 8).map((p) => (
               <div key={p.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 14, padding: '12px 16px', borderBottom: '1px solid var(--line)' }}>
@@ -373,7 +450,12 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose, onEditDraft }) => {
               </div>
             );
             })}
-            {showQueue.length === 0 && (
+            {/* An error is NOT an empty queue. Showing "nothing scheduled yet"
+                after a 500 told users their posts had vanished. */}
+            {showQueue.length === 0 && tabQuery.error && (
+              <ErrorNote what={`your ${tabQuery.label}`} />
+            )}
+            {showQueue.length === 0 && !tabQuery.error && (
               <div style={{ padding: 28, fontSize: 13, color: 'var(--ink-3)', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
                 <Icon name="clock" size={18} style={{ color: 'var(--ink-4)' }} />
                 <div style={{ maxWidth: 320, lineHeight: 1.5 }}>
@@ -413,11 +495,13 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose, onEditDraft }) => {
                   </div>
                 </div>
               ))}
-              {showTrends.length === 0 && (
+              {showTrends.length === 0 && (trendsError ? (
+                <ErrorNote what="your trends" />
+              ) : (
                 <div style={{ padding: 18, fontSize: 13, color: 'var(--ink-3)' }}>
                   No trends yet. Auto-pilot → <strong>Pull fresh trends</strong>.
                 </div>
-              )}
+              ))}
             </div>
           </div>
 
@@ -430,8 +514,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose, onEditDraft }) => {
               <div className="card-body flush">
                 {activity.slice(0, 6).map((a) => (
                   <div key={a.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 14px', borderBottom: '1px solid var(--line)' }}>
-                    <span className={`chip ${activityTone(a.kind)}`} style={{ marginTop: 2, flexShrink: 0 }}>
-                      <span className="dot" />{activityLabel(a.kind)}
+                    <span className={`chip ${activityMeta(a.kind).tone}`} style={{ marginTop: 2, flexShrink: 0 }}>
+                      <span className="dot" />{activityMeta(a.kind).label}
                     </span>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 12.5, fontWeight: 500, lineHeight: 1.4 }}>{a.title}</div>
@@ -453,7 +537,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose, onEditDraft }) => {
                 <span className="meta">{realConnected} live</span>
               </div>
               <div className="card-body flush">
-                {accounts.map((a) => (
+                {accounts.map((a) => {
+                  // Same helper the Connections page uses, so the two screens
+                  // can't describe the same account differently.
+                  const health = healthFor(a, now);
+                  return (
                   <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', borderBottom: '1px solid var(--line)' }}>
                     <Pglyph p={PLATFORM_TO_SHORT[a.platform]} />
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -463,11 +551,19 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose, onEditDraft }) => {
                       <div className="mono" style={{ fontSize: 11, color: 'var(--ink-3)' }}>
                         {a.handle ? `@${a.handle}` : a.platform}
                         {a.isStub && <> · stub</>}
+                        {health.tone === 'bad' && <> · {health.detail}</>}
                       </div>
                     </div>
-                    {a.isStub
-                      ? <span className="chip ghost mono">stub</span>
-                      : <span className="chip"><span className="dot" style={{ background: 'var(--good)' }} />Live</span>}
+                    <span
+                      className="chip"
+                      title={health.detail}
+                      style={health.tone === 'bad' || health.tone === 'warn'
+                        ? { color: toneColor[health.tone], borderColor: toneColor[health.tone] }
+                        : undefined}
+                    >
+                      <span className="dot" style={{ background: toneColor[health.tone] }} />
+                      {health.label}
+                    </span>
                     <button
                       className="icon-btn"
                       title="Disconnect"
@@ -478,7 +574,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose, onEditDraft }) => {
                       <Icon name="x" size={12} />
                     </button>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -486,14 +583,19 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose, onEditDraft }) => {
       </div>
 
       {confirmDisconnect && (
-        <div className="modal-scrim" onClick={() => { if (!disconnecting) setConfirmDisconnect(null); }}>
+        <div className="modal-scrim" onClick={() => { if (!disconnecting) { setDisconnectError(null); setConfirmDisconnect(null); } }}>
           <div className="modal-sheet" onClick={(e) => e.stopPropagation()} style={{ width: 'min(420px, 92vw)' }}>
             <h3 style={{ margin: '0 0 8px', fontSize: 15, letterSpacing: '-0.01em' }}>Disconnect this account?</h3>
             <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--ink-3)', lineHeight: 1.5 }}>
               {confirmDisconnect.displayName || confirmDisconnect.meta?.pageName || confirmDisconnect.handle || confirmDisconnect.platform} will be disconnected. You can reconnect anytime.
             </p>
+            {disconnectError && (
+              <p style={{ margin: '0 0 16px', padding: '8px 10px', fontSize: 12.5, lineHeight: 1.5, color: 'var(--bad)', border: '1px solid var(--bad)', borderRadius: 8 }}>
+                {disconnectError}
+              </p>
+            )}
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button className="btn" onClick={() => setConfirmDisconnect(null)} disabled={!!disconnecting}>Keep connected</button>
+              <button className="btn" onClick={() => { setDisconnectError(null); setConfirmDisconnect(null); }} disabled={!!disconnecting}>Keep connected</button>
               <button className="btn primary" onClick={() => disconnect(confirmDisconnect.id)} disabled={!!disconnecting}>
                 {disconnecting ? 'Disconnecting…' : 'Disconnect'}
               </button>
@@ -504,6 +606,30 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose, onEditDraft }) => {
     </>
   );
 };
+
+/**
+ * "We couldn't load this" — deliberately NOT shaped like the empty state.
+ * Red rule, no "get started" call to action, and an explicit retry.
+ */
+const ErrorNote: React.FC<{ what: string; style?: React.CSSProperties }> = ({ what, style }) => (
+  <div
+    style={{
+      display: 'flex', alignItems: 'center', gap: 10,
+      padding: '14px 16px', fontSize: 13, lineHeight: 1.5,
+      background: 'var(--bg-elev)', borderLeft: '3px solid var(--bad)',
+      ...style,
+    }}
+  >
+    <Icon name="bolt" size={14} style={{ color: 'var(--bad)', flexShrink: 0 }} />
+    <div style={{ flex: 1, minWidth: 0 }}>
+      <strong>Couldn&apos;t load {what}.</strong>{' '}
+      <span style={{ color: 'var(--ink-3)' }}>Something went wrong on our side — this isn&apos;t an empty list.</span>
+    </div>
+    <button className="btn sm" onClick={() => window.location.reload()} style={{ flexShrink: 0 }}>
+      <Icon name="refresh" size={11} /> Retry
+    </button>
+  </div>
+);
 
 type BrandReport = {
   summary: string;
@@ -737,30 +863,6 @@ function relTime(iso: string): string {
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} min ago`;
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} hr ago`;
   return `${Math.floor(diff / 86_400_000)} d ago`;
-}
-
-function activityLabel(kind: string): string {
-  switch (kind) {
-    case 'platform_connected': return 'Connected';
-    case 'platform_disconnected': return 'Disconnected';
-    case 'draft_created': return 'Draft';
-    case 'draft_scheduled': return 'Scheduled';
-    case 'manual_publish': return 'Published';
-    case 'auto_publish': return 'Auto-publish';
-    case 'publish_failed': return 'Failed';
-    case 'agent_drafted': return 'Agent draft';
-    case 'agent_held': return 'Held';
-    case 'agent_enabled': return 'Agent on';
-    case 'agent_disabled': return 'Agent off';
-    case 'trend_spotted': return 'Trend';
-    default: return kind;
-  }
-}
-
-function activityTone(kind: string): 'accent' | 'warn' | '' {
-  if (kind === 'publish_failed' || kind === 'agent_held') return 'warn';
-  if (kind === 'manual_publish' || kind === 'auto_publish' || kind === 'platform_connected') return 'accent';
-  return '';
 }
 
 function relWhen(iso: string): string {

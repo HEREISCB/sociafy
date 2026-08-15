@@ -3,7 +3,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Icon } from './icons';
-import { apiPatch, apiPost, useApi } from '../lib/ui/fetcher';
+import { apiPatch, apiPost, friendlyApiError, useApi } from '../lib/ui/fetcher';
+import { activityMeta } from '../lib/ui/activity';
 import type { Niche, Platform } from '../lib/db/schema';
 import { estimateWeeklyBurn, weeksOfRunway } from '../lib/credits/estimator';
 import type { CreditsPayload } from './credits';
@@ -70,22 +71,6 @@ function relTime(iso: string): string {
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} hr ago`;
   return `${Math.floor(diff / 86_400_000)}d ago`;
 }
-
-const KIND_LABEL: Record<string, { label: string; tone: 'accent' | 'warn' | '' }> = {
-  trend_spotted: { label: 'Trend', tone: 'accent' },
-  agent_drafted: { label: 'Drafted', tone: '' },
-  auto_publish: { label: 'Scheduled', tone: 'accent' },
-  agent_held: { label: 'Held', tone: 'warn' },
-  publish_failed: { label: 'Failed', tone: 'warn' },
-  manual_publish: { label: 'Posted', tone: '' },
-  platform_connected: { label: 'Connected', tone: '' },
-  platform_disconnected: { label: 'Disconnected', tone: '' },
-  draft_created: { label: 'Drafted', tone: '' },
-  draft_scheduled: { label: 'Scheduled', tone: '' },
-  agent_enabled: { label: 'Enabled', tone: '' },
-  agent_disabled: { label: 'Paused', tone: '' },
-  onboarded: { label: 'Onboarded', tone: '' },
-};
 
 const DEMO_FEED: Activity[] = [
   { id: 'demo-1', kind: 'trend_spotted', title: 'Spotted "agentic content" mentions', body: 'Adjacent niche signal up 312%. Drafting your angle.', meta: null, createdAt: new Date(Date.now() - 2 * 60_000).toISOString() },
@@ -156,7 +141,7 @@ interface AgentPageProps {
 }
 
 const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
-  const { data: settings, mutate: refetchSettings, unauth } = useApi<AgentSettings>('/api/agent/settings');
+  const { data: settings, error: settingsError, mutate: refetchSettings, unauth } = useApi<AgentSettings>('/api/agent/settings');
   // Poll the activity feed so the "Live" badge is honest — drafts created by
   // the background autopilot loop appear without a manual refresh.
   const { data: activity, mutate: refetchActivity } = useApi<Activity[]>('/api/activity?limit=30', { refreshInterval: 30_000 });
@@ -188,6 +173,8 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
   const [quietStart, setQuietStart] = useState('22:00');
   const [quietEnd, setQuietEnd] = useState('07:00');
   const [savingRules, setSavingRules] = useState(false);
+  /** Last failed settings write, shown at the top of the page. */
+  const [saveError, setSaveError] = useState<string | null>(null);
   /** Briefly flashes a "Saved" pill on auto-save. Cleared after 1.5s so
    *  successive edits don't pile up timeouts. */
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -228,7 +215,9 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
     setBriefBusy(true);
     setBriefMsg('Drafting…');
     try {
-      const platforms = (accountsForBrief ?? []).map((a) => a.platform).slice(0, 4);
+      // Dedupe: two accounts on the same platform would otherwise put that
+      // platform in targetPlatforms twice and draft it twice.
+      const platforms = [...new Set((accountsForBrief ?? []).map((a) => a.platform))].slice(0, 4);
       if (platforms.length === 0) {
         setBriefMsg('Connect at least one platform first.');
         return;
@@ -269,8 +258,7 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
       await refetchActivity();
       setTimeout(() => { setBriefOpen(false); setBriefMsg(null); }, 900);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setBriefMsg(`Failed: ${msg.slice(0, 140)}`);
+      setBriefMsg(friendlyApiError(e));
     } finally {
       setBriefBusy(false);
     }
@@ -293,8 +281,7 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
       await refetchSettings();
       await refetchTrends();
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setRunMsg(`Failed: ${msg}`);
+      setRunMsg(friendlyApiError(e));
     } finally {
       setRunning(null);
     }
@@ -309,8 +296,7 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
       else setRunMsg(`Pulled ${r.inserted} trends from your niches`);
       await refetchTrends();
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setRunMsg(`Failed: ${msg}`);
+      setRunMsg(friendlyApiError(e));
     } finally {
       setRunning(null);
     }
@@ -334,6 +320,26 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
     setQuietEnd(settings.quietHours?.end ?? '07:00');
   }, [settings]);
 
+  /**
+   * Every settings write goes through here. Before, each caller was a
+   * try/finally with no catch: a failed PATCH left a floating rejection, no
+   * message, and — worse — the "Saved" pill still flashed and the editor still
+   * closed, so the UI claimed a save that never happened.
+   * Returns whether the write actually landed.
+   */
+  const persist = async (patch: Partial<AgentSettings>): Promise<boolean> => {
+    setSaveError(null);
+    try {
+      await apiPatch('/api/agent/settings', patch);
+      await refetchSettings();
+      setSavedAt(Date.now());
+      return true;
+    } catch (e) {
+      setSaveError(friendlyApiError(e));
+      return false;
+    }
+  };
+
   /** Save autopilot rules — fires on every change of platform toggle or
    *  number step. Server is the source of truth for run.ts. */
   const saveRules = async (patch: {
@@ -343,9 +349,7 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
   }) => {
     setSavingRules(true);
     try {
-      await apiPatch('/api/agent/settings', patch);
-      await refetchSettings();
-      setSavedAt(Date.now());
+      await persist(patch as Partial<AgentSettings>);
     } finally {
       setSavingRules(false);
     }
@@ -354,13 +358,12 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
   const saveBrand = async () => {
     setSavingBrand(true);
     try {
-      await apiPatch('/api/agent/settings', {
+      const ok = await persist({
         companyName: companyName.trim() || undefined,
         brandBio: brandBio.trim() || undefined,
         website: website.trim() || undefined,
-      });
-      await refetchSettings();
-      setBrandEditing(false);
+      } as Partial<AgentSettings>);
+      if (ok) setBrandEditing(false);
     } finally {
       setSavingBrand(false);
     }
@@ -368,31 +371,21 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
 
   const saveAutopilot = async (next: boolean) => {
     setAutopilot(next);
-    try {
-      await apiPatch('/api/agent/settings', { enabled: next });
-      await refetchSettings();
-    } catch {
-      setAutopilot(!next);
-    }
+    // Snap the switch back if the server didn't take it — an autopilot that
+    // looks "running" but isn't is the worst possible lie on this page.
+    if (!(await persist({ enabled: next }))) setAutopilot(!next);
   };
 
   const saveInstructions = async () => {
     setSavingInstr(true);
     try {
-      await apiPatch('/api/agent/settings', { instructions });
-      await refetchSettings();
-      setEditing(false);
+      if (await persist({ instructions })) setEditing(false);
     } finally {
       setSavingInstr(false);
     }
   };
 
-  const updateField = async (patch: Partial<AgentSettings>) => {
-    try {
-      await apiPatch('/api/agent/settings', patch);
-      await refetchSettings();
-    } catch {/* ignore */}
-  };
+  const updateField = persist;
 
   const niches = settings?.niches ?? [];
   // Demo feed only for unauthenticated visitors. Signed-in users with an
@@ -402,7 +395,10 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
   // First-run state: signed in but no niches picked yet. We block the
   // Resume button until they've at least named what to write about so
   // Autopilot doesn't run "blind".
-  const needsSetup = !unauth && niches.length === 0;
+  // `settings &&`: without it this is true for the whole first render pass, so
+  // every fully-configured user got a "finish setup" banner and dead buttons
+  // for a beat on each load.
+  const needsSetup = !unauth && !!settings && niches.length === 0;
 
   // Credit balance + live weekly burn estimate for the budget card.
   // Recomputes whenever the user tweaks the autopilot rules.
@@ -441,6 +437,22 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
             first run; signed-in users with niches already picked see it as a
             compact summary that can be expanded for a refresher. */}
         <HowItWorksCard expanded={needsSetup || !!unauth} />
+
+        {settingsError && (
+          <div style={{ padding: '12px 14px', borderRadius: 10, background: 'var(--bg-elev)', borderLeft: '3px solid var(--bad)', fontSize: 13, lineHeight: 1.5 }}>
+            <strong>Couldn&apos;t load your autopilot settings.</strong>{' '}
+            <span style={{ color: 'var(--ink-3)' }}>
+              What you see below is defaults, not your configuration — don&apos;t change anything until this loads.
+            </span>
+          </div>
+        )}
+
+        {saveError && (
+          <div style={{ padding: '12px 14px', borderRadius: 10, background: 'var(--bg-elev)', borderLeft: '3px solid var(--bad)', fontSize: 13, lineHeight: 1.5, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ flex: 1 }}><strong>That change wasn&apos;t saved.</strong> <span style={{ color: 'var(--ink-3)' }}>{saveError}</span></span>
+            <button className="btn sm ghost" onClick={() => setSaveError(null)} aria-label="Dismiss">✕</button>
+          </div>
+        )}
 
         {needsSetup && (
           <div className="card" style={{ background: 'var(--accent-soft)', borderColor: 'oklch(0.86 0.08 70)' }}>
@@ -643,7 +655,7 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
               </div>
             )}
             {feed.map((a) => {
-              const meta = KIND_LABEL[a.kind] ?? { label: a.kind, tone: '' as const };
+              const meta = activityMeta(a.kind);
               return (
                 <div className="agent-card" key={a.id}>
                   <div className="agent-mark">A</div>
@@ -996,9 +1008,11 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
                   value={String(row.key === 'cadence' ? cadence : row.key === 'threshold' ? threshold : strict)}
                   onChange={(e) => {
                     const v = e.target.value;
-                    if (row.key === 'cadence') { setCadence(parseInt(v)); updateField({ cadencePerWeek: parseInt(v) }); setSavedAt(Date.now()); }
-                    else if (row.key === 'threshold') { setThreshold(parseInt(v)); updateField({ autoPublishThreshold: parseInt(v) }); setSavedAt(Date.now()); }
-                    else { const b = v === 'true'; setStrict(b); updateField({ brandSafetyStrict: b }); setSavedAt(Date.now()); }
+                    // No optimistic "Saved" flash here — persist() flashes it
+                    // only once the server has actually taken the change.
+                    if (row.key === 'cadence') { setCadence(parseInt(v)); updateField({ cadencePerWeek: parseInt(v) }); }
+                    else if (row.key === 'threshold') { setThreshold(parseInt(v)); updateField({ autoPublishThreshold: parseInt(v) }); }
+                    else { const b = v === 'true'; setStrict(b); updateField({ brandSafetyStrict: b }); }
                   }}
                   style={{ fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--ink)', background: 'transparent', border: 'none', textAlign: 'right' }}
                   disabled={unauth}
@@ -1026,7 +1040,6 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
                   onBlur={() => {
                     if (quietStart && quietEnd && (quietStart !== settings?.quietHours?.start || quietEnd !== settings?.quietHours?.end)) {
                       updateField({ quietHours: { start: quietStart, end: quietEnd } });
-                      setSavedAt(Date.now());
                     }
                   }}
                   disabled={unauth}
@@ -1040,7 +1053,6 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
                   onBlur={() => {
                     if (quietStart && quietEnd && (quietStart !== settings?.quietHours?.start || quietEnd !== settings?.quietHours?.end)) {
                       updateField({ quietHours: { start: quietStart, end: quietEnd } });
-                      setSavedAt(Date.now());
                     }
                   }}
                   disabled={unauth}
