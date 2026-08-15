@@ -12,6 +12,7 @@ import {
   type DraftMedia,
 } from '../../../lib/db/schema';
 import { scheduleCreateSchema, parseBody } from '../../../lib/validation';
+import { postKind, supportsKind, unsupportedReason } from '../../../lib/platforms/capabilities';
 
 export async function GET(req: NextRequest) {
   return withUser(async (user) => {
@@ -65,20 +66,36 @@ export async function POST(req: NextRequest) {
       .where(eq(connectedAccounts.userId, user.id));
     const accountByPlatform = new Map(accounts.map((a) => [a.platform, a]));
 
-    // Platforms the user asked for but has no connected account on. We used to
-    // silently skip these — a request where EVERY platform was unconnected
-    // returned `{ scheduled: [] }` with 200 and the UI announced "Scheduled."
-    // while nothing existed. Fail loudly instead, and report partial skips.
-    const skipped = requestedPlatforms.filter((p) => !accountByPlatform.has(p));
+    // Platforms we can't actually publish to, with the reason. Two causes:
+    //  1. no connected account;
+    //  2. the platform's API rejects this post type outright (Instagram /
+    //     TikTok / YouTube can't take text-only). Scheduling those anyway is
+    //     how real rows ended up `failed` with `youtube_text_unsupported`
+    //     hours after a green "Scheduled." toast.
+    // We used to silently skip (1) and never check (2); a request where EVERY
+    // platform was unpublishable returned `{ scheduled: [] }` with 200.
+    const kind = postKind((draft.media ?? []) as DraftMedia[]);
+    const reasons: Record<string, string> = {};
+    for (const p of requestedPlatforms) {
+      if (!accountByPlatform.has(p)) {
+        reasons[p] = `No connected account for ${p}. Connect it first, then schedule.`;
+      } else if (!supportsKind(p, kind)) {
+        reasons[p] = unsupportedReason(p, kind);
+      }
+    }
+    const skipped = requestedPlatforms.filter((p) => p in reasons);
     if (skipped.length === requestedPlatforms.length) {
-      return jsonError('no_connected_accounts', 400, {
+      const unsupported = skipped.filter((p) => accountByPlatform.has(p));
+      return jsonError(unsupported.length > 0 ? 'unsupported_post_type' : 'no_connected_accounts', 400, {
         skipped,
-        hint: `No connected account for ${skipped.join(', ')}. Connect the platform first, then schedule.`,
+        reasons,
+        hint: Object.values(reasons).join(' '),
       });
     }
 
     const inserted = [];
     for (const platform of requestedPlatforms) {
+      if (platform in reasons) continue;
       const acct = accountByPlatform.get(platform);
       if (!acct) continue; // skip platforms with no connected account
       const text = (draft.perPlatformText as Record<string, string> | null)?.[platform] ?? draft.body;
@@ -107,6 +124,6 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    return { scheduled: inserted, skipped };
+    return { scheduled: inserted, skipped, reasons };
   }, req);
 }

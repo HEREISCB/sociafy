@@ -78,6 +78,10 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ platform: s
         scope: result.tokens.scope ?? null,
         meta: (result.tokens.meta ?? {}) as Record<string, unknown>,
         isStub: isStub || !adapter.isConfigured(),
+        // A successful reconnect clears the refresh failure. Without this the
+        // red "Reconnect needed" banner survived reconnecting, forever.
+        lastRefreshError: null,
+        lastRefreshErrorAt: null,
         updatedAt: new Date(),
       })
       .where(eq(connectedAccounts.id, existing[0].id));

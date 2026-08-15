@@ -31,6 +31,14 @@ export async function runAgentForUser(userId: string, opts?: { force?: boolean }
   const [settings] = await db().select().from(agentSettings).where(eq(agentSettings.userId, userId)).limit(1);
   if (!settings) return { userId, drafted: 0, published: 0, held: 0, reason: 'no_settings' };
 
+  // Autopilot paused = the agent does nothing on its own. `force` (the manual
+  // "Auto-draft from trends" button) may still draft, but a paused agent never
+  // schedules a live post — see the `canAutoPublish` gate below.
+  if (!settings.enabled && !opts?.force) {
+    return { userId, drafted: 0, published: 0, held: 0, reason: 'disabled' };
+  }
+  const canAutoPublish = settings.enabled;
+
   // Credit pre-flight: autopilot needs at least 1 credit per draft it'll
   // attempt. If the user is out, skip rather than partial-running.
   const minCredits = CREDIT_PRICES.agent_draft * (opts?.force ? 2 : Math.min(2, settings.cadencePerWeek));
@@ -77,14 +85,14 @@ export async function runAgentForUser(userId: string, opts?: { force?: boolean }
     return { userId, drafted: 0, published: 0, held: 0, reason: 'no_accounts' };
   }
 
-  // Apply the autopilot permission matrix. `enabledPlatforms` empty array
-  // means "all connected" (legacy behavior); otherwise we restrict to the
-  // intersection. Per-platform weekly caps are checked just-in-time below
-  // before each scheduledPosts.insert.
+  // Apply the autopilot permission matrix. `enabledPlatforms` is an explicit
+  // allow-list: empty means NO platforms, never "all connected". The UI says
+  // the same thing ("Autopilot has nowhere to post"), and [] is the column
+  // default, so the old "empty = all" reading posted to every connected
+  // account of every user who never finished onboarding. Per-platform weekly
+  // caps are checked just-in-time below before each scheduledPosts.insert.
   const allowList = (settings.enabledPlatforms ?? []) as Platform[];
-  const allowedPlatforms = allowList.length === 0
-    ? connectedPlatforms
-    : connectedPlatforms.filter((p) => allowList.includes(p));
+  const allowedPlatforms = connectedPlatforms.filter((p) => allowList.includes(p));
   if (allowedPlatforms.length === 0) {
     return { userId, drafted: 0, published: 0, held: 0, reason: 'no_allowed_platforms' };
   }
@@ -166,9 +174,12 @@ export async function runAgentForUser(userId: string, opts?: { force?: boolean }
 
     const accountByPlatform = new Map(accounts.map((a) => [a.platform, a]));
 
-    if (d.score >= settings.autoPublishThreshold) {
+    // score 0 means "unrated" (placeholder draft, or a model reply we couldn't
+    // trust) — it never auto-publishes, even if the threshold is set to 0.
+    if (canAutoPublish && d.score > 0 && d.score >= settings.autoPublishThreshold) {
       const when = nextPostingWindow(new Date(), settings.quietHours);
       const skipped: Platform[] = [];
+      let insertedAny = false;
       for (const p of allowedPlatforms) {
         const acct = accountByPlatform.get(p);
         if (!acct) continue;
@@ -185,11 +196,26 @@ export async function runAgentForUser(userId: string, opts?: { force?: boolean }
           text: d.perPlatform[p] ?? d.body,
           media: [] as DraftMedia[],
         });
+        insertedAny = true;
         // Tally so a second draft in the same run respects the cap.
         usedByPlatform.set(p, (usedByPlatform.get(p) ?? 0) + 1);
       }
       if (skipped.length > 0) {
         console.log(`[agent.run] skipped over weekly cap: ${skipped.join(', ')}`);
+      }
+      // Every platform was capped/unaccounted — nothing is queued, so the
+      // draft is still a draft. Marking it 'scheduled' hid it from the review
+      // inbox and counted it as published in the run result.
+      if (!insertedAny) {
+        await db().insert(activityLog).values({
+          userId,
+          kind: 'agent_drafted',
+          title: `Agent drafted: ${d.title}`,
+          body: d.body.slice(0, 280),
+          meta: { draftId: draftRow.id, score: d.score, reason: 'all_platforms_capped', skipped },
+        });
+        heldCount++;
+        continue;
       }
       await db().update(drafts).set({ status: 'scheduled' }).where(eq(drafts.id, draftRow.id));
       await db().insert(activityLog).values({

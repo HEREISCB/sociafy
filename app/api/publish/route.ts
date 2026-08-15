@@ -98,59 +98,9 @@ export async function POST(req: NextRequest) {
         })
         .returning();
 
-      try {
-        const adapter = getAdapter(platform);
-        const out = await adapter.publishText({
-          text,
-          media: media.map((m) => ({ url: m.url, mimeType: m.mimeType })),
-          account: {
-            id: acct.id,
-            accessToken: acct.accessToken,
-            refreshToken: acct.refreshToken,
-            platformUserId: acct.platformUserId,
-            meta: acct.meta as Record<string, unknown> | null,
-          },
-        });
-
-        // The adapter short-circuited to stubPublish: the platform isn't
-        // configured or the account holds a stub token, so nothing was posted
-        // and out.url is a dead stub.sociafy.local link. Same discipline as
-        // lib/cron/publish.ts — a simulated publish is never a success.
-        // Thrown so the existing failure path records it (row + activity log).
-        if (out.stub) {
-          throw new PlatformError(
-            `platform_not_connected: ${platform} is not connected (publish was simulated — nothing was posted). Connect ${platform}, then try again.`,
-            422,
-          );
-        }
-
-        await db()
-          .update(scheduledPosts)
-          .set({
-            status: 'published',
-            publishedAt: new Date(),
-            platformPostId: out.platformPostId,
-            platformPostUrl: out.url ?? null,
-            updatedAt: new Date(),
-          })
-          .where(eq(scheduledPosts.id, sp.id));
-
-        await db().insert(activityLog).values({
-          userId: user.id,
-          kind: 'manual_publish',
-          title: `Published to ${platform}`,
-          body: text.slice(0, 280),
-          meta: { scheduledPostId: sp.id, platform, url: out.url, immediate: true },
-        });
-
-        results.push({
-          platform,
-          ok: true,
-          url: out.url ?? null,
-          platformPostId: out.platformPostId,
-          scheduledPostId: sp.id,
-        });
-      } catch (e) {
+      // Nothing reached the platform, or the platform answered "no". Only
+      // ever called from before/at the publish call — never after a live post.
+      const fail = async (e: unknown) => {
         // Unwrap PlatformError so the upstream HTTP status + response body
         // make it back to the UI (and the activity log). Without this the
         // user just sees "x_publish_failed" with no clue what X actually
@@ -164,8 +114,17 @@ export async function POST(req: NextRequest) {
           : detailRaw != null
             ? (() => { try { return JSON.stringify(detailRaw); } catch { return String(detailRaw); } })()
             : '';
-        const friendly = [code, status ? `(${status})` : '', detailText ? `· ${detailText.slice(0, 400)}` : '']
-          .filter(Boolean).join(' ');
+        // No HTTP status means the platform never gave us a verdict (socket
+        // hangup, timeout, `TypeError: fetch failed`) — the post may well be
+        // live. No adapter sends an idempotency key, so telling the user to
+        // click "Post now" again is a coin-flip on double-posting to a real
+        // account. Say so instead of inviting the retry.
+        // ponytail: send a per-post idempotency key where the platform
+        // supports one (X, LinkedIn), then this can safely retry.
+        const friendly = platformErr
+          ? [code, status ? `(${status})` : '', detailText ? `· ${detailText.slice(0, 400)}` : '']
+              .filter(Boolean).join(' ')
+          : `publish_unconfirmed: ${code} — the post may or may not be live. Check ${platform} before trying again.`;
         console.error(`[publish] ${platform} failed: ${friendly}`);
 
         await db()
@@ -182,15 +141,98 @@ export async function POST(req: NextRequest) {
         });
 
         results.push({ platform, ok: false, error: friendly, scheduledPostId: sp.id });
+      };
+
+      // ── The only window where a failure is safe to report. Everything past
+      // this try has either not touched the platform yet, or has already put
+      // a post on the customer's real account — and a live post must NEVER be
+      // reported as failed, because the user's fix is to click "Post now"
+      // again. Same discipline as lib/cron/publish.ts.
+      const adapter = getAdapter(platform);
+      let out;
+      try {
+        out = await adapter.publishText({
+          text,
+          media: media.map((m) => ({ url: m.url, mimeType: m.mimeType })),
+          account: {
+            id: acct.id,
+            accessToken: acct.accessToken,
+            refreshToken: acct.refreshToken,
+            platformUserId: acct.platformUserId,
+            meta: acct.meta as Record<string, unknown> | null,
+          },
+        });
+      } catch (e) {
+        await fail(e);
+        continue;
       }
+
+      // The adapter short-circuited to stubPublish: the platform isn't
+      // configured or the account holds a stub token, so nothing was posted
+      // and out.url is a dead stub.sociafy.local link. Same discipline as
+      // lib/cron/publish.ts — a simulated publish is never a success.
+      if (out.stub) {
+        await fail(new PlatformError(
+          `platform_not_connected: ${platform} is not connected (publish was simulated — nothing was posted). Connect ${platform}, then try again.`,
+          422,
+        ));
+        continue;
+      }
+
+      // ── Past this line the post IS LIVE. Bookkeeping only: every failure is
+      // swallowed and logged loudly. A row stranded in 'publishing' or a
+      // missing activity-log line is strictly better than telling the user
+      // their post failed and having them post it to their feed twice.
+      try {
+        await db()
+          .update(scheduledPosts)
+          .set({
+            status: 'published',
+            publishedAt: new Date(),
+            platformPostId: out.platformPostId,
+            platformPostUrl: out.url ?? null,
+            updatedAt: new Date(),
+          })
+          .where(eq(scheduledPosts.id, sp.id));
+      } catch (e) {
+        console.error(
+          `[publish] PUBLISHED BUT NOT RECORDED — scheduled_post=${sp.id} platform=${platform} platformPostId=${out.platformPostId} url=${out.url ?? ''}: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+
+      try {
+        await db().insert(activityLog).values({
+          userId: user.id,
+          kind: 'manual_publish',
+          title: `Published to ${platform}`,
+          body: text.slice(0, 280),
+          meta: { scheduledPostId: sp.id, platform, url: out.url, immediate: true },
+        });
+      } catch (e) {
+        console.error(`[publish] activity log failed for published post ${sp.id}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+
+      results.push({
+        platform,
+        ok: true,
+        url: out.url ?? null,
+        platformPostId: out.platformPostId,
+        scheduledPostId: sp.id,
+      });
     }
 
     const anyOk = results.some((r) => r.ok);
     if (anyOk) {
-      await db()
-        .update(drafts)
-        .set({ status: 'published', updatedAt: new Date() })
-        .where(eq(drafts.id, draft.id));
+      // Also bookkeeping after a live post — a throw here would 500 the
+      // request and send the user straight back to "Post now".
+      try {
+        await db()
+          .update(drafts)
+          .set({ status: 'published', updatedAt: new Date() })
+          .where(eq(drafts.id, draft.id));
+      } catch (e) {
+        console.error(`[publish] draft ${draft.id} not marked published: ${e instanceof Error ? e.message : String(e)}`);
+      }
       return { results };
     }
 

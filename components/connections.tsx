@@ -28,7 +28,10 @@ type Account = {
 type ScheduledPost = {
   id: string;
   platform: Platform;
-  status: 'queued' | 'publishing' | 'published' | 'failed';
+  // Mirrors ScheduledStatus in lib/db/schema.ts. 'queued' was never a real
+  // status, so the queued count was always 0 and the disconnect dialog told
+  // users nothing would be lost.
+  status: 'pending' | 'publishing' | 'published' | 'failed' | 'canceled';
 };
 
 type PlatformDef = {
@@ -315,7 +318,7 @@ const ConnectionsPage: React.FC = () => {
   const queuedByPlatform = new Map<Platform, number>();
   (scheduled ?? []).forEach((s) => {
     if (s.status === 'published') publishedByPlatform.set(s.platform, (publishedByPlatform.get(s.platform) ?? 0) + 1);
-    if (s.status === 'queued' || s.status === 'publishing') queuedByPlatform.set(s.platform, (queuedByPlatform.get(s.platform) ?? 0) + 1);
+    if (s.status === 'pending' || s.status === 'publishing') queuedByPlatform.set(s.platform, (queuedByPlatform.get(s.platform) ?? 0) + 1);
   });
   const totalPublished = Array.from(publishedByPlatform.values()).reduce((a, b) => a + b, 0);
 
@@ -391,7 +394,7 @@ const ConnectionsPage: React.FC = () => {
                 maxInlineSize: '52ch',
               }}
             >
-              Connect each platform once. Tokens are encrypted at rest, refresh in the background, and you can pull the plug anytime — drafts and queue survive disconnects.
+              Connect each platform once. Tokens are encrypted at rest, refresh in the background, and you can pull the plug anytime — your drafts survive a disconnect (that platform&apos;s queue and post history do not).
             </p>
           </div>
           <div
@@ -688,12 +691,17 @@ const ConnectionsPage: React.FC = () => {
 
                     {confirming ? (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 'auto' }}>
+                        {/* Tell the truth: the connected_accounts row cascades
+                            to scheduled_posts, so disconnecting deletes the
+                            queue AND the publish history for this platform.
+                            Drafts live in their own table and survive. */}
                         <div style={{ fontSize: 12, color: 'var(--ink-2)', lineHeight: 1.5 }}>
-                          {queued > 0 ? (
-                            <><strong style={{ color: 'var(--bad)' }}>{queued} queued post{queued === 1 ? '' : 's'} to {p.name} will stop publishing.</strong> Drafts are kept — reconnect anytime to resume.</>
-                          ) : (
-                            <>No queued posts to {p.name}. Drafts are kept — reconnect anytime to resume.</>
-                          )}
+                          <strong style={{ color: 'var(--bad)' }}>
+                            This permanently deletes {queued > 0 ? `${queued} queued post${queued === 1 ? '' : 's'}` : 'nothing from your queue'}
+                            {published > 0 ? ` and ${published} published post${published === 1 ? '' : 's'} from your ${p.name} history` : ''}.
+                          </strong>{' '}
+                          {queued > 0 ? 'Those posts will never publish and cannot be recovered. ' : ''}
+                          Your drafts are kept — reconnect anytime and schedule them again.
                         </div>
                         <div style={{ display: 'flex', gap: 8 }}>
                           <button
@@ -861,7 +869,7 @@ const ConnectionsPage: React.FC = () => {
         <HelpCell
           icon="lock"
           title="Encrypted at rest"
-          body="Tokens live in your Postgres connected_accounts table. Disconnect anytime — nothing else gets deleted."
+          body="Tokens live in your Postgres connected_accounts table. Disconnecting removes that account along with its queued posts and publish history; your drafts stay put."
         />
         <HelpCell
           icon="refresh"

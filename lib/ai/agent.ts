@@ -98,17 +98,60 @@ export async function draftFromTrends(args: DraftAgentArgs): Promise<AgentDraft[
     text = await completeText(ai, { system: sys, user, maxOutputTokens: 3500, json: true });
   }
 
-  let parsed: { drafts: AgentDraft[] };
+  let parsed: unknown;
   try {
     parsed = JSON.parse(stripFences(text));
   } catch {
     return stubDrafts(args);
   }
-  return (parsed.drafts ?? []).slice(0, args.count);
+  const drafts = coerceDrafts(parsed, args.platforms).slice(0, args.count);
+  return drafts.length > 0 ? drafts : stubDrafts(args);
 }
 
 function stripFences(s: string): string {
   return s.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+}
+
+const str = (v: unknown, max: number): string =>
+  typeof v === 'string' ? v.slice(0, max) : '';
+
+/**
+ * The model's JSON is untrusted input: `score` decides whether a draft is
+ * auto-published to a real account, so it gets clamped to 0-100 and anything
+ * unparseable scores 0 (never auto-publishes — the lowest selectable
+ * threshold is above 0). Drafts with no body are dropped outright.
+ */
+export function coerceDrafts(parsed: unknown, platforms: Platform[]): AgentDraft[] {
+  const raw = (parsed as { drafts?: unknown })?.drafts;
+  if (!Array.isArray(raw)) return [];
+  const out: AgentDraft[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const d = item as Record<string, unknown>;
+    const body = str(d.body, 20_000);
+    if (!body.trim()) continue;
+
+    const perPlatform: Partial<Record<Platform, string>> = {};
+    const pp = (d.perPlatform ?? {}) as Record<string, unknown>;
+    if (pp && typeof pp === 'object') {
+      for (const p of platforms) {
+        const t = str(pp[p], PLATFORM_LIMITS[p].hard);
+        if (t) perPlatform[p] = t;
+      }
+    }
+
+    const n = Number(d.score);
+    out.push({
+      title: str(d.title, 280) || body.slice(0, 80),
+      body,
+      perPlatform,
+      score: Number.isFinite(n) ? Math.min(100, Math.max(0, Math.round(n))) : 0,
+      rationale: str(d.rationale, 2_000),
+      trendId: typeof d.trendId === 'string' ? d.trendId : undefined,
+      suggestedImageUrl: typeof d.suggestedImageUrl === 'string' ? d.suggestedImageUrl : null,
+    });
+  }
+  return out;
 }
 
 function stubDrafts(args: DraftAgentArgs): AgentDraft[] {
@@ -124,8 +167,11 @@ function stubDrafts(args: DraftAgentArgs): AgentDraft[] {
       title: trend.title,
       body,
       perPlatform,
-      score: 88,
-      rationale: 'Stub — reflects the trend with a founder-first angle.',
+      // Placeholder copy must never clear an auto-publish threshold — this is
+      // canned marketing text, not something the user asked to be posted.
+      // 0 is below every selectable threshold, so it always lands in review.
+      score: 0,
+      rationale: 'Placeholder draft — the model was unavailable, so this is boilerplate. Review before publishing.',
       trendId: trend.id,
     },
   ];

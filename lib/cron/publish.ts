@@ -66,9 +66,12 @@ export async function runPublish(): Promise<{ ran: number; results: PublishResul
   if (due.length > BATCH_LIMIT) {
     batch = due.slice(0, BATCH_LIMIT);
     const overflow = due.slice(BATCH_LIMIT).map((p) => p.id);
+    // Give the attempt back: the claim already incremented it, but these rows
+    // never reached a platform. Without this they burn MAX_ATTEMPTS on ticks
+    // that never tried to publish them.
     await db()
       .update(scheduledPosts)
-      .set({ status: 'pending', updatedAt: now })
+      .set({ status: 'pending', attempts: sql`${scheduledPosts.attempts} - 1`, updatedAt: now })
       .where(inArray(scheduledPosts.id, overflow));
   }
 
@@ -96,13 +99,18 @@ export async function runPublish(): Promise<{ ran: number; results: PublishResul
       } else {
         await markFailed(sp.id, msg);
         // Only log the terminal verdict — logging every retry spams the feed.
-        await db().insert(activityLog).values({
-          userId: sp.userId,
-          kind: 'publish_failed',
-          title: `Publish failed: ${sp.platform}`,
-          body: msg,
-          meta: { scheduledPostId: sp.id, platform: sp.platform, attempts: sp.attempts },
-        });
+        // Never let a log write take down the rest of the batch.
+        try {
+          await db().insert(activityLog).values({
+            userId: sp.userId,
+            kind: 'publish_failed',
+            title: `Publish failed: ${sp.platform}`,
+            body: msg,
+            meta: { scheduledPostId: sp.id, platform: sp.platform, attempts: sp.attempts },
+          });
+        } catch (e) {
+          console.error(`[cron.publish] activity log failed for failed post ${sp.id}: ${errMsg(e)}`);
+        }
       }
       results.push({ id: sp.id, platform: sp.platform, ok: false, error: msg, willRetry });
     };
@@ -126,8 +134,12 @@ export async function runPublish(): Promise<{ ran: number; results: PublishResul
 
     const adapter = getAdapter(sp.platform);
 
+    // ── The only retryable window. Everything after this try has either not
+    // touched the platform yet, or has already put a post on the customer's
+    // real account — and a live post must NEVER go back to 'pending'.
+    let out;
     try {
-      const out = await adapter.publishText({
+      out = await adapter.publishText({
         text: sp.text,
         media: (sp.media ?? []) as { url: string; mimeType: string }[],
         account: {
@@ -138,20 +150,41 @@ export async function runPublish(): Promise<{ ran: number; results: PublishResul
           meta: acct.meta as Record<string, unknown> | null,
         },
       });
+    } catch (e) {
+      // A PlatformError carries an HTTP status: the platform answered and
+      // said no, so nothing was posted and retrying is safe. Anything else
+      // (socket hangup, timeout, `TypeError: fetch failed`) means we never
+      // got a verdict — the post may well be live. No adapter sends an
+      // idempotency key, so a retry is a coin-flip on double-posting to a
+      // real account. Go terminal and let the user decide.
+      // ponytail: send a per-row idempotency key where the platform supports
+      // one (X, LinkedIn), then these can retry safely.
+      const unconfirmed = !(e instanceof PlatformError);
+      await fail(
+        unconfirmed ? `publish_unconfirmed: ${errMsg(e)} — the post may or may not be live. Check ${sp.platform} before rescheduling.` : errMsg(e),
+        unconfirmed || isPermanent(e),
+      );
+      continue;
+    }
 
-      // The adapter short-circuited to stubPublish: the platform isn't
-      // configured or the account holds a stub token, so nothing was posted
-      // and out.url is a dead stub.sociafy.local link. Recording this as
-      // 'published' is how users ended up with green posts they could never
-      // find. Terminal — retrying can't connect an account.
-      if (out.stub) {
-        await fail(
-          `platform_not_connected: ${sp.platform} is not connected (publish was simulated — nothing was posted). Connect ${sp.platform}, then reschedule.`,
-          true,
-        );
-        continue;
-      }
+    // The adapter short-circuited to stubPublish: the platform isn't
+    // configured or the account holds a stub token, so nothing was posted
+    // and out.url is a dead stub.sociafy.local link. Recording this as
+    // 'published' is how users ended up with green posts they could never
+    // find. Terminal — retrying can't connect an account.
+    if (out.stub) {
+      await fail(
+        `platform_not_connected: ${sp.platform} is not connected (publish was simulated — nothing was posted). Connect ${sp.platform}, then reschedule.`,
+        true,
+      );
+      continue;
+    }
 
+    // ── Past this line the post IS LIVE. Bookkeeping only: every failure is
+    // swallowed and logged loudly. A row stuck in 'publishing' (never
+    // reclaimed) or a missing activity-log line is strictly better than
+    // posting to the customer's account a second time.
+    try {
       await db()
         .update(scheduledPosts)
         .set({
@@ -162,7 +195,13 @@ export async function runPublish(): Promise<{ ran: number; results: PublishResul
           updatedAt: new Date(),
         })
         .where(eq(scheduledPosts.id, sp.id));
+    } catch (e) {
+      console.error(
+        `[cron.publish] PUBLISHED BUT NOT RECORDED — scheduled_post=${sp.id} platform=${sp.platform} platformPostId=${out.platformPostId} url=${out.url ?? ''}: ${errMsg(e)}`,
+      );
+    }
 
+    try {
       await db().insert(activityLog).values({
         userId: sp.userId,
         kind: 'manual_publish',
@@ -170,11 +209,11 @@ export async function runPublish(): Promise<{ ran: number; results: PublishResul
         body: sp.text.slice(0, 280),
         meta: { scheduledPostId: sp.id, platform: sp.platform, url: out.url },
       });
-
-      results.push({ id: sp.id, platform: sp.platform, ok: true, postId: out.platformPostId });
     } catch (e) {
-      await fail(errMsg(e), isPermanent(e));
+      console.error(`[cron.publish] activity log failed for published post ${sp.id}: ${errMsg(e)}`);
     }
+
+    results.push({ id: sp.id, platform: sp.platform, ok: true, postId: out.platformPostId });
   }
 
   // Mark draft 'published' if all of its scheduled posts are published.

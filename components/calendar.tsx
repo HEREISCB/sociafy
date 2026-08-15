@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Icon } from './icons';
 import { apiDelete, apiPatch, apiPost, friendlyApiError, useApi } from '../lib/ui/fetcher';
 import { PLATFORM_TO_SHORT } from '../lib/ui/platforms';
+import { supportsKind, unsupportedReason } from '../lib/platforms/capabilities';
 import type { Platform } from '../lib/db/schema';
 
 type QuickMode = 'text' | 'image' | 'video';
@@ -21,6 +22,10 @@ type ScheduledRow = {
   status: 'pending' | 'publishing' | 'published' | 'failed' | 'canceled';
   text: string;
   platformPostUrl?: string | null;
+  /** Why the last publish attempt failed. The API always returned it; the
+   *  client used to drop it, so a failed post was a dead end on screen. */
+  error?: string | null;
+  attempts?: number;
 };
 
 type CalEventType = 'posted' | 'scheduled' | 'ai' | 'draft' | 'failed' | 'canceled';
@@ -92,12 +97,17 @@ const QuickComposeModal: React.FC<QuickComposeModalProps> = ({ whenIso, onWhenCh
   // down for this one post. Derived rather than synced through an effect, so
   // accounts arriving late can't clobber a selection the user already made.
   const connected = useMemo(() => (accountsApi.data ?? []).map((a) => a.platform), [accountsApi.data]);
+  // Quick-compose never attaches media, so every post it makes is text-only.
+  // Instagram/TikTok/YouTube reject text-only outright — offering them here
+  // bought a green "Scheduled." toast and a `failed` row hours later.
+  const selectable = useMemo(() => connected.filter((p) => supportsKind(p, 'text')), [connected]);
   const [platformOverride, setPlatformOverride] = useState<Platform[] | null>(null);
-  const platforms = platformOverride ?? connected.slice(0, 4);
+  const platforms = (platformOverride ?? selectable.slice(0, 4)).filter((p) => supportsKind(p, 'text'));
 
   const togglePlatform = (p: Platform) => {
+    if (!supportsKind(p, 'text')) return;
     setPlatformOverride((cur) => {
-      const base = cur ?? connected.slice(0, 4);
+      const base = cur ?? selectable.slice(0, 4);
       return base.includes(p) ? base.filter((x) => x !== p) : [...base, p];
     });
   };
@@ -150,6 +160,7 @@ const QuickComposeModal: React.FC<QuickComposeModalProps> = ({ whenIso, onWhenCh
     setBusy(true);
     setMsg('Scheduling…');
     let skipped: string[];
+    let reasons: Record<string, string> = {};
     try {
       const draft = await apiPost<{ id: string }>('/api/drafts', {
         prompt,
@@ -160,11 +171,12 @@ const QuickComposeModal: React.FC<QuickComposeModalProps> = ({ whenIso, onWhenCh
         perPlatformText: perPlatform,
         preset: mode === 'video' ? 'reel' : 'announcement',
       });
-      const res = await apiPost<{ scheduled: unknown[]; skipped?: string[] }>(
+      const res = await apiPost<{ scheduled: unknown[]; skipped?: string[]; reasons?: Record<string, string> }>(
         '/api/schedule',
         { draftId: draft.id, scheduledAt: whenIso, platforms },
       );
       skipped = res.skipped ?? [];
+      reasons = res.reasons ?? {};
     } catch (e) {
       setMsg(friendlyApiError(e));
       setBusy(false);
@@ -175,7 +187,11 @@ const QuickComposeModal: React.FC<QuickComposeModalProps> = ({ whenIso, onWhenCh
     // not the parent's cache manages to catch up.
     setDone(true);
     setBusy(false);
-    setMsg(skipped.length > 0 ? `Scheduled. Skipped ${skipped.join(', ')} — not connected.` : 'Scheduled.');
+    setMsg(
+      skipped.length > 0
+        ? `Scheduled. Skipped ${skipped.join(', ')} — ${skipped.map((p) => reasons[p]).filter(Boolean).join(' ') || 'not connected.'}`
+        : 'Scheduled.',
+    );
     try {
       await onScheduled();
     } catch {
@@ -254,12 +270,18 @@ const QuickComposeModal: React.FC<QuickComposeModalProps> = ({ whenIso, onWhenCh
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {connected.map((p) => {
               const on = platforms.includes(p);
+              const blocked = unsupportedReason(p, 'text');
               return (
                 <span
                   key={p}
                   onClick={() => togglePlatform(p)}
                   className={`prompt-chip ${on ? 'active' : ''}`}
-                  style={{ textTransform: 'capitalize' }}
+                  title={blocked ? `${blocked} Use "Edit in compose" to attach media.` : undefined}
+                  aria-disabled={blocked ? true : undefined}
+                  style={{
+                    textTransform: 'capitalize',
+                    ...(blocked ? { opacity: 0.4, cursor: 'not-allowed', textDecoration: 'line-through' } : null),
+                  }}
                 >
                   {p}
                 </span>
@@ -750,6 +772,14 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onCompose }) => {
             <div style={{ fontSize: 13.5, lineHeight: 1.55, whiteSpace: 'pre-wrap', padding: 14, background: 'var(--bg-sunk)', borderRadius: 10, marginBottom: 14, color: 'var(--ink-2)' }}>
               {selected.text}
             </div>
+            {selected.status === 'failed' && (
+              <div style={{ padding: 12, marginBottom: 14, fontSize: 12.5, lineHeight: 1.5, color: 'var(--bad)', background: 'var(--bg-sunk)', border: '1px solid var(--bad)', borderRadius: 10, wordBreak: 'break-word' }}>
+                <strong>Publish failed.</strong> {selected.error || 'No error was recorded.'}
+                <div style={{ marginTop: 6, color: 'var(--ink-3)' }}>
+                  Fix the cause, then pick a new time and hit Reschedule — that puts it back in the queue.
+                </div>
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
               <label style={{ fontSize: 12, color: 'var(--ink-3)' }}>Reschedule</label>
               <input
@@ -1221,6 +1251,14 @@ const CalendarMobileMonth: React.FC = () => {
             <div style={{ fontSize: 13.5, lineHeight: 1.55, whiteSpace: 'pre-wrap', padding: 14, background: 'var(--bg-sunk)', borderRadius: 10, marginBottom: 14, color: 'var(--ink-2)' }}>
               {selected.text}
             </div>
+            {selected.status === 'failed' && (
+              <div style={{ padding: 12, marginBottom: 14, fontSize: 12.5, lineHeight: 1.5, color: 'var(--bad)', background: 'var(--bg-sunk)', border: '1px solid var(--bad)', borderRadius: 10, wordBreak: 'break-word' }}>
+                <strong>Publish failed.</strong> {selected.error || 'No error was recorded.'}
+                <div style={{ marginTop: 6, color: 'var(--ink-3)' }}>
+                  Fix the cause, then pick a new time and hit Reschedule — that puts it back in the queue.
+                </div>
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
               <label style={{ fontSize: 12, color: 'var(--ink-3)' }}>Reschedule</label>
               <input

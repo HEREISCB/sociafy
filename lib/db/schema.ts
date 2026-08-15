@@ -279,8 +279,9 @@ export const agentSettings = pgTable('agent_settings', {
   website: text('website'),
   // Autopilot permission matrix — the user explicitly chooses which
   // platforms autopilot may post to and how many posts/week per platform.
-  // Empty array on enabledPlatforms means "all connected platforms" (legacy
-  // behavior); listing specific platforms restricts to those.
+  // enabledPlatforms is a strict allow-list: empty means autopilot posts
+  // NOWHERE. (It used to mean "all connected", which posted to every account
+  // of every user who never finished onboarding.)
   enabledPlatforms: jsonb('enabled_platforms').$type<Platform[]>().notNull().default([]),
   postsPerWeekByPlatform: jsonb('posts_per_week_by_platform').$type<Partial<Record<Platform, number>>>().notNull().default({}),
   postsPerWeekByContentType: jsonb('posts_per_week_by_content_type').$type<PostsPerWeekByType>().notNull().default({ text: 4, image: 0, video: 0 }),
