@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useUser } from '@clerk/nextjs';
 import { useSWRConfig } from 'swr';
 import { Sidebar, Topbar } from '../../components/shell';
@@ -162,8 +162,20 @@ export default function Home() {
   // share-URL land on the same pane. Use replaceState (not pushState) so
   // tab switches don't pollute browser history — Back goes to whatever
   // page the user came from before the dashboard, not previous tab.
+  //
+  // Skip the FIRST run. On a cold load `page` is still its initial
+  // 'dashboard' — the effect above has read `?tab=` but its setPage hasn't
+  // been applied yet — so syncing here would replaceState to `/dashboard`
+  // and destroy the very param we're about to honour. Every bookmarked or
+  // shared deep link would open the Dashboard tab. It only survived manual
+  // testing because warm client-side navigation sets `page` before mount.
+  const urlSynced = useRef(false);
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    if (!urlSynced.current) {
+      urlSynced.current = true;
+      return;
+    }
     const target = page === 'dashboard' ? '/dashboard' : `/dashboard?tab=${page}`;
     const current = window.location.pathname + window.location.search;
     if (current !== target) {

@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Sidebar, Topbar } from '../../components/shell';
 import { Icon } from '../../components/icons';
-import { apiPost, useApi } from '../../lib/ui/fetcher';
+import { apiPost, friendlyApiError, useApi } from '../../lib/ui/fetcher';
 import { openRazorpayModal } from '../../components/billing/razorpay-checkout';
 import { topupPriceView } from '../../lib/billing/pricing';
 
@@ -187,7 +187,11 @@ function BillingPageInner() {
       if (msg.includes('503') || msg.includes('billing_coming_soon')) {
         setToast('Payments aren\'t configured yet — please try again shortly or contact support.');
       } else {
-        setToast(`Checkout failed: ${msg.slice(0, 160)}`);
+        // friendlyApiError turns `Error("<status>: <json>")` into the server's
+        // `hint` sentence (or a generic one). Never interpolate the raw message
+        // — that is what put `500: {"error":"internal",…}` in front of a
+        // paying customer.
+        setToast(friendlyApiError(e));
       }
     } finally {
       setBusy(null);
@@ -211,7 +215,7 @@ function BillingPageInner() {
         await mutate();
       }
     } catch (e) {
-      setToast(`Couldn't switch tier: ${e instanceof Error ? e.message.slice(0, 160) : String(e)}`);
+      setToast(`Couldn't switch tier — ${friendlyApiError(e)}`);
     } finally {
       setBusy(null);
     }
@@ -230,7 +234,7 @@ function BillingPageInner() {
       if (msg.includes('503') || msg.includes('billing_coming_soon')) {
         setToast('Payments aren\'t configured yet — please try again shortly or contact support.');
       } else {
-        setToast(`Top-up failed: ${msg.slice(0, 160)}`);
+        setToast(friendlyApiError(e));
       }
     } finally {
       setTopupBusy(false);

@@ -1233,14 +1233,14 @@ a { color: inherit; text-decoration: none; }
   z-index: 1;
   display: inline-flex; align-items: center; gap: 5px;
 }
-.mode-switch .opt.active { color: var(--bg); }
-.mode-switch .pill {
-  position: absolute;
-  top: 3px; bottom: 3px;
+/* The active option paints its OWN dark background. It used to rely on a
+   sliding `.pill` indicator sitting behind it, but neither call site
+   (components/dashboard.tsx, components/calendar.tsx) ever rendered one — so
+   `color: var(--bg)` was near-white text on a near-white track (1.05:1) and
+   the selected tab read as a blank button. */
+.mode-switch .opt.active {
+  color: var(--bg);
   background: var(--ink);
-  border-radius: 100px;
-  transition: left 0.25s cubic-bezier(0.4, 0, 0.2, 1), width 0.25s;
-  z-index: 0;
 }
 
 /* Misc */
