@@ -127,7 +127,7 @@ a { color: inherit; text-decoration: none; }
   position: relative;
   cursor: pointer;
 }
-.nav-item:hover { background: var(--bg-sunk); }
+@media (hover: hover) and (pointer: fine) { .nav-item:hover { background: var(--bg-sunk); } }
 .nav-item.active {
   background: var(--bg-elev);
   color: var(--ink);
@@ -272,21 +272,21 @@ a { color: inherit; text-decoration: none; }
   white-space: nowrap;
   cursor: pointer;
 }
-.btn:hover { background: var(--bg-sunk); }
+@media (hover: hover) and (pointer: fine) { .btn:hover { background: var(--bg-sunk); } }
 .btn.primary {
   background: var(--ink);
   color: var(--bg);
   border-color: var(--ink);
 }
-.btn.primary:hover { background: var(--ink-2); }
+@media (hover: hover) and (pointer: fine) { .btn.primary:hover { background: var(--ink-2); } }
 .btn.accent {
   background: var(--accent);
   color: white;
   border-color: var(--accent);
 }
-.btn.accent:hover { filter: brightness(0.96); }
+@media (hover: hover) and (pointer: fine) { .btn.accent:hover { filter: brightness(0.96); } }
 .btn.ghost { border-color: transparent; background: transparent; }
-.btn.ghost:hover { background: var(--bg-sunk); }
+@media (hover: hover) and (pointer: fine) { .btn.ghost:hover { background: var(--bg-sunk); } }
 .btn.sm { padding: 4px 8px; font-size: 11.5px; }
 .btn .ic { width: 14px; height: 14px; }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
@@ -549,7 +549,7 @@ a { color: inherit; text-decoration: none; }
   border-color: var(--accent);
   color: white;
 }
-.briefing .btn:hover { background: oklch(0.22 0 0); }
+@media (hover: hover) and (pointer: fine) { .briefing .btn:hover { background: oklch(0.22 0 0); } }
 
 .briefing-meter {
   border: 1px solid oklch(0.22 0 0);
@@ -607,7 +607,7 @@ a { color: inherit; text-decoration: none; }
   align-items: start;
 }
 .queue-item:last-child { border-bottom: 0; }
-.queue-item:hover { background: var(--bg-sunk); }
+@media (hover: hover) and (pointer: fine) { .queue-item:hover { background: var(--bg-sunk); } }
 .queue-time {
   font-family: var(--mono);
   font-size: 11px;
@@ -644,7 +644,7 @@ a { color: inherit; text-decoration: none; }
   display: flex; gap: 4px; align-items: center;
   opacity: 0; transition: opacity 0.15s;
 }
-.queue-item:hover .queue-actions { opacity: 1; }
+@media (hover: hover) and (pointer: fine) { .queue-item:hover .queue-actions { opacity: 1; } }
 .icon-btn {
   width: 26px; height: 26px;
   display: grid; place-items: center;
@@ -653,7 +653,7 @@ a { color: inherit; text-decoration: none; }
   border: 1px solid transparent;
   cursor: pointer;
 }
-.icon-btn:hover { background: var(--bg-elev); border-color: var(--line); color: var(--ink); }
+@media (hover: hover) and (pointer: fine) { .icon-btn:hover { background: var(--bg-elev); border-color: var(--line); color: var(--ink); } }
 
 /* Trends list */
 .trend-item {
@@ -665,7 +665,7 @@ a { color: inherit; text-decoration: none; }
   align-items: center;
 }
 .trend-item:last-child { border-bottom: 0; }
-.trend-item:hover { background: var(--bg-sunk); }
+@media (hover: hover) and (pointer: fine) { .trend-item:hover { background: var(--bg-sunk); } }
 .trend-rank {
   font-family: var(--mono);
   font-size: 11px;
@@ -686,7 +686,7 @@ a { color: inherit; text-decoration: none; }
   display: flex; align-items: center; gap: 6px;
   opacity: 0; transition: opacity 0.15s;
 }
-.trend-item:hover .trend-action { opacity: 1; }
+@media (hover: hover) and (pointer: fine) { .trend-item:hover .trend-action { opacity: 1; } }
 
 /* Calendar */
 .calendar {
@@ -750,7 +750,7 @@ a { color: inherit; text-decoration: none; }
   border-bottom: 1px dashed var(--line);
   position: relative;
 }
-.cal-slot:hover { background: var(--bg-sunk); }
+@media (hover: hover) and (pointer: fine) { .cal-slot:hover { background: var(--bg-sunk); } }
 .cal-event {
   position: absolute;
   left: 4px; right: 4px;
@@ -938,7 +938,7 @@ a { color: inherit; text-decoration: none; }
   display: inline-flex; align-items: center; gap: 5px;
   cursor: pointer;
 }
-.prompt-chip:hover { background: var(--bg-sunk); }
+@media (hover: hover) and (pointer: fine) { .prompt-chip:hover { background: var(--bg-sunk); } }
 .prompt-chip.active { background: var(--ink); color: var(--bg); border-color: var(--ink); }
 .prompt-spacer { flex: 1; }
 
@@ -957,7 +957,7 @@ a { color: inherit; text-decoration: none; }
   cursor: pointer;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
-.variant:hover { border-color: var(--line-2); }
+@media (hover: hover) and (pointer: fine) { .variant:hover { border-color: var(--line-2); } }
 .variant.active { border-color: var(--accent); box-shadow: 0 0 0 3px oklch(0.96 0.04 70); }
 .variant-head {
   display: flex; justify-content: space-between; align-items: center;
@@ -1121,7 +1121,7 @@ a { color: inherit; text-decoration: none; }
   cursor: pointer;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
-.connect-tile:hover { border-color: var(--line-2); }
+@media (hover: hover) and (pointer: fine) { .connect-tile:hover { border-color: var(--line-2); } }
 .connect-tile.connected { border-color: oklch(0.86 0.08 155); background: oklch(0.98 0.02 155); }
 .connect-tile.connecting { border-color: var(--accent); }
 .connect-tile-meta { min-width: 0; }
@@ -1163,7 +1163,7 @@ a { color: inherit; text-decoration: none; }
   cursor: pointer;
   display: flex; flex-direction: column; gap: 4px;
 }
-.topic:hover { border-color: var(--line-2); }
+@media (hover: hover) and (pointer: fine) { .topic:hover { border-color: var(--line-2); } }
 .topic.active {
   border-color: var(--ink);
   background: var(--ink);
@@ -1254,7 +1254,7 @@ a { color: inherit; text-decoration: none; }
   border-radius: 5px;
   border: 2px solid var(--bg);
 }
-::-webkit-scrollbar-thumb:hover { background: var(--ink-4); }
+@media (hover: hover) and (pointer: fine) { ::-webkit-scrollbar-thumb:hover { background: var(--ink-4); } }
 
 /* =====================================================
    LANDING PAGE STYLES
@@ -1285,7 +1285,7 @@ a { color: inherit; text-decoration: none; }
   color: var(--ink-2);
   margin-left: 8px;
 }
-.lp-nav-links a:hover { color: var(--ink); }
+@media (hover: hover) and (pointer: fine) { .lp-nav-links a:hover { color: var(--ink); } }
 .lp-nav-spacer { flex: 1; }
 .lp-nav-actions { display: flex; gap: 8px; align-items: center; }
 .lp-nav-status {
@@ -1375,7 +1375,7 @@ a { color: inherit; text-decoration: none; }
   font-weight: 500;
 }
 .btn-lg.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
-.btn-lg.primary:hover { background: var(--ink-2); }
+@media (hover: hover) and (pointer: fine) { .btn-lg.primary:hover { background: var(--ink-2); } }
 .btn-lg .kbd {
   font-family: var(--mono); font-size: 10.5px;
   background: oklch(0.18 0 0); color: oklch(0.78 0 0);
@@ -1522,7 +1522,7 @@ a { color: inherit; text-decoration: none; }
   opacity: 0.75;
   transition: opacity 0.2s, color 0.2s;
 }
-.lp-logo:hover { opacity: 1; color: var(--ink); }
+@media (hover: hover) and (pointer: fine) { .lp-logo:hover { opacity: 1; color: var(--ink); } }
 .lp-logo .glyph {
   width: 22px; height: 22px;
   border-radius: 5px;
@@ -2065,7 +2065,7 @@ a { color: inherit; text-decoration: none; }
 .price-card.featured .price-cta .btn {
   background: var(--accent); border-color: var(--accent); color: white;
 }
-.price-card.featured .price-cta .btn:hover { filter: brightness(0.95); }
+@media (hover: hover) and (pointer: fine) { .price-card.featured .price-cta .btn:hover { filter: brightness(0.95); } }
 
 /* ======= FAQ ======= */
 .faq { display: grid; grid-template-columns: 1fr; gap: 0; border-top: 1px solid var(--line); }
@@ -2150,7 +2150,7 @@ a { color: inherit; text-decoration: none; }
 }
 .lp-foot-col ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
 .lp-foot-col a { font-size: 13px; color: var(--ink-2); }
-.lp-foot-col a:hover { color: var(--ink); }
+@media (hover: hover) and (pointer: fine) { .lp-foot-col a:hover { color: var(--ink); } }
 .lp-foot-bottom {
   display: flex; align-items: center; justify-content: space-between;
   padding-top: 24px; border-top: 1px solid var(--line);
@@ -2158,7 +2158,7 @@ a { color: inherit; text-decoration: none; }
 }
 .lp-foot-socials { display: flex; gap: 6px; }
 .lp-foot-socials .pglyph { opacity: 0.7; }
-.lp-foot-socials .pglyph:hover { opacity: 1; }
+@media (hover: hover) and (pointer: fine) { .lp-foot-socials .pglyph:hover { opacity: 1; } }
 
 /* ============================================================
    Auth pages
@@ -2331,7 +2331,7 @@ a { color: inherit; text-decoration: none; }
   line-height: 1;
   transition: border-color 0.15s ease, background 0.15s ease;
 }
-.autopilot-pill:hover { border-color: var(--line-2); }
+@media (hover: hover) and (pointer: fine) { .autopilot-pill:hover { border-color: var(--line-2); } }
 .autopilot-pill .status-dot {
   width: 7px;
   height: 7px;
@@ -2386,7 +2386,7 @@ a { color: inherit; text-decoration: none; }
   line-height: 1;
   transition: border-color 0.15s ease, background 0.15s ease;
 }
-.credit-meter:hover { border-color: var(--line-2); }
+@media (hover: hover) and (pointer: fine) { .credit-meter:hover { border-color: var(--line-2); } }
 .credit-meter .credit-meter-icon {
   display: grid;
   place-items: center;
@@ -2757,15 +2757,9 @@ a { color: inherit; text-decoration: none; }
 }
 .dev-cost-label span { text-transform: none; letter-spacing: 0; color: var(--ink-3); }
 
-/* Raw docs/api.md at /developers/reference. */
+/* /developers/reference. The page renders parsed markdown now; its
+   typography lives in a local <style> block there, not here. */
 .doc-page { max-width: 900px; margin: 0 auto; padding: 40px 24px 64px; }
-.doc-md {
-  font-family: var(--mono);
-  font-size: 12px;
-  line-height: 1.7;
-  white-space: pre-wrap;
-  overflow-wrap: break-word;
-}
 
 /* ===================================================================
    Billing page
@@ -2871,7 +2865,7 @@ a { color: inherit; text-decoration: none; }
   gap: 10px;
   transition: border-color 0.15s ease, transform 0.15s ease;
 }
-.billing-tier-card:hover { border-color: var(--line-2); transform: translateY(-1px); }
+@media (hover: hover) and (pointer: fine) { .billing-tier-card:hover { border-color: var(--line-2); transform: translateY(-1px); } }
 .billing-tier-card.current {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
@@ -3011,7 +3005,7 @@ a { color: inherit; text-decoration: none; }
   text-align: left;
   color: var(--ink);
 }
-.plan-platform:hover:not(.muted) { border-color: var(--line-2); }
+@media (hover: hover) and (pointer: fine) { .plan-platform:hover:not(.muted) { border-color: var(--line-2); } }
 .plan-platform.on {
   border-color: var(--accent);
   background: var(--accent-soft);
@@ -3076,7 +3070,7 @@ a { color: inherit; text-decoration: none; }
   cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease;
 }
-.plan-radio:hover { border-color: var(--line-2); }
+@media (hover: hover) and (pointer: fine) { .plan-radio:hover { border-color: var(--line-2); } }
 .plan-radio.on {
   border-color: var(--accent);
   background: var(--accent-soft);
@@ -3295,7 +3289,7 @@ a { color: inherit; text-decoration: none; }
   margin-right: -4px;
   flex-shrink: 0;
 }
-.topbar-menu-btn:hover { background: var(--bg-sunk); color: var(--ink); }
+@media (hover: hover) and (pointer: fine) { .topbar-menu-btn:hover { background: var(--bg-sunk); color: var(--ink); } }
 .sidebar-scrim {
   display: none;
 }
@@ -3319,21 +3313,33 @@ a { color: inherit; text-decoration: none; }
     z-index: 90;
     background: var(--bg-elev);
     border-right: 1px solid var(--line);
-    transform: translateX(-100%);
-    transition: transform 0.22s cubic-bezier(0.32, 0.72, 0.32, 1);
+    /* Position is owned by shell.tsx: 1:1 with the finger while dragging,
+       then a spring. Deliberately NO css transition — a scripted curve
+       cannot be grabbed and reversed mid-flight, and one layered on top of
+       the rAF loop would only lag it. The fallback keeps it shut before
+       hydration. */
+    transform: translateX(var(--drawer-x, -100%));
+    will-change: transform;
+    /* Let the browser keep vertical scrolling; we want the horizontal axis. */
+    touch-action: pan-y;
+    -webkit-user-select: none;
+    user-select: none;
     box-shadow: 0 24px 60px -24px rgba(0, 0, 0, 0.25);
     overflow-y: auto;
   }
-  .sidebar.mobile-open { transform: translateX(0); }
   .sidebar-scrim {
     display: block;
     position: fixed;
     inset: 0;
     background: rgba(10, 10, 10, 0.42);
     z-index: 89;
+    /* Starts out of the way; shell.tsx fades it in step with the drawer, so a
+       half-dragged drawer gets a half-dark scrim instead of a scripted fade
+       that knows nothing about the gesture. */
+    opacity: 0;
+    pointer-events: none;
     -webkit-backdrop-filter: blur(2px);
     backdrop-filter: blur(2px);
-    animation: modalScrimIn 180ms ease-out both;
   }
 
   .topbar-menu-btn { display: inline-flex; }
@@ -3751,6 +3757,23 @@ a { color: inherit; text-decoration: none; }
   .topbar-menu-btn:active,
   .autopilot-pill:active,
   .mode-switch .opt:active { transform: none; }
+}
+
+/* Continues the block above, but has to be width-scoped: `.sidebar` is a real
+   layout column on desktop, and hiding it there would delete the navigation.
+   The mobile drawer under reduced motion does not slide and does not spring —
+   it cross-fades in place, and shell.tsx disables the drag, since dragging a
+   panel across the screen is exactly the vestibular motion being declined. */
+@media (max-width: 900px) and (prefers-reduced-motion: reduce) {
+  .sidebar {
+    transform: none !important;
+    will-change: auto;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 160ms ease, visibility 160ms;
+  }
+  .sidebar.mobile-open { opacity: 1; visibility: visible; }
+  .sidebar-scrim { transition: opacity 160ms ease; }
 }
 
 @media (prefers-reduced-transparency: reduce) {

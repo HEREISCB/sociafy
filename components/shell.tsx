@@ -7,6 +7,7 @@ import { UserButton, useUser } from '@clerk/nextjs';
 import { Icon } from './icons';
 import { useApi } from '../lib/ui/fetcher';
 import { CreditMeter } from './credits';
+import { createSpring, project, rubberband, type Spring } from '../lib/ui/spring';
 
 type Page = 'dashboard' | 'compose' | 'agent' | 'calendar' | 'connections' | 'shield' | 'onboarding';
 // Legacy alias kept so callers compile during the topbar refactor.
@@ -69,6 +70,193 @@ interface SidebarProps {
   onMobileClose?: () => void;
 }
 
+const MOBILE = '(max-width: 900px)';
+const REDUCED = '(prefers-reduced-motion: reduce)';
+/** Below this the release was a drag, not a flick, so position decides. px/s. */
+const FLICK = 150;
+/** Movement before we commit to a direction — also lets a tap stay a tap. */
+const HYSTERESIS = 10;
+/** Apple's published drawer/sheet feel. */
+const SHEET = { damping: 0.8, response: 0.3 };
+
+type Sample = { t: number; x: number };
+
+/** px/s from the tail of the gesture. Zero if the finger had already stopped —
+ *  averaging over a stale window would invent a flick that never happened. */
+function velocityFrom(samples: Sample[]): number {
+  const last = samples[samples.length - 1];
+  const now = performance.now();
+  if (!last || now - last.t > 120) return 0;
+  const first = samples.find((s) => last.t - s.t < 120) ?? samples[0];
+  const dt = (last.t - first.t) / 1000;
+  return dt > 0 ? (last.x - first.x) / dt : 0;
+}
+
+/**
+ * The mobile drawer as a real gesture rather than a scripted animation.
+ *
+ * Everything here exists to serve one property: the drawer can be grabbed at
+ * any instant, including mid-flight, and it never jumps when you do. That is
+ * why the drag anchors to `spring.value` (what is actually on screen) instead
+ * of to the logical open/closed target, and why there is no CSS transition.
+ *
+ * Returns handlers to spread onto the <aside>, plus the two refs.
+ */
+function useDrawerDrag(open: boolean, onClose: () => void, onOpen: () => void) {
+  const asideRef = useRef<HTMLElement | null>(null);
+  const scrimRef = useRef<HTMLDivElement | null>(null);
+  const springRef = useRef<Spring | null>(null);
+  const widthRef = useRef(280);
+  const mountedRef = useRef(false);
+  const draggedRef = useRef(false);
+  const endDragRef = useRef<(() => void) | null>(null);
+
+  // The only place anything is written to the DOM. x runs from -width (shut)
+  // to 0 (open); the scrim darkens in step, so a half-drag reads as half-open.
+  const paint = useCallback((x: number) => {
+    asideRef.current?.style.setProperty('--drawer-x', `${x}px`);
+    const scrim = scrimRef.current;
+    if (scrim) {
+      const p = Math.max(0, Math.min(1, 1 + x / widthRef.current));
+      scrim.style.opacity = String(p);
+      scrim.style.pointerEvents = p > 0.01 ? 'auto' : 'none';
+    }
+  }, []);
+
+  const measure = useCallback(() => {
+    const w = asideRef.current?.offsetWidth;
+    if (w) widthRef.current = w;
+    return widthRef.current;
+  }, []);
+
+  useEffect(() => {
+    if (!asideRef.current || !window.matchMedia(MOBILE).matches) return;
+    const w = measure();
+    const spring = (springRef.current ??= createSpring(paint, -w));
+    // First paint and reduced motion both want the value, not the journey.
+    if (!mountedRef.current || window.matchMedia(REDUCED).matches) {
+      mountedRef.current = true;
+      spring.set(open ? 0 : -w);
+      return;
+    }
+    // Carries whatever velocity the spring already had, so a re-target lands
+    // as a redirection rather than a stop-and-restart.
+    spring.to(open ? 0 : -w, SHEET);
+  }, [open, measure, paint]);
+
+  /**
+   * The gesture lives entirely in this closure, and — importantly — tracks on
+   * `window`, not on the <aside>. A drawer closing at 2000px/s slides out from
+   * under a stationary finger in a single frame; if the moves were bound to
+   * the element, that grab would be silently dropped, which is precisely the
+   * interruption the whole feature exists to support.
+   */
+  const onPointerDown = useCallback((e: React.PointerEvent<HTMLElement>) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if (!window.matchMedia(MOBILE).matches || window.matchMedia(REDUCED).matches) return;
+    const maybeSpring = springRef.current;
+    const maybeEl = asideRef.current;
+    if (!maybeSpring || !maybeEl) return;
+    // Re-bound as plain locals: the hoisted `move`/`up` declarations below do
+    // not inherit the narrowing from the guard above.
+    const spring: Spring = maybeSpring;
+    const el: HTMLElement = maybeEl;
+    const w = measure();
+    draggedRef.current = false;
+
+    const id = e.pointerId;
+    const startY = e.clientY;
+    let startX = e.clientX;
+    let from = spring.value;
+    let active = false;
+    let samples: Sample[] = [];
+    // Note: the spring is NOT stopped here. A touch that never becomes a drag
+    // must leave an in-flight drawer alone rather than strand it half open.
+
+    const end = () => {
+      endDragRef.current = null;
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+      if (el.hasPointerCapture(id)) el.releasePointerCapture(id);
+    };
+
+    function move(ev: PointerEvent) {
+      if (ev.pointerId !== id) return;
+      if (!active) {
+        const dx = ev.clientX - startX;
+        const dy = ev.clientY - startY;
+        if (Math.abs(dx) < HYSTERESIS && Math.abs(dy) < HYSTERESIS) return;
+        // Vertical intent wins the ambiguity: the drawer scrolls instead.
+        if (Math.abs(dx) <= Math.abs(dy)) { end(); return; }
+        active = true;
+        // Captured only now, so a touch that stays a tap still reaches the nav
+        // button underneath it.
+        try { el.setPointerCapture(id); } catch { /* pointer already gone */ }
+        spring.stop();
+        // Re-anchor to the live on-screen position at the instant of takeover.
+        // This is what makes grabbing a moving drawer jump-free, and it is
+        // what preserves the grab offset: the drawer moves *with* the finger
+        // from here on, it is never yanked to sit under it.
+        from = spring.value;
+        startX = ev.clientX;
+        samples = [{ t: performance.now(), x: from }];
+      }
+      let x = from + (ev.clientX - startX);
+      // Soft bounds. Past either edge it keeps moving, just less and less.
+      if (x > 0) x = rubberband(x, w);
+      else if (x < -w) x = -w - rubberband(-w - x, w);
+      samples.push({ t: performance.now(), x });
+      if (samples.length > 8) samples.shift();
+      spring.set(x);
+    }
+
+    function up(ev: PointerEvent) {
+      if (ev.pointerId !== id) return;
+      end();
+      if (!active) return; // never became a drag; let the click through
+      draggedRef.current = true;
+      const v = velocityFrom(samples);
+      // A flick is an instruction and its direction is the whole instruction —
+      // where the drawer happened to be when the finger left is irrelevant.
+      // Only when there is no meaningful velocity does position get a say, and
+      // then through the projected resting point, not the release point.
+      const willOpen = Math.abs(v) > FLICK ? v > 0 : spring.value + project(v) > -w / 2;
+      spring.to(willOpen ? 0 : -w, { ...SHEET, velocity: v });
+      // Report the outcome either way. Pulling a closing drawer back open has
+      // to be a real state change, or the app would believe it is shut while
+      // it is plainly on screen.
+      (willOpen ? onOpen : onClose)();
+    }
+
+    endDragRef.current = end;
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+  }, [measure, onClose, onOpen]);
+
+  // Unmounting mid-drag would otherwise leave the window listeners behind.
+  useEffect(() => () => endDragRef.current?.(), []);
+
+  return {
+    asideRef,
+    scrimRef,
+    handlers: {
+      onPointerDown,
+      // A drag that finishes on a nav link must not also navigate. Cleared on
+      // the next pointerdown so it can never eat a genuine tap.
+      onClickCapture: (e: React.MouseEvent) => {
+        if (!draggedRef.current) return;
+        draggedRef.current = false;
+        e.preventDefault();
+        e.stopPropagation();
+      },
+      // Native link/image dragging would steal the gesture.
+      onDragStart: (e: React.DragEvent) => e.preventDefault(),
+    },
+  };
+}
+
 export const Sidebar: React.FC<SidebarProps> = ({ page, onNav, showTTS = true, mobileOpen = false, onMobileClose }) => {
   const items = [
     { id: 'dashboard' as Page, label: 'Dashboard', icon: 'home' as const, kbd: '1' },
@@ -79,19 +267,34 @@ export const Sidebar: React.FC<SidebarProps> = ({ page, onNav, showTTS = true, m
     { id: 'shield' as Page, label: 'Reputation Shield', icon: 'shield' as const, kbd: '6', badge: 'New', accent: true },
   ];
 
+  // The parent's `mobileOpen` is a trigger, not the truth: a gesture can pull a
+  // closing drawer back open, and the parent has no callback to hear about it.
+  // So the drawer is open if the parent asked for it OR the user caught it.
+  // Every close path clears the flag and tells the parent, which keeps the two
+  // in step without any page needing to know a drag happened.
+  const [caught, setCaught] = useState(false);
+  const open = mobileOpen || caught;
+  const close = useCallback(() => { setCaught(false); onMobileClose?.(); }, [onMobileClose]);
+  const reopen = useCallback(() => setCaught(true), []);
+
+  const { asideRef, scrimRef, handlers } = useDrawerDrag(open, close, reopen);
+
   // Auto-close drawer on Esc so a thumb-friendly escape exists alongside scrim tap.
   useEffect(() => {
-    if (!mobileOpen) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onMobileClose?.(); };
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [mobileOpen, onMobileClose]);
+  }, [open, close]);
 
   return (
     <>
-      {mobileOpen && <div className="sidebar-scrim" onClick={onMobileClose} aria-hidden="true" />}
-      <aside className={`sidebar${mobileOpen ? ' mobile-open' : ''}`}>
-        <Link href="/" className="brand" style={{ textDecoration: 'none', color: 'inherit' }} onClick={onMobileClose}>
+      {/* Always mounted: it has to be able to fade back OUT with the drawer,
+          and to darken continuously under a drag. CSS keeps it transparent
+          and click-through until the drawer actually moves. */}
+      <div ref={scrimRef} className="sidebar-scrim" onClick={close} aria-hidden="true" />
+      <aside ref={asideRef} {...handlers} className={`sidebar${open ? ' mobile-open' : ''}`}>
+        <Link href="/" className="brand" style={{ textDecoration: 'none', color: 'inherit' }} onClick={close}>
           <div className="brand-mark">S</div>
           <span className="brand-name">sociafy<span className="dot">.</span></span>
         </Link>
@@ -104,7 +307,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ page, onNav, showTTS = true, m
               key={it.id}
               className={`nav-item ${page === it.id ? 'active' : ''}`}
               aria-current={page === it.id ? 'page' : undefined}
-              onClick={() => { onNav(it.id); onMobileClose?.(); }}
+              onClick={() => { onNav(it.id); close(); }}
             >
               <Icon name={it.icon} className="ic" />
               {it.label}
@@ -126,7 +329,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ page, onNav, showTTS = true, m
             href="/developers"
             className="nav-item"
             style={{ textDecoration: 'none' }}
-            onClick={onMobileClose}
+            onClick={close}
           >
             <Icon name="lock" className="ic" />
             API
@@ -135,7 +338,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ page, onNav, showTTS = true, m
             href="/usage"
             className="nav-item"
             style={{ textDecoration: 'none' }}
-            onClick={onMobileClose}
+            onClick={close}
           >
             <Icon name="chart" className="ic" />
             Usage
@@ -144,7 +347,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ page, onNav, showTTS = true, m
             href="/billing"
             className="nav-item"
             style={{ textDecoration: 'none' }}
-            onClick={onMobileClose}
+            onClick={close}
           >
             <Icon name="bolt" className="ic" />
             Billing
@@ -157,7 +360,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ page, onNav, showTTS = true, m
               href="/studio/voice"
               className="tts-card"
               style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}
-              onClick={onMobileClose}
+              onClick={close}
             >
               <span className="pill">New</span>
               <h4>Voice cloner</h4>
