@@ -358,7 +358,9 @@ export async function grantIdempotent(args: {
         kind: args.kind,
         action: null,
         credits: Math.abs(args.credits),
-        meta: { source: args.source, ...(args.meta ?? {}) } as Record<string, unknown>,
+        // `source` LAST: it backs the idempotency unique index, so a caller
+        // that happened to pass meta.source must not be able to overwrite it.
+        meta: { ...(args.meta ?? {}), source: args.source } as Record<string, unknown>,
       })
       .returning({ id: creditLedger.id });
   } catch (e) {

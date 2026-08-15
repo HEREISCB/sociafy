@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-type Update = Record<string, unknown> & { __whereId?: string };
+type Update = Record<string, unknown> & { __whereId?: string; __guard?: unknown };
 const updates: Update[] = [];
 
 vi.mock('../db', () => {
@@ -8,8 +8,8 @@ vi.mock('../db', () => {
     db: () => ({
       update: () => ({
         set: (vals: Record<string, unknown>) => ({
-          where: (clause: { __whereId?: string }) => {
-            updates.push({ ...vals, __whereId: clause?.__whereId });
+          where: (clause: { __whereId?: string; __guard?: unknown }) => {
+            updates.push({ ...vals, __whereId: clause?.__whereId, __guard: clause?.__guard });
             return Promise.resolve();
           },
         }),
@@ -19,7 +19,14 @@ vi.mock('../db', () => {
 });
 
 vi.mock('drizzle-orm', () => ({
-  eq: (_col: unknown, val: string) => ({ __whereId: val }),
+  eq: (col: unknown, val: string) => ({ __whereId: val, __col: col }),
+  isNull: (col: unknown) => ({ __isNull: col }),
+  or: (...parts: unknown[]) => ({ __or: parts }),
+  // The id predicate stays readable as __whereId; the identity guard rides along.
+  and: (...parts: Array<{ __whereId?: string }>) => ({
+    __whereId: parts[0]?.__whereId,
+    __guard: parts[1],
+  }),
 }));
 
 import { applySubscriptionState } from './state';
@@ -80,5 +87,33 @@ describe('applySubscriptionState', () => {
 
     expect(updates[0].tier).toBeUndefined();
     expect(updates[0].subscriptionStatus).toBe('past_due');
+  });
+
+  it('guards a status-only update on the subscription id it names', async () => {
+    await applySubscriptionState({
+      userId: 'u4',
+      provider: 'razorpay',
+      status: 'canceled',
+      tier: null,
+      periodEnd: null,
+      providerSubscriptionId: 'sub_old',
+    });
+    // WHERE id = u4 AND (razorpay_subscription_id IS NULL OR = sub_old) — so a
+    // cancelled event for a superseded subscription matches zero rows.
+    expect(updates[0].__whereId).toBe('u4');
+    expect(updates[0].__guard).toBeDefined();
+  });
+
+  it('does not guard a tier-carrying write (first activation / upgrade / resubscribe)', async () => {
+    await applySubscriptionState({
+      userId: 'u5',
+      provider: 'razorpay',
+      status: 'active',
+      tier: 'pro',
+      periodEnd: null,
+      providerSubscriptionId: 'sub_new',
+    });
+    expect(updates[0].__whereId).toBe('u5');
+    expect(updates[0].__guard).toBeUndefined();
   });
 });

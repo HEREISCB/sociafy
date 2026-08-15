@@ -96,10 +96,10 @@
     }
     ```
 
-    `credits_charged_today` is the gross credits this key has charged in the last 24
-    hours. Refunds (see §6) are **not** netted out of it, so a run of failed
-    generations still counts against the cap until the window rolls off. `balance`
-    is always exact and does reflect refunds.
+    `credits_charged_today` is the **net** credits this key has spent in the last 24
+    hours: refunds (see §6) are subtracted, so a run of failed generations does not
+    burn your daily cap. It is the same figure the cap is enforced against, so
+    `daily_cap_remaining` is exactly how much you can still spend.
 
     Status codes: `200`, `401`, `500`, `503`.
 

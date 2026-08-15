@@ -6,12 +6,13 @@ vi.mock('../../../../lib/env', () => ({
   isStubMode: { razorpay: () => false },
 }));
 
-const { applyState, grantIdempotent, subsCreate, subsCancel, profileRow, updates } = vi.hoisted(() => {
+const { applyState, grantIdempotent, subsCreate, subsCancel, ordersFetch, profileRow, updates } = vi.hoisted(() => {
   return {
     applyState: vi.fn(),
     grantIdempotent: vi.fn(),
     subsCreate: vi.fn(),
     subsCancel: vi.fn(),
+    ordersFetch: vi.fn(),
     profileRow: { tier: undefined as string | undefined, razorpayCustomerId: undefined as string | undefined, pendingTierChangeTo: null as string | null },
     updates: [] as Array<Record<string, unknown>>,
   };
@@ -21,7 +22,12 @@ vi.mock('../../../../lib/billing/state', () => ({ applySubscriptionState: applyS
 vi.mock('../../../../lib/credits/ledger', () => ({ grantIdempotent }));
 
 vi.mock('../../../../lib/billing/providers/razorpay/client', () => ({
-  getRazorpay: () => ({ subscriptions: { create: subsCreate, cancel: subsCancel } }),
+  // payment.captured reads the ORDER back — the payment's own notes are
+  // attacker-controlled (see replay-order.audit.test.ts).
+  getRazorpay: () => ({
+    subscriptions: { create: subsCreate, cancel: subsCancel },
+    orders: { fetch: ordersFetch },
+  }),
   razorpayPlanIdFor: (tier: string) => ({ starter: 'plan_s', pro: 'plan_p', business: 'plan_b' }[tier]),
 }));
 
@@ -99,16 +105,16 @@ describe('POST /api/razorpay/webhook', () => {
     }));
   });
 
-  it('grants top-up credits on payment.captured with notes.kind=topup', async () => {
+  it('grants top-up credits on payment.captured for a topup order', async () => {
+    // 2,000 credits = 2 packs = 2 x Rs 1,499.
+    ordersFetch.mockResolvedValue({
+      id: 'order_t1', amount: 299800,
+      notes: { sociafy_user_id: 'u1', kind: 'topup', credits: '2000' },
+    });
     const body = JSON.stringify({
       event: 'payment.captured',
       payload: {
-        payment: {
-          entity: {
-            id: 'pay_t1',
-            notes: { sociafy_user_id: 'u1', kind: 'topup', credits: '2000' },
-          },
-        },
+        payment: { entity: { id: 'pay_t1', amount: 299800, order_id: 'order_t1' } },
       },
     });
     grantIdempotent.mockResolvedValue(true);
@@ -137,6 +143,7 @@ describe('payment.captured with notes.kind=upgrade_diff', () => {
   beforeEach(() => {
     subsCreate.mockReset();
     subsCancel.mockReset();
+    ordersFetch.mockReset();
     grantIdempotent.mockReset();
     applyState.mockReset();
     profileRow.razorpayCustomerId = 'cust_x';
@@ -148,20 +155,21 @@ describe('payment.captured with notes.kind=upgrade_diff', () => {
   it('cancels the old sub, creates a new sub on the target plan, and grants the delta', async () => {
     subsCreate.mockResolvedValue({ id: 'sub_new', status: 'active', plan_id: 'plan_p' });
     grantIdempotent.mockResolvedValue(true);
+    ordersFetch.mockResolvedValue({
+      id: 'order_up1', amount: 500000,
+      notes: {
+        sociafy_user_id: 'u1',
+        kind: 'upgrade_diff',
+        from_tier: 'starter',
+        to_tier: 'pro',
+        old_sub_id: 'sub_old',
+      },
+    });
 
     const body = JSON.stringify({
       event: 'payment.captured',
       payload: {
-        payment: { entity: {
-          id: 'pay_up1',
-          notes: {
-            sociafy_user_id: 'u1',
-            kind: 'upgrade_diff',
-            from_tier: 'starter',
-            to_tier: 'pro',
-            old_sub_id: 'sub_old',
-          },
-        } },
+        payment: { entity: { id: 'pay_up1', amount: 500000, order_id: 'order_up1' } },
       },
     });
 

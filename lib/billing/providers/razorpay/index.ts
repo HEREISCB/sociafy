@@ -72,6 +72,9 @@ class RazorpayBillingProvider implements BillingProvider {
       currency: 'INR',
       description: `Sociafy top-up — ${credits.toLocaleString()} credits`,
       prefill: {},
+      // Cosmetic: these go through the browser into the Checkout constructor, so
+      // they are attacker-controlled by construction. The webhook grants off the
+      // ORDER's notes above — never these. Do not add anything load-bearing here.
       notes: { sociafy_user_id: userId, kind: 'topup', credits: String(credits) },
     };
   }

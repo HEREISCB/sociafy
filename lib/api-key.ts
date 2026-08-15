@@ -12,7 +12,7 @@
  */
 
 import crypto from 'node:crypto';
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { db } from './db';
 import { apiKeys, creditLedger } from './db/schema';
 import { ensureProfile } from './api';
@@ -36,6 +36,26 @@ const LAST_USED_STALE_MS = 5 * 60_000;
 const GLOBAL_DAILY_CAP = Number(process.env.API_DAILY_CREDIT_CAP) || 50_000;
 
 const IS_PROD = process.env.NODE_ENV === 'production';
+
+/**
+ * The API key a credit_ledger row is attributable to: its own `meta.apiKeyId`
+ * for a charge, or — for a refund, which carries no apiKeyId of its own — the
+ * charge it reverses, via related_ledger_id.
+ *
+ * Exported because GET /api/v1/me must meter with the SAME expression the cap
+ * enforces with, or `daily_cap_remaining` lies about when the 429 lands.
+ *
+ * Summing signed credits over `kind IN ('charge','refund')` with this filter
+ * nets refunds out: we promise failed generations are refunded, so a developer
+ * whose jobs failed must not burn their daily cap on them.
+ *
+ * COALESCE short-circuits, so the subquery only runs for rows without their own
+ * apiKeyId, and then it is a primary-key lookup.
+ */
+export const apiKeyOfLedgerRow = sql<string | null>`COALESCE(
+  ${creditLedger.meta}->>'apiKeyId',
+  (SELECT c.meta->>'apiKeyId' FROM credit_ledger c WHERE c.id = ${creditLedger.relatedLedgerId})
+)`;
 
 /** Returns the one-time plaintext key plus what gets persisted. */
 export function generateApiKey(): { full: string; prefix: string; keyHash: string } {
@@ -129,15 +149,15 @@ export async function withApiKey(
     // the last day's API charges.
     const [spend] = isRead ? [null] : await db()
       .select({
-        key: sql<number>`COALESCE(-SUM(${creditLedger.credits}) FILTER (WHERE ${creditLedger.meta}->>'apiKeyId' = ${key.id}), 0)::int`,
+        key: sql<number>`COALESCE(-SUM(${creditLedger.credits}) FILTER (WHERE ${apiKeyOfLedgerRow} = ${key.id}), 0)::int`,
         all: sql<number>`COALESCE(-SUM(${creditLedger.credits}), 0)::int`,
       })
       .from(creditLedger)
       .where(
         and(
-          eq(creditLedger.kind, 'charge'),
+          inArray(creditLedger.kind, ['charge', 'refund']),
           sql`${creditLedger.createdAt} > now() - interval '1 day'`,
-          sql`${creditLedger.meta}->>'apiKeyId' IS NOT NULL`,
+          sql`${apiKeyOfLedgerRow} IS NOT NULL`,
         ),
       );
     const keySpent = Number(spend?.key ?? 0);

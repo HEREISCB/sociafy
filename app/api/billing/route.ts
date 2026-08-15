@@ -4,7 +4,7 @@ import { withUser } from '../../../lib/api';
 import { db } from '../../../lib/db';
 import { profiles, TIER_CREDITS, type Tier } from '../../../lib/db/schema';
 import { getBalance } from '../../../lib/credits/ledger';
-import { env, isStubMode, devForcedCountry } from '../../../lib/env';
+import { env, isStubMode, geoCountry } from '../../../lib/env';
 import { tierPriceView, type Currency } from '../../../lib/billing/pricing';
 
 export const runtime = 'nodejs';
@@ -14,11 +14,11 @@ export const runtime = 'nodejs';
  */
 export async function GET(req: NextRequest) {
   return withUser(async (user) => {
-    // Detect country from Vercel geo header (or dev override).
-    const detectedCountry =
-      req.headers.get('x-vercel-ip-country')?.toUpperCase()
-      ?? devForcedCountry()
-      ?? null;
+    // Production is Cloudflare → nginx → Next (etc/nginx/sites-available/sociafy.conf),
+    // which forwards CF-IPCountry; x-vercel-ip-country is never set there, so
+    // reading it alone quoted every Indian customer in dollars. Vercel fallback
+    // kept for preview deploys.
+    const detectedCountry = geoCountry(req.headers);
 
     const [profile] = await db()
       .select()
@@ -26,14 +26,13 @@ export async function GET(req: NextRequest) {
       .where(eq(profiles.id, user.id))
       .limit(1);
 
-    // Write-through: stamp billing_country on first visit, never overwrite.
-    if (profile && !profile.billingCountry && detectedCountry) {
-      await db()
-        .update(profiles)
-        .set({ billingCountry: detectedCountry, updatedAt: new Date() })
-        .where(eq(profiles.id, user.id));
-      profile.billingCountry = detectedCountry;
-    }
+    // DISPLAY ONLY — deliberately not written back to billing_country. On this
+    // stack the geo header is client-supplied (nginx copies whatever arrives),
+    // and this used to stamp it permanently on first visit. Nothing needs the
+    // column: providerFor() ignores it (lib/billing/router.ts — everyone is
+    // Razorpay/INR), and the currency a user actually chooses is persisted by
+    // POST /api/billing/preferences, which is authenticated intent rather than
+    // a header.
 
     const tier = (profile?.tier ?? 'starter') as Tier;
     const balance = await getBalance(user.id);

@@ -3,6 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { tierPriceView, topupLabel, topupPriceView, type Currency } from '../lib/billing/pricing';
+import { CREDIT_PRICES } from '../lib/credits/pricing';
 
 const ArrowIcon = () => (
   <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
@@ -169,7 +170,11 @@ const Hero = ({ currency }: { currency: Currency }) => (
     <div className="lp">
       <div className="lp-logos">
         <div className="lp-logos-label">Built for solo founders, indie studios &amp; small marketing teams</div>
-        <div className="lp-logos-row" style={{ gridTemplateColumns: 'repeat(4, auto)', gap: '20px 28px', flexWrap: 'wrap' }}>
+        {/* auto-fit, not `repeat(4, auto)`: `auto` tracks size to their content,
+            so four long labels forced a ~416px row inside a 390px phone —
+            overflowing off BOTH edges (the grid is centred) and giving the
+            whole landing page a sideways scroll. auto-fit reflows to 2-up. */}
+        <div className="lp-logos-row" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '20px 28px' }}>
           {[
             'One agent, every platform',
             'Posts in your own voice',
@@ -500,6 +505,13 @@ const PriceAmount = ({ currency, tier }: { currency: Currency; tier: Tier }) => 
 const priceTag = (c: Currency, t: Tier): string =>
   `${CREDITS[t].toLocaleString()} credits / month · ${perCreditLabel(c, t)} per credit${TIER_OFF[t]}`;
 
+/** "~11 reels OR 333 images / mo" — divided out of the real charge table, because
+ *  the hand-written version promised 500 images at a price of 4 credits each that
+ *  we have never charged. */
+const capacityLine = (t: Tier): string =>
+  `~${Math.floor(CREDITS[t] / CREDIT_PRICES.video_8s_720p_quality)} reels OR `
+  + `${Math.floor(CREDITS[t] / CREDIT_PRICES.image_medium_1024)} images / mo`;
+
 const startCheckoutFromLanding = async (tier: Tier, setBusy: (t: Tier | null) => void) => {
   setBusy(tier);
   try {
@@ -562,7 +574,10 @@ const Pricing = ({ currency, setCurrency }: { currency: Currency; setCurrency: (
           <h2>Every action is a <em>credit</em>. <em>Bigger plans, better rates.</em></h2>
         </div>
         <p className="blurb">
-          Text post: 1 credit. AI image: 4 credits. 720p video reel: 180 credits.
+          {/* Straight from the charge table — a hardcoded figure advertised 4 credits
+              for an image we bill 6 for. */}
+          Text post: {CREDIT_PRICES.text_post} credit. AI image: {CREDIT_PRICES.image_medium_1024} credits.
+          720p video reel: {CREDIT_PRICES.video_8s_720p_quality} credits.
           Top up anytime at {topupLabel(currency)}. No free trial — start when you&apos;re ready.
         </p>
       </div>
@@ -586,7 +601,7 @@ const Pricing = ({ currency, setCurrency }: { currency: Currency; setCurrency: (
           <ul className="price-list">
             <li><span className="check">✓</span> All 6 platforms</li>
             <li><span className="check">✓</span> Text, image &amp; 720p video gen</li>
-            <li><span className="check">✓</span> ~11 reels OR 500 images / mo</li>
+            <li><span className="check">✓</span> {capacityLine('starter')}</li>
             <li><span className="check">✓</span> Manual posting + scheduling</li>
             <li><span className="check">✓</span> 1-month credit rollover</li>
             <li><span className="check" style={{ opacity: 0.4 }}>—</span> No autopilot</li>

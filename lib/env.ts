@@ -118,8 +118,29 @@ export const isStubMode = {
   },
 };
 
-/** Returns the country to use when the Vercel geo header is absent. Reads
+/** Returns the country to use when the geo header is absent. Reads
  *  DEV_FORCE_COUNTRY (e.g. 'IN' / 'US'). Returns null if unset. */
 export function devForcedCountry(): string | null {
   return process.env.DEV_FORCE_COUNTRY?.toUpperCase() ?? null;
+}
+
+/**
+ * The visitor's country per the edge, or null when nothing geolocated them.
+ *
+ * `CF-IPCountry` first: production is Cloudflare → nginx → Next and that is the
+ * only header on the wire (etc/nginx/sites-available/sociafy.conf). The Vercel
+ * header is the fallback for preview deploys.
+ *
+ * DISPLAY ONLY. nginx copies through whatever the client sent, so treat this as
+ * a hint — never as identity, and never persist it.
+ */
+export function geoCountry(headers: { get(name: string): string | null }): string | null {
+  // Cloudflare sends XX when it cannot geolocate and T1 for Tor — both mean
+  // "unknown", and passing them on would read as "not India" instead of letting
+  // the client fall back to its own timezone guess.
+  const cf = headers.get('cf-ipcountry')?.toUpperCase();
+  if (cf && cf !== 'XX' && cf !== 'T1') return cf;
+  return headers.get('x-vercel-ip-country')?.toUpperCase()
+    ?? devForcedCountry()
+    ?? null;
 }

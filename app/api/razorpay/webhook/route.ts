@@ -9,6 +9,7 @@ import { applySubscriptionState } from '../../../../lib/billing/state';
 import { grantIdempotent } from '../../../../lib/credits/ledger';
 import { normalizeRazorpayStatus, type RazorpaySubscriptionStatus } from '../../../../lib/billing/providers/razorpay/status';
 import { getRazorpay, razorpayPlanIdFor } from '../../../../lib/billing/providers/razorpay/client';
+import { topupPriceView } from '../../../../lib/billing/pricing';
 import { deltaCredits } from '../../../../lib/billing/providers/razorpay/proration';
 
 export const runtime = 'nodejs';
@@ -243,27 +244,73 @@ async function handleSubPastDue(payload: Record<string, unknown>) {
   });
 }
 
+type OrderNotes = {
+  sociafy_user_id?: string;
+  kind?: string;
+  credits?: string;
+  from_tier?: Tier;
+  to_tier?: Tier;
+  old_sub_id?: string;
+  [k: string]: unknown;
+};
+
+/**
+ * `payment.captured` — the only handler that turns money into credits.
+ *
+ * Everything it acts on comes from the ORDER we created server-side, fetched
+ * fresh from Razorpay by `payment.order_id`. The payment's own notes are
+ * attacker-controlled: `startTopUp` hands that same object to the browser,
+ * which passes it into the Checkout constructor, so a user could name any
+ * recipient and any credit quantity. Reading the order instead means the
+ * recipient and the quantity are ours, and the ownership check is implicit —
+ * the order's notes name the user the order was created for.
+ *
+ * The paid amount is then checked against the price table, so a captured
+ * partial payment (Razorpay allows those) never buys a full pack either.
+ */
 async function handlePaymentCaptured(payload: Record<string, unknown>) {
   const payment = (payload.payment as { entity: {
     id: string;
-    notes?: {
-      sociafy_user_id?: string;
-      kind?: string;
-      credits?: string;
-      from_tier?: Tier;
-      to_tier?: Tier;
-      old_sub_id?: string;
-      [k: string]: unknown;
-    };
+    amount?: number;
+    order_id?: string;
   } } | undefined)?.entity;
-  if (!payment) return;
-  const notes = payment.notes ?? {};
+  if (!payment?.order_id) return;
+
+  let order: { amount?: number | string; notes?: OrderNotes };
+  try {
+    order = await getRazorpay().orders.fetch(payment.order_id);
+  } catch (e) {
+    // Never grant on an order we could not read. Razorpay retries the webhook.
+    console.error(
+      `[razorpay.webhook] payment.captured ${payment.id}: orders.fetch(${payment.order_id}) failed — NOT granting:`,
+      e instanceof Error ? e.message : String(e),
+    );
+    return;
+  }
+
+  const notes: OrderNotes = order.notes ?? {};
   const userId = notes.sociafy_user_id;
   if (!userId) return;
 
+  const paidMinor = Number(payment.amount);
+  if (Number(order.amount) !== paidMinor) {
+    console.error(
+      `[razorpay.webhook] payment.captured ${payment.id}: paid ${paidMinor} but order ${payment.order_id} is ${order.amount} — NOT granting`,
+    );
+    return;
+  }
+
   if (notes.kind === 'topup') {
     const credits = Number(notes.credits ?? '0');
-    if (credits <= 0) return;
+    if (!Number.isInteger(credits) || credits <= 0) return;
+    // Price table, not the order, decides what this many credits costs.
+    const expectedMinor = topupPriceView('INR', credits).chargeMinor;
+    if (paidMinor !== expectedMinor) {
+      console.error(
+        `[razorpay.webhook] payment.captured ${payment.id}: ${credits} credits cost ${expectedMinor} but ${paidMinor} was paid (order ${payment.order_id}, user ${userId}) — NOT granting`,
+      );
+      return;
+    }
     await grantIdempotent({
       userId,
       kind: 'topup',

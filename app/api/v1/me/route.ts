@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
-import { and, eq, sql } from 'drizzle-orm';
-import { withApiKey } from '../../../../lib/api-key';
+import { and, eq, inArray, sql } from 'drizzle-orm';
+import { withApiKey, apiKeyOfLedgerRow } from '../../../../lib/api-key';
 import { db } from '../../../../lib/db';
 import { apiKeys, creditLedger } from '../../../../lib/db/schema';
 import { getBalance } from '../../../../lib/credits/ledger';
@@ -14,9 +14,9 @@ export const dynamic = 'force-dynamic';
  * is this key alive, what can it still spend, how much has it already spent.
  * One round trip, and it removes most "why did I get a 402/429" tickets.
  *
- * The spend window MUST mirror lib/api-key.ts's cap query exactly — rolling 24h
- * on `meta->>'apiKeyId'`, gross charges, refunds not netted out. If this drifts,
- * `daily_cap_remaining` starts lying about when the 429 will hit.
+ * The spend window MUST mirror lib/api-key.ts's cap query exactly — rolling 24h,
+ * attributed by the shared `apiKeyOfLedgerRow` expression, refunds netted out.
+ * If this drifts, `daily_cap_remaining` starts lying about when the 429 hits.
  */
 export async function GET(req: NextRequest) {
   return withApiKey(req, async (auth) => {
@@ -35,8 +35,8 @@ export async function GET(req: NextRequest) {
         .from(creditLedger)
         .where(
           and(
-            eq(creditLedger.kind, 'charge'),
-            sql`${creditLedger.meta}->>'apiKeyId' = ${auth.apiKeyId}`,
+            inArray(creditLedger.kind, ['charge', 'refund']),
+            sql`${apiKeyOfLedgerRow} = ${auth.apiKeyId}`,
             sql`${creditLedger.createdAt} > now() - interval '1 day'`,
           ),
         ),

@@ -116,8 +116,8 @@ curl -sS ${BASE}/me \\
           Returns <code className="mono">balance</code>, <code className="mono">key_prefix</code>,{' '}
           <code className="mono">credits_charged_today</code>, <code className="mono">daily_cap</code>,{' '}
           <code className="mono">daily_cap_remaining</code>. <code className="mono">credits_charged_today</code>{' '}
-          is gross — refunds are not netted out of it, though <code className="mono">balance</code> does
-          reflect them.
+          is net of refunds — a failed generation is refunded and does not burn your
+          daily cap — and it is the same figure the cap is enforced against.
         </div>
       </Endpoint>
 

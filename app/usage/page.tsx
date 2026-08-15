@@ -7,14 +7,17 @@ import { Sidebar, Topbar } from '../../components/shell';
 import { Icon } from '../../components/icons';
 import { useApi } from '../../lib/ui/fetcher';
 import type { CreditsPayload } from '../../components/credits';
+import { tierPriceView, type Currency } from '../../lib/billing/pricing';
+import { CREDIT_PRICES } from '../../lib/credits/pricing';
 
 type Page = 'dashboard' | 'compose' | 'agent' | 'calendar' | 'connections' | 'onboarding';
-
-const TIER_LABEL = { starter: 'Starter · $30/mo', pro: 'Pro · $80/mo', business: 'Business · $299/mo' };
 
 export default function UsagePage() {
   const router = useRouter();
   const { data, isLoading } = useApi<CreditsPayload>('/api/credits', { refreshInterval: 30_000 });
+  // /billing owns currency detection; reusing its payload keeps the two pages
+  // from quoting different prices. INR until it loads — that is what we charge.
+  const { data: billing } = useApi<{ currency: Currency }>('/api/billing');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // Ticking "now" so daysLeft stays pure during render.
   const [now, setNow] = useState<number>(0);
@@ -28,6 +31,9 @@ export default function UsagePage() {
   const allocation = data?.monthlyAllocation ?? 0;
   const pct = allocation > 0 ? Math.min(100, Math.round((balance / allocation) * 100)) : 0;
   const tier = data?.tier ?? 'starter';
+  // Was a hardcoded USD table ($30/$80/$299) nobody is ever charged.
+  const tierLabel = `${tier.charAt(0).toUpperCase() + tier.slice(1)} · `
+    + `${tierPriceView(billing?.currency ?? 'INR', tier).display}/mo`;
   const cycleStart = data?.creditCycleStart ? new Date(data.creditCycleStart) : null;
   const nextReset = cycleStart ? new Date(cycleStart.getTime() + 30 * 24 * 60 * 60 * 1000) : null;
   const daysLeft = nextReset && now > 0
@@ -66,7 +72,7 @@ export default function UsagePage() {
             <section className="usage-hero">
               <div className="usage-card">
                 <span className="tier-pill">
-                  <Icon name="bolt" size={10} /> {TIER_LABEL[tier]}
+                  <Icon name="bolt" size={10} /> {tierLabel}
                 </span>
                 <h3>Credits remaining</h3>
                 <div className="num">{balance.toLocaleString()}</div>
@@ -90,7 +96,11 @@ export default function UsagePage() {
                   {data?.ledger?.length ? `${data.ledger.length} ledger entries shown` : 'No activity yet — credits will appear here as you generate.'}
                 </div>
                 <div style={{ marginTop: 20, fontSize: 12, color: 'var(--ink-3)', lineHeight: 1.55 }}>
-                  Text = 1 cr · Image (medium) = 4 cr · 720p reel (8s) = 180 cr · 1080p hero (15s) = 835 cr. Failed generations refund automatically.
+                  {/* Read off the charge table, not retyped — it advertised 4 cr per
+                      image while every medium image was billed 6. */}
+                  Text = {CREDIT_PRICES.text_post} cr · Image (medium) = {CREDIT_PRICES.image_medium_1024} cr
+                  {' · '}720p reel (8s) = {CREDIT_PRICES.video_8s_720p_quality} cr
+                  {' · '}1080p hero (15s) = {CREDIT_PRICES.video_15s_1080p_quality} cr. Failed generations refund automatically.
                 </div>
               </div>
             </section>

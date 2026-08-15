@@ -1,6 +1,6 @@
 import { headers } from 'next/headers';
 import LandingPage from '../components/landing';
-import { devForcedCountry } from '../lib/env';
+import { geoCountry } from '../lib/env';
 import type { Currency } from '../lib/billing/pricing';
 
 /**
@@ -14,14 +14,15 @@ import type { Currency } from '../lib/billing/pricing';
  * of a page with no data fetching; the alternative is a visible price flicker
  * on the highest-intent screen we have.
  *
- * Same country signal as /api/billing (x-vercel-ip-country → DEV_FORCE_COUNTRY),
- * so the landing price and the checkout price can't disagree. Null when the host
- * doesn't geolocate — the client then guesses from timezone.
+ * Same country signal as /api/billing (geoCountry: CF-IPCountry →
+ * x-vercel-ip-country → DEV_FORCE_COUNTRY), so the landing price and the
+ * checkout price can't disagree. Null when nothing geolocated the visitor — the
+ * client then guesses from timezone.
  */
 export const dynamic = 'force-dynamic';
 
 export default async function Page() {
-  const country = (await headers()).get('x-vercel-ip-country')?.toUpperCase() ?? devForcedCountry();
+  const country = geoCountry(await headers());
   const initialCurrency: Currency | null = country ? (country === 'IN' ? 'INR' : 'USD') : null;
   return <LandingPage initialCurrency={initialCurrency} />;
 }
