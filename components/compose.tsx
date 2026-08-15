@@ -1,16 +1,20 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Icon, Pglyph } from './icons';
 import { apiPatch, apiPost, useApi } from '../lib/ui/fetcher';
 import { PLATFORM_TO_SHORT, SHORT_TO_PLATFORM } from '../lib/ui/platforms';
+import { groupByDay, mediaTime } from '../lib/ui/media-history';
 import type { Platform } from '../lib/db/schema';
 import { useSWRConfig } from 'swr';
 import { InsufficientCreditsBanner } from './credits';
 import { priceForImage, priceForVideo, priceForCompose, priceForAvatar, ACTION_LABELS } from '../lib/credits/pricing';
 import type { CreditsPayload } from './credits';
 import { VoicePicker, useVoices } from './voice-studio';
+
+/** Rows fetched per /api/media page (the route's own default). */
+const LIBRARY_PAGE = 40;
 
 type ComposeMode = 'text' | 'image' | 'video';
 type MediaKind = 'image' | 'carousel' | 'video';
@@ -267,6 +271,12 @@ interface MediaItem {
    * into a horizontal X/LinkedIn preview. Falls back to platform default
    * when missing (legacy uploads, stock images). */
   aspect?: string;
+  /** Epoch ms the asset was created. Drives the day-grouped gallery.
+   * Deliberately optional and NEVER defaulted to Date.now() — a draft's
+   * media list carries no timestamp, and filing a month-old asset under
+   * "Today" is worse than admitting we don't know. Undated items land in
+   * their own trailing group. */
+  createdAt?: number;
 }
 
 type MediaPlaceholderProps = {
@@ -758,6 +768,11 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
   const [perPlatform, setPerPlatform] = useState<Partial<Record<Platform, string>>>({});
   const [mediaKind, setMediaKind] = useState<MediaKind>('image');
   const [media, setMedia] = useState<MediaItem[]>([]);
+  // Library paging — `/api/media` returns one page at a time; the cursor is
+  // the createdAt of the oldest row we hold.
+  const [libraryMore, setLibraryMore] = useState(false);
+  const [libraryBusy, setLibraryBusy] = useState(false);
+  const libraryCursor = useRef<string | null>(null);
   const [busy, setBusy] = useState<null | 'schedule' | 'post'>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [customSchedule, setCustomSchedule] = useState('');
@@ -992,6 +1007,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
       tag: img.source,
       url: img.url,
       mimeType: 'image/jpeg',
+      createdAt: Date.now(),
     }]);
     setStockOpen(false);
     setStockResults([]);
@@ -1004,7 +1020,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
     if (!file) return;
     e.target.value = ''; // allow re-uploading the same file
     const tempId = `tmp-${Date.now()}`;
-    setMedia((m) => [...m, { kind: file.type.startsWith('video/') ? 'video' : 'image', label: file.name, tag: 'Uploading', uploading: true, id: tempId }]);
+    setMedia((m) => [...m, { kind: file.type.startsWith('video/') ? 'video' : 'image', label: file.name, tag: 'Uploading', uploading: true, id: tempId, createdAt: Date.now() }]);
     try {
       const fd = new FormData();
       fd.append('file', file);
@@ -1022,7 +1038,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
       setMedia((m) =>
         m.map((it) =>
           it.id === tempId
-            ? { kind: row.mimeType.startsWith('video/') ? 'video' : 'image', label: row.label || file.name, tag: 'Uploaded', id: row.id, url: row.publicUrl, mimeType: row.mimeType }
+            ? { kind: row.mimeType.startsWith('video/') ? 'video' : 'image', label: row.label || file.name, tag: 'Uploaded', id: row.id, url: row.publicUrl, mimeType: row.mimeType, createdAt: it.createdAt ?? Date.now() }
             : it,
         ),
       );
@@ -1109,6 +1125,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
         url: row.publicUrl,
         mimeType: row.mimeType,
         aspect: imageAspect,
+        createdAt: Date.now(),
       }));
       setMedia((m) => [...m, ...added]);
       setCreditError(null);
@@ -1259,6 +1276,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
               url: pd.asset.publicUrl,
               mimeType: pd.asset.mimeType,
               aspect: videoAspect.replace(':', '/'),
+              createdAt: Date.now(),
             };
           }
           if (pd.status === 'failed') {
@@ -1449,6 +1467,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
           url: asset!.publicUrl,
           mimeType: asset!.mimeType,
           aspect: videoAspect.replace(':', '/'),
+          createdAt: Date.now(),
         }]);
         setToast('Avatar video ready.');
         setTimeout(() => {
@@ -1478,49 +1497,62 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
   // and videos on mount. Without this, refreshing the page or coming
   // back from another tab wipes everything you've made. Drafts override
   // this (a draft's media list is canonical for that draft).
+  const loadLibrary = useCallback(async (before?: string | null) => {
+    setLibraryBusy(true);
+    try {
+      const r = await fetch(
+        `/api/media?limit=${LIBRARY_PAGE}${before ? `&before=${encodeURIComponent(before)}` : ''}`,
+        { credentials: 'include' },
+      );
+      if (!r.ok) return;
+      const data = (await r.json()) as {
+        items: Array<{
+          id: string;
+          publicUrl: string;
+          mimeType: string;
+          label: string | null;
+          width: number | null;
+          height: number | null;
+          createdAt: string;
+        }>;
+      };
+      const restored: MediaItem[] = data.items.map((row) => {
+        const isVideo = row.mimeType.startsWith('video/');
+        const aspect = row.width && row.height ? `${row.width}/${row.height}` : undefined;
+        // An unparseable/absent timestamp stays undefined rather than
+        // becoming "now" — see MediaItem.createdAt.
+        const ts = row.createdAt ? new Date(row.createdAt).getTime() : NaN;
+        return {
+          kind: isVideo ? 'video' : 'image',
+          label: row.label ?? (isVideo ? 'Generated clip' : 'Generated image'),
+          tag: 'Library',
+          id: row.id,
+          url: row.publicUrl,
+          mimeType: row.mimeType,
+          aspect,
+          createdAt: Number.isNaN(ts) ? undefined : ts,
+        };
+      });
+      const oldest = data.items[data.items.length - 1]?.createdAt;
+      if (oldest) libraryCursor.current = oldest;
+      setLibraryMore(data.items.length === LIBRARY_PAGE);
+      setMedia((prev) => {
+        // De-dupe by id — a freshly generated item may already be in
+        // local state if the user generated something during this load.
+        const seen = new Set(prev.map((m) => m.id).filter(Boolean));
+        return [...prev, ...restored.filter((r) => !r.id || !seen.has(r.id))];
+      });
+    } catch {
+      // Library hydration is best-effort. Silent failure keeps the UI usable.
+    } finally {
+      setLibraryBusy(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (draftId) return; // draft loader below handles its own media
-    let cancelled = false;
-    (async () => {
-      try {
-        const r = await fetch('/api/media?limit=40', { credentials: 'include' });
-        if (!r.ok) return;
-        const data = (await r.json()) as {
-          items: Array<{
-            id: string;
-            publicUrl: string;
-            mimeType: string;
-            label: string | null;
-            width: number | null;
-            height: number | null;
-          }>;
-        };
-        if (cancelled) return;
-        const restored: MediaItem[] = data.items.map((row) => {
-          const isVideo = row.mimeType.startsWith('video/');
-          const aspect = row.width && row.height ? `${row.width}/${row.height}` : undefined;
-          return {
-            kind: isVideo ? 'video' : 'image',
-            label: row.label ?? (isVideo ? 'Generated clip' : 'Generated image'),
-            tag: 'Library',
-            id: row.id,
-            url: row.publicUrl,
-            mimeType: row.mimeType,
-            aspect,
-          };
-        });
-        setMedia((prev) => {
-          // De-dupe by id — a freshly generated item may already be in
-          // local state if the user generated something during this load.
-          const seen = new Set(prev.map((m) => m.id).filter(Boolean));
-          return [...prev, ...restored.filter((r) => !r.id || !seen.has(r.id))];
-        });
-      } catch {
-        // Library hydration is best-effort. Silent failure keeps the UI usable.
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [draftId]);
+    void loadLibrary();
+  }, [draftId, loadLibrary]);
 
   // Load existing draft when editing. Intentionally syncs prop → state so
   // the form repopulates when ?draft=… changes.
@@ -1641,7 +1673,48 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
   // The image/video "Describe X" section is now embedded INSIDE the main
   // Compose card (one card, one Generate button). These two helpers return
   // just the inner body — textarea + sliders — without their own card wrapper.
-  const imageSection = (
+  // The inputs that DEFINE the output (reference images) render above the
+  // prompt; the knobs that only TUNE it (count/ratio/quality) render below.
+  // Reference images — the output imitates these, so a generated ring can
+  // be THEIR ring. Picked from the gallery below rather than uploaded
+  // again; the surcharge is shown before they commit.
+  const imageInputsSection = (
+    <div style={{ marginBottom: 14, paddingBottom: 14, borderBottom: '1px dashed var(--line)' }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
+        <span style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          References ({imageRefUrls.length}/{MAX_IMAGE_REFS})
+        </span>
+        <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>Optional — the generated image imitates these.</span>
+      </div>
+      {imageRefUrls.length === 0 ? (
+        <div style={{ fontSize: 11, color: 'var(--ink-4)' }}>
+          Hit <strong>Ref</strong> on any image below to copy its subject — +{priceForImage(imageSize, imageQuality, 1).surcharge} credits each.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          {imageRefUrls.map((url, i) => (
+            <div key={url} style={{ width: 44, height: 44, borderRadius: 6, border: '1px solid var(--line-2)', position: 'relative', overflow: 'hidden', background: 'var(--bg-sunk)' }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={url} alt={`reference ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              <button
+                type="button"
+                aria-label={`Remove reference ${i + 1}`}
+                onClick={() => toggleImageRef(url)}
+                style={{ position: 'absolute', top: 0, right: 0, width: 16, height: 16, background: 'rgba(10,10,10,0.7)', color: 'white', border: 0, display: 'grid', placeItems: 'center', cursor: 'pointer', padding: 0 }}
+              >
+                <Icon name="x" size={9} />
+              </button>
+            </div>
+          ))}
+          <span style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>
+            +{priceForImage(imageSize, imageQuality, imageRefUrls.length).surcharge} credits{imageCount > 1 ? ` × ${imageCount}` : ''} · likeness is guided, not exact
+          </span>
+        </div>
+      )}
+    </div>
+  );
+
+  const imageOptionsSection = (
     <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px dashed var(--line)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
         <Icon name="image" size={14} style={{ color: 'var(--accent)' }} />
@@ -1703,44 +1776,12 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
           </div>
         </div>
       </div>
-
-      {/* Reference images — the output imitates these, so a generated ring can
-          be THEIR ring. Picked from the gallery below rather than uploaded
-          again; the surcharge is shown before they commit. */}
-      <div style={{ marginTop: 14 }}>
-        <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
-          References ({imageRefUrls.length}/{MAX_IMAGE_REFS})
-        </div>
-        {imageRefUrls.length === 0 ? (
-          <div style={{ fontSize: 11, color: 'var(--ink-4)' }}>
-            Hit <strong>Ref</strong> on any image below to copy its subject — +{priceForImage(imageSize, imageQuality, 1).surcharge} credits each.
-          </div>
-        ) : (
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-            {imageRefUrls.map((url, i) => (
-              <div key={url} style={{ width: 44, height: 44, borderRadius: 6, border: '1px solid var(--line-2)', position: 'relative', overflow: 'hidden', background: 'var(--bg-sunk)' }}>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={url} alt={`reference ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                <button
-                  type="button"
-                  aria-label={`Remove reference ${i + 1}`}
-                  onClick={() => toggleImageRef(url)}
-                  style={{ position: 'absolute', top: 0, right: 0, width: 16, height: 16, background: 'rgba(10,10,10,0.7)', color: 'white', border: 0, display: 'grid', placeItems: 'center', cursor: 'pointer', padding: 0 }}
-                >
-                  <Icon name="x" size={9} />
-                </button>
-              </div>
-            ))}
-            <span style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>
-              +{priceForImage(imageSize, imageQuality, imageRefUrls.length).surcharge} credits{imageCount > 1 ? ` × ${imageCount}` : ''} · likeness is guided, not exact
-            </span>
-          </div>
-        )}
-      </div>
     </div>
   );
 
-  const videoSection = (
+  // Same split for video: mode picker + its anchor slots go above the prompt,
+  // duration/quality/aspect/model stay below it.
+  const videoOptionsSection = (
     <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px dashed var(--line)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
         <Icon name="play" size={14} style={{ color: 'var(--accent)' }} />
@@ -1844,8 +1885,15 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
         </div>
       )}
 
-      {/* Generation type — drives which inputs render below. */}
-      <div style={{ marginTop: 14 }}>
+    </div>
+  );
+
+  const videoInputsSection = (
+    <div style={{ marginBottom: 14, paddingBottom: 14, borderBottom: '1px dashed var(--line)' }}>
+      {/* Generation type — drives which input slots render directly below it.
+          Picker and slots must stay together: choosing a mode in one place and
+          watching its inputs appear somewhere else is worse than burying both. */}
+      <div>
         <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>How to generate</div>
         <div className="m-2col" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8 }}>
           {VIDEO_GEN_MODES.map((m) => {
@@ -2048,7 +2096,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                 <div style={{ fontSize: 11, color: 'var(--ink-3)', lineHeight: 1.6, paddingTop: 4 }}>
                   Use a clear, front-facing photo with one face and even lighting. Looking at the camera works best.
                   <div style={{ marginTop: 6, color: 'var(--ink-4)' }}>
-                    Tip: the photo is cropped to <span style={{ fontFamily: 'var(--mono)' }}>{videoAspect}</span> to match your video — change the aspect above before cropping.
+                    Tip: the photo is cropped to <span style={{ fontFamily: 'var(--mono)' }}>{videoAspect}</span> to match your video — change the aspect in Video options below before cropping.
                   </div>
                 </div>
               </div>
@@ -2155,6 +2203,53 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
       : [];
   const currentMediaItem = modeMedia[Math.min(selectedMediaIdx, Math.max(modeMedia.length - 1, 0))];
   const currentMediaUrl = currentMediaItem?.url;
+
+  // The gallery is history, not a flat pile: bucket it into local calendar
+  // days, newest first.
+  const mediaGroups = groupByDay(modeMedia);
+  const heroIdx = Math.min(selectedMediaIdx, Math.max(modeMedia.length - 1, 0));
+  const mediaBusy = mode === 'video' ? videoBusy : imageBusy;
+  const dayHeader = (label: string, count: number) => (
+    <div
+      style={{
+        position: 'sticky', top: 0, zIndex: 10,
+        background: 'var(--bg-elev)',
+        padding: '8px 0 6px',
+        fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)',
+        textTransform: 'uppercase', letterSpacing: '0.09em',
+        fontVariantNumeric: 'tabular-nums',
+      }}
+    >
+      {label} <span style={{ color: 'var(--ink-4)' }}>· {count}</span>
+    </div>
+  );
+  const loadOlderRow = libraryMore ? (
+    <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 12 }}>
+      <button className="btn sm ghost" disabled={libraryBusy} onClick={() => loadLibrary(libraryCursor.current)}>
+        <Icon name="refresh" size={11} /> {libraryBusy ? 'Loading…' : 'Load older'}
+      </button>
+    </div>
+  ) : null;
+  // Never claim "empty" while something is still rendering.
+  const emptyGalleryNote = (
+    <div style={{ padding: '22px 12px', textAlign: 'center', fontSize: 12.5, color: 'var(--ink-3)', lineHeight: 1.6 }}>
+      {mediaBusy ? (
+        <>
+          <Icon name="refresh" size={16} style={{ color: 'var(--accent)' }} />
+          <div style={{ marginTop: 6 }}>Rendering — your {mode === 'video' ? 'clip' : 'image'} will land here.</div>
+        </>
+      ) : (
+        <>
+          <Icon name="sparkle" size={16} style={{ color: 'var(--accent)' }} />
+          <div style={{ marginTop: 6 }}>
+            {mode === 'video'
+              ? 'Describe the post above and hit Generate to make your first clip — or upload one.'
+              : 'Describe the post above and hit Generate to make your first image — or upload one.'}
+          </div>
+        </>
+      )}
+    </div>
+  );
 
   const generate = async (opts?: { withTools?: boolean }) => {
     setGenerating(true);
@@ -2423,6 +2518,10 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
         </div>
 
         <div className="prompt-box">
+          {/* Inputs that DEFINE the output come first — mode picker and its
+              slots — then the prompt, then the knobs that only tune it. */}
+          {mode === 'image' && imageInputsSection}
+          {mode === 'video' && videoInputsSection}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
             <Icon name="sparkle" size={14} style={{ color: 'var(--accent)' }} />
             <span style={{ fontSize: 12, fontWeight: 550, letterSpacing: '-0.005em' }}>{loadedDraftId ? 'Edit prompt' : 'Tell me what to write'}</span>
@@ -2455,10 +2554,10 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
             }
           />
 
-          {/* Mode-specific second section — image or video prompt + controls.
-              All in the same card so the user has ONE Generate button below. */}
-          {mode === 'image' && imageSection}
-          {mode === 'video' && videoSection}
+          {/* Tuning knobs — count, ratio, quality, duration, model. Same card
+              so the user still has ONE Generate button below. */}
+          {mode === 'image' && imageOptionsSection}
+          {mode === 'video' && videoOptionsSection}
 
           <div className="prompt-foot">
             <div className="prompt-chips">
@@ -2745,12 +2844,31 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                 </div>
               </div>
               <div className="card-body">
+                {/* Add-media actions live outside the scrolling history so they
+                    don't drift away as you page back through older days. */}
+                <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+                  <button className="btn sm ghost" onClick={onPickFile}>
+                    <Icon name="plus" size={12} /> Upload
+                  </button>
+                  <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm,video/quicktime" hidden onChange={onFileChange} />
+                  <button className="btn sm ghost" onClick={() => { setStockOpen(true); if (prompt && !stockQuery) { setStockQuery(prompt.slice(0, 60)); runStockSearch(prompt.slice(0, 60)); } }}>
+                    <Icon name="search" size={12} /> Stock
+                  </button>
+                </div>
+                {/* Its own scrollport so the day headers have something to
+                    stick to — .card is overflow:hidden, which would otherwise
+                    make position:sticky a no-op. */}
+                <div style={{ maxHeight: 560, overflowY: 'auto', overflowX: 'hidden', padding: '0 4px 4px', margin: '0 -4px -4px' }}>
+                {modeMedia.length === 0 && emptyGalleryNote}
+                {mediaGroups.map((g) => (
+                <React.Fragment key={g.key}>
+                {dayHeader(g.label, g.entries.length)}
                 <div className="compose-media-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10 }}>
-                  {modeMedia.map((m, i) => {
-                    const isHero = i === Math.min(selectedMediaIdx, Math.max(modeMedia.length - 1, 0));
+                  {g.entries.map(({ item: m, index: i }) => {
+                    const isHero = i === heroIdx;
                     return (
+                      <div key={m.id ?? i}>
                       <div
-                        key={m.id ?? i}
                         onClick={() => setSelectedMediaIdx(i)}
                         style={{
                           aspectRatio: '1/1', position: 'relative', overflow: 'hidden', borderRadius: 10,
@@ -2811,17 +2929,16 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                           </span>
                         </button>
                       </div>
+                      <div style={{ marginTop: 4, fontSize: 9.5, fontFamily: 'var(--mono)', color: 'var(--ink-4)', fontVariantNumeric: 'tabular-nums' }}>
+                        {mediaTime(m.createdAt) || '—'}
+                      </div>
+                      </div>
                     );
                   })}
-                  <button style={{ aspectRatio: '1/1', borderRadius: 10, border: '1px dashed var(--line-2)', background: 'var(--bg-sunk)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, color: 'var(--ink-3)', fontSize: 11, fontFamily: 'var(--mono)' }} onClick={onPickFile}>
-                    <Icon name="plus" size={16} />
-                    <span>Upload</span>
-                  </button>
-                  <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm,video/quicktime" hidden onChange={onFileChange} />
-                  <button style={{ aspectRatio: '1/1', borderRadius: 10, border: '1px dashed oklch(0.86 0.08 70)', background: 'var(--accent-soft)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, color: 'var(--accent-ink)', fontSize: 11, fontFamily: 'var(--mono)' }} onClick={() => { setStockOpen(true); if (prompt && !stockQuery) { setStockQuery(prompt.slice(0, 60)); runStockSearch(prompt.slice(0, 60)); } }}>
-                    <Icon name="search" size={16} />
-                    <span>Stock</span>
-                  </button>
+                </div>
+                </React.Fragment>
+                ))}
+                {loadOlderRow}
                 </div>
 
                 {/* Stock image picker — collapsible */}
@@ -2895,16 +3012,22 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                   <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: '#fff8' }}>Preview unavailable</div>
                 )}
               </div>
-              {/* Clip-strip: pick which clip is the hero. */}
-              <div style={{ display: 'flex', gap: 8, marginTop: 10, overflowX: 'auto', paddingBottom: 4 }}>
-                {modeMedia.map((m, i) => {
-                  const isHero = i === Math.min(selectedMediaIdx, modeMedia.length - 1);
+              {/* Clip-strip: pick which clip is the hero. Grouped by the local
+                  calendar day it was made on; each day gets its own row so the
+                  headers can stick against the vertical scrollport. */}
+              <div style={{ marginTop: 10, maxHeight: 320, overflowY: 'auto', padding: '0 4px 4px', margin: '10px -4px -4px' }}>
+              {mediaGroups.map((g) => (
+              <React.Fragment key={g.key}>
+              {dayHeader(g.label, g.entries.length)}
+              <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
+                {g.entries.map(({ item: m, index: i }) => {
+                  const isHero = i === heroIdx;
                   return (
+                    <div key={m.id ?? i} style={{ flexShrink: 0, width: 96 }}>
                     <div
-                      key={m.id ?? i}
                       onClick={() => setSelectedMediaIdx(i)}
                       style={{
-                        flexShrink: 0, width: 96, aspectRatio: '16/9', borderRadius: 8,
+                        width: '100%', aspectRatio: '16/9', borderRadius: 8,
                         border: isHero ? '2px solid var(--accent)' : '1px solid var(--line-2)',
                         background: '#181818', position: 'relative', cursor: 'pointer', overflow: 'hidden',
                       }}
@@ -2925,14 +3048,20 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                         </span>
                       </button>
                     </div>
+                    <div style={{ marginTop: 4, fontSize: 9.5, fontFamily: 'var(--mono)', color: 'var(--ink-4)', fontVariantNumeric: 'tabular-nums' }}>
+                      {mediaTime(m.createdAt) || '—'}
+                    </div>
+                    </div>
                   );
                 })}
-                <button
-                  onClick={onPickFile}
-                  style={{ flexShrink: 0, width: 96, aspectRatio: '16/9', borderRadius: 8, border: '1px dashed var(--line-2)', background: 'var(--bg-sunk)', color: 'var(--ink-3)', display: 'grid', placeItems: 'center', cursor: 'pointer' }}
-                  title="Add another clip"
-                >
-                  <Icon name="plus" size={16} />
+              </div>
+              </React.Fragment>
+              ))}
+              {loadOlderRow}
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                <button className="btn sm ghost" onClick={onPickFile} title="Add another clip">
+                  <Icon name="plus" size={12} /> Add clip
                 </button>
                 <input ref={fileInputRef} type="file" accept="video/mp4,video/webm,video/quicktime" hidden onChange={onFileChange} />
               </div>
