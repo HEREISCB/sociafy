@@ -32,6 +32,7 @@ import {
   fetchRedditMentions,
   fetchXMentions,
   xReadsConfigured,
+  filterByBrand,
   type RawMention,
   type MentionSourceId,
 } from './sources';
@@ -94,9 +95,16 @@ export async function runShieldScan(opts: ShieldScanOptions): Promise<ShieldScan
   const settled = await Promise.allSettled(tasks);
   const all: RawMention[] = settled.flatMap(r => (r.status === 'fulfilled' ? r.value : []));
 
+  // Drop results that aren't about this brand before anything is scored or
+  // stored. Search backends match on words, not entities — without this, a
+  // Wikipedia hit for "…lawsuit investigation" about an unrelated company gets
+  // saved and scored as the customer's crisis. The resolved X handle counts as
+  // the brand (tweets say "@tweetndmc", not "New Delhi Municipal Council").
+  const relevant = filterByBrand(all, brand, resolvedX?.handle ? [resolvedX.handle] : []);
+
   // Deduplicate by external id within this batch
   const seen = new Set<string>();
-  const deduped = all.filter(m => {
+  const deduped = relevant.filter(m => {
     const key = m.id;
     if (!key || seen.has(key)) return false;
     seen.add(key);

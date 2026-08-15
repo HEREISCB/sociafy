@@ -1,26 +1,41 @@
+/** Unambiguous crisis words — one is enough to raise a crisis. */
 const CRISIS = new Set([
-  'fraud','scam','lawsuit','sue','sued','suing','investigation','breach','hack',
-  'hacked','stolen','corrupt','corruption','criminal','illegal','arrest','arrested',
-  'bankrupt','bankruptcy','collapse','shutdown','recall','death','dangerous','unsafe',
-  'explosion','resign','resigned','discrimination','racist','racism','sexist','abuse',
+  'fraud','scam','lawsuit','sue','sued','suing','breach','hack',
+  'hacked','stolen','corrupt','corruption','criminal','illegal',
+  'bankrupt','bankruptcy','collapse','shutdown','recall','dangerous','unsafe',
+  'explosion','discrimination','racist','racism','sexist','abuse',
   'abused','exploit','exploitation','whistleblower','ponzi','embezzl','extort',
   'manipulate','manipulation','bribe','bribery','coverup','cover-up','negligence',
   'negligent','defamation','libel','slander','mislead','defraud',
 ]);
 
+/**
+ * Crisis-adjacent but routine in ordinary news ("joint investigation team",
+ * "three arrested", "the minister resigned"). One of these alone is not a
+ * brand crisis; two distinct ones together is. Alone they count as negative.
+ */
+const CRISIS_WEAK = new Set([
+  'investigation','investigating','investigated','arrest','arrested','arrests',
+  'death','deaths','resign','resigns','resigned',
+]);
+
+// Removed from NEGATIVE — these fire on routine business news and carry no
+// sentiment on their own: issue(s) ("issues Q3 guidance"), problem(s), concern(s),
+// critical, alleged/allegedly, down ("down the road"), expensive, refund
+// ("refund policy"), negative, bad. Each false positive cost an OpenAI
+// script generation and a slot in the customer's attention queue.
 const NEGATIVE = new Set([
   'terrible','awful','horrible','dreadful','disgusting','pathetic','useless',
-  'worthless','garbage','trash','bad','worst','worse','broken','bug','bugs',
-  'buggy','crash','crashes','crashing','slow','unreliable','unstable','down',
+  'worthless','garbage','trash','worst','worse','broken','bug','bugs',
+  'buggy','crash','crashes','crashing','slow','unreliable','unstable',
   'outage','offline','fail','failed','failing','failure','disaster','disappointed',
   'disappointing','frustrating','frustrated','frustration','angry','furious','rage',
-  'upset','hate','hated','avoid','boycott','refund','chargeback','overpriced',
-  'expensive','ripoff','waste','misleading','deceptive','lied','lying','dishonest',
+  'upset','hate','hated','avoid','boycott','chargeback','overpriced',
+  'ripoff','waste','misleading','deceptive','lied','lying','dishonest',
   'unethical','incompetent','unprofessional','rude','arrogant','spam','spammy',
   'sketchy','shady','suspicious','warning','beware','complaint','complaints',
-  'controversy','controversial','scandal','embarrassing','accusation','alleged',
-  'allegedly','negative','critical','criticism','problem','problems','issue','issues',
-  'concern','concerns','wrong','error','errors','broken','unusable','disappoints',
+  'controversy','controversial','scandal','embarrassing','accusation',
+  'criticism','wrong','error','errors','unusable','disappoints',
 ]);
 
 const POSITIVE = new Set([
@@ -45,14 +60,22 @@ export function scoreMention(title: string, body: string): SentimentResult {
   const words = text.split(/\W+/).filter(Boolean);
 
   const foundCrisis: string[] = [];
+  const foundWeak: string[] = [];
   const foundNeg: string[] = [];
   let pos = 0;
 
   for (const w of words) {
     if (CRISIS.has(w)) foundCrisis.push(w);
+    else if (CRISIS_WEAK.has(w)) foundWeak.push(w);
     else if (NEGATIVE.has(w)) foundNeg.push(w);
     else if (POSITIVE.has(w)) pos++;
   }
+
+  // Weak crisis words escalate only alongside another crisis signal — two
+  // *distinct* ones, or a real one. Repetition doesn't count: an article that
+  // says "investigation" four times is still one signal.
+  if (foundCrisis.length > 0 || new Set(foundWeak).size >= 2) foundCrisis.push(...foundWeak);
+  else foundNeg.push(...foundWeak);
 
   const rawScore = pos - foundNeg.length - foundCrisis.length * 3;
   const score = Math.max(-10, Math.min(10, rawScore));
@@ -66,7 +89,10 @@ export function scoreMention(title: string, body: string): SentimentResult {
   } else if (score < -1 || foundNeg.length >= 2) {
     label = 'negative';
     severity = Math.min(7, 2 + foundNeg.length);
-  } else if (score > 1) {
+  } else if (score > 0 && foundNeg.length === 0) {
+    // One positive word and nothing negative is enough — `score > 1` meant a
+    // single "love"/"great" landed as neutral. Any negative word still holds it
+    // at neutral, so genuinely mixed news doesn't read as praise.
     label = 'positive';
     severity = 0;
   } else {

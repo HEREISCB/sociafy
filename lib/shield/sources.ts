@@ -217,6 +217,75 @@ export async function fetchXMentions(
     .filter(m => m.title.length > 5);
 }
 
+// ── Brand relevance guard ─────────────────────────────────────────────────────
+// Every search backend happily returns pages that merely share words with the
+// query: a Wikipedia search for `Zomato controversy criticism scandal` returns
+// "Uber", and one for "New Delhi Municipal Council" returns "Minamata disease".
+// Worse, the query words ("lawsuit", "investigation") come back inside the
+// snippet, so scoreMention then labels the off-brand page a crisis. Nothing may
+// be stored unless the text plausibly refers to the brand — filterByBrand() is
+// the single gate every source passes through (see monitor.ts).
+
+/** Dropped from the brand before matching — they carry no identity. */
+const BRAND_SUFFIXES = new Set([
+  'inc', 'ltd', 'llc', 'llp', 'plc', 'pvt', 'private', 'limited', 'corp',
+  'co', 'company', 'gmbh', 'official', 'the', 'and',
+]);
+
+const tokenize = (s: string): string[] => s.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+
+/** Brand words that actually identify it: no suffixes, no single letters. */
+function brandTokens(brand: string): string[] {
+  return tokenize(brand).filter(w => w.length > 1 && !BRAND_SUFFIXES.has(w));
+}
+
+/** "New Delhi Municipal Council" → "ndmc". Only for 3+ word brands, so we
+ *  never invent a 2-letter acronym that collides with ordinary text. */
+function brandAcronym(tokens: string[]): string | null {
+  if (tokens.length < 3) return null;
+  const acronym = tokens.map(t => t[0]).join('');
+  return acronym.length >= 3 ? acronym : null;
+}
+
+/**
+ * Does this text plausibly refer to the brand?
+ * Accepts when: an alias (e.g. the resolved X @handle) appears, the brand's
+ * acronym appears, or every identifying brand word appears somewhere in the
+ * title/body. Case-insensitive, punctuation-insensitive.
+ *
+ * ponytail: requiring *every* brand word means "Acme sues rival" is dropped for
+ * brand "Acme Widgets". Deliberate — a missed neutral headline costs nothing, a
+ * fabricated crisis about another company costs the customer's trust. Upgrade
+ * path if it bites: an IDF-style rarest-word rule instead of all-words.
+ */
+export function isBrandRelevant(
+  m: Pick<RawMention, 'title' | 'body'>,
+  brand: string,
+  aliases: string[] = [],
+): boolean {
+  const tokens = brandTokens(brand);
+  // Nothing identifying to match on (e.g. brand "H&M") — don't filter blind.
+  if (tokens.length === 0) return true;
+
+  const words = new Set(tokenize(`${m.title} ${m.body}`));
+  // Aliases are single handles ("@tweetndmc"); a tweet naming the handle but
+  // never the org's full name is still on-brand.
+  if (aliases.flatMap(tokenize).some(a => words.has(a))) return true;
+
+  const acronym = brandAcronym(tokens);
+  if (acronym && words.has(acronym)) return true;
+
+  return tokens.every(t => words.has(t));
+}
+
+export function filterByBrand(
+  items: RawMention[],
+  brand: string,
+  aliases: string[] = [],
+): RawMention[] {
+  return items.filter(m => isBrandRelevant(m, brand, aliases));
+}
+
 // ── All free sources bundled ──────────────────────────────────────────────────
 
 export async function fetchAllFreeSources(brand: string): Promise<RawMention[]> {
@@ -226,12 +295,12 @@ export async function fetchAllFreeSources(brand: string): Promise<RawMention[]> 
     fetchHackerNews(brand),
     fetchWikipedia(brand),
   ]);
-  return [
+  return filterByBrand([
     ...(gnews.status === 'fulfilled' ? gnews.value : []),
     ...(gnewsNeg.status === 'fulfilled' ? gnewsNeg.value : []),
     ...(hn.status === 'fulfilled' ? hn.value : []),
     ...(wiki.status === 'fulfilled' ? wiki.value : []),
-  ];
+  ], brand);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

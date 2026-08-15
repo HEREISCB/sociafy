@@ -52,11 +52,16 @@ const ShieldDashboard: React.FC = () => {
   const { data: accountsData } = useApi<ConnectedAccount[]>('/api/accounts');
   // For the toolbar button badges (SWR dedupes with the modal components' calls).
   const { data: docsData } = useApi<{ documents: unknown[] }>('/api/shield/documents');
-  const { data: settingsData } = useApi<{ settings: { systemPrompt: string; autoFetch: boolean } }>('/api/shield/settings');
+  const { data: settingsData } = useApi<{ settings: { systemPrompt: string; autoFetch: boolean; autoFetchBrand: string } }>('/api/shield/settings');
   const { data: attentionData } = useApi<AttentionData>('/api/shield/attention');
   const docCount = docsData?.documents?.length ?? 0;
   const promptCustom = !!settingsData?.settings?.systemPrompt?.trim();
   const autoFetchOn = !!settingsData?.settings?.autoFetch;
+  const autoFetchBrand = settingsData?.settings?.autoFetchBrand?.trim() ?? '';
+  // Scheduled scans need BOTH the toggle and a brand — the cron picks users by
+  // (autoFetch = true), then skips any with no brand set. Say so plainly rather
+  // than letting the user assume they're being monitored. Never auto-enable.
+  const monitoringOff = !!settingsData && (!autoFetchOn || !autoFetchBrand);
   const attentionCount = attentionData?.counts?.total ?? 0;
 
   const actions = actionsData?.actions ?? [];
@@ -192,8 +197,10 @@ const ShieldDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Scan bar */}
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+      {/* Scan bar — wraps on narrow viewports. Without the wrap the button is
+          pushed past the right edge on a 390px phone and clipped away entirely,
+          leaving the empty state pointing at a control that isn't on screen. */}
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
         <input
           type="text"
           value={brand}
@@ -201,7 +208,8 @@ const ShieldDashboard: React.FC = () => {
           onKeyDown={e => e.key === 'Enter' && !scanning && scan()}
           placeholder="Brand or company name to scan…"
           style={{
-            flex: 1,
+            flex: '1 1 220px',
+            minWidth: 0,
             padding: '10px 14px',
             borderRadius: 'var(--r)',
             border: '1px solid var(--line-2)',
@@ -248,6 +256,29 @@ const ShieldDashboard: React.FC = () => {
       {resolvedNote && !scanError && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '8px 14px', background: 'var(--bg-elev)', border: '1px solid var(--line)', borderRadius: 'var(--r-sm)', fontSize: 12.5, color: 'var(--ink-2)' }}>
           <Icon name="target" size={12} /> <span><strong>Smart match:</strong> {resolvedNote}</span>
+        </div>
+      )}
+
+      {monitoringOff && (
+        <div
+          style={{
+            display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+            padding: '10px 14px', background: 'var(--bg-elev)',
+            border: '1px solid var(--line-2)', borderLeft: '3px solid var(--warn)',
+            borderRadius: 'var(--r-sm)', fontSize: 12.5, color: 'var(--ink-2)',
+          }}
+        >
+          <Icon name="alert" size={12} />
+          <span style={{ flex: 1, minWidth: 220, lineHeight: 1.5 }}>
+            <strong>Automatic monitoring is off.</strong>{' '}
+            {autoFetchOn && !autoFetchBrand
+              ? 'Scheduled scans are enabled but no brand is set, so nothing is being scanned.'
+              : 'Nothing is scanned in the background — mentions only appear when you press Scan Now.'}
+          </span>
+          <button className="btn sm" onClick={() => setModal('monitoring')}>
+            <Icon name="refresh" size={12} />
+            {autoFetchOn && !autoFetchBrand ? 'Set a brand' : 'Turn on monitoring'}
+          </button>
         </div>
       )}
 
