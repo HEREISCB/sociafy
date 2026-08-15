@@ -3675,3 +3675,97 @@ a { color: inherit; text-decoration: none; }
 @media (max-width: 430px) {
   .m-2col { grid-template-columns: 1fr !important; }
 }
+
+/* ===================================================================
+   Press feedback, and honouring the three accessibility preferences
+
+   The stylesheet had 29 `:hover` rules and exactly one `:active` rule
+   (.cal-month-event). Hover does not exist on a touchscreen, so every
+   button, chip, tile and card in the app gave a phone user NO feedback
+   at all between the tap and whatever happened next — and on a slow
+   request, "nothing happened" and "it didn't register" look identical.
+   Feedback belongs on the press, not on the result.
+   =================================================================== */
+
+/* Button-like controls: they shrink under the finger. Transform only on
+   things small enough that scaling reads as a press rather than as the
+   layout moving — and never on a container that might hold a positioned
+   child, since a transform would become its containing block. */
+.btn:active,
+.icon-btn:active,
+.prompt-chip:active,
+.topbar-menu-btn:active,
+.autopilot-pill:active,
+.mode-switch .opt:active {
+  transform: scale(0.97);
+}
+.btn,
+.icon-btn,
+.prompt-chip,
+.topbar-menu-btn,
+.autopilot-pill,
+.mode-switch .opt {
+  /* Fast enough to feel like a response rather than an animation. The
+     press itself is instant; this only smooths the release. */
+  transition: transform 100ms ease-out, background 0.12s, border-color 0.12s;
+}
+.btn:active:disabled,
+.icon-btn:active:disabled { transform: none; }
+
+/* Larger surfaces darken instead of scaling: a 300px tile scaling down
+   reads as the page shifting, and several of these host absolutely
+   positioned children. */
+.billing-tier-card:active,
+.connect-tile:active,
+.queue-item:active,
+.trend-item:active,
+.variant:active,
+.plan-platform:active,
+.plan-radio:active,
+.topic:active,
+.cal-slot:active {
+  background: var(--bg-sunk);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Five animations loop forever; only the two newest were guarded.
+     `pulse`, `autopilot-dot` and `credit-pulse` all sit near the
+     0.2–0.6Hz band that provokes vestibular symptoms, and credit-pulse
+     is attached to a warning state, so it is on screen exactly when
+     someone is already stressed. Static, still legible. */
+  .briefing-eyebrow .pulse::after,
+  .autopilot-pill .status-dot.live,
+  .credit-meter.crit,
+  .render-bar::after,
+  .render-dot { animation: none !important; }
+  /* Entrances become cross-fades — the information still arrives, the
+     movement does not. */
+  .modal-scrim,
+  .modal-sheet { animation: none !important; }
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+  }
+  .btn:active,
+  .icon-btn:active,
+  .prompt-chip:active,
+  .topbar-menu-btn:active,
+  .autopilot-pill:active,
+  .mode-switch .opt:active { transform: none; }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  /* Seven translucent surfaces, none of which had a fallback. Blur is a
+     decorative depth cue; for someone who has asked for less of it, the
+     surface just becomes solid. */
+  .modal-scrim { backdrop-filter: none; background: rgba(10, 10, 10, 0.82); }
+  .modal-sheet,
+  .lp-nav-wrap { backdrop-filter: none; background: var(--bg-elev); }
+}
+
+@media (prefers-contrast: more) {
+  /* Near-solid surfaces with a defined edge, so a panel's boundary does
+     not depend on a shadow or a translucent wash to be seen. */
+  .modal-sheet,
+  .lp-nav-wrap { background: var(--bg-elev); border: 1px solid var(--ink); }
+  .btn { border-color: var(--ink-2); }
+}
