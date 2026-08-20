@@ -145,7 +145,7 @@
     | `aspect` | `9:16` \| `1:1` \| `16:9` | `9:16` | |
     | `fast` | boolean | `false` | Cheaper and quicker, slightly lower fidelity. Ignored at 1080p, which has no fast tier — you are billed the quality price. |
     | `gen_mode` | `text` \| `reference` \| `image-to-video` | `text` | Which still images, if any, the clip is built from. See below. |
-    | `reference_images` | array of 1–4 `https` URLs | omitted | **`gen_mode: "reference"` only, and required by it.** Photos of the real subject, so the clip shows *your* product rather than an approximation of it. |
+    | `reference_images` | array of 1–9 `https` URLs | omitted | **`gen_mode: "reference"` only, and required by it.** Photos of the real subject, so the clip shows *your* product rather than an approximation of it. |
     | `start_frame` | `https` URL | omitted | **`gen_mode: "image-to-video"` only, and required by it.** The clip's first frame. |
     | `end_frame` | `https` URL | omitted | `gen_mode: "image-to-video"` only. The clip's last frame, if you want to pin where it lands. |
 
@@ -175,7 +175,7 @@
     /api/v1/images`, which does carry one (§6), because that provider bills input
     image tokens.
 
-    - **`gen_mode: "reference"`** with `reference_images`: 1–4 photos of the real
+    - **`gen_mode: "reference"`** with `reference_images`: 1–9 photos of the real
       subject. The clip depicts *those*, which is the difference between "a gold
       solitaire ring" and your gold solitaire ring. Several angles beat one.
     - **`gen_mode: "image-to-video"`** with `start_frame` (and optionally
@@ -393,7 +393,7 @@
     | `prompt` | string, 2–2000 chars | required |
     | `size` | `1024x1024` \| `1536x1024` \| `1024x1536` | `1024x1024` |
     | `quality` | `low` \| `medium` \| `high` | `medium` |
-    | `reference_images` | array of 1–4 `https` URLs — see below | omitted |
+    | `reference_images` | array of 1–10 `https` URLs — see below | omitted |
     | `async` | boolean — `true` returns `202` + `poll_url` instead of holding the connection open | `false` |
 
     Unknown fields are rejected with `400`, and there is no `count` — one request,

@@ -571,17 +571,26 @@ export async function submitVideo(args: SubmitVideoArgs): Promise<SubmitVideoRes
  * and bytes no longer affect the bill. What is left is memory and latency.
  *
  * 20MB per image clears catalogue masters (the provider's own limit is <50MB) and
- * 48MB across all four bounds the buffered total, since we hold every reference in
- * memory at once. Four 20MB uploads would add minutes to a call already measured
- * at 66–83s, which the total budget also keeps in check.
+ * 48MB across the whole set bounds the buffered total, since we hold every
+ * reference in memory at once. That byte ceiling and the fetch budget — not the
+ * count — are what actually protect the route: ten 4MB references cost strictly
+ * less memory and less time than four 20MB ones, so capping the count low was
+ * punishing the common good case without lowering the worst case.
  */
 export const REFERENCE_LIMITS = {
-  maxImages: 4,
+  /** Images. NOT a provider limit: OpenAI's images/edits accepted 20 references
+   *  in one call when probed directly. This is our memory/latency budget. */
+  maxImages: 10,
+  /** Video. This one IS the provider's, and it is hard: Seedance answers
+   *  `400 invalid request: omni_reference mode accepts at most 9 reference
+   *  images, got 10`. Verified against PiAPI, not inferred from docs. */
+  maxVideoImages: 9,
   maxBytes: 20 * 1024 * 1024,
-  /** All references together — 4 × maxBytes of buffered memory is not acceptable. */
+  /** All references together — the real ceiling. maxImages × maxBytes of
+   *  buffered memory is not acceptable, so the bytes bound it, not the count. */
   maxTotalBytes: 48 * 1024 * 1024,
   perFetchMs: 20_000,
-  /** All fetches together. Four slow hosts must not eat the route's maxDuration
+  /** All fetches together. Slow hosts must not eat the route's maxDuration
    *  and strand us mid-generation after the charge. */
   totalBudgetMs: 45_000,
 } as const;

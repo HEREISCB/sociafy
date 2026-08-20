@@ -189,7 +189,7 @@ function VideoRenderCard({ startedAt, phases, note }: { startedAt: number; phase
 
 /** Mirrors REFERENCE_LIMITS.maxImages in app/api/v1/shared.ts. Not imported:
  *  that module pulls in node:dns and the database. */
-const MAX_IMAGE_REFS = 4;
+const MAX_IMAGE_REFS = 10;
 
 type Variant = { id: string; name: string; score: number; text: string; rationale?: string };
 

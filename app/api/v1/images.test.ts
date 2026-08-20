@@ -531,6 +531,21 @@ describe('POST /api/v1/images — reference_images', () => {
     expect(state.fetched).toHaveLength(4);
   });
 
+  // The limit was 4 for no provider reason — probing OpenAI's images/edits
+  // directly took 20 references in a single call. What actually bounds this
+  // route is maxTotalBytes and totalBudgetMs, and ten 4MB references cost less
+  // of both than four 20MB ones. Asserting the full ten reach the provider is
+  // the only thing that would catch the cap silently regressing to 4, since the
+  // over-the-cap test above passes either way.
+  it('takes the full ten references and forwards every one', async () => {
+    const urls = Array.from({ length: 10 }, (_, n) => `https://93.184.216.34/rings/a-${n}.png`);
+    const res = await post(ref({ reference_images: urls }));
+    expect(res.status).toBe(200);
+    expect((await res.json()).credits_charged).toBe(6 + 10 * 6);
+    expect((state.editCalls[0] as { image: File[] }).image).toHaveLength(10);
+    expect(state.fetched).toHaveLength(10);
+  });
+
   // The bug this endpoint shipped with: a 4000×4000 catalogue photo was charged
   // 64 credits of surcharge on top of a 6-credit base, for provider input tokens
   // that are clamped at 1,521 either way. Resolution is not a billing input.
@@ -543,9 +558,13 @@ describe('POST /api/v1/images — reference_images', () => {
     expect((await (await post(ref())).json()).credits_charged).toBe(big.credits_charged);
   });
 
-  it('rejects a 5th reference, an empty array and a non-array', async () => {
+  it('rejects an 11th reference, an empty array and a non-array', async () => {
     for (const value of [
-      [1, 2, 3, 4, 5].map((n) => `https://93.184.216.34/${n}.png`),
+      // One past REFERENCE_LIMITS.maxImages. The count is our budget, not
+      // OpenAI's — images/edits took 20 in one call when probed — but the cap
+      // still has to hold, or maxTotalBytes is the only thing between us and an
+      // unbounded fetch loop.
+      Array.from({ length: 11 }, (_, n) => `https://93.184.216.34/${n}.png`),
       [],
       REF_URL,
     ]) {

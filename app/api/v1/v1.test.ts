@@ -487,7 +487,10 @@ describe('POST /api/v1/videos — reference stills', () => {
       { gen_mode: 'text', start_frame: REF_A },                         // frame without the mode
       { gen_mode: 'reference', reference_images: [REF_A], start_frame: REF_B },
       { gen_mode: 'image-to-video', start_frame: REF_A, reference_images: [REF_B] },
-      { gen_mode: 'reference', reference_images: [REF_A, REF_A, REF_A, REF_A, REF_A] }, // over the cap
+      // 10 stills — one past Seedance's own hard limit. Not our choice: PiAPI
+      // answers `400 omni_reference mode accepts at most 9 reference images`,
+      // so rejecting here saves a charge that would only be refunded later.
+      { gen_mode: 'reference', reference_images: Array.from({ length: 10 }, () => REF_A) },
       { gen_mode: 'video-reference', start_frame: REF_A },              // the withheld mode
     ];
     for (const b of bodies) {

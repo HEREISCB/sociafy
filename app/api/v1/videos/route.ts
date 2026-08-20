@@ -51,7 +51,7 @@ const bodySchema = z
     gen_mode: z.enum(['text', 'reference', 'image-to-video']).default('text'),
     /** Product stills the clip should depict. Fetched and re-hosted by us —
      *  same limits and same fetcher as `reference_images` on /images. */
-    reference_images: z.array(z.string()).min(1).max(REFERENCE_LIMITS.maxImages).optional(),
+    reference_images: z.array(z.string()).min(1).max(REFERENCE_LIMITS.maxVideoImages).optional(),
     /** image-to-video anchors: the clip starts here, and ends on `end_frame`
      *  if one is given. */
     start_frame: z.string().optional(),
