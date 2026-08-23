@@ -9,8 +9,9 @@ import { applySubscriptionState } from '../../../../lib/billing/state';
 import { grantIdempotent } from '../../../../lib/credits/ledger';
 import { normalizeRazorpayStatus, type RazorpaySubscriptionStatus } from '../../../../lib/billing/providers/razorpay/status';
 import { getRazorpay, razorpayPlanIdFor } from '../../../../lib/billing/providers/razorpay/client';
-import { topupPriceView } from '../../../../lib/billing/pricing';
+import { topupPriceView, TIER_PRICING } from '../../../../lib/billing/pricing';
 import { deltaCredits } from '../../../../lib/billing/providers/razorpay/proration';
+import { issueInvoice } from '../../../../lib/billing/zoho/invoice';
 
 export const runtime = 'nodejs';
 
@@ -130,7 +131,7 @@ async function handleSubActivated(payload: Record<string, unknown>) {
 
 async function handleSubCharged(payload: Record<string, unknown>) {
   const sub = readSub(payload);
-  const payment = (payload.payment as { entity: { id: string } } | undefined)?.entity;
+  const payment = (payload.payment as { entity: { id: string; amount?: number } } | undefined)?.entity;
   const userId = sub.notes?.sociafy_user_id;
   const tier = sub.notes?.tier ?? tierFromPlanId(sub.plan_id);
   if (!userId || !tier || !payment) return;
@@ -154,6 +155,37 @@ async function handleSubCharged(payload: Record<string, unknown>) {
     source: `rzp_sub:${sub.id}:${payment.id}`,
     meta: { reason: 'monthly_renewal', tier, subscriptionId: sub.id, paymentId: payment.id },
   });
+
+  // subscription.charged is the only subscription event that carries a real
+  // payment, so it is the only one that gets an invoice. Invoicing on
+  // `activated` too would raise a second document for the same rupee.
+  await invoice({
+    userId,
+    kind: 'subscription',
+    source: `rzp_sub:${sub.id}:${payment.id}`,
+    grossMinor: Number(payment.amount) || TIER_PRICING.INR[tier].amountMinor,
+    description: `Sociafy ${tier} plan — monthly subscription`,
+    providerPaymentId: payment.id,
+    meta: { tier, subscriptionId: sub.id },
+  });
+}
+
+/**
+ * Raise the GST invoice for a captured payment. Deliberately swallows
+ * everything: the money has moved and the credits are already granted, so a
+ * Zoho outage must not 500 this webhook into a Razorpay retry storm. Failed
+ * rows sit in `invoices` and the hourly reissue-invoices cron picks them up.
+ */
+async function invoice(args: Parameters<typeof issueInvoice>[0]) {
+  try {
+    const r = await issueInvoice(args);
+    if (!r.ok) console.error(`[razorpay.webhook] invoice ${args.source} deferred: ${r.error}`);
+  } catch (e) {
+    console.error(
+      `[razorpay.webhook] invoice ${args.source} threw:`,
+      e instanceof Error ? e.message : String(e),
+    );
+  }
 }
 
 async function handleSubUpdated(payload: Record<string, unknown>) {
@@ -318,6 +350,15 @@ async function handlePaymentCaptured(payload: Record<string, unknown>) {
       source: `rzp_topup:${payment.id}`,
       meta: { reason: 'topup', paymentId: payment.id },
     });
+    await invoice({
+      userId,
+      kind: 'topup',
+      source: `rzp_topup:${payment.id}`,
+      grossMinor: paidMinor,
+      description: `Sociafy credits top-up — ${credits.toLocaleString('en-IN')} credits`,
+      providerPaymentId: payment.id,
+      meta: { credits },
+    });
     return;
   }
 
@@ -349,6 +390,16 @@ async function handlePaymentCaptured(payload: Record<string, unknown>) {
       tier: notes.to_tier,
       periodEnd: null,
       providerSubscriptionId: next.id,
+    });
+
+    await invoice({
+      userId,
+      kind: 'upgrade',
+      source: `rzp_upgrade:${payment.id}`,
+      grossMinor: paidMinor,
+      description: `Sociafy plan upgrade ${notes.from_tier} → ${notes.to_tier} — prorated`,
+      providerPaymentId: payment.id,
+      meta: { fromTier: notes.from_tier, toTier: notes.to_tier },
     });
 
     const delta = deltaCredits(notes.from_tier, notes.to_tier);

@@ -74,9 +74,76 @@ export const profiles = pgTable('profiles', {
   razorpaySubscriptionId: text('razorpay_subscription_id'),
   pendingTierChangeTo: text('pending_tier_change_to').$type<Tier>(),
   pendingTierChangeAt: timestamp('pending_tier_change_at', { withTimezone: true }),
+  // ---- new in 0011: GST invoicing identity ----
+  // What a compliant Indian tax invoice has to name. Collected in onboarding's
+  // Brand step and editable on /billing; mirrored into a Zoho Books contact the
+  // first time we raise an invoice for this user.
+  legalName: text('legal_name'),
+  gstin: text('gstin'),
+  pan: text('pan'),
+  billingAddress: jsonb('billing_address').$type<BillingAddress>().notNull().default({}),
+  /** 2-digit GST state code. Decides CGST+SGST (intra-state) vs IGST. */
+  placeOfSupply: text('place_of_supply'),
+  zohoContactId: text('zoho_contact_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
+
+export type BillingAddress = {
+  line1?: string;
+  line2?: string;
+  city?: string;
+  /** State name, for the printed address. `placeOfSupply` is the code. */
+  state?: string;
+  postalCode?: string;
+  /** ISO 3166-1 alpha-2. */
+  country?: string;
+};
+
+// =====================================================
+// invoices — one row per GST invoice raised in Zoho Books.
+//
+// Written BEFORE the Zoho call. The unique (user_id, source) index is the
+// idempotency lock: a replayed Razorpay webhook collides and does nothing
+// rather than raising a second invoice for the same payment.
+//
+// Money fields are minor units (paise) and tax-INCLUSIVE: gross is exactly
+// what the card was charged, and taxable + tax === gross. See lib/billing/gst.ts.
+// =====================================================
+export const INVOICE_KINDS = ['subscription', 'topup', 'upgrade'] as const;
+export type InvoiceKind = (typeof INVOICE_KINDS)[number];
+export type InvoiceStatus = 'pending' | 'issued' | 'failed';
+
+export const invoices = pgTable(
+  'invoices',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id').notNull(),
+    kind: text('kind').notNull().$type<InvoiceKind>(),
+    /** Idempotency key — carries the Razorpay payment id. */
+    source: text('source').notNull(),
+    providerPaymentId: text('provider_payment_id'),
+    currency: text('currency').notNull().default('INR'),
+    grossMinor: integer('gross_minor').notNull(),
+    taxableMinor: integer('taxable_minor').notNull(),
+    taxMinor: integer('tax_minor').notNull(),
+    taxRatePct: integer('tax_rate_pct').notNull().default(18),
+    status: text('status').notNull().$type<InvoiceStatus>().default('pending'),
+    zohoInvoiceId: text('zoho_invoice_id'),
+    zohoInvoiceNumber: text('zoho_invoice_number'),
+    zohoInvoiceUrl: text('zoho_invoice_url'),
+    attempts: integer('attempts').notNull().default(0),
+    error: text('error'),
+    meta: jsonb('meta').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex('invoices_source_uniq').on(t.userId, t.source),
+    index('invoices_user_created_idx').on(t.userId, t.createdAt),
+    index('invoices_status_idx').on(t.status),
+  ],
+);
 
 // =====================================================
 // credit_ledger — append-only signed-credit ledger.

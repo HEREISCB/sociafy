@@ -10,6 +10,7 @@
  *   node scripts/cron-run.mjs trends
  *   node scripts/cron-run.mjs agent
  *   node scripts/cron-run.mjs refresh-tokens
+ *   node scripts/cron-run.mjs reissue-invoices
  *
  * Why direct invocation instead of curl-ing the route:
  *   - No HTTP round-trip / parse-serialize overhead
@@ -107,7 +108,7 @@ async function loadCronModule(specifier, exportName) {
 const which = process.argv[2];
 if (!which) {
   console.error(
-    'Usage: node scripts/cron-run.mjs <publish|finalize-video-jobs|shield-monitor|trends|agent|refresh-tokens>',
+    'Usage: node scripts/cron-run.mjs <publish|finalize-video-jobs|shield-monitor|trends|agent|refresh-tokens|reissue-invoices>',
   );
   process.exit(2);
 }
@@ -131,6 +132,10 @@ try {
     payload = { users: await (await loadCronModule('../lib/agent/run.ts', 'runAgentForAll'))() };
   } else if (which === 'refresh-tokens') {
     payload = await (await loadCronModule('../lib/cron/refreshTokens.ts', 'runRefreshTokens'))();
+  } else if (which === 'reissue-invoices') {
+    // Retries GST invoices a Zoho outage (or a missing ZOHO_* var) left as
+    // 'failed'. Nothing else ever re-raises them.
+    payload = await (await loadCronModule('../lib/billing/zoho/invoice.ts', 'reissueFailedInvoices'))();
   } else {
     console.error(`[cron] unknown task: ${which}`);
     process.exit(2);

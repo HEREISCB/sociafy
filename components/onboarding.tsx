@@ -7,6 +7,7 @@ import { apiPatch, useApi } from '../lib/ui/fetcher';
 import { PLATFORM_TO_SHORT, SHORT_TO_PLATFORM } from '../lib/ui/platforms';
 import type { Platform } from '../lib/db/schema';
 import { estimateWeeklyBurn, weeksOfRunway, type ContentMixWeekly } from '../lib/credits/estimator';
+import { BillingDetailsFields, useBillingDetails } from './billing/billing-details';
 import type { CreditsPayload } from './credits';
 
 const ONBOARD_PLATFORMS: { id: Platform; short: string; name: string }[] = [
@@ -131,6 +132,10 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
     }
   }, [accounts]);
 
+  // Company identity for GST invoices. Owns its own fetch/save; the Brand
+  // step's Continue button drives it (see saveBrandAndContinue).
+  const billing = useBillingDetails();
+
   const estimate = useMemo(() => estimateWeeklyBurn({
     platforms: planPlatforms,
     cadencePerWeek: planTextPerWeek + planImagePerWeek + planVideoPerWeek,
@@ -193,6 +198,14 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
     setSavingBrand(true);
     setSaveError(null);
     try {
+      // Billing details first: a bad GSTIN is the one thing on this step that
+      // can be *wrong* rather than just empty, and we'd rather not advance past
+      // it having silently saved the brand fields around it.
+      const billingError = await billing.save();
+      if (billingError) {
+        setSaveError(billingError);
+        return;
+      }
       await apiPatch('/api/agent/settings', {
         companyName: companyName.trim() || undefined,
         brandBio: brandBio.trim() || undefined,
@@ -443,6 +456,14 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
                 />
               </div>
             </div>
+            <div style={{ borderTop: '1px solid var(--line)', paddingTop: 24, marginBottom: 32 }}>
+              <h2 style={{ fontSize: 16, margin: '0 0 6px' }}>Invoicing details</h2>
+              <p className="lede" style={{ marginTop: 0, marginBottom: 20 }}>
+                So every payment gets a proper GST invoice in your business&apos;s name. You can skip this now and add it on the Billing page — but we can only put a GSTIN on invoices raised <em>after</em> you&apos;ve entered it.
+              </p>
+              <BillingDetailsFields value={billing.value} set={billing.set} setAddress={billing.setAddress} />
+            </div>
+
             <div style={{ padding: 14, background: 'var(--bg-elev)', border: '1px solid var(--line)', borderRadius: 10, fontSize: 12, color: 'var(--ink-3)', display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 32 }}>
               <Icon name="folder" size={14} style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 2 }} />
               <span><strong style={{ color: 'var(--ink)' }}>Coming soon:</strong> upload PDFs / docs about your business — pitch decks, brand guidelines, product specs — and Sociafy will use them as long-term context for every AI call.</span>

@@ -95,6 +95,24 @@ export const env = {
     planPro: required('RAZORPAY_PLAN_PRO'),
     planBusiness: required('RAZORPAY_PLAN_BUSINESS'),
   },
+
+  // Zoho Books — raises the GST invoice for every captured payment.
+  // Auth is the self-client refresh-token grant: the refresh token never
+  // expires, so there is no interactive re-consent to babysit.
+  zoho: {
+    clientId: required('ZOHO_CLIENT_ID'),
+    clientSecret: required('ZOHO_CLIENT_SECRET'),
+    refreshToken: required('ZOHO_REFRESH_TOKEN'),
+    organizationId: required('ZOHO_ORGANIZATION_ID'),
+    /** Data-centre suffix: 'in' (India), 'com', 'eu', 'com.au', 'jp', 'ca', 'sa'. */
+    region: process.env.ZOHO_REGION || 'in',
+    /** Tax id of the 18% GST rate in Books. Without it Zoho raises a ₹0-tax invoice. */
+    gstTaxId: required('ZOHO_GST_TAX_ID'),
+    /** Deposit-to account for recording the payment. Unset → invoice stays unpaid. */
+    depositAccountId: required('ZOHO_DEPOSIT_ACCOUNT_ID'),
+    /** SAC for online information & database access / SaaS. */
+    sacCode: process.env.ZOHO_SAC_CODE || '998314',
+  },
 } as const;
 
 export const isStubMode = {
@@ -105,6 +123,11 @@ export const isStubMode = {
   r2: () => !env.r2.accountId || !env.r2.bucket,
   stripe: () => !env.stripe.secretKey,
   razorpay: () => !env.razorpay.keyId || !env.razorpay.keySecret,
+  zoho: () =>
+    !env.zoho.clientId ||
+    !env.zoho.clientSecret ||
+    !env.zoho.refreshToken ||
+    !env.zoho.organizationId,
   platform: (p: 'x' | 'linkedin' | 'instagram' | 'facebook' | 'tiktok' | 'youtube' | 'reddit'): boolean => {
     switch (p) {
       case 'x': return !env.platforms.x.clientId;

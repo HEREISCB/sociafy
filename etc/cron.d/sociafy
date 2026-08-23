@@ -17,9 +17,12 @@
 #   refresh-tokens       every 6 h    — refreshes OAuth tokens before expiry
 #   trends               hourly       — pulls fresh trend rows per niche
 #   agent                every 2 h    — autopilot drafting + auto-publish
+#   reissue-invoices     hourly       — re-raises GST invoices Zoho rejected
 #
 # finalize-video-jobs is not optional: a stuck job holds the customer's credits
-# until this sweeps it. Nothing else ever refunds them.
+# until this sweeps it. Nothing else ever refunds them. Same for
+# reissue-invoices: a customer who paid and never got a tax invoice is a
+# compliance problem, and the payment webhook only ever tries once.
 
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -36,3 +39,4 @@ LOG_DIR=/var/log/sociafy
 0      */6 *   *   *   $SOCIAFY_USER  cd $SOCIAFY_DIR && $NODE_BIN --import tsx scripts/cron-run.mjs refresh-tokens      >> $LOG_DIR/cron-refresh-tokens.log      2>&1
 0      *   *   *   *   $SOCIAFY_USER  cd $SOCIAFY_DIR && $NODE_BIN --import tsx scripts/cron-run.mjs trends              >> $LOG_DIR/cron-trends.log              2>&1
 0      */2 *   *   *   $SOCIAFY_USER  cd $SOCIAFY_DIR && $NODE_BIN --import tsx scripts/cron-run.mjs agent               >> $LOG_DIR/cron-agent.log               2>&1
+30     *   *   *   *   $SOCIAFY_USER  cd $SOCIAFY_DIR && $NODE_BIN --import tsx scripts/cron-run.mjs reissue-invoices    >> $LOG_DIR/cron-reissue-invoices.log    2>&1

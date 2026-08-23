@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { PLATFORMS, VOICE_TEMPLATES } from './db/schema';
+import { GST_STATES, isValidGstin } from './billing/gst';
 
 /**
  * Shared schemas for request body validation.
@@ -117,6 +118,39 @@ export const agentSettingsUpdateSchema = z.object({
 export const stubAccountCreateSchema = z.object({
   platform: platform,
   handle: z.string().max(120).optional(),
+});
+
+// Billing / GST details ------------------------------------------------
+/**
+ * What goes on a tax invoice. Every field is optional so the user can save a
+ * partial form and come back — but GSTIN and PAN are checked properly when
+ * present. A malformed GSTIN does not fail loudly at save time; it fails
+ * months later as an invoice naming a business that does not exist, which is
+ * the customer's accountant's problem to unwind. Reject it here instead.
+ */
+export const billingDetailsSchema = z.object({
+  legalName: z.string().max(200).optional(),
+  gstin: z.string()
+    .transform((v) => v.trim().toUpperCase())
+    .refine((v) => v === '' || isValidGstin(v), 'Not a valid GSTIN — check for a typo.')
+    .optional(),
+  // PAN: 5 letters, 4 digits, 1 letter. No checksum exists for it.
+  pan: z.string()
+    .transform((v) => v.trim().toUpperCase())
+    .refine((v) => v === '' || /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(v), 'Not a valid PAN.')
+    .optional(),
+  billingAddress: z.object({
+    line1: z.string().max(200).optional(),
+    line2: z.string().max(200).optional(),
+    city: z.string().max(100).optional(),
+    state: z.string().max(100).optional(),
+    postalCode: z.string().max(20).optional(),
+    country: z.string().length(2).optional(),
+  }).optional(),
+  /** 2-digit GST state code. '' clears it. */
+  placeOfSupply: z.string()
+    .refine((v) => v === '' || !!GST_STATES[v], 'Unknown state.')
+    .optional(),
 });
 
 /**

@@ -8,6 +8,7 @@ import { Icon } from '../../components/icons';
 import { apiPost, friendlyApiError, useApi } from '../../lib/ui/fetcher';
 import { openRazorpayModal } from '../../components/billing/razorpay-checkout';
 import { topupPriceView } from '../../lib/billing/pricing';
+import { BillingDetailsFields, useBillingDetails } from '../../components/billing/billing-details';
 
 type CheckoutHandoff =
   | { kind: 'redirect'; url: string }
@@ -24,6 +25,22 @@ type CheckoutHandoff =
     };
 
 type Page = 'dashboard' | 'compose' | 'agent' | 'calendar' | 'connections' | 'onboarding';
+
+type InvoiceRow = {
+  id: string;
+  kind: 'subscription' | 'topup' | 'upgrade';
+  status: 'pending' | 'issued' | 'failed';
+  number: string | null;
+  url: string | null;
+  currency: string;
+  grossMinor: number;
+  taxMinor: number;
+  taxRatePct: number;
+  description: string | null;
+  createdAt: string;
+};
+
+const rupees = (minor: number) => `₹${(minor / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
 
 type BillingPayload = {
   currentTier: 'starter' | 'pro' | 'business';
@@ -117,6 +134,14 @@ function BillingPageInner() {
   const [cancelBusy, setCancelBusy] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const billing = useBillingDetails();
+  const [detailsMsg, setDetailsMsg] = useState<string | null>(null);
+  const { data: invoiceData } = useApi<{ invoices: InvoiceRow[] }>('/api/billing/invoices');
+
+  const saveDetails = async () => {
+    const err = await billing.save();
+    setDetailsMsg(err ?? 'Saved. Future invoices will use these details.');
+  };
 
   async function apiFetch<T>(url: string, init: RequestInit): Promise<T> {
     const r = await fetch(url, { ...init, headers: { 'content-type': 'application/json', ...(init.headers ?? {}) } });
@@ -504,6 +529,67 @@ function BillingPageInner() {
                   </div>
                 ))}
               </div>
+            </section>
+
+            <section className="billing-tiers" id="billing-details">
+              <h2 className="billing-section-head">Invoicing details</h2>
+              <p className="muted" style={{ fontSize: 13, marginTop: 0, maxWidth: 620, lineHeight: 1.55 }}>
+                Every payment raises a GST invoice in your business&apos;s name and emails it to you.
+                Add your GSTIN to get a B2B tax invoice you can claim input credit on — invoices already
+                raised can&apos;t be amended, so enter it before your next charge.
+              </p>
+              <div style={{ maxWidth: 620 }}>
+                <BillingDetailsFields value={billing.value} set={billing.set} setAddress={billing.setAddress} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
+                  <button className="btn primary" onClick={saveDetails} disabled={billing.saving || !billing.loaded}>
+                    {billing.saving ? 'Saving…' : 'Save invoicing details'}
+                  </button>
+                  {detailsMsg && (
+                    <span style={{ fontSize: 12, color: billing.validate() ? 'var(--bad)' : 'var(--ink-3)' }}>{detailsMsg}</span>
+                  )}
+                </div>
+              </div>
+            </section>
+
+            <section className="billing-tiers" id="billing-invoices">
+              <h2 className="billing-section-head">Invoices</h2>
+              {!invoiceData?.invoices.length ? (
+                <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
+                  No invoices yet. One is raised automatically for every payment.
+                </p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {invoiceData.invoices.map((inv) => (
+                    <div
+                      key={inv.id}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+                        padding: '12px 14px', border: '1px solid var(--line)',
+                        borderRadius: 10, background: 'var(--bg-elev)', fontSize: 13,
+                      }}
+                    >
+                      <span className="mono" style={{ color: 'var(--ink-3)', minWidth: 92 }}>
+                        {new Date(inv.createdAt).toLocaleDateString()}
+                      </span>
+                      <span style={{ flex: 1, minWidth: 180 }}>
+                        {inv.description ?? inv.kind}
+                        {inv.number && <span className="mono" style={{ color: 'var(--ink-4)' }}> · {inv.number}</span>}
+                      </span>
+                      <span className="mono" title={`incl. ${rupees(inv.taxMinor)} GST @ ${inv.taxRatePct}%`}>
+                        {rupees(inv.grossMinor)}
+                      </span>
+                      {inv.url ? (
+                        <a className="btn ghost" href={inv.url} target="_blank" rel="noreferrer">Download</a>
+                      ) : (
+                        // Money moved and credits landed; only the document is late.
+                        <span className="mono" style={{ fontSize: 11, color: 'var(--ink-4)' }}>
+                          {inv.status === 'failed' ? 'Retrying…' : 'Preparing…'}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </section>
 
             <section className="billing-footnote mono">
