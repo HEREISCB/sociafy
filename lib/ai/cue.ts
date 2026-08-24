@@ -143,7 +143,43 @@ export type CueRenderParams = {
   steps: number;
   aspect: string;
   seed?: number;
+  /** Base64 image the clip opens on. */
+  firstFrame?: string;
+  /** Base64 image it closes on. */
+  lastFrame?: string;
 };
+
+/**
+ * Base64 budget across every attachment on one render.
+ *
+ * The renderer itself draws the line at 24 MiB, but a serverless function in
+ * front of it drops a body over 4.5 MB before it ever arrives — so the proxy is
+ * the real ceiling and 24 MiB is a number that will never be reached. 3 MB of
+ * base64 (~2.2 MB of image) leaves room for the prompt and the JSON envelope,
+ * and is generous in practice: a 1536px JPEG is around 300 KB.
+ */
+export const CINEMA_MAX_ATTACHMENT_B64 = 3_000_000;
+
+export class CinemaAttachmentTooLarge extends Error {
+  constructor(readonly totalB64: number) {
+    super(`cinema attachments are ${totalB64} base64 bytes, over ${CINEMA_MAX_ATTACHMENT_B64}`);
+    this.name = 'CinemaAttachmentTooLarge';
+  }
+}
+
+/**
+ * Encode frames for a render, refusing anything that would 413 upstream.
+ *
+ * MANDATORY: call this BEFORE the charge. The proxy in front of the renderer
+ * rejects an oversized body outright, so discovering the limit after charging
+ * means a refund we then have to explain — and the size is knowable up front.
+ */
+export function encodeCinemaFrames(buffers: Buffer[]): string[] {
+  const b64 = buffers.map((b) => b.toString('base64'));
+  const total = b64.reduce((n, s) => n + s.length, 0);
+  if (total > CINEMA_MAX_ATTACHMENT_B64) throw new CinemaAttachmentTooLarge(total);
+  return b64;
+}
 
 /** Queue a render. Returns as soon as it is queued — and charged upstream. */
 export async function createCueRender(args: CueRenderParams & { title?: string }): Promise<string> {
@@ -159,6 +195,12 @@ export async function createCueRender(args: CueRenderParams & { title?: string }
         steps: args.steps,
         aspect: args.aspect,
         ...(args.seed !== undefined ? { seed: args.seed } : {}),
+        ...(args.firstFrame ? { first_frame: args.firstFrame } : {}),
+        ...(args.lastFrame ? { last_frame: args.lastFrame } : {}),
+        // `match_input` is deliberately NOT set. It would take the canvas shape
+        // from the supplied still and silently override the caller's `aspect` —
+        // and aspect is a field they chose. Letterboxing a landscape frame into
+        // the 9:16 they asked for is their call to make, not ours to undo.
       },
     },
   });

@@ -233,7 +233,7 @@ Status codes: `200`, `401`, `500`, `503`.
     | `quality` | `480p` \| `720p` \| `1080p` | `720p` | 1080p costs ~5× 480p, and is Motion only. |
     | `aspect` | `9:16` \| `1:1` \| `16:9` | `9:16` | |
     | `fast` | boolean | `false` | Cheaper and quicker, slightly lower fidelity. Ignored at 1080p, which has no fast tier — you are billed the quality price. |
-    | `gen_mode` | `text` \| `reference` \| `image-to-video` | `text` | Which still images, if any, the clip is built from. See below. Cinema is `text` only. |
+    | `gen_mode` | `text` \| `reference` \| `image-to-video` | `text` | Which still images, if any, the clip is built from. See below. Cinema takes `text` and `image-to-video`; `reference` is Motion only. |
     | `reference_images` | array of 1–9 `https` URLs | omitted | **`gen_mode: "reference"` only, and required by it.** Photos of the real subject, so the clip shows *your* product rather than an approximation of it. |
     | `start_frame` | `https` URL | omitted | **`gen_mode: "image-to-video"` only, and required by it.** The clip's first frame. |
     | `end_frame` | `https` URL | omitted | `gen_mode: "image-to-video"` only. The clip's last frame, if you want to pin where it lands. |

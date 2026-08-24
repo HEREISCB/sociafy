@@ -10,6 +10,7 @@ import {
   VIDEO_MODELS,
   validateAgainstModel,
 } from '../../../../lib/ai/models';
+import { CinemaAttachmentTooLarge, CINEMA_MAX_ATTACHMENT_B64, encodeCinemaFrames } from '../../../../lib/ai/cue';
 import {
   apiError,
   fetchReferenceImages,
@@ -107,10 +108,12 @@ export async function POST(req: NextRequest) {
     }
     const body = parsed.data;
 
+    const isCinema = body.model === 'sociafy-cinema-1';
+
     // Pre-flight the backend this MODEL actually needs. Checked after parsing
     // so the answer names the right dependency: Cinema does not touch the
     // Motion backend, and refusing it for a key Motion needs is a lie.
-    const pre = body.model === 'sociafy-cinema-1'
+    const pre = isCinema
       ? providerPreflight({ r2: true, cue: true })
       : providerPreflight({ r2: true, piapi: true });
     if (pre) return pre;
@@ -135,19 +138,42 @@ export async function POST(req: NextRequest) {
     // We hand the provider OUR urls, never the caller's — theirs may be signed,
     // private or short-lived, which would fail opaquely after we had charged.
     let imageUrls: string[] | undefined;
+    let frames: string[] | undefined;
     if (body.gen_mode !== 'text') {
       const urls = body.gen_mode === 'reference'
         ? body.reference_images!
         : [body.start_frame!, ...(body.end_frame ? [body.end_frame] : [])];
       const fetched = await fetchReferenceImages(urls);
       if (!fetched.ok) return fetched.response;
-      try {
-        imageUrls = await rehostReferences(auth.userId, fetched.files);
-      } catch (e) {
-        // Nothing is charged yet, and the provider cannot fetch what we could
-        // not store. Same code the storage pre-flight uses.
-        console.error('[v1/videos] reference re-host failed:', e instanceof Error ? e.message : e);
-        return apiError('service_unavailable', 503, 'Media storage is temporarily unavailable. Nothing was charged — retry.');
+
+      if (isCinema) {
+        // Cinema's backend takes the bytes themselves, not a URL, so re-hosting
+        // to R2 would buy nothing and bill the customer for storing their own
+        // image. Encode here, BEFORE the charge: the size limit is knowable up
+        // front, and finding it afterwards is a refund we have to explain.
+        try {
+          frames = encodeCinemaFrames(
+            await Promise.all(fetched.files.map(async (f) => Buffer.from(await f.arrayBuffer()))),
+          );
+        } catch (e) {
+          if (e instanceof CinemaAttachmentTooLarge) {
+            return apiError(
+              'reference_too_large',
+              400,
+              `Those frames come to ${Math.round(e.totalB64 / 1024)}KB encoded, over the ${Math.round(CINEMA_MAX_ATTACHMENT_B64 / 1024)}KB this model accepts across all frames. Send smaller images — 1536px on the long edge is plenty. Nothing was charged.`,
+            );
+          }
+          throw e;
+        }
+      } else {
+        try {
+          imageUrls = await rehostReferences(auth.userId, fetched.files);
+        } catch (e) {
+          // Nothing is charged yet, and the provider cannot fetch what we could
+          // not store. Same code the storage pre-flight uses.
+          console.error('[v1/videos] reference re-host failed:', e instanceof Error ? e.message : e);
+          return apiError('service_unavailable', 503, 'Media storage is temporarily unavailable. Nothing was charged — retry.');
+        }
       }
     }
 
@@ -163,6 +189,7 @@ export async function POST(req: NextRequest) {
         fast: body.fast,
         genMode: body.gen_mode,
         imageUrls,
+        frames,
         source: idem.source,
         webhookConfig: webhookConfigFor(req),
       });
@@ -220,7 +247,7 @@ export async function POST(req: NextRequest) {
     // not the one on the ledger.
     const charged = result.replayed
       ? result.creditsCharged
-      : body.model === 'sociafy-cinema-1'
+      : isCinema
         ? result.creditsCharged
         : priceForVideo({ durationSec: body.duration_sec, quality: body.quality, fast: body.fast }).credits;
     const job = result.job;

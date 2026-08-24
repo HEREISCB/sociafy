@@ -9,6 +9,7 @@ import {
   validateAgainstModel,
 } from './models';
 import { CREDITS_PER_PROVIDER_USD, creditsFromProviderUsd } from '../credits/pricing';
+import { CINEMA_MAX_ATTACHMENT_B64, CinemaAttachmentTooLarge, encodeCinemaFrames } from './cue';
 
 const base = {
   durationSec: 8,
@@ -80,9 +81,17 @@ describe('validateAgainstModel', () => {
     expect(validateAgainstModel('sociafy-cinema-1', { ...base, durationSec: 3 })?.field).toBe('duration_sec');
   });
 
-  it('refuses reference modes on Cinema, which cannot take them yet', () => {
-    expect(validateAgainstModel('sociafy-cinema-1', { ...base, genMode: 'reference' })?.field).toBe('gen_mode');
-    expect(validateAgainstModel('sociafy-cinema-1', { ...base, genMode: 'image-to-video' })?.field).toBe('gen_mode');
+  it('accepts frames on Cinema — its backend takes first_frame/last_frame', () => {
+    expect(validateAgainstModel('sociafy-cinema-1', { ...base, genMode: 'image-to-video' })).toBeNull();
+  });
+
+  it('still withholds `reference` on Cinema, and only that', () => {
+    // ref_images switches the backend into a different render mode whose price
+    // we have not measured, and Cinema bills from a live quote — an unmeasured
+    // mode is an unpriced one.
+    const bad = validateAgainstModel('sociafy-cinema-1', { ...base, genMode: 'reference' });
+    expect(bad?.field).toBe('gen_mode');
+    expect(bad?.message).toContain('image-to-video');
     expect(validateAgainstModel('sociafy-motion-1', { ...base, genMode: 'reference' })).toBeNull();
   });
 
@@ -105,5 +114,32 @@ describe('creditsFromProviderUsd', () => {
     expect(creditsFromProviderUsd(0.113)).toBe(13);
     expect(creditsFromProviderUsd(0.291)).toBe(33);
     expect(creditsFromProviderUsd(2.564)).toBe(289);
+  });
+});
+
+describe('encodeCinemaFrames', () => {
+  it('encodes frames in the order given', () => {
+    const out = encodeCinemaFrames([Buffer.from('first'), Buffer.from('last')]);
+    expect(out).toEqual([Buffer.from('first').toString('base64'), Buffer.from('last').toString('base64')]);
+  });
+
+  it('refuses a set that would 413 upstream, and says how big it was', () => {
+    // The proxy in front of the render backend drops an oversized body
+    // outright. This has to throw BEFORE the charge, or it is a refund to
+    // explain for a limit we could have checked up front.
+    const big = Buffer.alloc(CINEMA_MAX_ATTACHMENT_B64); // base64 is ~4/3 of this
+    expect(() => encodeCinemaFrames([big])).toThrow(CinemaAttachmentTooLarge);
+    try {
+      encodeCinemaFrames([big]);
+    } catch (e) {
+      expect((e as InstanceType<typeof CinemaAttachmentTooLarge>).totalB64).toBeGreaterThan(CINEMA_MAX_ATTACHMENT_B64);
+    }
+  });
+
+  it('counts the whole set, not each frame', () => {
+    // Two frames that each fit but together do not must still be refused.
+    const half = Buffer.alloc(Math.floor((CINEMA_MAX_ATTACHMENT_B64 * 3) / 4) - 1_000);
+    expect(() => encodeCinemaFrames([half])).not.toThrow();
+    expect(() => encodeCinemaFrames([half, half])).toThrow(CinemaAttachmentTooLarge);
   });
 });

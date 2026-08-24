@@ -59,18 +59,18 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModel> = {
     id: 'sociafy-cinema-1',
     name: 'Sociafy Cinema 1',
     summary:
-      'Longer, sound-on video up to 30s. Scores its own audio from the prompt — end the prompt with an "Audio:" line to direct it. Text prompt only for now; 1080p is not offered.',
+      'Longer, sound-on video up to 30s. Scores its own audio from the prompt — end the prompt with an "Audio:" line to direct it. Can open and close on frames you supply. 1080p is not offered.',
     durationSec: { min: 4, max: 30 },
     // 0.98 MP (1344x768) is the ceiling this engine renders at — above 720p's
     // 0.92 MP, below 1080p's 2.07. Offering "1080p" here would be a lie.
     qualities: ['480p', '720p'],
     aspects: ASPECTS,
-    // ponytail: text-only. References and frames are accepted by the backend as
-    // base64 inside a body capped near 4MB, while our reference pipeline
-    // re-hosts to R2 URLs and allows 48MB — bridging the two needs a downscale
-    // step. Add it when a customer asks; a wrong answer here is a 413 after the
-    // charge.
-    genModes: ['text'],
+    // 'reference' is still withheld, and only that one. It maps to the
+    // backend's ref_images, which switches the render into a different mode
+    // (ref2v) whose price we have not measured — and Cinema is charged from a
+    // live quote, so an unmeasured mode is an unpriced one. Frames do not
+    // change the mode, so they are safe to offer.
+    genModes: ['text', 'image-to-video'],
     nativeAudio: true,
     supportsFast: false,
   },
