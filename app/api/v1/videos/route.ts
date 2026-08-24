@@ -5,6 +5,12 @@ import { rateLimit } from '../../../../lib/rate-limit';
 import { InsufficientCreditsError } from '../../../../lib/credits/ledger';
 import { priceForVideo } from '../../../../lib/credits/pricing';
 import {
+  DEFAULT_VIDEO_MODEL,
+  VIDEO_MODEL_IDS,
+  VIDEO_MODELS,
+  validateAgainstModel,
+} from '../../../../lib/ai/models';
+import {
   apiError,
   fetchReferenceImages,
   providerPreflight,
@@ -36,7 +42,11 @@ export const maxDuration = 300;
 const bodySchema = z
   .object({
     prompt: z.string().min(2).max(2_000),
-    duration_sec: z.number().int().min(4).max(15).default(8),
+    /** Which of our models renders this. GET /api/v1/models lists them with
+     *  their envelopes; each model's own limits are enforced below, so the
+     *  ranges here are the union and never the whole story. */
+    model: z.enum(VIDEO_MODEL_IDS).default(DEFAULT_VIDEO_MODEL),
+    duration_sec: z.number().int().min(4).max(30).default(8),
     quality: z.enum(['480p', '720p', '1080p']).default('720p'),
     aspect: z.enum(['9:16', '1:1', '16:9']).default('9:16'),
     /** Trade quality for speed and cost. 1080p has no fast tier. */
@@ -70,13 +80,21 @@ const bodySchema = z
     if (b.end_frame && !i2v) reject('end_frame', 'end_frame is only accepted with gen_mode "image-to-video".');
     if (b.gen_mode === 'reference' && !b.reference_images) reject('reference_images', 'gen_mode "reference" requires reference_images.');
     if (i2v && !b.start_frame) reject('start_frame', 'gen_mode "image-to-video" requires start_frame.');
+    // Per-model envelope. Rejected, not clamped: a caller who asks Cinema for
+    // 1080p and silently receives 720p pays full price for a downgrade they
+    // never agreed to, and learns about it from the file.
+    const bad = validateAgainstModel(b.model, {
+      durationSec: b.duration_sec,
+      quality: b.quality,
+      aspect: b.aspect,
+      genMode: b.gen_mode,
+      fast: b.fast,
+    });
+    if (bad) reject(bad.field, bad.message);
   });
 
 export async function POST(req: NextRequest) {
   return withApiKey(req, async (auth) => {
-    const pre = providerPreflight({ r2: true, piapi: true });
-    if (pre) return pre;
-
     const idem = readIdempotencyKey(req, 'videos');
     if (!idem.ok) return idem.response;
 
@@ -88,6 +106,14 @@ export async function POST(req: NextRequest) {
       });
     }
     const body = parsed.data;
+
+    // Pre-flight the backend this MODEL actually needs. Checked after parsing
+    // so the answer names the right dependency: Cinema does not touch the
+    // Motion backend, and refusing it for a key Motion needs is a lie.
+    const pre = body.model === 'sociafy-cinema-1'
+      ? providerPreflight({ r2: true, cue: true })
+      : providerPreflight({ r2: true, piapi: true });
+    if (pre) return pre;
 
     // Burst guard on top of the spend cap. In-process only (see lib/rate-limit),
     // so it thins bursts per instance; the daily cap is the real ceiling.
@@ -129,6 +155,7 @@ export async function POST(req: NextRequest) {
     try {
       result = await submitVideo({
         auth,
+        model: body.model,
         prompt: body.prompt,
         durationSec: body.duration_sec,
         quality: body.quality,
@@ -150,6 +177,17 @@ export async function POST(req: NextRequest) {
       // lock-in.
       if (e instanceof SubmitFailure) {
         console.error('[v1/videos] submit failed:', e.code, e.detail.slice(0, 300));
+        if (e.code === 'at_capacity') {
+          // Nothing was charged. A finite queue that says so beats one that
+          // holds the request open and bills for the wait.
+          return apiError(
+            'model_busy',
+            429,
+            `${VIDEO_MODELS[body.model].name} is at capacity right now. Nothing was charged — retry in a minute.`,
+            { retry_after_sec: 60 },
+            { 'retry-after': '60' },
+          );
+        }
         if (e.code === 'request_in_progress') {
           return apiError(
             'request_in_progress',
@@ -177,7 +215,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const price = priceForVideo({ durationSec: body.duration_sec, quality: body.quality, fast: body.fast });
+    // What the submit actually charged. Cinema is quoted per request, so
+    // re-deriving it from the bucket table here would print a number that is
+    // not the one on the ledger.
+    const charged = result.replayed
+      ? result.creditsCharged
+      : body.model === 'sociafy-cinema-1'
+        ? result.creditsCharged
+        : priceForVideo({ durationSec: body.duration_sec, quality: body.quality, fast: body.fast }).credits;
     const job = result.job;
     return new Response(
       JSON.stringify({
@@ -187,7 +232,8 @@ export async function POST(req: NextRequest) {
         status: job.status,
         // From the price table on a fresh submit: an unconfirmed-submit row is the
         // pre-charge snapshot, so its credits_charged column is still null.
-        credits_charged: result.replayed ? result.creditsCharged : price.credits,
+        credits_charged: charged,
+        model: body.model,
         // The ORIGINAL job's parameters. Echoing the incoming body on a replay
         // mixed the new request's params with the old job's price.
         duration_sec: job.durationSec,

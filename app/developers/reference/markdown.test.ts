@@ -74,8 +74,11 @@ describe('the docs/api.md renderer', () => {
     const out = html(src);
     // The whole doc, not one <pre> of raw text.
     expect(out).not.toContain('doc-md');
-    expect((out.match(/<h2>/g) ?? []).length).toBe(12);
-    expect((out.match(/<table/g) ?? []).length).toBe(12);
+    // Pinned counts, bumped whenever docs/api.md gains a section or a table —
+    // they exist so a renderer that silently drops the tail of the doc fails
+    // here rather than shipping a truncated reference page.
+    expect((out.match(/<h2>/g) ?? []).length).toBe(13);
+    expect((out.match(/<table/g) ?? []).length).toBe(13);
     // Strip code and pre, then nothing markdown-ish may remain in the prose.
     const prose = out
       .replace(/<pre>[\s\S]*?<\/pre>/g, '')

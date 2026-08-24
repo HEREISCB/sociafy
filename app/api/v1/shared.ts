@@ -1,15 +1,17 @@
 import { BlockList, isIP } from 'node:net';
 import { lookup } from 'node:dns/promises';
 import { randomUUID } from 'node:crypto';
-import { and, eq, ne, notInArray, sql } from 'drizzle-orm';
+import { and, eq, gt, ne, notInArray, sql } from 'drizzle-orm';
 import type { ApiKeyAuth } from '../../../lib/api-key';
 import { db } from '../../../lib/db';
 import { creditLedger, genJobs, mediaAssets, videoJobs } from '../../../lib/db/schema';
 import { isStubMode } from '../../../lib/env';
 import { charge, ensureBalance, InsufficientCreditsError, refund } from '../../../lib/credits/ledger';
-import { priceForVideo, type ImageQuality, type ImageSize, type VideoQuality } from '../../../lib/credits/pricing';
+import { priceForVideo, type CreditAction, type ImageQuality, type ImageSize, type VideoQuality } from '../../../lib/credits/pricing';
 import { imageFormat, type ImageFormat } from '../../../lib/media/probe';
 import { createSeedanceTask, type SeedanceAspect, type SeedanceMode } from '../../../lib/ai/piapi';
+import { createCueRender, priceCinemaRender, CUE_CONCURRENCY } from '../../../lib/ai/cue';
+import { backendFor, type VideoModelId } from '../../../lib/ai/models';
 import { getOpenAI, MODELS } from '../../../lib/ai/client';
 import { makeMediaKey, publicUrlFor, uploadBuffer } from '../../../lib/storage/r2';
 
@@ -183,6 +185,14 @@ export function publicVideoError(raw: string | null | undefined): string | null 
     console.error('[v1/videos] provider reported a failed job:', raw.slice(0, 300));
     return MODERATION_MSG_RX.test(raw) ? 'prompt_rejected' : 'generation_failed';
   }
+  // Cinema. Same two outcomes, same two codes — one code means one thing across
+  // the API regardless of which engine served the model. The backend's own
+  // prose stays in the log; `cinema_refused` is set by us, not echoed.
+  if (raw.startsWith('cinema_refused')) return 'prompt_rejected';
+  if (raw.startsWith('cinema_failed')) {
+    console.error('[v1/videos] cinema backend reported a failed render:', raw.slice(0, 300));
+    return MODERATION_MSG_RX.test(raw) ? 'prompt_rejected' : 'generation_failed';
+  }
   return 'generation_failed';
 }
 
@@ -195,7 +205,7 @@ export function publicVideoError(raw: string | null | undefined): string | null 
  */
 export class SubmitFailure extends Error {
   constructor(
-    readonly code: 'provider_rejected' | 'request_in_progress',
+    readonly code: 'provider_rejected' | 'request_in_progress' | 'at_capacity' | 'prompt_rejected',
     /** Whether the charge was successfully reversed before we gave up. */
     readonly refunded: boolean,
     readonly detail: string,
@@ -322,11 +332,14 @@ export function logImageFailure(tag: string, e: unknown, classified: ImageFailur
 }
 
 /** 503s for the config that has to be present before we take money. */
-export function providerPreflight(opts: { r2: boolean; piapi?: boolean; openai?: boolean }): Response | null {
+export function providerPreflight(opts: { r2: boolean; piapi?: boolean; cue?: boolean; openai?: boolean }): Response | null {
   if (isStubMode.database()) {
     return apiError('service_unavailable', 503, 'The service is temporarily unavailable.');
   }
   if (opts.piapi && !process.env.PIAPI_API_KEY) {
+    return apiError('service_unavailable', 503, 'Video generation is temporarily unavailable.');
+  }
+  if (opts.cue && isStubMode.cue()) {
     return apiError('service_unavailable', 503, 'Video generation is temporarily unavailable.');
   }
   if (opts.openai && !process.env.OPENAI_API_KEY) {
@@ -382,8 +395,33 @@ const SEEDANCE_MODE: Record<VideoGenMode, SeedanceMode> = {
   'image-to-video': 'first_last_frames',
 };
 
+/**
+ * Cinema renders currently occupying a backend slot, account-wide.
+ *
+ * Bounded by age on purpose. A row that never reached a terminal state — a
+ * submit whose socket died, a render the backend forgot — would otherwise hold
+ * a slot forever and take the model offline for everyone. finalizeVideoJob
+ * gives up on the same two-hour horizon and refunds, so anything older than
+ * that is not really occupying anything.
+ */
+async function cinemaInFlight(): Promise<number> {
+  const [row] = await db()
+    .select({ n: sql<number>`COUNT(*)::int` })
+    .from(videoJobs)
+    .where(
+      and(
+        eq(videoJobs.provider, 'cue-h3'),
+        eq(videoJobs.status, 'pending'),
+        gt(videoJobs.createdAt, new Date(Date.now() - 2 * 60 * 60_000)),
+      ),
+    );
+  return Number(row?.n ?? 0);
+}
+
 export type SubmitVideoArgs = {
   auth: ApiKeyAuth;
+  /** Public model id. Decides the backend, the price and the envelope. */
+  model: VideoModelId;
   prompt: string;
   durationSec: number;
   quality: VideoQuality;
@@ -427,7 +465,43 @@ export async function submitVideo(args: SubmitVideoArgs): Promise<SubmitVideoRes
     if (replay) return replay;
   }
 
-  const perJob = priceForVideo({ durationSec: args.durationSec, quality: args.quality, fast: args.fast });
+  const isCinema = args.model === 'sociafy-cinema-1';
+  const backend = backendFor(args.model, args.fast);
+
+  // Cinema runs on a backend that admits three renders at a time ACROSS THE
+  // WHOLE ACCOUNT — ours, shared by every customer, not one each. Check before
+  // charging: a 429 after the charge is a refund we then have to explain.
+  // ponytail: refuse, don't queue. A real queue needs a submit-later worker and
+  // a job state our sweeper doesn't currently mean; add it when refusals show
+  // up in the logs rather than in principle.
+  if (isCinema) {
+    const busy = await cinemaInFlight();
+    if (busy >= CUE_CONCURRENCY) {
+      throw new SubmitFailure('at_capacity', false, `cinema slots busy: ${busy}/${CUE_CONCURRENCY}`);
+    }
+  }
+
+  // Cinema is quoted per request, not looked up in a bucket: its cost is
+  // quadratic-ish in frame count, so there is no 8s row to scale off.
+  let perJob: { action: CreditAction; credits: number };
+  let cinema: { megapixels: number; steps: number } | null = null;
+  if (isCinema) {
+    try {
+      const q = await priceCinemaRender({
+        durationSec: args.durationSec,
+        quality: args.quality as '480p' | '720p',
+      });
+      perJob = { action: 'video_cinema', credits: q.credits };
+      cinema = { megapixels: q.megapixels, steps: q.steps };
+    } catch (e) {
+      // We could not get a price. Refuse rather than guess — a guess is either
+      // below our own cost or an overcharge for our outage. Nothing is charged.
+      console.error('[submitVideo] cinema quote failed:', e instanceof Error ? e.message : e);
+      throw new SubmitFailure('provider_rejected', false, 'cinema quote unavailable');
+    }
+  } else {
+    perJob = priceForVideo({ durationSec: args.durationSec, quality: args.quality, fast: args.fast });
+  }
 
   // Pre-flight so a zero-balance key doesn't write two rows per 402. `charge`
   // below is still the authority (it re-checks under FOR UPDATE), so this is
@@ -441,7 +515,7 @@ export async function submitVideo(args: SubmitVideoArgs): Promise<SubmitVideoRes
     .insert(videoJobs)
     .values({
       userId: auth.userId,
-      provider: args.fast ? 'piapi-seedance-2-fast' : 'piapi-seedance-2',
+      provider: backend,
       providerTaskId: '',
       status: 'pending',
       prompt: args.prompt,
@@ -464,6 +538,7 @@ export async function submitVideo(args: SubmitVideoArgs): Promise<SubmitVideoRes
         // MANDATORY: the auth layer's daily-cap query reads meta.apiKeyId.
         // Omitting it silently disables the spend cap.
         apiKeyId: auth.apiKeyId,
+        model: args.model,
         durationSec: args.durationSec,
         quality: args.quality,
         aspect: args.aspect,
@@ -505,17 +580,26 @@ export async function submitVideo(args: SubmitVideoArgs): Promise<SubmitVideoRes
     .where(eq(videoJobs.id, row.id));
 
   try {
-    const taskId = await createSeedanceTask({
-      prompt: args.prompt,
-      mode: SEEDANCE_MODE[genMode],
-      imageUrls: args.imageUrls,
-      durationSec: args.durationSec,
-      aspect: args.aspect,
-      resolution: args.quality,
-      fast: args.fast,
-      apiKey: process.env.PIAPI_API_KEY!,
-      webhookConfig: args.webhookConfig,
-    });
+    const taskId = cinema
+      ? await createCueRender({
+          prompt: args.prompt,
+          durationSec: args.durationSec,
+          megapixels: cinema.megapixels,
+          steps: cinema.steps,
+          aspect: args.aspect,
+          title: args.prompt.slice(0, 80),
+        })
+      : await createSeedanceTask({
+          prompt: args.prompt,
+          mode: SEEDANCE_MODE[genMode],
+          imageUrls: args.imageUrls,
+          durationSec: args.durationSec,
+          aspect: args.aspect,
+          resolution: args.quality,
+          fast: args.fast,
+          apiKey: process.env.PIAPI_API_KEY!,
+          webhookConfig: args.webhookConfig,
+        });
     const [live] = await db()
       .update(videoJobs)
       .set({ providerTaskId: taskId, updatedAt: new Date() })

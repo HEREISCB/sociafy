@@ -22,7 +22,7 @@
     uploaded before generation starts.
 
     If you stay synchronous, **set your client timeout to at least 180 seconds**, and
-    read §7 — a timed-out request's charge is recoverable by retrying the same
+    read §8 — a timed-out request's charge is recoverable by retrying the same
     `Idempotency-Key`. `POST /api/v1/videos` returns in a second or two; none of this
     is about it.
 
@@ -97,7 +97,7 @@
     ```
 
     `credits_charged_today` is the **net** credits this key has spent in the last 24
-    hours: refunds (see §6) are subtracted, so a run of failed generations does not
+    hours: refunds (see §7) are subtracted, so a run of failed generations does not
     burn your daily cap. It is the same figure the cap is enforced against, so
     `daily_cap_remaining` is exactly how much you can still spend.
 
@@ -105,11 +105,98 @@
 
     ---
 
-    ## 3. `POST /api/v1/videos`
+    ## 3. `GET /api/v1/models`
+
+Which models `POST /api/v1/videos` accepts, and what each one can do. Built from
+the same table the request validator rejects against, so it cannot disagree with
+what the endpoint allows: stay inside the envelope described here and you will
+not see a `400` for an unsupported combination.
+
+```bash
+curl -s https://sociafy.app/api/v1/models \
+  -H "Authorization: Bearer $SOCIAFY_API_KEY"
+```
+
+```json
+{
+  "models": [
+    {
+      "id": "sociafy-motion-1",
+      "type": "video",
+      "name": "Sociafy Motion 1",
+      "summary": "General-purpose social video up to 15s...",
+      "default": true,
+      "available": true,
+      "capabilities": {
+        "duration_sec": { "min": 4, "max": 15 },
+        "quality": ["480p", "720p", "1080p"],
+        "aspect": ["9:16", "1:1", "16:9"],
+        "gen_mode": ["text", "reference", "image-to-video"],
+        "native_audio": false,
+        "fast_tier": true
+      },
+      "example": { "duration_sec": 8, "quality": "720p", "credits": 180 }
+    },
+    {
+      "id": "sociafy-cinema-1",
+      "type": "video",
+      "name": "Sociafy Cinema 1",
+      "summary": "Longer, sound-on video up to 30s...",
+      "default": false,
+      "available": true,
+      "capabilities": {
+        "duration_sec": { "min": 4, "max": 30 },
+        "quality": ["480p", "720p"],
+        "aspect": ["9:16", "1:1", "16:9"],
+        "gen_mode": ["text"],
+        "native_audio": true,
+        "fast_tier": false
+      },
+      "example": { "duration_sec": 8, "quality": "720p", "credits": 33 }
+    }
+  ]
+}
+```
+
+`example` is indicative — one representative render so you can compare models
+without submitting. It is `null` when a price could not be quoted; that is a
+signal to retry the read, not to assume a cost.
+
+`available: false` means the model is configured out right now. A submit against
+it answers `503` and charges nothing, so fall back to another model rather than
+retrying the same one.
+
+**The two models**
+
+| | `sociafy-motion-1` | `sociafy-cinema-1` |
+|---|---|---|
+| Length | 4–15s | 4–30s |
+| Sound | silent | **scores its own audio** |
+| Quality | 480p, 720p, 1080p | 480p, 720p |
+| Still images as input | yes | not yet |
+| `fast` tier | yes | no |
+| 8s at 720p | 180 credits | 33 credits |
+
+Cinema writes its own soundtrack from the prompt. End the prompt with an
+`Audio:` line to direct it — *"Audio: room tone, one ceramic knock, distant
+traffic."* Say nothing and it invents something plausible, which is rarely what
+you wanted.
+
+Cinema renders take **minutes, not seconds** — roughly 100s for a 4s clip and
+proportionally more beyond that, because a longer clip costs more than linearly.
+Poll on the same 5s interval; just expect a longer wait. It also runs a **small
+finite pool**: when every slot is busy a submit answers `429 model_busy` with
+`retry_after_sec`, and nothing is charged.
+
+Status codes: `200`, `401`, `500`, `503`.
+
+---
+
+    ## 4. `POST /api/v1/videos`
 
     Submit a video generation — from a prompt alone, or from still images of the
     real thing. Returns `202` immediately — generation takes 30–120 seconds, so you
-    poll (§4) rather than holding a connection open.
+    poll (§5) rather than holding a connection open.
 
     ```bash
     curl -X POST https://sociafy.app/api/v1/videos \
@@ -130,6 +217,7 @@
       "id": "8f2c1d6e-4a71-4b0e-9a3c-77c1e5b2d901",
       "status": "pending",
       "credits_charged": 180,
+      "model": "sociafy-motion-1",
       "duration_sec": 8,
       "quality": "720p",
       "aspect": "9:16",
@@ -140,11 +228,12 @@
     | Field | Type | Default | Notes |
     |---|---|---|---|
     | `prompt` | string, 2–2000 chars | required | Used verbatim. There is no prompt rewriting on the API — what you send is what the model sees. |
-    | `duration_sec` | integer 4–15 | `8` | Priced pro-rata; see §5. |
-    | `quality` | `480p` \| `720p` \| `1080p` | `720p` | 1080p costs ~5× 480p. |
+    | `model` | `sociafy-motion-1` \| `sociafy-cinema-1` | `sociafy-motion-1` | Which model renders it. Each has its own limits — see §3. |
+    | `duration_sec` | integer 4–30 | `8` | Motion caps at 15, Cinema at 30. Priced pro-rata on Motion; quoted per request on Cinema. See §6. |
+    | `quality` | `480p` \| `720p` \| `1080p` | `720p` | 1080p costs ~5× 480p, and is Motion only. |
     | `aspect` | `9:16` \| `1:1` \| `16:9` | `9:16` | |
     | `fast` | boolean | `false` | Cheaper and quicker, slightly lower fidelity. Ignored at 1080p, which has no fast tier — you are billed the quality price. |
-    | `gen_mode` | `text` \| `reference` \| `image-to-video` | `text` | Which still images, if any, the clip is built from. See below. |
+    | `gen_mode` | `text` \| `reference` \| `image-to-video` | `text` | Which still images, if any, the clip is built from. See below. Cinema is `text` only. |
     | `reference_images` | array of 1–9 `https` URLs | omitted | **`gen_mode: "reference"` only, and required by it.** Photos of the real subject, so the clip shows *your* product rather than an approximation of it. |
     | `start_frame` | `https` URL | omitted | **`gen_mode: "image-to-video"` only, and required by it.** The clip's first frame. |
     | `end_frame` | `https` URL | omitted | `gen_mode: "image-to-video"` only. The clip's last frame, if you want to pin where it lands. |
@@ -152,7 +241,12 @@
     **Unknown fields are rejected with `400`.** A typo in `quality` should not
     silently bill you for a default you did not choose.
 
-    `status`, `duration_sec`, `quality` and `aspect` always describe the **stored
+    **A request outside the chosen model's envelope is also a `400`, never a
+    downgrade.** Asking `sociafy-cinema-1` for `1080p` is refused and costs
+    nothing; it is not quietly served at 720p and billed in full. The `issues`
+    array names the field and the values that model does accept.
+
+    `status`, `model`, `duration_sec`, `quality` and `aspect` always describe the **stored
     job**, which matters on an idempotent replay: replaying a key whose job already
     finished returns that job's real status and its original parameters, not the
     parameters you just sent. A replay that resolves to a `failed` job also carries
@@ -163,7 +257,7 @@
 
     Generate several clips by making several requests, each with its own
     `Idempotency-Key`. There is no `count` parameter — one request is one job, one
-    charge, one id. **Mind the burst limit while you do** (§8): three submits, then
+    charge, one id. **Mind the burst limit while you do** (§9): three submits, then
     one every 100 seconds. A batch of ten clips takes about fifteen minutes to get
     in the door.
 
@@ -172,7 +266,7 @@
     Two modes take images, and both cost **exactly the same as text-to-video** — the
     provider prices video per output second, and still input adds nothing to that, so
     there is no surcharge to pass on. Compare `reference_images` on `POST
-    /api/v1/images`, which does carry one (§6), because that provider bills input
+    /api/v1/images`, which does carry one (§7), because that provider bills input
     image tokens.
 
     - **`gen_mode: "reference"`** with `reference_images`: 1–9 photos of the real
@@ -209,7 +303,7 @@
     re-host it, then hand the generation provider *our* copy — your host is never
     disclosed to them, and a URL that is signed, private or short-lived cannot fail
     opaquely on their side after you have been charged. The requirements are exactly
-    those in §5 (`https` only, no redirects, publicly resolvable host, `png`/`jpeg`/
+    those in §6 (`https` only, no redirects, publicly resolvable host, `png`/`jpeg`/
     `webp` verified by magic bytes, 20 MB each and 48 MB in total, 20 s each and 45 s
     across all of them), and each violation is its own `400` carrying `reference_url`.
     Nothing is charged for any of them. The fetch runs before the charge, so a
@@ -225,7 +319,7 @@
 
     ---
 
-    ## 4. `GET /api/v1/videos/{id}`
+    ## 5. `GET /api/v1/videos/{id}`
 
     Poll every 5–10 seconds until `status` is `completed` or `failed`. Polling is not
     rate-limited; 5 seconds is advice about not wasting your own sockets, not a limit
@@ -239,6 +333,7 @@
     ```json
     {
       "id": "8f2c1d6e-4a71-4b0e-9a3c-77c1e5b2d901",
+      "model": "sociafy-motion-1",
       "status": "completed",
       "video_url": "https://<your-media-host>/users/user_2ab.../vid-1753538201-9f3c.mp4",
       "credits_charged": 180,
@@ -282,7 +377,7 @@
 
     ---
 
-    ## 5. `POST /api/v1/images`
+    ## 6. `POST /api/v1/images`
 
     Two modes on one endpoint. **Prefer `async: true`** — it books and charges the job,
     answers `202` immediately, and you poll for the result exactly as you do for
@@ -316,7 +411,7 @@
     `202` on both a fresh submit and a replay, like `POST /api/v1/videos`. Credits are
     charged here, at submission, before the response is sent — so the answer to "was I
     charged?" is in the response body, and if you never get a response you can find
-    out by replaying the key (§7).
+    out by replaying the key (§8).
 
     `status` is the stored job's real status, so a replay of a key whose job already
     finished says `completed` rather than `pending`, and a replay resolving to a
@@ -345,7 +440,7 @@
     and `error` are both `null`. **`completed` always carries a usable `image_url`** —
     status and URL become visible in the same commit, so a `completed` with a null URL
     is not a shape you have to handle; a job that is not deliverable yet still reads
-    `pending`. A `failed` job names its reason in `error` (§9) and
+    `pending`. A `failed` job names its reason in `error` (§10) and
     its credits are refunded automatically. Poll every 5 seconds — most jobs land in
     70–90 seconds, and `high` quality or several references take longer. Reads are
     free, uncapped and not rate-limited, but please stay under one request a second.
@@ -409,8 +504,8 @@
     second. **Synchronously it is all wall-clock time on your socket:** the request is
     held open for up to 300 seconds, so set your client timeout to at least 180 s — a
     60-second default fails on almost every request. If the connection ends without a
-    result, retry the same `Idempotency-Key` (§7) to find out whether you were
-    charged; the refund caveat in §6 also applies to that path only.
+    result, retry the same `Idempotency-Key` (§8) to find out whether you were
+    charged; the refund caveat in §7 also applies to that path only.
 
     Status codes: `200` (sync), `202` (async), `400`, `401`, `402`, `409`, `429`,
     `500`, `502`, `503`.
@@ -450,7 +545,7 @@
     integrating for product likeness reaches for — is not supported by the model
     behind this endpoint, which answers `invalid_input_fidelity_model`, so we do not
     send it and there is no field to set. Likeness is guided, not tunable. Send more
-    angles rather than a bigger file: see the token table in §6 for why resolution
+    angles rather than a bigger file: see the token table in §7 for why resolution
     does not help.
 
     Requirements, each of which is a distinct `400` if unmet:
@@ -467,20 +562,27 @@
     object says nothing about its size or its contents.
 
     There is **no megapixel limit and no dimension requirement**. Both used to exist,
-    purely to bound a per-megapixel charge that no longer exists (§6), so an image we
+    purely to bound a per-megapixel charge that no longer exists (§7), so an image we
     cannot measure is no longer refused.
 
-    Cost: the output price from §6 **plus a flat surcharge per reference image**,
+    Cost: the output price from §7 **plus a flat surcharge per reference image**,
     independent of its resolution. Nothing changes for a request without
     `reference_images`.
 
     ---
 
-    ## 6. Credit costs
+    ## 7. Credit costs
 
     Charged at submission. Nothing else on the request is billable — no charge for
     polling, for `GET /api/v1/me`, or for a request rejected with
     `400`/`401`/`404`/`429`.
+
+    **`sociafy-cinema-1` is quoted per request, not looked up in a table.** Its cost
+    rises faster than linearly with length — 4s, 8s, 15s and 30s at 720p are
+    **13, 33, 92 and 289 credits** — so there is no 8-second row to scale off.
+    `GET /api/v1/models` returns the current 8s/720p figure; the exact charge for
+    your request comes back as `credits_charged` on the `202`. 480p is roughly a
+    third of the 720p price.
 
     **Video, 4–12 s** (scaled pro-rata from the 8 s price, e.g. 6 s at 720p quality
     = `180 × 6/8` = 135):
@@ -504,7 +606,7 @@
     does not enter into it, so `gen_mode: "reference"` and `gen_mode:
     "image-to-video"` cost exactly what the same clip costs from a prompt alone. The
     only input that would be surcharged is a reference *video*, which is why that one
-    is not offered (§3).
+    is not offered (§4).
 
     **Images:**
 
@@ -576,13 +678,13 @@
     that failed, and there is no row to sweep. If that request's process dies before it
     can refund — an instance lost mid-flight, a deploy landing at the wrong moment, the
     300-second ceiling reached — the charge stands with no image to show for it and
-    nothing retries it. Retrying the same `Idempotency-Key` (§7) is how you resolve it
+    nothing retries it. Retrying the same `Idempotency-Key` (§8) is how you resolve it
     yourself; failing that we will refund it if you tell us. **`async: true` removes
     this caveat entirely** — it is the reason to prefer it beyond the timeouts.
 
     ---
 
-    ## 7. Idempotency
+    ## 8. Idempotency
 
     Send an `Idempotency-Key` header on every `POST`. It is optional, but without one
     a retried request is a second charge.
@@ -654,7 +756,7 @@
 
     ---
 
-    ## 8. Rate limits
+    ## 9. Rate limits
 
     Two independent mechanisms. The spend caps in §1 are the real ceiling; this is a
     burst guard.
@@ -688,7 +790,7 @@
 
     ---
 
-    ## 9. Errors
+    ## 10. Errors
 
     Every error is JSON with a stable `error` code **and** a human `message`. Match on
     `error`, never on `message` — the codes are stable, the prose is not.
@@ -722,7 +824,8 @@
     | 402 | `insufficient_credits` | both POSTs | Includes `balance` and `needed`. Top up and retry. |
     | 404 | `not_found` | both `GET /{id}`s | No such generation for this account — including a malformed id. |
     | 409 | `request_in_progress` | both POSTs | Another request with this `Idempotency-Key` has not finished. Retry the same key in a few seconds. |
-    | 429 | `rate_limited` | both POSTs | Burst limit (§8). Honour `Retry-After`. |
+    | 429 | `rate_limited` | both POSTs | Burst limit (§9). Honour `Retry-After`. |
+    | 429 | `model_busy` | `POST /api/v1/videos` | Every slot on that model is busy. Nothing charged. Honour `Retry-After`, or submit against another model. |
     | 429 | `daily_cap_exceeded` | both POSTs | This key hit its rolling 24-hour credit cap. Includes `spent` and `cap`. Raise the cap in the dashboard or wait. |
     | 429 | `api_capacity_exceeded` | both POSTs | Platform-wide daily limit. Not your fault; retry later. |
     | 500 | `internal` | everywhere | Our bug, and logged as one. Usually nothing was charged; on the rare variant that fails *after* the charge we cannot promise the automatic refund, so check `GET /api/v1/me` and tell us if your balance looks wrong. |
@@ -754,7 +857,7 @@
     | `duplicate_request` | Another request with the same `Idempotency-Key` won the race; that one is the real job. |
 
     All of these are refunded. All of them require a **new** `Idempotency-Key` to try
-    again (§7).
+    again (§8).
 
     ### Failed image jobs
 
@@ -772,11 +875,11 @@
     | `generation_timeout` | The generation was lost mid-flight and closed out by the sweeper after 10 minutes. Safe to retry. |
 
     All of these release their `Idempotency-Key`, so retrying with the **same** key is
-    a genuine fresh attempt (§7) — the opposite of the video rule.
+    a genuine fresh attempt (§8) — the opposite of the video rule.
 
     ---
 
-    ## 10. Versioning and stability
+    ## 11. Versioning and stability
 
     `/api/v1` is stable. While it is v1 we will:
 
@@ -797,7 +900,7 @@
 
     ---
 
-    ## 11. Putting it together
+    ## 12. Putting it together
 
     ```bash
     #!/usr/bin/env bash
@@ -826,7 +929,7 @@
 
     Re-running the script with the same `IDEM` is free and returns the same clip — as
     long as it succeeded. If it ended `failed`, change `IDEM` before retrying, or you
-    will keep being handed the same dead job (§7).
+    will keep being handed the same dead job (§8).
 
     Images take the identical shape once you send `"async": true` — same `202`, same
     `poll_url`, same loop, and no client timeout to tune:
@@ -843,20 +946,20 @@
     ```
 
     Unlike video, retrying a *failed* image with the same `IDEM` is correct and is a
-    real new attempt (§7).
+    real new attempt (§8).
 
     Submitting several clips? Space the `POST`s out, or expect `429 rate_limited`
-    after the third (§8).
+    after the third (§9).
 
     ---
 
-    ## 12. Not in v1
+    ## 13. Not in v1
 
     Named so you build around them rather than waiting:
 
     - **Outbound webhooks.** Poll instead; at this volume it is cheaper for both of
       us than you operating a public endpoint.
-    - **Reference *video* on `POST /api/v1/videos`.** See §3 — a pricing correctness
+    - **Reference *video* on `POST /api/v1/videos`.** See §4 — a pricing correctness
       problem, not an effort one. Still images (`reference` and `image-to-video`) do
       exist, and cost no more than text-to-video.
     - **Batch parameters.** One request, one job, one charge. Loop.
@@ -864,8 +967,8 @@
     - **Programmatic key management.** Session-only, see §1.
     - **CORS / browser access.** Server-to-server only.
     - **A refund sweeper for *synchronous* images.** There is nothing to sweep — the
-      row that makes one possible is what `async: true` creates. See §6.
+      row that makes one possible is what `async: true` creates. See §7.
     - **A likeness/fidelity parameter for images.** The model does not support one;
-      see §5.
+      see §6.
     - **Postpaid billing.** Prepaid credits are also the spend cap; a balance cannot
       go negative.

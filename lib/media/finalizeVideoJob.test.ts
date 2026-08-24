@@ -16,6 +16,10 @@ const state = vi.hoisted(() => ({
   transactions: 0,
   uploadFails: false,
   r2Stub: false,
+  cueStub: false,
+  cueDeletes: [] as string[],
+  cueDownloadStatus: 0,
+  cueRender: { status: 'done' } as { status: string; error?: string },
   task: { status: 'completed', videoUrl: 'https://cdn.piapi/x.mp4' } as
     { status: string; videoUrl?: string; error?: string },
 }));
@@ -88,6 +92,21 @@ vi.mock('../db/schema', () => ({
 }));
 
 vi.mock('../ai/piapi', () => ({ getSeedanceTask: () => Promise.resolve(state.task) }));
+// The Cinema backend. CueError must be a real class — the finaliser branches on
+// `instanceof` to tell "not ready yet" (409) from an actual failure.
+vi.mock('../ai/cue', () => {
+  class CueError extends Error {
+    constructor(readonly status: number, readonly detail: string) { super(`cue_${status}`); }
+  }
+  return {
+    CueError,
+    getCueRender: () => Promise.resolve(state.cueRender),
+    downloadCueRender: () => state.cueDownloadStatus
+      ? Promise.reject(new CueError(state.cueDownloadStatus, 'nope'))
+      : Promise.resolve({ buffer: Buffer.from('mp4-with-audio'), contentType: 'video/mp4' }),
+    deleteCueRender: (id: string) => { state.cueDeletes.push(id); return Promise.resolve(); },
+  };
+});
 vi.mock('../storage/r2', () => ({
   makeMediaKey: (u: string, n: string) => `users/${u}/${n}`,
   publicUrlFor: (k: string) => `https://cdn.test/${k}`,
@@ -103,7 +122,7 @@ vi.mock('./finalize', () => ({
 vi.mock('../credits/ledger', () => ({
   refund: (a: Record<string, unknown>) => { state.refunds.push(a); return Promise.resolve({ refunded: true }); },
 }));
-vi.mock('../env', () => ({ isStubMode: { r2: () => state.r2Stub } }));
+vi.mock('../env', () => ({ isStubMode: { r2: () => state.r2Stub, cue: () => state.cueStub } }));
 
 import { finalizeVideoJob, type VideoJob } from './finalizeVideoJob';
 
@@ -112,6 +131,7 @@ function job(over: Record<string, unknown> = {}) {
     id: 'job_1',
     userId: 'user_1',
     status: 'pending',
+    provider: 'piapi-seedance-2',
     providerTaskId: 'task_1',
     prompt: 'a cat',
     rewrittenPrompt: 'a cat, dolly in',
@@ -130,6 +150,9 @@ beforeEach(() => {
   state.assets = []; state.updates = []; state.refunds = []; state.uploads = 0;
   state.transactions = 0; state.uploadFails = false; state.r2Stub = false;
   state.task = { status: 'completed', videoUrl: 'https://cdn.piapi/x.mp4' };
+  process.env.CUE_API_KEY = 'k';
+  state.cueStub = false; state.cueDeletes = []; state.cueDownloadStatus = 0;
+  state.cueRender = { status: 'done' };
 });
 
 describe('finalizeVideoJob', () => {
@@ -240,5 +263,73 @@ describe('finalizeVideoJob', () => {
     expect(res).toEqual({ status: 'pending', pollError: 'r2_not_configured' });
     expect(state.refunds).toHaveLength(0);
     expect(state.uploads).toBe(0);
+  });
+});
+
+describe('finalizeVideoJob · Sociafy Cinema', () => {
+  const cinemaJob = (over: Record<string, unknown> = {}) =>
+    job({ provider: 'cue-h3', providerTaskId: 'render_abc', ...over });
+
+  it('stores the render, claims the row, and drops the vendor copy', async () => {
+    const r = await finalizeVideoJob(cinemaJob());
+    expect(r.status).toBe('completed');
+    expect(state.uploads).toBe(1);
+    expect(state.assets).toHaveLength(1);
+    expect(state.transactions).toBe(1);
+    // Only after our copy is committed — deleting first would destroy the one
+    // copy if the claim then lost its race.
+    expect(state.cueDeletes).toEqual(['render_abc']);
+  });
+
+  it('never reaches the other backend — no key for it required', async () => {
+    delete process.env.PIAPI_API_KEY;
+    const r = await finalizeVideoJob(cinemaJob());
+    expect(r.status).toBe('completed');
+  });
+
+  it('treats a 409 on the file as not-ready, not as a failure', async () => {
+    // The backend answers 409 until the render settles. Reading that as a
+    // failure would refund a render that is about to succeed and throw the
+    // finished clip away.
+    state.cueDownloadStatus = 409;
+    const r = await finalizeVideoJob(cinemaJob());
+    expect(r.status).toBe('pending');
+    expect(state.refunds).toHaveLength(0);
+    expect(state.assets).toHaveLength(0);
+  });
+
+  it('stays pending while the render is still running', async () => {
+    state.cueRender = { status: 'running' };
+    const r = await finalizeVideoJob(cinemaJob());
+    expect(r.status).toBe('pending');
+    expect(state.refunds).toHaveLength(0);
+  });
+
+  it('refunds exactly once when the render fails', async () => {
+    state.cueRender = { status: 'failed', error: 'screening declined' };
+    const first = cinemaJob();
+    const snapshot = { ...first } as unknown as typeof first;
+    const [a, b] = await Promise.all([finalizeVideoJob(first), finalizeVideoJob(snapshot)]);
+    expect([a.status, b.status]).toEqual(['failed', 'failed']);
+    expect(state.refunds).toHaveLength(1);
+    // The vendor's own words must not become our error string.
+    expect(state.job!.error).toContain('cinema_failed');
+  });
+
+  it('gives up and refunds once a render is past the give-up window', async () => {
+    // A download that keeps erroring must still age out, or the job is
+    // immortal and the customer's credits are held forever.
+    state.cueDownloadStatus = 404;
+    const r = await finalizeVideoJob(cinemaJob({ createdAt: new Date(Date.now() - 7 * 60 * 60_000) }));
+    expect(r.status).toBe('failed');
+    expect(state.refunds).toHaveLength(1);
+  });
+
+  it('stays pending, storing nothing, when the backend is unconfigured', async () => {
+    state.cueStub = true;
+    const r = await finalizeVideoJob(cinemaJob());
+    expect(r.status).toBe('pending');
+    expect(state.uploads).toBe(0);
+    expect(state.refunds).toHaveLength(0);
   });
 });

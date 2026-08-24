@@ -29,6 +29,14 @@ const MAX_DOWNLOAD_BYTES = 200 * 1024 * 1024;
 export function downloadToBuffer(
   rawUrl: string,
   redirectsLeft = 5,
+  /**
+   * Extra request headers — for a provider whose artifact URL is authenticated
+   * rather than a public CDN link (the Cinema backend answers 401 without a
+   * bearer token). Dropped on a redirect that changes host: forwarding our
+   * credentials to wherever a 302 points is how a bearer token leaks to a
+   * third party.
+   */
+  headers: Record<string, string> = {},
 ): Promise<{ buffer: Buffer; contentType?: string }> {
   return new Promise((resolve, reject) => {
     let url: URL;
@@ -44,7 +52,7 @@ export function downloadToBuffer(
         port: url.port || 443,
         path: url.pathname + url.search,
         method: 'GET',
-        headers: { 'User-Agent': 'sociafy/1.0', Accept: '*/*' },
+        headers: { 'User-Agent': 'sociafy/1.0', Accept: '*/*', ...headers },
         agent: dlAgent,
       },
       (res) => {
@@ -55,8 +63,12 @@ export function downloadToBuffer(
             reject(new Error('too_many_redirects'));
             return;
           }
-          const next = new URL(res.headers.location, url).toString();
-          downloadToBuffer(next, redirectsLeft - 1).then(resolve, reject);
+          const next = new URL(res.headers.location, url);
+          downloadToBuffer(
+            next.toString(),
+            redirectsLeft - 1,
+            next.host === url.host ? headers : {},
+          ).then(resolve, reject);
           return;
         }
         if (!res.statusCode || res.statusCode >= 400) {

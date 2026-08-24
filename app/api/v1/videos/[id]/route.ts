@@ -4,6 +4,7 @@ import { withApiKey } from '../../../../../lib/api-key';
 import { db } from '../../../../../lib/db';
 import { videoJobs } from '../../../../../lib/db/schema';
 import { finalizeVideoJob } from '../../../../../lib/media/finalizeVideoJob';
+import { modelForBackend } from '../../../../../lib/ai/models';
 import { apiError, providerPreflight, publicVideoError, UUID_RX } from '../../shared';
 
 export const runtime = 'nodejs';
@@ -31,15 +32,19 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     // cast, and that cast threw inside the query, so a typo rendered a 500.
     if (!UUID_RX.test(id)) return apiError('not_found', 404, 'No such generation.');
 
-    const pre = providerPreflight({ r2: true, piapi: true });
-    if (pre) return pre;
-
     const [job] = await db()
       .select()
       .from(videoJobs)
       .where(and(eq(videoJobs.id, id), eq(videoJobs.userId, auth.userId)))
       .limit(1);
     if (!job) return apiError('not_found', 404, 'No such generation.');
+
+    // Checked against the job's OWN backend, after the lookup: polling a Cinema
+    // render must not 503 because the Motion key is missing, and vice versa.
+    const pre = job.provider === 'cue-h3'
+      ? providerPreflight({ r2: true, cue: true })
+      : providerPreflight({ r2: true, piapi: true });
+    if (pre) return pre;
 
     const result = await finalizeVideoJob(job);
 
@@ -56,6 +61,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
 
     return Response.json({
       id: job.id,
+      // Our model id, mapped from the internal backend column — which is
+      // operational and never leaves the process.
+      model: modelForBackend(job.provider),
       status,
       video_url: videoUrl,
       // What the ledger debited. A failed job is refunded automatically, so

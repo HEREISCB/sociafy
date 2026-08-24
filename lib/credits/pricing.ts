@@ -36,7 +36,8 @@ export type CreditAction =
   | 'voice_twin_create'
   | 'tts_synthesis'
   | 'avatar_video_480p'
-  | 'avatar_video_720p';
+  | 'avatar_video_720p'
+  | 'video_cinema';
 
 /** Single source-of-truth credit cost per action. */
 export const CREDIT_PRICES: Record<CreditAction, number> = {
@@ -89,6 +90,12 @@ export const CREDIT_PRICES: Record<CreditAction, number> = {
   tts_synthesis: 8,                   // L4 clone-TTS render ~$0.05 → 8 cr ≈ $0.096 @business (~48% margin)
   avatar_video_480p: 50,              // L40S+L4 ~$0.30 → 50 cr ≈ $0.60 @business (~50% margin)
   avatar_video_720p: 90,              // L40S+L4 ~$0.50 → 90 cr ≈ $1.08 @business (~54% margin)
+  // Sociafy Cinema: the only VARIABLE-priced action in this table. Cost is
+  // neither linear in duration nor in area, so the number here is a nominal
+  // 8s/720p reference and the real figure comes from priceForCinemaVideo(),
+  // which quotes the backend per request. `charge()` takes credits as an
+  // argument, not from this table, so the two never disagree on the bill.
+  video_cinema: 33,
 };
 
 export function creditsFor(action: CreditAction): number {
@@ -226,6 +233,38 @@ export function priceForCompose(args: {
   };
 }
 
+/**
+ * Credits we charge per dollar the video backend charges us.
+ *
+ * Pinned to the basis the rest of this file already uses: 8s/720p/Quality is
+ * 180 cr against a $1.60 provider cost, i.e. 112.5 cr per provider dollar at
+ * $0.012/credit (the Business rate). Cinema is priced off a live quote rather
+ * than a bucket, so it needs the ratio stated rather than baked into a
+ * constant — change this one number to move Cinema's margin, and nothing else.
+ */
+export const CREDITS_PER_PROVIDER_USD = 112.5;
+
+/** Round UP. A render that costs a fraction of a credit still costs us money. */
+export function creditsFromProviderUsd(usd: number): number {
+  return Math.max(1, Math.ceil(usd * CREDITS_PER_PROVIDER_USD));
+}
+
+/**
+ * Canvas area the Cinema backend renders at, per quality tier.
+ *
+ * 0.98 MP is 1344x768 — above 720p's 0.92 MP, below 1080p's 2.07, which is why
+ * lib/ai/models.ts does not offer 1080p on this model rather than quietly
+ * serving something smaller than the name promises.
+ */
+export const CINEMA_MEGAPIXELS: Record<'480p' | '720p', number> = {
+  '480p': 0.4,
+  '720p': 0.98,
+};
+
+/** Sampler steps Cinema renders at. Cost is linear in this, so it is a price
+ *  lever, not a hidden default: 20 is the backend's own standard. */
+export const CINEMA_STEPS = 20;
+
 // =====================================================
 // Human-readable labels for the ledger UI
 // =====================================================
@@ -254,6 +293,7 @@ export const ACTION_LABELS: Record<CreditAction, string> = {
   tts_synthesis: 'Text-to-speech',
   avatar_video_480p: 'Avatar video · 480p',
   avatar_video_720p: 'Avatar video · 720p',
+  video_cinema: 'Video · Cinema (sound-on)',
 };
 
 // Suppress unused-import warning while keeping the type available to consumers.

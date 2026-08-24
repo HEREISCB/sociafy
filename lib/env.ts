@@ -123,6 +123,10 @@ export const isStubMode = {
   r2: () => !env.r2.accountId || !env.r2.bucket,
   stripe: () => !env.stripe.secretKey,
   razorpay: () => !env.razorpay.keyId || !env.razorpay.keySecret,
+  // Backend behind the Sociafy Cinema model. Absent → the model is reported
+  // unavailable by GET /api/v1/models and refused with a 503 before any charge,
+  // while Sociafy Motion keeps working.
+  cue: () => !process.env.CUE_API_KEY,
   zoho: () =>
     !env.zoho.clientId ||
     !env.zoho.clientSecret ||
