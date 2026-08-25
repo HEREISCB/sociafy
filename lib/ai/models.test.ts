@@ -93,6 +93,11 @@ describe('validateAgainstModel', () => {
     expect(VIDEO_MODELS['sociafy-motion-1'].endFrameAlone).toBe(false);
   });
 
+  it('records which model can take its canvas shape from the frame', () => {
+    expect(VIDEO_MODELS['sociafy-cinema-1'].matchFrameAspect).toBe(true);
+    expect(VIDEO_MODELS['sociafy-motion-1'].matchFrameAspect).toBe(false);
+  });
+
   it('still withholds `reference` on Cinema, and only that', () => {
     // ref_images switches the backend into a different render mode whose price
     // we have not measured, and Cinema bills from a live quote — an unmeasured

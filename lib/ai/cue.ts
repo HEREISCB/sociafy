@@ -148,6 +148,8 @@ export type CueRenderParams = {
   firstFrame?: string;
   /** Base64 image it closes on. */
   lastFrame?: string;
+  /** Take the canvas shape from the supplied frame instead of `aspect`. */
+  matchInput?: boolean;
 };
 
 /**
@@ -214,10 +216,10 @@ export async function createCueRender(args: CueRenderParams & { title?: string }
         ...(args.seed !== undefined ? { seed: args.seed } : {}),
         ...(args.firstFrame ? { first_frame: args.firstFrame } : {}),
         ...(args.lastFrame ? { last_frame: args.lastFrame } : {}),
-        // `match_input` is deliberately NOT set. It would take the canvas shape
-        // from the supplied still and silently override the caller's `aspect` —
-        // and aspect is a field they chose. Letterboxing a landscape frame into
-        // the 9:16 they asked for is their call to make, not ours to undo.
+        // Only ever set because the caller asked for it. Overriding `aspect`
+        // silently would be deciding their framing for them; offering it as an
+        // explicit opt-in lets them decide.
+        ...(args.matchInput ? { match_input: true } : {}),
       },
     },
   });

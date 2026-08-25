@@ -435,6 +435,8 @@ export type SubmitVideoArgs = {
    *  either may be absent, and a positional array would send a lone closing
    *  frame as the opening one. Already size-checked by the route. */
   frames?: { first?: string; last?: string };
+  /** Cinema only: take the canvas shape from the frame rather than `aspect`. */
+  matchFrameAspect?: boolean;
   /** `api:<Idempotency-Key>`, or null when the caller opted out. */
   source: string | null;
   webhookConfig?: { endpoint: string; secret: string };
@@ -593,6 +595,7 @@ export async function submitVideo(args: SubmitVideoArgs): Promise<SubmitVideoRes
           aspect: args.aspect,
           firstFrame: args.frames?.first,
           lastFrame: args.frames?.last,
+          matchInput: args.matchFrameAspect,
           title: args.prompt.slice(0, 80),
         })
       : await createSeedanceTask({

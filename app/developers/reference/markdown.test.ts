@@ -89,3 +89,20 @@ describe('the docs/api.md renderer', () => {
     expect(prose).not.toMatch(/(^|\n)#{1,6} /);
   });
 });
+
+describe('malformed input cannot hang the renderer', () => {
+  // A table row with no |---| separator above it startsBlock() but no block
+  // handler claims it. Before the guard this spun forever and OOM'd the build.
+  it('renders an orphaned table row as prose instead of looping', () => {
+    const out = html('intro\n\n| `a` | b | c |\n\noutro');
+    expect(out).toContain('outro');
+    expect(out).toContain('intro');
+  });
+
+  it('terminates on every line that starts a block but forms none', () => {
+    for (const stray of ['| lone | row |', '|', '|---|', '| a \\| b |']) {
+      expect(() => html(`before\n\n${stray}\n\nafter`)).not.toThrow();
+      expect(html(`before\n\n${stray}\n\nafter`)).toContain('after');
+    }
+  });
+});

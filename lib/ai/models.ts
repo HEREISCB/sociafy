@@ -47,6 +47,15 @@ export type VideoModel = {
    * there is no way to fill only the second.
    */
   endFrameAlone: boolean;
+  /**
+   * True when the model can take its canvas SHAPE from the supplied frame
+   * instead of from `aspect` — so a portrait still is not rendered into a
+   * landscape box and letterboxed.
+   *
+   * Shape only. The canvas AREA still comes from `quality`, so this does not
+   * move the price.
+   */
+  matchFrameAspect: boolean;
 };
 
 const ASPECTS = ['9:16', '1:1', '16:9'] as const;
@@ -64,6 +73,7 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModel> = {
     nativeAudio: false,
     supportsFast: true,
     endFrameAlone: false,
+    matchFrameAspect: false,
   },
   'sociafy-cinema-1': {
     id: 'sociafy-cinema-1',
@@ -86,6 +96,7 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModel> = {
     // Verified against the backend: a render with last_frame and no first_frame
     // is accepted and completes (mode i2v, has_first false, has_last true).
     endFrameAlone: true,
+    matchFrameAspect: true,
   },
 };
 

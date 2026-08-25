@@ -130,6 +130,13 @@ export function renderMarkdown(src: string): React.ReactNode[] {
 
     const para: string[] = [];
     while (i < lines.length && lines[i].trim() && !startsBlock(lines[i])) para.push(lines[i++]);
+    // MANDATORY: `i` must advance on every pass. A line that startsBlock() but
+    // that no block handler above claimed — a table row with no |---| separator
+    // over it is the one that actually happened — consumes nothing here, so the
+    // loop spins forever pushing empty <p> until the heap dies. That is an OOM
+    // at BUILD time on a prerendered page, from a stray line in a doc.
+    // Rendering it as prose makes the mistake visible instead of fatal.
+    if (para.length === 0) para.push(lines[i++]);
     out.push(<p key={key()}>{inline(para.join(' '))}</p>);
   }
 

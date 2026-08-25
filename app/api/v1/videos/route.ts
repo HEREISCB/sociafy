@@ -67,6 +67,16 @@ const bodySchema = z
      *  if one is given. */
     start_frame: z.string().optional(),
     end_frame: z.string().optional(),
+    /**
+     * Take the canvas SHAPE from the supplied frame instead of from `aspect`,
+     * so a portrait still is not rendered into a landscape box. Opt-in and
+     * explicit: when true it overrides `aspect`, and we would rather the caller
+     * say so than have us quietly decide their framing for them.
+     *
+     * Shape only — `quality` still sets the area, so this does not move the
+     * price.
+     */
+    match_frame_aspect: z.boolean().default(false),
   })
   .strict()
   // Contradictions are rejected, never resolved by precedence: silently
@@ -89,6 +99,12 @@ const bodySchema = z
     // there is no way to fill only the second.
     if (i2v && !b.start_frame && b.end_frame && !VIDEO_MODELS[b.model].endFrameAlone) {
       reject('start_frame', `${VIDEO_MODELS[b.model].name} needs a start_frame; only Sociafy Cinema 1 can render from an end_frame alone.`);
+    }
+    if (b.match_frame_aspect && !i2v) {
+      reject('match_frame_aspect', 'match_frame_aspect needs a frame to match — use gen_mode "image-to-video".');
+    }
+    if (b.match_frame_aspect && !VIDEO_MODELS[b.model].matchFrameAspect) {
+      reject('match_frame_aspect', `${VIDEO_MODELS[b.model].name} cannot take its shape from a frame; set aspect instead.`);
     }
     // Per-model envelope. Rejected, not clamped: a caller who asks Cinema for
     // 1080p and silently receives 720p pays full price for a downgrade they
@@ -207,6 +223,7 @@ export async function POST(req: NextRequest) {
         genMode: body.gen_mode,
         imageUrls,
         frames,
+        matchFrameAspect: body.match_frame_aspect,
         source: idem.source,
         webhookConfig: webhookConfigFor(req),
       });
@@ -282,7 +299,10 @@ export async function POST(req: NextRequest) {
         // mixed the new request's params with the old job's price.
         duration_sec: job.durationSec,
         quality: job.quality,
+        // Echoed as requested. When match_frame_aspect is set the real canvas
+        // comes from the frame, so this is what you asked for, not what ran.
         aspect: job.aspect,
+        match_frame_aspect: body.match_frame_aspect,
         // Surfaced here so a replay of an already-failed job doesn't send the
         // caller off to poll something that will never succeed.
         ...(job.status === 'failed' ? { error: publicVideoError(job.error) } : {}),
