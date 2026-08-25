@@ -126,7 +126,8 @@ export async function cueEstimate(args: {
     megapixels: String(args.megapixels),
     steps: String(args.steps),
   });
-  const est = await call<CueEstimate>(`/estimate?${q}`, { timeoutMs: 15_000 });
+  // Bounded tight on purpose — see the budget note on createCueRender.
+  const est = await call<CueEstimate>(`/estimate?${q}`, { timeoutMs: 8_000 });
   if (typeof est?.usd !== 'number' || !(est.usd > 0)) {
     throw new CueError(502, `estimate returned no usable price: ${JSON.stringify(est).slice(0, 200)}`);
   }
@@ -181,11 +182,27 @@ export function encodeCinemaFrames(buffers: Buffer[]): string[] {
   return b64;
 }
 
-/** Queue a render. Returns as soon as it is queued — and charged upstream. */
+/**
+ * Queue a render. Returns as soon as it is queued — and charged upstream.
+ *
+ * TIMEOUT BUDGET. Production sits behind a Cloudflare Tunnel, which gives up
+ * on an origin request at 100s. Our POST /api/v1/videos must therefore finish
+ * inside that, and its worst case is the sum of three bounded waits:
+ *
+ *   reference fetch   45s   (REFERENCE_LIMITS.totalBudgetMs, image-to-video only)
+ * + price quote        8s   (cueEstimate)
+ * + this call         35s
+ * = 88s, with headroom for our own work.
+ *
+ * Raising any of the three past that budget means a submit that the edge kills
+ * mid-flight — and this call is the one that spends money, so a killed request
+ * is a charge the caller never got an id for. If a bigger window is ever
+ * genuinely needed, the fix is to stop submitting inline, not to widen this.
+ */
 export async function createCueRender(args: CueRenderParams & { title?: string }): Promise<string> {
   const res = await call<{ id?: string }>('/renders', {
     method: 'POST',
-    timeoutMs: 60_000,
+    timeoutMs: 35_000,
     body: {
       ...(args.title ? { title: args.title.slice(0, 120) } : {}),
       params: {
