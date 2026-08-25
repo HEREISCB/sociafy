@@ -85,6 +85,14 @@ describe('validateAgainstModel', () => {
     expect(validateAgainstModel('sociafy-cinema-1', { ...base, genMode: 'image-to-video' })).toBeNull();
   });
 
+  it('records which model can render from a closing frame alone', () => {
+    // Verified against the backend: last_frame with no first_frame is accepted
+    // and completes. Motion cannot express it — its frames are an ordered
+    // [start, end?] list, so the first slot IS the opening frame.
+    expect(VIDEO_MODELS['sociafy-cinema-1'].endFrameAlone).toBe(true);
+    expect(VIDEO_MODELS['sociafy-motion-1'].endFrameAlone).toBe(false);
+  });
+
   it('still withholds `reference` on Cinema, and only that', () => {
     // ref_images switches the backend into a different render mode whose price
     // we have not measured, and Cinema bills from a live quote — an unmeasured

@@ -38,6 +38,15 @@ export type VideoModel = {
   nativeAudio: boolean;
   /** True when `fast` changes anything. */
   supportsFast: boolean;
+  /**
+   * True when the model can render from a CLOSING frame alone, with no
+   * start_frame — "end here, work out how to arrive."
+   *
+   * False is not a style choice: Motion's backend takes its frames as an
+   * ordered [start, end?] list, so the first slot IS the opening frame and
+   * there is no way to fill only the second.
+   */
+  endFrameAlone: boolean;
 };
 
 const ASPECTS = ['9:16', '1:1', '16:9'] as const;
@@ -54,6 +63,7 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModel> = {
     genModes: ['text', 'reference', 'image-to-video'],
     nativeAudio: false,
     supportsFast: true,
+    endFrameAlone: false,
   },
   'sociafy-cinema-1': {
     id: 'sociafy-cinema-1',
@@ -73,6 +83,9 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModel> = {
     genModes: ['text', 'image-to-video'],
     nativeAudio: true,
     supportsFast: false,
+    // Verified against the backend: a render with last_frame and no first_frame
+    // is accepted and completes (mode i2v, has_first false, has_last true).
+    endFrameAlone: true,
   },
 };
 

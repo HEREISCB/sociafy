@@ -236,7 +236,7 @@ Status codes: `200`, `401`, `500`, `503`.
     | `gen_mode` | `text` \| `reference` \| `image-to-video` | `text` | Which still images, if any, the clip is built from. See below. Cinema takes `text` and `image-to-video`; `reference` is Motion only. |
     | `reference_images` | array of 1–9 `https` URLs | omitted | **`gen_mode: "reference"` only, and required by it.** Photos of the real subject, so the clip shows *your* product rather than an approximation of it. |
     | `start_frame` | `https` URL | omitted | **`gen_mode: "image-to-video"` only, and required by it.** The clip's first frame. |
-    | `end_frame` | `https` URL | omitted | `gen_mode: "image-to-video"` only. The clip's last frame, if you want to pin where it lands. |
+    | `end_frame` | `https` URL | omitted | `gen_mode: "image-to-video"` only. The clip's last frame, if you want to pin where it lands. **On Cinema it may be sent alone**, with no `start_frame` — "end here, work out how to arrive". Motion always needs a `start_frame`. |
 
     **Unknown fields are rejected with `400`.** A typo in `quality` should not
     silently bill you for a default you did not choose.

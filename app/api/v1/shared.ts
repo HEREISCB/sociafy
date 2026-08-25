@@ -431,9 +431,10 @@ export type SubmitVideoArgs = {
   /** Stills for a non-text mode, already re-hosted by us — see rehostReferences.
    *  Order is meaningful for image-to-video. Motion only: Cinema takes bytes. */
   imageUrls?: string[];
-  /** Cinema's equivalent: base64 stills in [first, last?] order, already
-   *  size-checked by the route. Its backend takes bytes, not URLs. */
-  frames?: string[];
+  /** Cinema's equivalent: base64 stills keyed by SLOT, not by position —
+   *  either may be absent, and a positional array would send a lone closing
+   *  frame as the opening one. Already size-checked by the route. */
+  frames?: { first?: string; last?: string };
   /** `api:<Idempotency-Key>`, or null when the caller opted out. */
   source: string | null;
   webhookConfig?: { endpoint: string; secret: string };
@@ -590,8 +591,8 @@ export async function submitVideo(args: SubmitVideoArgs): Promise<SubmitVideoRes
           megapixels: cinema.megapixels,
           steps: cinema.steps,
           aspect: args.aspect,
-          firstFrame: args.frames?.[0],
-          lastFrame: args.frames?.[1],
+          firstFrame: args.frames?.first,
+          lastFrame: args.frames?.last,
           title: args.prompt.slice(0, 80),
         })
       : await createSeedanceTask({

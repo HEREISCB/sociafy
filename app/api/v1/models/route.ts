@@ -41,6 +41,7 @@ export async function GET(req: NextRequest) {
             gen_mode: m.genModes,
             native_audio: m.nativeAudio,
             fast_tier: m.supportsFast,
+            end_frame_alone: m.endFrameAlone,
           },
           // Indicative, not a quote: one representative render so a caller can
           // compare models without submitting. Omitted rather than guessed when

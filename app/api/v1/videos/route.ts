@@ -80,7 +80,16 @@ const bodySchema = z
     if (b.start_frame && !i2v) reject('start_frame', 'start_frame is only accepted with gen_mode "image-to-video".');
     if (b.end_frame && !i2v) reject('end_frame', 'end_frame is only accepted with gen_mode "image-to-video".');
     if (b.gen_mode === 'reference' && !b.reference_images) reject('reference_images', 'gen_mode "reference" requires reference_images.');
-    if (i2v && !b.start_frame) reject('start_frame', 'gen_mode "image-to-video" requires start_frame.');
+    if (i2v && !b.start_frame && !b.end_frame) {
+      reject('start_frame', 'gen_mode "image-to-video" requires start_frame, end_frame, or both.');
+    }
+    // A closing frame on its own is a real request — "end here, work out how to
+    // arrive" — but only where the backend can express it. Motion takes an
+    // ordered [start, end?] list, so its first slot IS the opening frame and
+    // there is no way to fill only the second.
+    if (i2v && !b.start_frame && b.end_frame && !VIDEO_MODELS[b.model].endFrameAlone) {
+      reject('start_frame', `${VIDEO_MODELS[b.model].name} needs a start_frame; only Sociafy Cinema 1 can render from an end_frame alone.`);
+    }
     // Per-model envelope. Rejected, not clamped: a caller who asks Cinema for
     // 1080p and silently receives 720p pays full price for a downgrade they
     // never agreed to, and learns about it from the file.
@@ -138,11 +147,17 @@ export async function POST(req: NextRequest) {
     // We hand the provider OUR urls, never the caller's — theirs may be signed,
     // private or short-lived, which would fail opaquely after we had charged.
     let imageUrls: string[] | undefined;
-    let frames: string[] | undefined;
+    let frames: { first?: string; last?: string } | undefined;
     if (body.gen_mode !== 'text') {
+      // Slots, not positions. Either frame may be absent on Cinema, so carrying
+      // the labels through is what stops an end-frame-only request arriving
+      // upstream as an opening frame.
+      const slots: ('first' | 'last')[] = [];
+      if (body.start_frame) slots.push('first');
+      if (body.end_frame) slots.push('last');
       const urls = body.gen_mode === 'reference'
         ? body.reference_images!
-        : [body.start_frame!, ...(body.end_frame ? [body.end_frame] : [])];
+        : [...(body.start_frame ? [body.start_frame] : []), ...(body.end_frame ? [body.end_frame] : [])];
       const fetched = await fetchReferenceImages(urls);
       if (!fetched.ok) return fetched.response;
 
@@ -152,9 +167,11 @@ export async function POST(req: NextRequest) {
         // image. Encode here, BEFORE the charge: the size limit is knowable up
         // front, and finding it afterwards is a refund we have to explain.
         try {
-          frames = encodeCinemaFrames(
+          const encoded = encodeCinemaFrames(
             await Promise.all(fetched.files.map(async (f) => Buffer.from(await f.arrayBuffer()))),
           );
+          frames = {};
+          slots.forEach((slot, i) => { frames![slot] = encoded[i]; });
         } catch (e) {
           if (e instanceof CinemaAttachmentTooLarge) {
             return apiError(
