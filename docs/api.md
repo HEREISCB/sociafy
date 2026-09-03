@@ -487,7 +487,7 @@ Status codes: `200`, `401`, `500`, `503`.
     | Field | Type | Default |
     |---|---|---|
     | `prompt` | string, 2–2000 chars | required |
-    | `size` | `1024x1024` \| `1536x1024` \| `1024x1536` | `1024x1024` |
+    | `size` | a preset name, or `WxH` in pixels — see below | `1024x1024` |
     | `quality` | `low` \| `medium` \| `high` | `medium` |
     | `reference_images` | array of 1–10 `https` URLs — see below | omitted |
     | `async` | boolean — `true` returns `202` + `poll_url` instead of holding the connection open | `false` |
@@ -496,6 +496,53 @@ Status codes: `200`, `401`, `500`, `503`.
     one image, one charge. Everything else is identical between the two modes: same
     validation, same prices, same refunds, same idempotency, same reference-image
     handling.
+
+    #### Sizes
+
+    `size` takes either a **social preset** or an explicit **`WxH`** in pixels. One
+    field for both, so there is never a question of which wins.
+
+    | Preset | Pixels | Ratio |
+    |---|---|---|
+    | `ig_square` | `1024x1024` | 1:1 |
+    | `ig_portrait` | `1088x1360` | 4:5 |
+    | `ig_story` | `864x1536` | 9:16 |
+    | `ig_landscape` | `1456x768` | 1.9:1 |
+    | `fb_square` | `1024x1024` | 1:1 |
+    | `fb_story` | `864x1536` | 9:16 |
+    | `fb_link` | `1456x768` | 1.9:1 |
+    | `x_post` | `1536x864` | 16:9 |
+    | `x_header` | `1536x512` | 3:1 |
+    | `li_post` | `1456x768` | 1.9:1 |
+    | `li_banner` | `1536x512` | 3:1 |
+    | `yt_thumbnail` | `1280x720` | 16:9 |
+    | `tiktok` | `864x1536` | 9:16 |
+    | `pinterest_pin` | `1024x1536` | 2:3 |
+
+    A **custom `WxH`** must satisfy all of:
+
+    - both edges divisible by **16**
+    - at least **692,224** pixels in total
+    - at most **1,048,576** pixels in total (the area of a `1024x1024`)
+    - aspect ratio within **3:1** either way
+
+    The divisibility rule is why the numbers the platforms publish do not work
+    verbatim: Instagram's own `1080x1350` is rejected, because 1080 and 1350 are not
+    multiples of 16. `1088x1360` is the identical 4:5 shape and renders fine, which
+    is what `ig_portrait` sends. A rejected size names a valid alternative with the
+    **same** aspect ratio, so the fix is one edit rather than a search.
+
+    Two limits are the engine's own and cannot be worked around: nothing wider than
+    3:1 renders at all (so LinkedIn's 4:1 banner is unavailable — `li_banner` is the
+    closest renderable shape), and nothing below the pixel minimum.
+
+    The three original sizes — `1024x1024`, `1536x1024`, `1024x1536` — still work and
+    still cost exactly what they always did. `1024x1536` is deliberately exempt from
+    the custom pixel ceiling so that existing integrations do not move.
+
+    **Pricing.** Presets and custom sizes are billed at the square rate for their
+    `quality`. Only the two original non-square sizes keep the slightly cheaper
+    non-square rate. Nothing gets more expensive than it is today.
 
     **Timing.** Text-only, `quality: "medium"` has been measured at **66–78 seconds**
     across five runs; with one reference image, **about 83 s**. `high` is

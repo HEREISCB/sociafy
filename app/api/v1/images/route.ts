@@ -6,6 +6,7 @@ import { rateLimit } from '../../../../lib/rate-limit';
 import { db } from '../../../../lib/db';
 import { genJobs, mediaAssets } from '../../../../lib/db/schema';
 import { getOpenAI, MODELS } from '../../../../lib/ai/client';
+import { resolveImageSize } from '../../../../lib/ai/image-sizes';
 import { makeMediaKey, publicUrlFor, uploadBuffer } from '../../../../lib/storage/r2';
 import { charge, ensureBalance, InsufficientCreditsError, refund } from '../../../../lib/credits/ledger';
 import { priceForImage } from '../../../../lib/credits/pricing';
@@ -64,7 +65,17 @@ export const maxDuration = 300;
 const bodySchema = z
   .object({
     prompt: z.string().min(2).max(2_000),
-    size: z.enum(['1024x1024', '1536x1024', '1024x1536']).default('1024x1024'),
+    /**
+     * A social preset (`ig_portrait`, `x_post`, `yt_thumbnail`, …) or explicit
+     * `WxH` pixels. The old three-value enum was our restriction, not the
+     * provider's — see lib/ai/image-sizes.ts for the real bounds and how they
+     * were measured.
+     *
+     * ONE field rather than `size` plus `preset`: two fields need a precedence
+     * rule, and a precedence rule silently renders a shape the caller did not
+     * ask for and then bills them for it.
+     */
+    size: z.string().default('1024x1024'),
     quality: z.enum(['low', 'medium', 'high']).default('medium'),
     /**
      * Public https URLs of product photos to imitate. One field rather than a
@@ -77,7 +88,15 @@ const bodySchema = z
      *  response body of every existing caller's working code. */
     async: z.boolean().default(false),
   })
-  .strict();
+  .strict()
+  // Rejected here, at parse time, so a bad size is a 400 that costs nothing.
+  // This matters more than it looks: on the async path the charge lands BEFORE
+  // the provider is called, so a size we let through and the provider refuses is
+  // a charge we then have to find and refund.
+  .superRefine((b, ctx) => {
+    const resolved = resolveImageSize(b.size);
+    if (!resolved.ok) ctx.addIssue({ code: 'custom', path: ['size'], message: resolved.message });
+  });
 
 export async function POST(req: NextRequest) {
   return withApiKey(req, async (auth) => {
@@ -97,7 +116,22 @@ export async function POST(req: NextRequest) {
         issues: parsed.error.issues.slice(0, 5).map((i) => ({ field: i.path.join('.'), message: i.message })),
       });
     }
-    const { prompt, size, quality, reference_images: referenceUrls, async: wantAsync } = parsed.data;
+    const { prompt, quality, reference_images: referenceUrls, async: wantAsync } = parsed.data;
+
+    // Presets become concrete pixels HERE, once, so everything downstream — the
+    // provider call, the ledger meta, the stored job row, and completeImageJob's
+    // width/height parse — only ever sees `WxH`. A preset name reaching the
+    // database would be a second vocabulary to keep in sync forever.
+    const sized = resolveImageSize(parsed.data.size);
+    if (!sized.ok) {
+      // Unreachable: superRefine rejected this already. Kept as a real branch
+      // rather than a cast, because a cast makes two files silently
+      // load-bearing on each other.
+      return apiError('invalid_request', 400, 'Request body failed validation.', {
+        issues: [{ field: 'size', message: sized.message }],
+      });
+    }
+    const size = sized.value.size;
 
     // Rate limit AFTER validation: §6 of the docs promises a 400 costs nothing,
     // and it used to cost a token — three typos burned the whole burst budget.

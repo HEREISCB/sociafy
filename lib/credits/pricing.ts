@@ -105,7 +105,10 @@ export function creditsFor(action: CreditAction): number {
 // =====================================================
 // Image-gen price helper
 // =====================================================
-export type ImageSize = '1024x1024' | '1536x1024' | '1024x1536';
+/** `WxH` in pixels. Was a three-value union; the provider accepts far more than
+ *  that (see lib/ai/image-sizes.ts), and the route validates the string against
+ *  those bounds before it ever reaches pricing. */
+export type ImageSize = string;
 export type ImageQuality = 'low' | 'medium' | 'high';
 
 /**
@@ -119,7 +122,17 @@ export function priceForImage(
   quality: ImageQuality,
   referenceCount?: number,
 ): { action: CreditAction; credits: number; surcharge: number } {
-  const isSquare = size === '1024x1024';
+  // The two original non-square sizes keep the price they have always had, so
+  // no working integration moves. EVERYTHING else — presets and custom sizes
+  // alike — is billed at the square tier, which is the dearer of the two.
+  //
+  // Not cosmetic: provider cost tracks the SHORT edge, not the pixel count, and
+  // the new shapes land between the two tiers. Instagram's 4:5 measures 181
+  // output tokens against the 158 the non-square tier is priced off and the 196
+  // of a square — so billing it as non-square would under-charge. Every size
+  // lib/ai/image-sizes.ts admits is measured at or under that 196, which makes
+  // the square tier a ceiling we are always at or above.
+  const isSquare = size !== '1536x1024' && size !== '1024x1536';
   let action: CreditAction;
   if (quality === 'low') {
     // gpt-image-2 low pricing is flat across aspect — both stay at 2 credits.
