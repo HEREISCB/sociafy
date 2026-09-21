@@ -183,6 +183,12 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
   const errText = (e: unknown) => (e instanceof Error ? e.message.slice(0, 140) : 'Something went wrong saving your changes.');
 
   const saveTopicsAndContinue = async () => {
+    // Niches are what autopilot writes about. Letting this through empty ended
+    // in an autopilot that was "on" and could never draft.
+    if (topics.length === 0) {
+      setSaveError('Pick at least one niche — it is what autopilot writes about.');
+      return;
+    }
     setSavingTopics(true);
     setSaveError(null);
     try {

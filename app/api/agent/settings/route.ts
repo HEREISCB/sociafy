@@ -84,19 +84,22 @@ export async function PATCH(req: NextRequest) {
         title: body.enabled ? 'Autopilot enabled' : 'Autopilot disabled',
         meta: {},
       });
-      // Switching on should produce something now, not at the next 2-hourly
-      // tick. Unforced on purpose: pacing and the credit cap still apply, so
-      // flipping the switch off and on cannot farm drafts.
-      if (body.enabled) {
-        after(async () => {
-          try {
-            await refreshTrendsForUser(user.id, (row.niches ?? []) as string[]);
-            await runAgentForUser(user.id);
-          } catch (e) {
-            console.error('[autopilot] first run failed:', e instanceof Error ? e.message : String(e));
-          }
-        });
-      }
+    }
+
+    // Switching on — or fixing what had it stuck (niches, platforms) — should
+    // produce something now, not at the next 2-hourly tick. Unforced on purpose:
+    // pacing, the credit cap and the run claim all still apply, so toggling
+    // settings cannot farm drafts.
+    const turnedOn = body.enabled === true && !current.enabled;
+    if (row.enabled && (turnedOn || body.niches !== undefined || body.enabledPlatforms !== undefined)) {
+      after(async () => {
+        try {
+          await refreshTrendsForUser(user.id, (row.niches ?? []) as string[]);
+          await runAgentForUser(user.id);
+        } catch (e) {
+          console.error('[autopilot] kick failed:', e instanceof Error ? e.message : String(e));
+        }
+      });
     }
 
     // Mark profile as onboarded on first save only (idempotent). Gates the

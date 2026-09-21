@@ -83,6 +83,49 @@ const DEMO_FEED: Activity[] = [
   { id: 'demo-3', kind: 'agent_held', title: 'Held a draft — tone mismatch', body: 'Used "game-changing" twice. Rewriting and re-queuing.', meta: null, createdAt: new Date(Date.now() - 60 * 60_000).toISOString() },
 ];
 
+/** Toggle niches in place. Saves on every change — no trip back through onboarding. */
+const NichePicker: React.FC<{ value: string[]; disabled?: boolean; onChange: (next: string[]) => void }> = ({ value, disabled, onChange }) => {
+  const [custom, setCustom] = useState('');
+  const [hint, setHint] = useState<string | null>(null);
+  const toggle = (n: string) => onChange(value.includes(n) ? value.filter((x) => x !== n) : [...value, n]);
+  const addCustom = () => {
+    const v = custom.trim().toLowerCase().replace(/\s+/g, '-').slice(0, 40);
+    if (!v) return;
+    // Same rule as onboarding: a niche is a topic to search trends for.
+    if (v.split('-').length > 4 || /[.,]/.test(v)) {
+      setHint('Keep it to a topic, like "voice ai". Your company and website go in Brand profile.');
+      return;
+    }
+    setHint(null);
+    setCustom('');
+    if (!value.includes(v)) onChange([...value, v]);
+  };
+  const all = [...Object.keys(NICHE_LABELS), ...value.filter((n) => !(n in NICHE_LABELS))];
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        {all.map((n) => (
+          <span key={n} className={`prompt-chip ${value.includes(n) ? 'active' : ''}`} onClick={() => !disabled && toggle(n)}>
+            {NICHE_LABELS[n as Niche] ?? n.replace(/-/g, ' ')}
+          </span>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+        <input
+          value={custom}
+          onChange={(e) => setCustom(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && addCustom()}
+          placeholder="Add your own, e.g. voice ai"
+          disabled={disabled}
+          style={{ flex: 1, minWidth: 0, padding: '6px 10px', fontSize: 12.5, border: '1px solid var(--line-2)', borderRadius: 8, background: 'var(--bg)', color: 'var(--ink)', outline: 'none' }}
+        />
+        <button className="btn sm" onClick={addCustom} disabled={disabled || !custom.trim()}>Add</button>
+      </div>
+      {hint && <div style={{ fontSize: 11.5, color: 'var(--bad)', marginTop: 6 }}>{hint}</div>}
+    </div>
+  );
+};
+
 const HOW_IT_WORKS_STEPS = [
   {
     icon: 'fire' as const,
@@ -347,8 +390,12 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
     setSaveError(null);
     try {
       await apiPatch('/api/agent/settings', patch);
-      await Promise.all([refetchSettings(), refetchStatus()]);
+      const [, fresh] = await Promise.all([refetchSettings(), refetchStatus()]);
       setSavedAt(Date.now());
+      // The server starts a draft when one of these lands and a draft is due —
+      // show it being written rather than a countdown to the next cron tick.
+      const kicks = patch.enabled === true || 'niches' in patch || 'enabledPlatforms' in patch;
+      if (kicks && fresh && 'dueNow' in fresh && fresh.enabled && fresh.dueNow) setWatchFrom(fresh.draftsThisWeek);
       return true;
     } catch (e) {
       setSaveError(friendlyApiError(e));
@@ -390,11 +437,7 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
     // Snap the switch back if the server didn't take it — an autopilot that
     // looks "running" but isn't is the worst possible lie on this page.
     if (!(await persist({ enabled: next }))) setAutopilot(!next);
-    else if (next) {
-      // Only promise "writing your first draft" when pacing will actually write one.
-      const fresh = await refetchStatus();
-      if (fresh && 'dueNow' in fresh && fresh.dueNow) setWatchFrom(fresh.draftsThisWeek);
-    }
+
   };
 
   useEffect(() => {
@@ -495,15 +538,9 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4, color: 'var(--accent-ink)' }}>One more step before Autopilot can run</div>
                 <div style={{ fontSize: 12.5, color: 'var(--accent-ink)', marginBottom: 10 }}>
-                  Pick the niches you want it to track, set how often it should draft, and tell it your voice. Without these it has nothing to write about.
+                  Pick what it should write about. It watches these niches for trends and drafts from them{autopilot ? ' — the first post starts as soon as you pick one.' : '.'}
                 </div>
-                <a
-                  href="/onboarding"
-                  className="btn primary"
-                  style={{ textDecoration: 'none', display: 'inline-flex' }}
-                >
-                  <Icon name="bolt" size={12} /> Finish setup
-                </a>
+                <NichePicker value={niches} onChange={(next) => persist({ niches: next as Niche[] })} />
               </div>
             </div>
           </div>
@@ -1050,24 +1087,8 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
           <div className="card-head">
             <h3><Icon name="globe" size={14} /> Niches I&apos;m watching</h3>
           </div>
-          <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {niches.length === 0 && (
-              <div style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>
-                No niches selected yet. Set them in <a href="/onboarding" style={{ textDecoration: 'underline', color: 'var(--ink)' }}>onboarding</a>.
-              </div>
-            )}
-            {niches.map((n) => {
-              const label = NICHE_LABELS[n as keyof typeof NICHE_LABELS] ?? n.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-              const isCustom = !NICHE_LABELS[n as keyof typeof NICHE_LABELS];
-              return (
-                <div key={n} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', borderRadius: 8, background: 'var(--bg-sunk)' }}>
-                  <div>
-                    <div style={{ fontSize: 12.5, fontWeight: 500 }}>{label}</div>
-                    <div className="mono" style={{ fontSize: 10.5, color: 'var(--ink-3)' }}>{isCustom ? 'custom niche' : 'RSS + community signals'}</div>
-                  </div>
-                </div>
-              );
-            })}
+          <div className="card-body">
+            <NichePicker value={niches} disabled={unauth} onChange={(next) => persist({ niches: next as Niche[] })} />
           </div>
         </div>
       </div>

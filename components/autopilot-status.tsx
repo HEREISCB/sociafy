@@ -14,7 +14,7 @@ export type AgentStatusPayload = Omit<AgentStatus, 'pendingReview'> & {
 const AUTO_THRESHOLD = 80;
 
 const BLOCKED: Record<NonNullable<AgentStatus['blocked']>, { text: string; href?: string; cta?: string }> = {
-  no_niches: { text: 'It has nothing to write about yet — pick your niches first.', href: '/onboarding', cta: 'Finish setup' },
+  no_niches: { text: 'It has nothing to write about yet. Pick at least one niche above and the first post starts right away.' },
   no_platforms: { text: 'It has nowhere to post — no connected account is switched on. Turn one on under Autopilot rules, or connect one.', href: '/connections', cta: 'Connections' },
   no_credits: { text: 'You are out of credits. Drafting resumes as soon as you top up.', href: '/billing', cta: 'Top up' },
   no_trends: { text: 'Nothing fresh in your niches right now. It looks again every hour and drafts as soon as something turns up.' },
