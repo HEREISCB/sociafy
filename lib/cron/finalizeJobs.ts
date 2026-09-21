@@ -3,6 +3,7 @@ import { db } from '../db';
 import { genJobs, videoJobs } from '../db/schema';
 import { isStubMode } from '../env';
 import { finalizeVideoJob } from '../media/finalizeVideoJob';
+import { attachFinishedVideos } from '../agent/media';
 // failImageJob is colocated with the /v1/images route that writes these rows and
 // is the only claim-then-refund path for them. Importing app/ from lib/ is
 // unusual here, but a second copy of a refund is how you get a double refund.
@@ -104,6 +105,14 @@ export async function runFinalizeJobs(): Promise<FinalizeJobsResult> {
       console.error('[cron/finalize-video-jobs] image', job.id, msg.slice(0, 300));
       results.push({ id: job.id, status: 'error', error: msg.slice(0, 200) });
     }
+  }
+
+  // Autopilot video posts whose render just ended (above, or via the webhook):
+  // attach the clip and schedule or hold the post.
+  try {
+    await attachFinishedVideos();
+  } catch (e) {
+    console.error('[cron/finalize-video-jobs] attach', e instanceof Error ? e.message.slice(0, 300) : e);
   }
 
   return {

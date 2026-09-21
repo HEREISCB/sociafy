@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 vi.mock('../db', () => ({ db: () => ({}) }));
 vi.mock('../credits/ledger', () => ({ getBalance: async () => 0 }));
 
-import { nextDraftDue, nextTick, overCap } from './status';
+import { nextDraftDue, nextTick, kindQueue, affordableKind } from './status';
 import { recommendPlan } from './recommend';
 
 const H = 60 * 60 * 1000;
@@ -37,11 +37,32 @@ describe('nextTick', () => {
   });
 });
 
-describe('overCap', () => {
+describe('kindQueue', () => {
+  const none = { text: 0, image: 0, video: 0 };
+  it('leads with the kind furthest behind its weekly share', () => {
+    expect(kindQueue({ text: 4, image: 2, video: 0 }, { text: 2, image: 0, video: 0 }, ['x'])).toEqual(['image', 'text']);
+  });
+  it('never offers a kind no enabled platform can publish', () => {
+    expect(kindQueue({ text: 4, image: 1, video: 1 }, none, ['instagram'])).toEqual(['image', 'video']);
+    expect(kindQueue({ text: 4, image: 1, video: 0 }, none, ['tiktok'])).toEqual([]);
+  });
+  it('falls back to text once the mix is met', () => {
+    expect(kindQueue({ text: 1, image: 1, video: 0 }, { text: 1, image: 1, video: 0 }, ['x'])).toEqual(['text']);
+  });
+});
+
+describe('affordableKind', () => {
+  it('drops to a cheaper kind rather than crossing the weekly cap', () => {
+    // video is 149, text is 4
+    expect(affordableKind(['video', 'text'], 1000, 100, 0)).toEqual({ kind: 'text' });
+    expect(affordableKind(['video', 'text'], 1000, null, 0)).toEqual({ kind: 'video' });
+  });
   it('blocks the draft that would cross the cap, not the one that reaches it', () => {
-    expect(overCap(8, 4)).toBe(false);
-    expect(overCap(8, 8)).toBe(true);
-    expect(overCap(null, 9999)).toBe(false);
+    expect(affordableKind(['text'], 1000, 8, 4)).toEqual({ kind: 'text' });
+    expect(affordableKind(['text'], 1000, 8, 8)).toEqual({ blocked: 'credit_cap' });
+  });
+  it('says out of credits before it says capped', () => {
+    expect(affordableKind(['text'], 3, 0, 0)).toEqual({ blocked: 'no_credits' });
   });
 });
 

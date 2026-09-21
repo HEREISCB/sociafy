@@ -66,6 +66,9 @@ vi.mock('../db', async () => {
 
 const draftFromTrends = vi.hoisted(() => vi.fn());
 vi.mock('../ai/agent', () => ({ draftFromTrends }));
+const generateAgentImage = vi.hoisted(() => vi.fn());
+const submitAgentVideo = vi.hoisted(() => vi.fn());
+vi.mock('./media', () => ({ generateAgentImage, submitAgentVideo }));
 vi.mock('../credits/ledger', () => ({
   getBalance: async () => 1000,
   charge: async () => undefined,
@@ -102,6 +105,8 @@ beforeEach(() => {
   state.recentSched = [];
   state.inserts = {};
   state.updates = [];
+  generateAgentImage.mockReset();
+  submitAgentVideo.mockReset();
   draftFromTrends.mockReset();
   draftFromTrends.mockResolvedValue([
     { title: 'T', body: 'B', perPlatform: {}, score: 99, rationale: 'r', trendId: 't1' },
@@ -183,5 +188,42 @@ describe('pacing', () => {
     state.settings = settingsWith({ enabledPlatforms: ['x'], weeklyCreditCap: 0 } as never);
     expect((await runAgentForUser('u1')).reason).toBe('credit_cap');
     expect((await runAgentForUser('u1', { force: true })).drafted).toBe(1);
+  });
+});
+
+describe('image and video posts', () => {
+  const IMG = { id: 'm1', url: 'https://cdn/x.png', mimeType: 'image/png' };
+
+  it('attaches the generated image to the draft and to the scheduled post', async () => {
+    state.settings = settingsWith({ enabledPlatforms: ['x'], postsPerWeekByContentType: { text: 0, image: 3, video: 0 } } as never);
+    generateAgentImage.mockResolvedValue(IMG);
+    const res = await runAgentForUser('u1');
+    expect(res.published).toBe(1);
+    expect(state.inserts['drafts'][0].media).toEqual([IMG]);
+    expect(scheduled()[0].media).toEqual([IMG]);
+  });
+
+  it('holds a video post until its render lands instead of posting it bare', async () => {
+    state.settings = settingsWith({ enabledPlatforms: ['x'], postsPerWeekByContentType: { text: 0, image: 0, video: 1 } } as never);
+    submitAgentVideo.mockResolvedValue('job-1');
+    const res = await runAgentForUser('u1');
+    expect(state.inserts['drafts'][0].videoJobId).toBe('job-1');
+    expect(res.held).toBe(1);
+    expect(scheduled()).toEqual([]);
+  });
+
+  it('never schedules a text post to a platform that rejects text', async () => {
+    state.settings = settingsWith({ enabledPlatforms: ['x', 'instagram'] });
+    state.accounts = [{ id: 'acc-x', platform: 'x' }, { id: 'acc-ig', platform: 'instagram' }];
+    await runAgentForUser('u1');
+    expect(scheduled().map((r) => r.platform)).toEqual(['x']);
+  });
+
+  it('keeps the post as text when the image fails', async () => {
+    state.settings = settingsWith({ enabledPlatforms: ['x'], postsPerWeekByContentType: { text: 0, image: 3, video: 0 } } as never);
+    generateAgentImage.mockResolvedValue(null);
+    await runAgentForUser('u1');
+    expect(state.inserts['drafts'][0].media).toEqual([]);
+    expect(scheduled()).toHaveLength(1);
   });
 });

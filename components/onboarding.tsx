@@ -152,7 +152,6 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
       image: planImagePerWeek,
       video: planVideoPerWeek,
     },
-    withResearch: false,
   }), [planPlatforms, planTextPerWeek, planImagePerWeek, planVideoPerWeek]);
 
   const totalPerWeek = planTextPerWeek + planImagePerWeek + planVideoPerWeek;

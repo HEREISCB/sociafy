@@ -418,7 +418,8 @@ async function cinemaInFlight(): Promise<number> {
 }
 
 export type SubmitVideoArgs = {
-  auth: ApiKeyAuth;
+  /** Autopilot submits for a user with no API key in play — see `via`. */
+  auth: Pick<ApiKeyAuth, 'userId'> & Partial<ApiKeyAuth>;
   /** Public model id. Decides the backend, the price and the envelope. */
   model: VideoModelId;
   prompt: string;
@@ -439,6 +440,9 @@ export type SubmitVideoArgs = {
   /** `api:<Idempotency-Key>`, or null when the caller opted out. */
   source: string | null;
   webhookConfig?: { endpoint: string; secret: string };
+  /** Ledger meta.via. Autopilot passes 'autopilot' so its weekly credit cap can
+   *  find the charge (lib/agent/status.ts). Defaults to 'api_v1'. */
+  via?: string;
 };
 
 export type SubmitVideoResult = { job: VideoJob; creditsCharged: number; replayed: boolean };
@@ -552,7 +556,7 @@ export async function submitVideo(args: SubmitVideoArgs): Promise<SubmitVideoRes
         // Reference stills carry no surcharge (COSTS.md prices only reference
         // *video* input), so this explains the mode, not the price.
         ...(args.imageUrls?.length ? { referenceImages: args.imageUrls.length } : {}),
-        via: 'api_v1',
+        via: args.via ?? 'api_v1',
         ...(source ? { source } : {}),
       },
     });

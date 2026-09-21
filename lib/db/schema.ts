@@ -260,6 +260,9 @@ export const drafts = pgTable(
     preset: text('preset'),
     status: text('status').notNull().$type<DraftStatus>().default('draft'),
     source: text('source').notNull().default('user'),
+    // Autopilot video drafts: the render still in flight. lib/agent/media.ts
+    // attaches the clip (and schedules the post) when it lands, then nulls this.
+    videoJobId: uuid('video_job_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },

@@ -1,8 +1,9 @@
-import { and, eq, gte, asc } from 'drizzle-orm';
+import { and, eq, gte, asc, inArray, sql } from 'drizzle-orm';
 import { db } from '../db';
-import { agentSettings, drafts, scheduledPosts, creditLedger, connectedAccounts, type Niche, type Platform } from '../db/schema';
+import { agentSettings, drafts, scheduledPosts, creditLedger, connectedAccounts, type Niche, type Platform, type PostsPerWeekByType } from '../db/schema';
 import { getBalance } from '../credits/ledger';
-import { CREDIT_PRICES } from '../credits/pricing';
+import { draftCost } from '../credits/estimator';
+import { postKind, supportsKind, type PostKind } from '../platforms/capabilities';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 // ponytail: mirrors the agent cron ("0 */2 * * *" in etc/cron.d/sociafy and
@@ -40,18 +41,52 @@ export function nextTick(d: Date): Date {
 export async function loadWeek(userId: string, now = new Date()) {
   const since = new Date(now.getTime() - WEEK_MS);
   const recent = await db()
-    .select({ createdAt: drafts.createdAt })
+    .select({ createdAt: drafts.createdAt, media: drafts.media, videoJobId: drafts.videoJobId })
     .from(drafts)
     .where(and(eq(drafts.userId, userId), eq(drafts.source, 'agent'), gte(drafts.createdAt, since)));
-  const spent = await db()
+  // Every autopilot charge — copy, image, video — is tagged meta.via. (Not
+  // meta.source: that key is uniquely indexed per user for idempotency.)
+  const charges = await db()
+    .select({ id: creditLedger.id, credits: creditLedger.credits })
+    .from(creditLedger)
+    .where(and(eq(creditLedger.userId, userId), gte(creditLedger.createdAt, since), sql`${creditLedger.meta}->>'via' = 'autopilot'`));
+  // A failed render is refunded as a new row pointing back at its charge.
+  const refunds = charges.length === 0 ? [] : await db()
     .select({ credits: creditLedger.credits })
     .from(creditLedger)
-    .where(and(eq(creditLedger.userId, userId), eq(creditLedger.action, 'agent_draft'), gte(creditLedger.createdAt, since)));
+    .where(inArray(creditLedger.relatedLedgerId, charges.map((c) => c.id)));
+  const done: Record<PostKind, number> = { text: 0, image: 0, video: 0 };
+  for (const r of recent) done[r.videoJobId ? 'video' : postKind(r.media)]++;
   return {
     draftTimes: recent.map((r) => new Date(r.createdAt)),
-    // Charges are negative rows; refunds carry no action, so this is gross spend.
-    creditsThisWeek: spent.reduce((s, r) => s - Math.min(0, r.credits), 0),
+    done,
+    creditsThisWeek: Math.max(0, -[...charges, ...refunds].reduce((sum, r) => sum + r.credits, 0)),
   };
+}
+
+/**
+ * Which kind of post to draft next, best first. The kind furthest behind its
+ * weekly share leads; a kind no enabled platform can publish is dropped (an
+ * Instagram-only account never gets a text post). Text always closes the list
+ * where some platform takes it, so a plan with budget left still produces.
+ */
+export function kindQueue(mix: PostsPerWeekByType, done: Record<PostKind, number>, platforms: Platform[]): PostKind[] {
+  const kinds: PostKind[] = ['text', 'image', 'video'];
+  const behind = (k: PostKind) => (mix[k] > 0 ? (mix[k] - done[k]) / mix[k] : 0);
+  const usable = kinds.filter((k) => platforms.some((p) => supportsKind(p, k)));
+  // Stable sort: ties keep text < image < video, i.e. cheapest first.
+  const wanted = usable.filter((k) => behind(k) > 0).sort((a, b) => behind(b) - behind(a));
+  return usable.includes('text') && !wanted.includes('text') ? [...wanted, 'text'] : wanted;
+}
+
+/** The first kind in the queue the balance and weekly cap can pay for — or what stopped it. */
+export function affordableKind(queue: PostKind[], balance: number, cap: number | null | undefined, creditsThisWeek: number):
+  { kind: PostKind } | { blocked: 'no_credits' | 'credit_cap' | 'no_platforms' } {
+  if (queue.length === 0) return { blocked: 'no_platforms' };
+  const inBalance = queue.filter((k) => draftCost(k) <= balance);
+  if (inBalance.length === 0) return { blocked: 'no_credits' };
+  const kind = inBalance.find((k) => typeof cap !== 'number' || creditsThisWeek + draftCost(k) <= cap);
+  return kind ? { kind } : { blocked: 'credit_cap' };
 }
 
 export type AgentBlock = 'no_niches' | 'no_platforms' | 'no_credits' | 'credit_cap';
@@ -69,10 +104,14 @@ export type AgentStatus = {
   cadencePerWeek: number;
   creditsThisWeek: number;
   weeklyCreditCap: number | null;
-  creditsPerDraft: number;
+  /** What the next draft will be, and what it costs. Null when blocked. */
+  nextKind: PostKind | null;
+  nextCost: number;
+  /** Credits a full week of this plan costs. */
+  weeklyNeed: number;
   balance: number;
   /** Agent drafts still waiting for the user. */
-  pendingReview: { id: string; title: string | null; createdAt: Date }[];
+  pendingReview: { id: string; title: string | null; createdAt: Date; rendering: boolean }[];
   /** Earliest post already queued to go out. */
   nextPostAt: string | null;
 };
@@ -85,7 +124,7 @@ export async function getAgentStatus(userId: string, now = new Date()): Promise<
     getBalance(userId),
     db().select({ platform: connectedAccounts.platform }).from(connectedAccounts).where(eq(connectedAccounts.userId, userId)),
     db()
-      .select({ id: drafts.id, title: drafts.title, createdAt: drafts.createdAt })
+      .select({ id: drafts.id, title: drafts.title, createdAt: drafts.createdAt, videoJobId: drafts.videoJobId })
       .from(drafts)
       .where(and(eq(drafts.userId, userId), eq(drafts.source, 'agent'), eq(drafts.status, 'draft')))
       .orderBy(asc(drafts.createdAt))
@@ -98,13 +137,14 @@ export async function getAgentStatus(userId: string, now = new Date()): Promise<
       .limit(1),
   ]);
 
-  const price = CREDIT_PRICES.agent_draft;
+  const mix = s.postsPerWeekByContentType;
+  // Same rule as run.ts: a platform counts only if it is switched on AND connected.
+  const platforms = ((s.enabledPlatforms ?? []) as Platform[]).filter((p) => connected.some((c) => c.platform === p));
+  const next = affordableKind(kindQueue(mix, week.done, platforms), balance, s.weeklyCreditCap, week.creditsThisWeek);
   const blocked: AgentBlock | null =
     ((s.niches ?? []) as Niche[]).length === 0 ? 'no_niches'
-    // Same rule as run.ts: a platform counts only if it is switched on AND connected.
-    : !((s.enabledPlatforms ?? []) as Platform[]).some((p) => connected.some((c) => c.platform === p)) ? 'no_platforms'
-    : balance < price ? 'no_credits'
-    : overCap(s.weeklyCreditCap, week.creditsThisWeek) ? 'credit_cap'
+    : platforms.length === 0 ? 'no_platforms'
+    : 'blocked' in next ? next.blocked
     : null;
 
   const due = nextDraftDue(s.cadencePerWeek, week.draftTimes);
@@ -118,14 +158,11 @@ export async function getAgentStatus(userId: string, now = new Date()): Promise<
     cadencePerWeek: s.cadencePerWeek,
     creditsThisWeek: week.creditsThisWeek,
     weeklyCreditCap: s.weeklyCreditCap,
-    creditsPerDraft: price,
+    nextKind: 'kind' in next ? next.kind : null,
+    nextCost: 'kind' in next ? draftCost(next.kind) : 0,
+    weeklyNeed: (['text', 'image', 'video'] as const).reduce((sum, k) => sum + mix[k] * draftCost(k), 0),
     balance,
-    pendingReview,
+    pendingReview: pendingReview.map(({ videoJobId, ...d }) => ({ ...d, rendering: !!videoJobId })),
     nextPostAt: nextPost ? new Date(nextPost.at).toISOString() : null,
   };
-}
-
-/** True when one more draft would push this week's autopilot spend past the user's cap. */
-export function overCap(cap: number | null | undefined, creditsThisWeek: number): boolean {
-  return typeof cap === 'number' && creditsThisWeek + CREDIT_PRICES.agent_draft > cap;
 }

@@ -451,7 +451,6 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
     platforms: enabledPlatforms as Platform[],
     cadencePerWeek: cadence,
     postsPerWeekByContentType: contentTypeMix,
-    withResearch: false,
   }), [enabledPlatforms, cadence, contentTypeMix]);
   const balance = creditsData?.balance ?? 0;
   const runway = creditsData ? weeksOfRunway(burnEstimate.weekly, balance) : -1;

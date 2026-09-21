@@ -7,7 +7,7 @@ import type { AgentStatus } from '../lib/agent/status';
 
 /** AgentStatus as it arrives over JSON — Dates are strings by then. */
 export type AgentStatusPayload = Omit<AgentStatus, 'pendingReview'> & {
-  pendingReview: { id: string; title: string | null; createdAt: string }[];
+  pendingReview: { id: string; title: string | null; createdAt: string; rendering: boolean }[];
 };
 
 // Threshold the "Post automatically" button sets. Guardrails can tighten it.
@@ -57,7 +57,6 @@ export const AutopilotStatus: React.FC<Props> = ({ status, autopilot, starting, 
   const blocked = autopilot && status?.blocked ? BLOCKED[status.blocked] : null;
   const auto = status?.mode === 'auto';
   const pending = status?.pendingReview ?? [];
-  const weeklyNeed = status ? status.cadencePerWeek * status.creditsPerDraft : 0;
 
   return (
     <div className="card" style={{ opacity: disabled && !autopilot ? 0.6 : 1 }}>
@@ -74,7 +73,7 @@ export const AutopilotStatus: React.FC<Props> = ({ status, autopilot, starting, 
             {!autopilot
               ? 'Nothing is drafted or posted until you resume.'
               : blocked ? blocked.text
-              : 'It picks a trend from your niches, writes a post in your voice, and ' + (auto ? 'posts it for you.' : 'hands it to you to approve.')}
+              : 'It picks a trend from your niches, writes the post in your voice — with an image or video when your content mix calls for one — and ' + (auto ? 'posts it for you.' : 'hands it to you to approve.')}
             {blocked?.href && <> <Link href={blocked.href} style={{ textDecoration: 'underline', color: 'var(--ink)' }}>{blocked.cta}</Link></>}
           </div>
         </div>
@@ -93,7 +92,7 @@ export const AutopilotStatus: React.FC<Props> = ({ status, autopilot, starting, 
               ) : status.nextDraftAt ? (
                 <div style={{ fontSize: 13 }}>
                   <strong>{countdown(new Date(status.nextDraftAt).getTime(), now)}</strong>
-                  <span style={{ color: 'var(--ink-3)' }}> · around {when(status.nextDraftAt)} · {status.draftsThisWeek} of {status.cadencePerWeek} drafted this week</span>
+                  <span style={{ color: 'var(--ink-3)' }}> · around {when(status.nextDraftAt)} · {status.nextKind === 'text' ? 'a text' : status.nextKind === 'image' ? 'an image' : 'a video'} post, {status.nextCost} credits · {status.draftsThisWeek} of {status.cadencePerWeek} drafted this week</span>
                 </div>
               ) : (
                 <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>Post cadence is 0 — raise it under Guardrails.</div>
@@ -131,6 +130,7 @@ export const AutopilotStatus: React.FC<Props> = ({ status, autopilot, starting, 
                 {pending.map((d) => (
                   <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', background: 'var(--bg-sunk)', borderRadius: 8 }}>
                     <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.title || 'Untitled draft'}</span>
+                    {d.rendering && <span className="chip warn" style={{ fontSize: 10 }}><span className="dot" />video rendering</span>}
                     <span className="mono" style={{ fontSize: 10.5, color: 'var(--ink-3)' }}>{when(d.createdAt)}</span>
                     <button className="btn sm" onClick={() => onEditDraft?.(d.id)}>Review</button>
                   </div>
@@ -167,7 +167,7 @@ export const AutopilotStatus: React.FC<Props> = ({ status, autopilot, starting, 
                   style={{ width: 84, padding: '4px 8px', border: '1px solid var(--line-2)', borderRadius: 6, background: 'var(--bg)', color: 'var(--ink)', fontFamily: 'var(--mono)', fontSize: 12 }}
                 />
                 <span style={{ color: 'var(--ink-3)' }}>
-                  {status.creditsThisWeek} spent this week · your plan needs ~{weeklyNeed}
+                  {status.creditsThisWeek} spent this week · your plan needs ~{status.weeklyNeed}
                 </span>
               </div>
             </div>
