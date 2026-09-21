@@ -169,7 +169,6 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
   const [autopilot, setAutopilot] = useState(false);
   const [editing, setEditing] = useState(false);
   const [instructions, setInstructions] = useState('');
-  const [cadence, setCadence] = useState(4);
   const [threshold, setThreshold] = useState(90);
   const [strict, setStrict] = useState(true);
   const [savingInstr, setSavingInstr] = useState(false);
@@ -325,7 +324,6 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
     if (!settings) return;
     setAutopilot(settings.enabled);
     setInstructions(settings.instructions);
-    setCadence(settings.cadencePerWeek);
     setThreshold(settings.autoPublishThreshold);
     setStrict(settings.brandSafetyStrict);
     setCompanyName(settings.companyName ?? '');
@@ -392,7 +390,11 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
     // Snap the switch back if the server didn't take it — an autopilot that
     // looks "running" but isn't is the worst possible lie on this page.
     if (!(await persist({ enabled: next }))) setAutopilot(!next);
-    else if (next) setWatchFrom(status?.draftsThisWeek ?? 0);
+    else if (next) {
+      // Only promise "writing your first draft" when pacing will actually write one.
+      const fresh = await refetchStatus();
+      if (fresh && 'dueNow' in fresh && fresh.dueNow) setWatchFrom(fresh.draftsThisWeek);
+    }
   };
 
   useEffect(() => {
@@ -430,15 +432,19 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
 
   // What we'd post if it were our account — by platform, tilted by niche.
   const recommended = useMemo(() => recommendPlan(enabledPlatforms, niches), [enabledPlatforms, niches]);
-  const isRecommended = cadence === recommended.cadencePerWeek &&
+  const mixTotal = contentTypeMix.text + contentTypeMix.image + contentTypeMix.video;
+  const isRecommended = mixTotal === recommended.cadencePerWeek &&
     enabledPlatforms.every((p) => postsPerPlatform[p] === recommended.perPlatform[p]);
   const applyRecommended = async () => {
     const caps = { ...postsPerPlatform, ...recommended.perPlatform };
+    // The content mix is the weekly total: keep their image/video counts and
+    // let text posts make up the difference.
+    const mix = { ...contentTypeMix, text: Math.max(0, recommended.cadencePerWeek - contentTypeMix.image - contentTypeMix.video) };
     setPostsPerPlatform(caps);
-    setCadence(recommended.cadencePerWeek);
+    setContentTypeMix(mix);
     setSavingRules(true);
     try {
-      await persist({ postsPerWeekByPlatform: caps, cadencePerWeek: recommended.cadencePerWeek });
+      await persist({ postsPerWeekByPlatform: caps, postsPerWeekByContentType: mix });
     } finally {
       setSavingRules(false);
     }
@@ -449,9 +455,9 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
   const { data: creditsData } = useApi<CreditsPayload>('/api/credits', { refreshInterval: 60_000 });
   const burnEstimate = useMemo(() => estimateWeeklyBurn({
     platforms: enabledPlatforms as Platform[],
-    cadencePerWeek: cadence,
+    cadencePerWeek: mixTotal,
     postsPerWeekByContentType: contentTypeMix,
-  }), [enabledPlatforms, cadence, contentTypeMix]);
+  }), [enabledPlatforms, mixTotal, contentTypeMix]);
   const balance = creditsData?.balance ?? 0;
   const runway = creditsData ? weeksOfRunway(burnEstimate.weekly, balance) : -1;
 
@@ -894,7 +900,7 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
                 ))}
               </div>
               <div style={{ fontSize: 10.5, color: 'var(--ink-4)', marginTop: 6, fontFamily: 'var(--mono)' }}>
-                Total: {contentTypeMix.text + contentTypeMix.image + contentTypeMix.video} / week
+                Total: {mixTotal} posts / week — this is how often autopilot drafts
               </div>
             </div>
 
@@ -904,26 +910,11 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
                 platforms, capped by each platform's weekly limit. */}
             <div style={{ padding: '10px 12px', background: 'var(--bg-sunk)', border: '1px solid var(--line)', borderRadius: 8, fontSize: 12, color: 'var(--ink-2)', lineHeight: 1.5 }}>
               <Icon name="bolt" size={11} style={{ color: 'var(--accent)', marginRight: 6 }} />
-              {(() => {
-                const mixTotal = contentTypeMix.text + contentTypeMix.image + contentTypeMix.video;
-                const capTotal = enabledPlatforms.reduce((s, p) => s + (postsPerPlatform[p] ?? 0), 0);
-                // Per-platform caps cap the per-platform volume; the content
-                // mix sets how many of each kind get drafted. Effective weekly
-                // output is the smaller of "mix total" and "sum of caps" when
-                // caps are set, else just the mix total.
-                const effective = capTotal > 0 ? Math.min(mixTotal, capTotal) : mixTotal;
-                if (enabledPlatforms.length === 0) {
-                  return <>No platforms enabled — autopilot won&apos;t post anything yet.</>;
-                }
-                return (
-                  <>
-                    Autopilot will post <strong>~{effective}/week</strong> across {enabledPlatforms.length} platform{enabledPlatforms.length === 1 ? '' : 's'} (<strong>~{burnEstimate.weekly.toLocaleString()} credits/week</strong>).
-                    {capTotal > 0 && mixTotal > capTotal && (
-                      <span style={{ color: 'var(--ink-4)' }}> Your per-platform caps ({capTotal}/wk) limit the {mixTotal}/wk content mix.</span>
-                    )}
-                  </>
-                );
-              })()}
+              {enabledPlatforms.length === 0
+                ? <>No platforms enabled — autopilot won&apos;t post anything yet.</>
+                : <>
+                    Autopilot writes <strong>~{mixTotal} posts/week</strong> (<strong>~{burnEstimate.weekly.toLocaleString()} credits</strong>). Each one goes to every enabled platform that can take it — text never goes to Instagram, only video goes to TikTok and YouTube — up to that platform&apos;s weekly cap.
+                  </>}
             </div>
           </div>
         </div>
@@ -990,7 +981,6 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
                 row now includes 101 ("Drafts only") as the default option
                 — picking it routes every draft to your inbox for review. */}
             {[
-              { label: 'Post cadence', hint: 'How many drafts per week.', key: 'cadence' as const, options: [2, 3, 4, 5, 7] },
               { label: 'Auto-publish', hint: 'Score threshold each draft must beat to ship automatically. Drafts only sends everything to your inbox for review.', key: 'threshold' as const, options: [101, 80, 85, 90, 95] },
               { label: 'Brand-safe filter', hint: 'Strict refuses anything mentioning competitors or unverified claims.', key: 'strict' as const, options: [true, false] },
             ].map((row) => (
@@ -1000,13 +990,12 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
                   <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 2 }}>{row.hint}</div>
                 </div>
                 <select
-                  value={String(row.key === 'cadence' ? cadence : row.key === 'threshold' ? threshold : strict)}
+                  value={String(row.key === 'threshold' ? threshold : strict)}
                   onChange={(e) => {
                     const v = e.target.value;
                     // No optimistic "Saved" flash here — persist() flashes it
                     // only once the server has actually taken the change.
-                    if (row.key === 'cadence') { setCadence(parseInt(v)); updateField({ cadencePerWeek: parseInt(v) }); }
-                    else if (row.key === 'threshold') { setThreshold(parseInt(v)); updateField({ autoPublishThreshold: parseInt(v) }); }
+                    if (row.key === 'threshold') { setThreshold(parseInt(v)); updateField({ autoPublishThreshold: parseInt(v) }); }
                     else { const b = v === 'true'; setStrict(b); updateField({ brandSafetyStrict: b }); }
                   }}
                   style={{ fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--ink)', background: 'transparent', border: 'none', textAlign: 'right' }}
@@ -1014,8 +1003,7 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
                 >
                   {row.options.map((o) => (
                     <option key={String(o)} value={String(o)}>
-                      {row.key === 'cadence' ? `${o} / week` :
-                        row.key === 'threshold' ? (o === 101 ? 'Drafts only (review each)' : `Auto if score ≥ ${o}`) :
+                      {row.key === 'threshold' ? (o === 101 ? 'Drafts only (review each)' : `Auto if score ≥ ${o}`) :
                         (o ? 'Strict' : 'Standard')}
                     </option>
                   ))}

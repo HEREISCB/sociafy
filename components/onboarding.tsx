@@ -86,6 +86,13 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
   const addCustomNiche = () => {
     const v = customNiche.trim().toLowerCase().replace(/\s+/g, '-').slice(0, 40);
     if (!v) return;
+    // People type "I am founder of X, website x.io" here. A niche is what we
+    // search trends for, so a sentence or a URL only pulls in noise.
+    if (v.split('-').length > 4 || /[.,]/.test(v)) {
+      setSaveError('Keep a niche to a topic, like "voice ai" or "b2b sales". Your company and website go in the Brand step.');
+      return;
+    }
+    setSaveError(null);
     if (topics.includes(v)) { setCustomNiche(''); return; }
     setTopics((prev) => [...prev, v]);
     setCustomNiche('');

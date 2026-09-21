@@ -1,4 +1,4 @@
-import { and, eq, desc } from 'drizzle-orm';
+import { and, eq, desc, gte, isNull, lt, or, sql } from 'drizzle-orm';
 import { db } from '../db';
 import {
   agentSettings,
@@ -16,8 +16,8 @@ import { renderBrandBlock } from '../ai/brand-context';
 import { charge, getBalance } from '../credits/ledger';
 import { CREDIT_PRICES } from '../credits/pricing';
 import { draftCost } from '../credits/estimator';
-import type { PostKind } from '../platforms/capabilities';
-import { loadWeek, nextDraftDue, kindQueue, affordableKind } from './status';
+import { postKind, supportsKind, type PostKind } from '../platforms/capabilities';
+import { loadWeek, nextDraftDue, kindQueue, affordableKind, weeklyTarget } from './status';
 import { generateAgentImage, submitAgentVideo } from './media';
 import { publishOrHold } from './publish';
 
@@ -46,9 +46,8 @@ export async function runAgentForUser(userId: string, opts?: { force?: boolean }
     .from(connectedAccounts)
     .where(eq(connectedAccounts.userId, userId));
   const connectedPlatforms = Array.from(new Set(accounts.map((a) => a.platform))) as Platform[];
-  if (connectedPlatforms.length === 0) {
-    return { userId, drafted: 0, published: 0, held: 0, reason: 'no_accounts' };
-  }
+  if (((settings.niches ?? []) as Niche[]).length === 0) return blocked(userId, 'no_niches', 'no_niches');
+  if (connectedPlatforms.length === 0) return blocked(userId, 'no_accounts', 'no_platforms');
 
   // `enabledPlatforms` is an explicit allow-list: empty means NO platforms,
   // never "all connected". The UI says the same thing ("Autopilot has nowhere
@@ -57,9 +56,7 @@ export async function runAgentForUser(userId: string, opts?: { force?: boolean }
   // onboarding. Per-platform weekly caps are enforced in publishOrHold.
   const allowList = (settings.enabledPlatforms ?? []) as Platform[];
   const allowedPlatforms = connectedPlatforms.filter((p) => allowList.includes(p));
-  if (allowedPlatforms.length === 0) {
-    return { userId, drafted: 0, published: 0, held: 0, reason: 'no_allowed_platforms' };
-  }
+  if (allowedPlatforms.length === 0) return blocked(userId, 'no_allowed_platforms', 'no_platforms');
 
   // The manual button (`force`) is the user asking for drafts right now: it
   // skips pacing and the weekly cap, and stays text-only so one click can never
@@ -67,19 +64,19 @@ export async function runAgentForUser(userId: string, opts?: { force?: boolean }
   let kind: PostKind = 'text';
   const balance = await getBalance(userId);
   if (opts?.force) {
-    if (balance < draftCost('text') * 2) return outOfCredits(userId, balance, draftCost('text') * 2);
+    if (balance < draftCost('text') * 2) return blocked(userId, 'insufficient_credits', 'no_credits');
   } else {
     const week = await loadWeek(userId);
-    const due = nextDraftDue(settings.cadencePerWeek, week.draftTimes);
+    const target = weeklyTarget(settings);
+    const due = nextDraftDue(target, week.draftTimes);
     if (!due || due > new Date()) {
-      const spent = week.draftTimes.length >= settings.cadencePerWeek;
+      const spent = week.draftTimes.length >= target;
       return { userId, drafted: 0, published: 0, held: 0, reason: spent ? 'budget_met' : 'not_due' };
     }
-    const mix = settings.postsPerWeekByContentType ?? { text: settings.cadencePerWeek, image: 0, video: 0 };
+    const mix = settings.postsPerWeekByContentType ?? { text: target, image: 0, video: 0 };
     const next = affordableKind(kindQueue(mix, week.done, allowedPlatforms), balance, settings.weeklyCreditCap, week.creditsThisWeek);
     if ('blocked' in next) {
-      if (next.blocked === 'no_credits') return outOfCredits(userId, balance, draftCost('text'));
-      return { userId, drafted: 0, published: 0, held: 0, reason: next.blocked };
+      return blocked(userId, next.blocked === 'no_credits' ? 'insufficient_credits' : next.blocked, next.blocked);
     }
     kind = next.kind;
   }
@@ -92,6 +89,22 @@ export async function runAgentForUser(userId: string, opts?: { force?: boolean }
     .limit(8);
   if (newTrends.length === 0) {
     return { userId, drafted: 0, published: 0, held: 0, reason: 'no_trends' };
+  }
+
+  // Claim this run before the slow part (LLM + image can take 90s). Without it
+  // two runs that overlap — the enable-kick and a cron tick, or a doubled cron —
+  // both see "due", both draft, and the user pays twice. Whoever updates the
+  // row first wins; the manual button is the user's own choice and skips this.
+  if (!opts?.force) {
+    const claimed = await db()
+      .update(agentSettings)
+      .set({ lastRunAt: new Date() })
+      .where(and(
+        eq(agentSettings.userId, userId),
+        or(isNull(agentSettings.lastRunAt), lt(agentSettings.lastRunAt, new Date(Date.now() - 15 * 60_000))),
+      ))
+      .returning({ userId: agentSettings.userId });
+    if (claimed.length === 0) return { userId, drafted: 0, published: 0, held: 0, reason: 'already_running' };
   }
 
   // Who the brand is. Built from the row already in hand; voice, style guide,
@@ -150,7 +163,9 @@ export async function runAgentForUser(userId: string, opts?: { force?: boolean }
         selectedVariantLabel: 'A',
         media,
         videoJobId,
-        targetPlatforms: allowedPlatforms,
+        // Only platforms that can publish what this turned out to be — a failed
+        // image leaves a text post, which Instagram would reject.
+        targetPlatforms: allowedPlatforms.filter((p) => supportsKind(p, videoJobId ? 'video' : postKind(media))),
         perPlatformText: d.perPlatform,
         source: 'agent',
       })
@@ -190,30 +205,60 @@ export async function runAgentForUser(userId: string, opts?: { force?: boolean }
         meta: { draftId: draftRow.id, score: d.score, videoJobId },
       });
       heldCount++;
-    } else if (await publishOrHold(settings, draftRow, d.score)) publishedCount++;
-    else heldCount++;
+    } else {
+      // Re-read: the image took a minute, and "pause" or "ask me first" clicked
+      // in that minute must win over the snapshot this run started with.
+      const [fresh] = await db().select().from(agentSettings).where(eq(agentSettings.userId, userId)).limit(1);
+      if (await publishOrHold(fresh ?? settings, draftRow, d.score)) publishedCount++;
+      else heldCount++;
+    }
   }
 
   await db().update(agentSettings).set({ lastRunAt: new Date() }).where(eq(agentSettings.userId, userId));
   return { userId, drafted: drafted.length, published: publishedCount, held: heldCount, draftIds };
 }
 
-async function outOfCredits(userId: string, balance: number, needed: number): Promise<AgentRunResult> {
-  await db().insert(activityLog).values({
-    userId,
-    kind: 'agent_skipped',
-    title: 'Autopilot paused — out of credits',
-    body: `Need ${needed} credits to draft, balance is ${balance}. Top up or upgrade to resume.`,
-    meta: { reason: 'insufficient_credits', balance, needed },
-  });
-  return { userId, drafted: 0, published: 0, held: 0, reason: 'insufficient_credits' };
+// What the user has to do before autopilot can draft. Shown in the bell and
+// the activity feed — the only channel that reaches every user today.
+const BLOCKED_NOTES = {
+  no_niches: ['Autopilot is waiting on you — no topics picked', 'Pick at least one niche so it knows what to write about. Open Auto-pilot and hit Finish setup.'],
+  no_platforms: ['Autopilot is waiting on you — nowhere to post', 'Connect an account, then switch it on under Auto-pilot → Autopilot rules. Nothing is drafted until one is on.'],
+  no_credits: ['Autopilot paused — out of credits', 'There are not enough credits for the next post. Top up or upgrade and it picks up on its own.'],
+  credit_cap: ['Autopilot hit your weekly credit cap', 'It resumes as this week\'s spend ages out. Raise the cap on the Auto-pilot page to keep it going now.'],
+} as const;
+
+/**
+ * Autopilot is on but can't draft. Tell the user once — the cron asks every two
+ * hours, and a fresh "you're out of credits" each time buries everything else
+ * in the feed. A week later, if it is still stuck, it is worth saying again.
+ */
+async function blocked(userId: string, reason: string, note: keyof typeof BLOCKED_NOTES): Promise<AgentRunResult> {
+  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const [told] = await db()
+    .select({ id: activityLog.id })
+    .from(activityLog)
+    .where(and(eq(activityLog.userId, userId), eq(activityLog.kind, 'agent_skipped'), gte(activityLog.createdAt, since), sql`${activityLog.meta}->>'note' = ${note}`))
+    .limit(1);
+  if (!told) {
+    const [title, body] = BLOCKED_NOTES[note];
+    await db().insert(activityLog).values({ userId, kind: 'agent_skipped', title, body, meta: { reason, note } });
+  }
+  return { userId, drafted: 0, published: 0, held: 0, reason };
 }
 
 export async function runAgentForAll(): Promise<AgentRunResult[]> {
-  const enabled = await db().select().from(agentSettings).where(eq(agentSettings.enabled, true)).limit(100);
+  // ponytail: sequential and unbounded. Fine while enabled users number in the
+  // dozens; shard by user id across ticks when a tick stops fitting in 2 hours.
+  const enabled = await db().select({ userId: agentSettings.userId }).from(agentSettings).where(eq(agentSettings.enabled, true));
   const out: AgentRunResult[] = [];
-  for (const settings of enabled) {
-    out.push(await runAgentForUser(settings.userId));
+  for (const { userId } of enabled) {
+    try {
+      out.push(await runAgentForUser(userId));
+    } catch (e) {
+      // One user's bad row or provider error must not cost everyone after them their tick.
+      console.error('[agent.run]', userId, e instanceof Error ? e.message : e);
+      out.push({ userId, drafted: 0, published: 0, held: 0, reason: 'error' });
+    }
   }
   return out;
 }

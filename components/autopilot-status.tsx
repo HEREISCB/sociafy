@@ -17,6 +17,7 @@ const BLOCKED: Record<NonNullable<AgentStatus['blocked']>, { text: string; href?
   no_niches: { text: 'It has nothing to write about yet — pick your niches first.', href: '/onboarding', cta: 'Finish setup' },
   no_platforms: { text: 'It has nowhere to post — no connected account is switched on. Turn one on under Autopilot rules, or connect one.', href: '/connections', cta: 'Connections' },
   no_credits: { text: 'You are out of credits. Drafting resumes as soon as you top up.', href: '/billing', cta: 'Top up' },
+  no_trends: { text: 'Nothing fresh in your niches right now. It looks again every hour and drafts as soon as something turns up.' },
   credit_cap: { text: 'It hit your weekly credit cap. Drafting resumes as older spend ages out — or raise the cap below.' },
 };
 

@@ -1,6 +1,6 @@
 import { and, eq, gte, asc, inArray, sql } from 'drizzle-orm';
 import { db } from '../db';
-import { agentSettings, drafts, scheduledPosts, creditLedger, connectedAccounts, type Niche, type Platform, type PostsPerWeekByType } from '../db/schema';
+import { agentSettings, drafts, scheduledPosts, creditLedger, connectedAccounts, trends, type Niche, type Platform, type PostsPerWeekByType } from '../db/schema';
 import { getBalance } from '../credits/ledger';
 import { draftCost } from '../credits/estimator';
 import { postKind, supportsKind, type PostKind } from '../platforms/capabilities';
@@ -10,6 +10,16 @@ const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 // scheduled-jobs.yml). Change the cron, change this — it only drives the
 // countdown shown to the user, never whether a draft is allowed.
 const TICK_HOURS = 2;
+
+/**
+ * Posts per week autopilot aims for. The content mix IS the plan — 4 text +
+ * 2 image + 1 video means 7 a week. cadencePerWeek only speaks for rows saved
+ * before the mix existed (or with an all-zero mix).
+ */
+export function weeklyTarget(s: { cadencePerWeek: number; postsPerWeekByContentType?: PostsPerWeekByType | null }): number {
+  const m = s.postsPerWeekByContentType;
+  return (m ? m.text + m.image + m.video : 0) || s.cadencePerWeek;
+}
 
 /**
  * When autopilot may next draft. Drafts are spread evenly over the week
@@ -76,7 +86,11 @@ export function kindQueue(mix: PostsPerWeekByType, done: Record<PostKind, number
   const usable = kinds.filter((k) => platforms.some((p) => supportsKind(p, k)));
   // Stable sort: ties keep text < image < video, i.e. cheapest first.
   const wanted = usable.filter((k) => behind(k) > 0).sort((a, b) => behind(b) - behind(a));
-  return usable.includes('text') && !wanted.includes('text') ? [...wanted, 'text'] : wanted;
+  if (usable.includes('text') && !wanted.includes('text')) wanted.push('text');
+  // Mix met (or never set) on an account text can't reach, e.g. Instagram-only:
+  // an image rather than "nowhere to post". Never a video nobody asked for —
+  // that is 149 credits.
+  return wanted.length ? wanted : usable.filter((k) => k !== 'video').slice(0, 1);
 }
 
 /** The first kind in the queue the balance and weekly cap can pay for — or what stopped it. */
@@ -89,7 +103,7 @@ export function affordableKind(queue: PostKind[], balance: number, cap: number |
   return kind ? { kind } : { blocked: 'credit_cap' };
 }
 
-export type AgentBlock = 'no_niches' | 'no_platforms' | 'no_credits' | 'credit_cap';
+export type AgentBlock = 'no_niches' | 'no_platforms' | 'no_credits' | 'credit_cap' | 'no_trends';
 
 export type AgentStatus = {
   enabled: boolean;
@@ -100,6 +114,8 @@ export type AgentStatus = {
   threshold: number;
   /** ISO time of the cron tick that writes the next draft. Null when paused or blocked. */
   nextDraftAt: string | null;
+  /** Pacing allows a draft right now — switching on will write one immediately. */
+  dueNow: boolean;
   draftsThisWeek: number;
   cadencePerWeek: number;
   creditsThisWeek: number;
@@ -119,10 +135,11 @@ export type AgentStatus = {
 export async function getAgentStatus(userId: string, now = new Date()): Promise<AgentStatus | null> {
   const [s] = await db().select().from(agentSettings).where(eq(agentSettings.userId, userId)).limit(1);
   if (!s) return null;
-  const [week, balance, connected, pendingReview, [nextPost]] = await Promise.all([
+  const [week, balance, connected, [freshTrend], pendingReview, [nextPost]] = await Promise.all([
     loadWeek(userId, now),
     getBalance(userId),
     db().select({ platform: connectedAccounts.platform }).from(connectedAccounts).where(eq(connectedAccounts.userId, userId)),
+    db().select({ id: trends.id }).from(trends).where(and(eq(trends.userId, userId), eq(trends.status, 'new'))).limit(1),
     db()
       .select({ id: drafts.id, title: drafts.title, createdAt: drafts.createdAt, videoJobId: drafts.videoJobId })
       .from(drafts)
@@ -145,17 +162,21 @@ export async function getAgentStatus(userId: string, now = new Date()): Promise<
     ((s.niches ?? []) as Niche[]).length === 0 ? 'no_niches'
     : platforms.length === 0 ? 'no_platforms'
     : 'blocked' in next ? next.blocked
+    // run.ts writes nothing without a trend to write about; the hourly refresh usually fixes this by itself.
+    : s.enabled && !freshTrend ? 'no_trends'
     : null;
 
-  const due = nextDraftDue(s.cadencePerWeek, week.draftTimes);
+  const target = weeklyTarget(s);
+  const due = nextDraftDue(target, week.draftTimes);
   return {
     enabled: s.enabled,
     blocked,
     mode: s.autoPublishThreshold <= 100 ? 'auto' : 'review',
     threshold: s.autoPublishThreshold,
     nextDraftAt: s.enabled && !blocked && due ? nextTick(due > now ? due : now).toISOString() : null,
+    dueNow: !blocked && !!due && due <= now,
     draftsThisWeek: week.draftTimes.length,
-    cadencePerWeek: s.cadencePerWeek,
+    cadencePerWeek: target,
     creditsThisWeek: week.creditsThisWeek,
     weeklyCreditCap: s.weeklyCreditCap,
     nextKind: 'kind' in next ? next.kind : null,

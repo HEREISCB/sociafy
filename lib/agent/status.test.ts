@@ -46,6 +46,9 @@ describe('kindQueue', () => {
     expect(kindQueue({ text: 4, image: 1, video: 1 }, none, ['instagram'])).toEqual(['image', 'video']);
     expect(kindQueue({ text: 4, image: 1, video: 0 }, none, ['tiktok'])).toEqual([]);
   });
+  it('offers the cheapest publishable kind when text cannot go anywhere', () => {
+    expect(kindQueue(none, none, ['instagram'])).toEqual(['image']);
+  });
   it('falls back to text once the mix is met', () => {
     expect(kindQueue({ text: 1, image: 1, video: 0 }, { text: 1, image: 1, video: 0 }, ['x'])).toEqual(['text']);
   });

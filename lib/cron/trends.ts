@@ -42,8 +42,7 @@ export async function runTrends(): Promise<TrendsResult[]> {
   const enabled = await db()
     .select()
     .from(agentSettings)
-    .where(eq(agentSettings.enabled, true))
-    .limit(50);
+    .where(eq(agentSettings.enabled, true));
   const out: TrendsResult[] = [];
   const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
@@ -53,7 +52,11 @@ export async function runTrends(): Promise<TrendsResult[]> {
       out.push({ userId: settings.userId, inserted: 0, pruned: 0 });
       continue;
     }
-    const inserted = await refreshTrendsForUser(settings.userId, niches);
+    // A feed timing out for one user must not cost the rest their refresh.
+    const inserted = await refreshTrendsForUser(settings.userId, niches).catch((e) => {
+      console.error('[cron/trends]', settings.userId, e instanceof Error ? e.message : e);
+      return 0;
+    });
 
     const pruned = await db()
       .delete(trends)

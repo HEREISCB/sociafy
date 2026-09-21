@@ -17,6 +17,8 @@ const state = vi.hoisted(() => ({
   accounts: [] as Record<string, unknown>[],
   recentDrafts: [] as Record<string, unknown>[],
   recentSched: [] as Record<string, unknown>[],
+  activity: [] as Record<string, unknown>[],
+  claimFails: false,
   inserts: {} as Record<string, Record<string, unknown>[]>,
   updates: [] as { table: string; values: Record<string, unknown> }[],
 }));
@@ -30,6 +32,7 @@ vi.mock('../db', async () => {
       case 'trends': return state.trends;
       case 'connected_accounts': return state.accounts;
       case 'scheduled_posts': return state.recentSched;
+      case 'activity_log': return state.activity;
       default: return [];
     }
   };
@@ -57,7 +60,8 @@ vi.mock('../db', async () => {
       update: (t: any) => ({
         set: (v: Record<string, unknown>) => {
           state.updates.push({ table: getTableName(t), values: v });
-          return { where: () => Promise.resolve([]) };
+          // `.returning()` answers the run claim: one row = we own this run.
+          return { where: () => Object.assign(Promise.resolve([]), { returning: () => Promise.resolve(state.claimFails ? [] : [{ userId: 'u1' }]) }) };
         },
       }),
     }),
@@ -103,6 +107,8 @@ beforeEach(() => {
   ];
   state.recentDrafts = [];
   state.recentSched = [];
+  state.activity = [];
+  state.claimFails = false;
   state.inserts = {};
   state.updates = [];
   generateAgentImage.mockReset();
@@ -225,5 +231,47 @@ describe('image and video posts', () => {
     await runAgentForUser('u1');
     expect(state.inserts['drafts'][0].media).toEqual([]);
     expect(scheduled()).toHaveLength(1);
+  });
+});
+
+describe('when autopilot is on but cannot draft', () => {
+  const notes = () => (state.inserts['activity_log'] ?? []).filter((r) => r.kind === 'agent_skipped');
+
+  it('tells the user what to fix', async () => {
+    state.settings = settingsWith({ enabledPlatforms: [] });
+    await runAgentForUser('u1');
+    expect(notes()).toHaveLength(1);
+    expect((notes()[0].meta as { note: string }).note).toBe('no_platforms');
+  });
+
+  it('does not repeat itself every cron tick', async () => {
+    state.settings = settingsWith({ enabledPlatforms: [] });
+    state.activity = [{ id: 'already-told' }];
+    await runAgentForUser('u1');
+    expect(notes()).toEqual([]);
+  });
+
+  it('asks for niches before anything else', async () => {
+    state.settings = settingsWith({ niches: [], enabledPlatforms: ['x'] });
+    expect((await runAgentForUser('u1')).reason).toBe('no_niches');
+  });
+});
+
+describe('the content mix is the weekly plan', () => {
+  it('keeps drafting past cadencePerWeek when the mix asks for more', async () => {
+    // cadence says 1, mix says 7: one draft 2 days ago is not "budget met".
+    state.settings = settingsWith({ cadencePerWeek: 1, enabledPlatforms: ['x'], postsPerWeekByContentType: { text: 7, image: 0, video: 0 } } as never);
+    state.recentDrafts = [{ createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000), media: [] }];
+    expect((await runAgentForUser('u1')).drafted).toBe(1);
+  });
+});
+
+describe('overlapping runs', () => {
+  it('drafts nothing when another run already claimed this user', async () => {
+    state.settings = settingsWith({ enabledPlatforms: ['x'] });
+    state.claimFails = true;
+    const res = await runAgentForUser('u1');
+    expect(res.reason).toBe('already_running');
+    expect(draftFromTrends).not.toHaveBeenCalled();
   });
 });

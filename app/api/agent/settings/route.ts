@@ -64,7 +64,12 @@ export async function PATCH(req: NextRequest) {
     }
     if (body.enabledPlatforms !== undefined) patch.enabledPlatforms = body.enabledPlatforms;
     if (body.postsPerWeekByPlatform !== undefined) patch.postsPerWeekByPlatform = body.postsPerWeekByPlatform;
-    if (body.postsPerWeekByContentType !== undefined) patch.postsPerWeekByContentType = body.postsPerWeekByContentType;
+    if (body.postsPerWeekByContentType !== undefined) {
+      patch.postsPerWeekByContentType = body.postsPerWeekByContentType;
+      // The mix is the plan; keep the legacy column in step for anything still reading it.
+      const { text, image, video } = body.postsPerWeekByContentType;
+      if (text + image + video > 0) patch.cadencePerWeek = text + image + video;
+    }
     if (body.weeklyCreditCap !== undefined) patch.weeklyCreditCap = body.weeklyCreditCap;
     const [row] = await db()
       .update(agentSettings)

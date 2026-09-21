@@ -1,4 +1,4 @@
-import { eq, ne } from 'drizzle-orm';
+import { and, eq, ne } from 'drizzle-orm';
 import { db } from '../db';
 import { agentSettings, drafts, genJobs, videoJobs, mediaAssets, activityLog, type DraftMedia } from '../db/schema';
 import { charge } from '../credits/ledger';
@@ -29,9 +29,10 @@ export async function generateAgentImage(p: Post): Promise<DraftMedia | null> {
       credits: unit.credits,
       meta: { via: 'autopilot', imageJobId: job.id, ...AGENT_IMAGE },
     });
-    // The sweeper and failImageJob refund against this link.
-    await db().update(genJobs).set({ creditLedgerId: charged.ledgerId, creditsCharged: unit.credits }).where(eq(genJobs.id, job.id));
+    // The sweeper and failImageJob refund against this link — set it in memory
+    // first so a failed UPDATE still leaves the catch below able to refund.
     job.creditLedgerId = charged.ledgerId;
+    await db().update(genJobs).set({ creditLedgerId: charged.ledgerId, creditsCharged: unit.credits }).where(eq(genJobs.id, job.id));
   } catch (e) {
     await failImageJob(job, 'charge_failed');
     throw e;
@@ -78,11 +79,17 @@ export async function attachFinishedVideos(): Promise<number> {
     const media: DraftMedia[] = asset
       ? [{ id: asset.id, url: asset.publicUrl, mimeType: asset.mimeType, width: asset.width ?? undefined, height: asset.height ?? undefined }]
       : [];
+    // Conditional on the job still being parked here: of two overlapping sweeps
+    // only one gets a row back, so a post can never be queued twice. Media the
+    // user attached while waiting is theirs — the clip only fills an empty slot.
     const [updated] = await db()
       .update(drafts)
-      .set({ media, videoJobId: null, updatedAt: new Date() })
-      .where(eq(drafts.id, draft.id))
+      .set({ ...((draft.media ?? []).length === 0 ? { media } : {}), videoJobId: null, updatedAt: new Date() })
+      .where(and(eq(drafts.id, draft.id), eq(drafts.videoJobId, job.id)))
       .returning();
+    if (!updated) continue;
+    // Scheduled, published or archived by hand in the meantime: their call stands.
+    if (updated.status !== 'draft') continue;
 
     if (!asset) {
       await db().insert(activityLog).values({

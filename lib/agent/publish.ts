@@ -1,4 +1,4 @@
-import { and, eq, gte } from 'drizzle-orm';
+import { and, eq, gte, notInArray } from 'drizzle-orm';
 import { db } from '../db';
 import { agentSettings, drafts, scheduledPosts, connectedAccounts, activityLog, type Platform, type DraftMedia } from '../db/schema';
 import { nextPostingWindow } from '../schedule/windows';
@@ -36,7 +36,7 @@ export async function publishOrHold(settings: Settings, draft: Draft, score: num
   const recent = await db()
     .select({ platform: scheduledPosts.platform })
     .from(scheduledPosts)
-    .where(and(eq(scheduledPosts.userId, userId), gte(scheduledPosts.createdAt, weekAgo)));
+    .where(and(eq(scheduledPosts.userId, userId), gte(scheduledPosts.createdAt, weekAgo), notInArray(scheduledPosts.status, ['failed', 'canceled'])));
   const used = new Map<Platform, number>();
   for (const r of recent) used.set(r.platform as Platform, (used.get(r.platform as Platform) ?? 0) + 1);
   const caps = (settings.postsPerWeekByPlatform ?? {}) as Partial<Record<Platform, number>>;
