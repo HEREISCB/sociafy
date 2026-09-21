@@ -6,7 +6,7 @@ import { Icon, Pglyph } from './icons';
 import { apiPatch, useApi } from '../lib/ui/fetcher';
 import { PLATFORM_TO_SHORT, SHORT_TO_PLATFORM } from '../lib/ui/platforms';
 import type { Platform } from '../lib/db/schema';
-import { estimateWeeklyBurn, weeksOfRunway, CREDIT_PRICES, type ContentMixWeekly } from '../lib/credits/estimator';
+import { estimateWeeklyBurn, weeksOfRunway, type ContentMixWeekly } from '../lib/credits/estimator';
 import { recommendPlan } from '../lib/agent/recommend';
 import { BillingDetailsFields, useBillingDetails } from './billing/billing-details';
 import type { CreditsPayload } from './credits';
@@ -631,7 +631,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
                     onChange={(e) => setPlanCreditCap(e.target.value)}
                     style={{ width: 110, padding: '8px 10px', border: '1px solid var(--line-2)', borderRadius: 8, background: 'var(--bg)', color: 'var(--ink)', fontFamily: 'var(--mono)', fontSize: 13 }}
                   />
-                  <span style={{ color: 'var(--ink-3)' }}>credits / week · this plan&apos;s drafts need about {Math.max(1, totalPerWeek) * CREDIT_PRICES.agent_draft}</span>
+                  <span style={{ color: 'var(--ink-3)' }}>credits / week · this plan needs about {estimate.weekly}</span>
                 </div>
               </section>
 

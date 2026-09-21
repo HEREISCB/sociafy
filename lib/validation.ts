@@ -106,7 +106,9 @@ export const agentSettingsUpdateSchema = z.object({
   website: z.string().url().max(500).optional().or(z.literal('')),
   // Autopilot permission matrix.
   enabledPlatforms: z.array(platform).max(6).optional(),
-  postsPerWeekByPlatform: z.record(platform, z.number().int().min(0).max(50)).optional(),
+  // partialRecord: Zod 4's z.record over an enum demands EVERY key, so caps for
+  // just the platforms a user has (the only shape the UI ever sends) were a 400.
+  postsPerWeekByPlatform: z.partialRecord(platform, z.number().int().min(0).max(50)).optional(),
   postsPerWeekByContentType: z.object({
     text: z.number().int().min(0).max(50),
     image: z.number().int().min(0).max(50),
