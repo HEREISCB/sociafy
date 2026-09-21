@@ -112,6 +112,8 @@ export const agentSettingsUpdateSchema = z.object({
     image: z.number().int().min(0).max(50),
     video: z.number().int().min(0).max(20),
   }).optional(),
+  // null clears the cap.
+  weeklyCreditCap: z.number().int().min(0).max(1_000_000).nullable().optional(),
 });
 
 // Accounts -------------------------------------------------------------

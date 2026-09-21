@@ -24,6 +24,8 @@ export type DraftAgentArgs = {
   niches: Niche[];
   platforms: Platform[];
   brandSafetyStrict: boolean;
+  /** Pre-rendered brand context block from `renderBrandBlock(ctx, 'text')`. */
+  brandBlock?: string;
   trends: Array<{ id: string; niche: string; title: string; summary?: string | null; sourceUrl?: string | null }>;
   count: number;
   /** Enable web_search + url fetch + image search tools. Defaults to true. */
@@ -44,6 +46,7 @@ export async function draftFromTrends(args: DraftAgentArgs): Promise<AgentDraft[
     `Voice template: ${args.voiceTemplate}`,
     `Niches they post about: ${args.niches.join(', ') || 'general'}`,
     `Brand safety: ${args.brandSafetyStrict ? 'strict — refuse posts that mention competitors negatively, unverified claims, or sensitive topics' : 'standard'}`,
+    args.brandBlock ? `\n${args.brandBlock}` : '',
     '',
     ...(enableTools
       ? [

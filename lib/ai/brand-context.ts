@@ -12,6 +12,8 @@ export type BrandContext = {
   companyName: string | null;
   brandBio: string | null;
   website: string | null;
+  /** LLM summary of the website's own copy — see lib/ai/brand-brief.ts. */
+  brandBrief: string | null;
   niches: Niche[];
   voiceTemplate: VoiceTemplate | null;
   /** The user's freeform style guide. Separate from brandBio: the bio
@@ -37,6 +39,7 @@ export async function loadBrandContext(userId: string): Promise<BrandContext | n
     companyName: settings.companyName,
     brandBio: settings.brandBio,
     website: settings.website,
+    brandBrief: settings.brandBrief,
     niches: (settings.niches ?? []) as Niche[],
     voiceTemplate: (settings.voiceTemplate ?? null) as VoiceTemplate | null,
     instructions: settings.instructions || null,
@@ -63,6 +66,7 @@ export function renderBrandBlock(ctx: BrandContext | null, mode: 'media' | 'text
   if (ctx.companyName) lines.push(`Brand: ${ctx.companyName}`);
   if (ctx.brandBio) lines.push(`About: ${ctx.brandBio}`);
   if (ctx.website) lines.push(`Website: ${ctx.website}`);
+  if (ctx.brandBrief) lines.push(`From their website: ${ctx.brandBrief}`);
   if (ctx.niches.length) lines.push(`Niches: ${ctx.niches.join(', ')}`);
   if (mode === 'text') {
     if (ctx.voiceTemplate) lines.push(`Voice preset: ${ctx.voiceTemplate}`);

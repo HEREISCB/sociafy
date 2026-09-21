@@ -1,9 +1,16 @@
-import { NextRequest } from 'next/server';
+import { NextRequest, after } from 'next/server';
 import { and, eq, isNull } from 'drizzle-orm';
 import { withUser } from '../../../../lib/api';
 import { db } from '../../../../lib/db';
 import { agentSettings, activityLog, profiles } from '../../../../lib/db/schema';
 import { agentSettingsUpdateSchema, parseBody } from '../../../../lib/validation';
+import { buildBrandBrief } from '../../../../lib/ai/brand-brief';
+import { refreshTrendsForUser } from '../../../../lib/cron/trends';
+import { runAgentForUser } from '../../../../lib/agent/run';
+
+// Bounds the `after()` work: the brand-brief build (2 fetch rounds at 10s + a
+// 30s LLM call) or autopilot's first draft on enable.
+export const maxDuration = 60;
 
 const DEFAULT_INSTRUCTIONS = `Match my voice. Don't use emojis unless I do. Avoid hyperbole and corporate jargon. Lead with a clear point of view. When sharing data, cite the source. Hold posts that mention competitors or unverified claims for review.`;
 
@@ -48,10 +55,17 @@ export async function PATCH(req: NextRequest) {
     if (body.voiceTemplate !== undefined) patch.voiceTemplate = body.voiceTemplate;
     if (body.companyName !== undefined) patch.companyName = body.companyName || null;
     if (body.brandBio !== undefined) patch.brandBio = body.brandBio || null;
-    if (body.website !== undefined) patch.website = body.website || null;
+    if (body.website !== undefined) {
+      patch.website = body.website || null;
+      if (!patch.website) {
+        patch.brandBrief = null;
+        patch.brandBriefSource = null;
+      }
+    }
     if (body.enabledPlatforms !== undefined) patch.enabledPlatforms = body.enabledPlatforms;
     if (body.postsPerWeekByPlatform !== undefined) patch.postsPerWeekByPlatform = body.postsPerWeekByPlatform;
     if (body.postsPerWeekByContentType !== undefined) patch.postsPerWeekByContentType = body.postsPerWeekByContentType;
+    if (body.weeklyCreditCap !== undefined) patch.weeklyCreditCap = body.weeklyCreditCap;
     const [row] = await db()
       .update(agentSettings)
       .set(patch)
@@ -65,6 +79,19 @@ export async function PATCH(req: NextRequest) {
         title: body.enabled ? 'Autopilot enabled' : 'Autopilot disabled',
         meta: {},
       });
+      // Switching on should produce something now, not at the next 2-hourly
+      // tick. Unforced on purpose: pacing and the credit cap still apply, so
+      // flipping the switch off and on cannot farm drafts.
+      if (body.enabled) {
+        after(async () => {
+          try {
+            await refreshTrendsForUser(user.id, (row.niches ?? []) as string[]);
+            await runAgentForUser(user.id);
+          } catch (e) {
+            console.error('[autopilot] first run failed:', e instanceof Error ? e.message : String(e));
+          }
+        });
+      }
     }
 
     // Mark profile as onboarded on first save only (idempotent). Gates the
@@ -79,6 +106,26 @@ export async function PATCH(req: NextRequest) {
       .insert(profiles)
       .values({ id: user.id, onboardedAt: new Date() })
       .onConflictDoNothing({ target: profiles.id });
+
+    // Read the website into a brand brief after the response — a slow or dead
+    // site must never slow down or fail the save. Stale = the URL changed since
+    // the brief was built, or a previous build failed and left it null.
+    const site = row.website;
+    if (body.website !== undefined && site && (site !== row.brandBriefSource || !row.brandBrief)) {
+      after(async () => {
+        try {
+          const brief = await buildBrandBrief(site);
+          if (!brief) return;
+          // Guard on website so a URL changed mid-build isn't given the old site's brief.
+          await db()
+            .update(agentSettings)
+            .set({ brandBrief: brief, brandBriefSource: site })
+            .where(and(eq(agentSettings.userId, user.id), eq(agentSettings.website, site)));
+        } catch (e) {
+          console.error('[brand-brief] build failed:', e instanceof Error ? e.message : String(e));
+        }
+      });
+    }
 
     return row;
   }, req);

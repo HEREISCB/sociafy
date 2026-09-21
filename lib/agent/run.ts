@@ -14,9 +14,11 @@ import {
   type VoiceTemplate,
 } from '../db/schema';
 import { draftFromTrends } from '../ai/agent';
+import { renderBrandBlock } from '../ai/brand-context';
 import { nextPostingWindow } from '../schedule/windows';
 import { charge, getBalance } from '../credits/ledger';
 import { CREDIT_PRICES } from '../credits/pricing';
+import { loadWeek, nextDraftDue, overCap } from './status';
 
 export type AgentRunResult = {
   userId: string;
@@ -39,9 +41,23 @@ export async function runAgentForUser(userId: string, opts?: { force?: boolean }
   }
   const canAutoPublish = settings.enabled;
 
+  // Pacing + spend limits for the cron path. The manual button (`force`) is the
+  // user asking for a draft right now, so it skips both.
+  if (!opts?.force) {
+    const week = await loadWeek(userId);
+    const due = nextDraftDue(settings.cadencePerWeek, week.draftTimes);
+    if (!due || due > new Date()) {
+      const spent = week.draftTimes.length >= settings.cadencePerWeek;
+      return { userId, drafted: 0, published: 0, held: 0, reason: spent ? 'budget_met' : 'not_due' };
+    }
+    if (overCap(settings.weeklyCreditCap, week.creditsThisWeek)) {
+      return { userId, drafted: 0, published: 0, held: 0, reason: 'credit_cap' };
+    }
+  }
+
   // Credit pre-flight: autopilot needs at least 1 credit per draft it'll
   // attempt. If the user is out, skip rather than partial-running.
-  const minCredits = CREDIT_PRICES.agent_draft * (opts?.force ? 2 : Math.min(2, settings.cadencePerWeek));
+  const minCredits = CREDIT_PRICES.agent_draft * (opts?.force ? 2 : 1);
   const balance = await getBalance(userId);
   if (balance < minCredits) {
     await db().insert(activityLog).values({
@@ -52,18 +68,6 @@ export async function runAgentForUser(userId: string, opts?: { force?: boolean }
       meta: { reason: 'insufficient_credits', balance, needed: minCredits },
     });
     return { userId, drafted: 0, published: 0, held: 0, reason: 'insufficient_credits' };
-  }
-
-  // Per-user budget: drafts produced in the past 7 days (skip if force)
-  if (!opts?.force) {
-    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const recent = await db()
-      .select()
-      .from(drafts)
-      .where(and(eq(drafts.userId, userId), eq(drafts.source, 'agent'), gte(drafts.createdAt, since)));
-    if (recent.length >= settings.cadencePerWeek) {
-      return { userId, drafted: 0, published: 0, held: 0, reason: 'budget_met' };
-    }
   }
 
   const newTrends = await db()
@@ -128,8 +132,24 @@ export async function runAgentForUser(userId: string, opts?: { force?: boolean }
     niches: (settings.niches ?? []) as Niche[],
     platforms: allowedPlatforms,
     brandSafetyStrict: settings.brandSafetyStrict,
+    // Who the brand is. Built from the row already in hand; voice, style guide,
+    // niches and safety are blanked because the agent prompt states them itself.
+    brandBlock: renderBrandBlock(
+      {
+        companyName: settings.companyName,
+        brandBio: settings.brandBio,
+        website: settings.website,
+        brandBrief: settings.brandBrief,
+        niches: [],
+        voiceTemplate: null,
+        instructions: null,
+        brandSafetyStrict: false,
+      },
+      'text',
+    ),
     trends: newTrends.map((t) => ({ id: t.id, niche: t.niche, title: t.title, summary: t.summary, sourceUrl: t.sourceUrl })),
-    count: opts?.force ? 2 : Math.min(2, settings.cadencePerWeek),
+    // One per cron tick: nextDraftDue spreads the week's drafts out.
+    count: opts?.force ? 2 : 1,
   });
 
   let publishedCount = 0;

@@ -5,6 +5,7 @@ import { shieldActions, mentions, shieldSettings } from '../../../../../../lib/d
 import { authedUser } from '../../../../../../lib/api';
 import { generateScript } from '../../../../../../lib/shield/script';
 import { getBrandKnowledge } from '../../../../../../lib/shield/knowledge';
+import { loadBrandContext, renderBrandBlock } from '../../../../../../lib/ai/brand-context';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
@@ -41,6 +42,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     source: mention.source,
     severity: mention.severity,
     knowledge,
+    brandBlock: renderBrandBlock(await loadBrandContext(user.id), 'text') || undefined,
     systemPrompt: settings?.systemPrompt || undefined,
     author: mention.author || undefined,
     datetime: mention.fetchedAt ? new Date(mention.fetchedAt).toLocaleString() : undefined,

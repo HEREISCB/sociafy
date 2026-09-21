@@ -169,3 +169,19 @@ describe('weekly per-platform caps', () => {
     expect(state.updates.some((u) => u.table === 'drafts' && u.values.status === 'scheduled')).toBe(false);
   });
 });
+
+describe('pacing', () => {
+  it('does not draft again until the next slot in the week', async () => {
+    state.settings = settingsWith({ enabledPlatforms: ['x'] });
+    state.recentDrafts = [{ createdAt: new Date() }];
+    const res = await runAgentForUser('u1');
+    expect(res.reason).toBe('not_due');
+    expect(draftFromTrends).not.toHaveBeenCalled();
+  });
+
+  it('stops at the weekly credit cap, but a manual run still drafts', async () => {
+    state.settings = settingsWith({ enabledPlatforms: ['x'], weeklyCreditCap: 0 } as never);
+    expect((await runAgentForUser('u1')).reason).toBe('credit_cap');
+    expect((await runAgentForUser('u1', { force: true })).drafted).toBe(1);
+  });
+});

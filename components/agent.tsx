@@ -8,6 +8,8 @@ import { activityMeta } from '../lib/ui/activity';
 import type { Niche, Platform } from '../lib/db/schema';
 import { estimateWeeklyBurn, weeksOfRunway } from '../lib/credits/estimator';
 import type { CreditsPayload } from './credits';
+import { AutopilotStatus, type AgentStatusPayload } from './autopilot-status';
+import { recommendPlan } from '../lib/agent/recommend';
 
 type BriefMode = 'text' | 'image' | 'video';
 type ConnectedAccount = { id: string; platform: Platform };
@@ -28,6 +30,7 @@ type AgentSettings = {
   enabledPlatforms: Array<'x' | 'linkedin' | 'instagram' | 'facebook' | 'tiktok' | 'youtube'>;
   postsPerWeekByPlatform: Partial<Record<'x' | 'linkedin' | 'instagram' | 'facebook' | 'tiktok' | 'youtube', number>>;
   postsPerWeekByContentType: { text: number; image: number; video: number };
+  weeklyCreditCap: number | null;
 };
 
 type Activity = {
@@ -62,6 +65,8 @@ const NICHE_LABELS: Record<Niche, string> = {
   media: 'Media',
   community: 'Community',
 };
+
+const PLATFORM_NAMES = { x: 'X', linkedin: 'LinkedIn', instagram: 'Instagram', facebook: 'Facebook', tiktok: 'TikTok', youtube: 'YouTube' } as const;
 
 function relTime(iso: string): string {
   const t = new Date(iso).getTime();
@@ -147,6 +152,19 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
   const { data: activity, mutate: refetchActivity } = useApi<Activity[]>('/api/activity?limit=30', { refreshInterval: 30_000 });
   const { data: trendsNew, mutate: refetchTrends } = useApi<Trend[]>('/api/trends?status=new&limit=20');
   const { data: trendsUsed } = useApi<Trend[]>('/api/trends?status=used&limit=10');
+
+  // After switching on, the server writes the first draft in the background.
+  // `watchFrom` is the draft count at that moment: poll fast until it moves
+  // (or 90s pass) so the page shows the draft arriving.
+  const [watchFrom, setWatchFrom] = useState<number | null>(() => {
+    // Arriving straight from onboarding's "Enter Sociafy", which just switched it on.
+    const at = typeof window === 'undefined' ? 0 : Number(window.sessionStorage.getItem('sociafy:autopilotStartedAt'));
+    return Date.now() - at < 90_000 ? 0 : null;
+  });
+  const { data: status, mutate: refetchStatus } = useApi<AgentStatusPayload>('/api/agent/status', {
+    refreshInterval: watchFrom !== null ? 4_000 : 60_000,
+  });
+  const starting = watchFrom !== null && (status?.draftsThisWeek ?? 0) === watchFrom;
 
   const [autopilot, setAutopilot] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -331,7 +349,7 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
     setSaveError(null);
     try {
       await apiPatch('/api/agent/settings', patch);
-      await refetchSettings();
+      await Promise.all([refetchSettings(), refetchStatus()]);
       setSavedAt(Date.now());
       return true;
     } catch (e) {
@@ -374,7 +392,17 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
     // Snap the switch back if the server didn't take it — an autopilot that
     // looks "running" but isn't is the worst possible lie on this page.
     if (!(await persist({ enabled: next }))) setAutopilot(!next);
+    else if (next) setWatchFrom(status?.draftsThisWeek ?? 0);
   };
+
+  useEffect(() => {
+    if (watchFrom === null) return;
+    // Draft landed: pull it into the feed now rather than on the next poll.
+    if (!starting) { refetchActivity(); refetchTrends(); }
+    const t = setTimeout(() => setWatchFrom(null), starting ? 90_000 : 0);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchFrom, starting]);
 
   const saveInstructions = async () => {
     setSavingInstr(true);
@@ -387,7 +415,7 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
 
   const updateField = persist;
 
-  const niches = settings?.niches ?? [];
+  const niches = useMemo(() => settings?.niches ?? [], [settings]);
   // Demo feed only for unauthenticated visitors. Signed-in users with an
   // empty activity log see the real empty state below, not fake events.
   const feed = unauth ? DEMO_FEED : (activity ?? []);
@@ -399,6 +427,22 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
   // every fully-configured user got a "finish setup" banner and dead buttons
   // for a beat on each load.
   const needsSetup = !unauth && !!settings && niches.length === 0;
+
+  // What we'd post if it were our account — by platform, tilted by niche.
+  const recommended = useMemo(() => recommendPlan(enabledPlatforms, niches), [enabledPlatforms, niches]);
+  const isRecommended = cadence === recommended.cadencePerWeek &&
+    enabledPlatforms.every((p) => postsPerPlatform[p] === recommended.perPlatform[p]);
+  const applyRecommended = async () => {
+    const caps = { ...postsPerPlatform, ...recommended.perPlatform };
+    setPostsPerPlatform(caps);
+    setCadence(recommended.cadencePerWeek);
+    setSavingRules(true);
+    try {
+      await persist({ postsPerWeekByPlatform: caps, cadencePerWeek: recommended.cadencePerWeek });
+    } finally {
+      setSavingRules(false);
+    }
+  };
 
   // Credit balance + live weekly burn estimate for the budget card.
   // Recomputes whenever the user tweaks the autopilot rules.
@@ -412,23 +456,6 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
   const balance = creditsData?.balance ?? 0;
   const runway = creditsData ? weeksOfRunway(burnEstimate.weekly, balance) : -1;
 
-  // First-run tooltip on the activity feed. Shows once, the first time the
-  // user enables autopilot — lives in localStorage so it doesn't nag again.
-  const [showFirstRunTip, setShowFirstRunTip] = useState(false);
-  useEffect(() => {
-    if (autopilot && typeof window !== 'undefined') {
-      const seen = window.localStorage.getItem('sociafy:firstAutopilotEnabled');
-      if (!seen) setShowFirstRunTip(true);
-    }
-  }, [autopilot]);
-  const dismissFirstRunTip = () => {
-    setShowFirstRunTip(false);
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem('sociafy:firstAutopilotEnabled', String(Date.now()));
-    }
-  };
-  // Drafts-only when threshold > 100 (101 = our "never auto-publish" sentinel).
-  const draftsOnly = threshold > 100;
 
   return (
     <div className="two-col">
@@ -477,43 +504,17 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
           </div>
         )}
 
-        <div className="card" style={{ background: autopilot ? 'var(--bg-elev)' : 'var(--bg-sunk)', opacity: needsSetup ? 0.5 : 1 }}>
-          <div className="card-body" style={{ display: 'grid', gridTemplateColumns: '40px 1fr auto', gap: 16, alignItems: 'center' }}>
-            <div style={{ width: 40, height: 40, borderRadius: 10, background: autopilot ? 'var(--ink)' : 'var(--bg-sunk)', color: autopilot ? 'var(--accent)' : 'var(--ink-3)', display: 'grid', placeItems: 'center', position: 'relative' }}>
-              <Icon name="bolt" size={18} />
-              {autopilot && <span style={{ position: 'absolute', top: -2, right: -2, width: 10, height: 10, borderRadius: '50%', background: 'var(--good)', border: '2px solid var(--bg-elev)' }} />}
-            </div>
-            <div>
-              <div style={{ fontSize: 14, fontWeight: 550, letterSpacing: '-0.01em', marginBottom: 2, display: 'flex', alignItems: 'center', gap: 8 }}>
-                Autopilot is {autopilot ? 'running' : 'paused'}
-                {settings?.lastRunAt && (
-                  <span className="chip ghost mono" style={{ fontSize: 10 }}>
-                    Last drafted {relTime(settings.lastRunAt)}
-                  </span>
-                )}
-              </div>
-              <div style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>
-                {autopilot
-                  ? `Monitoring ${niches.length} niches, drafting on a ${cadence}/week cadence, ${draftsOnly ? 'sending every draft to your inbox for review' : `auto-publishing posts scoring ≥ ${threshold}`}.`
-                  : "I'll keep watching but won't draft or post without you."}
-              </div>
-            </div>
-            <button
-              className={`btn ${autopilot ? '' : 'primary'}`}
-              onClick={() => saveAutopilot(!autopilot)}
-              disabled={unauth || needsSetup}
-              title={needsSetup ? 'Finish setup first — pick at least one niche.' : undefined}
-            >
-              {autopilot ? <><Icon name="pause" size={12} /> Pause</> : <><Icon name="play" size={12} /> Resume</>}
-            </button>
-          </div>
-          {autopilot && enabledPlatforms.length === 0 && (
-            <div style={{ padding: '8px 14px', fontSize: 12, color: 'oklch(0.45 0.18 30)', background: 'oklch(0.97 0.04 30)', borderTop: '1px solid oklch(0.86 0.08 30)', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Icon name="bolt" size={11} />
-              No platforms enabled in Autopilot rules — Autopilot has nowhere to post. Toggle at least one platform on the right.
-            </div>
-          )}
-        </div>
+        <AutopilotStatus
+          status={unauth ? null : status}
+          autopilot={autopilot}
+          starting={starting}
+          disabled={!!unauth || needsSetup}
+          disabledReason={needsSetup ? 'Finish setup first — pick at least one niche.' : undefined}
+          onToggle={saveAutopilot}
+          onMode={(t) => { setThreshold(t); persist({ autoPublishThreshold: t }); }}
+          onCap={(cap) => persist({ weeklyCreditCap: cap })}
+          onEditDraft={onEditDraft}
+        />
 
         <div className="card">
           <div className="card-head">
@@ -637,23 +638,6 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
             <span className="meta">Last 24 hours</span>
           </div>
           <div className="card-body" style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {showFirstRunTip && (
-              <div style={{
-                padding: 12,
-                background: 'var(--accent-soft)',
-                border: '1px solid oklch(0.86 0.08 70)',
-                borderRadius: 8,
-                display: 'flex',
-                gap: 10,
-                alignItems: 'flex-start',
-              }}>
-                <Icon name="sparkle" size={14} style={{ color: 'var(--accent-ink)', marginTop: 2, flexShrink: 0 }} />
-                <div style={{ flex: 1, fontSize: 12.5, color: 'var(--accent-ink)', lineHeight: 1.5 }}>
-                  <strong>Autopilot is on.</strong> Your agent will draft over the next hour. Drafts land here {draftsOnly ? '— review and approve each one before it goes live.' : `— anything scoring ≥ ${threshold} auto-publishes; the rest waits for your review.`}
-                </div>
-                <button className="btn sm ghost" onClick={dismissFirstRunTip} aria-label="Dismiss">✕</button>
-              </div>
-            )}
             {feed.map((a) => {
               const meta = activityMeta(a.kind);
               return (
@@ -821,18 +805,30 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
             </span>
           </div>
           <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {recommended.cadencePerWeek > 0 && (
+              <div style={{ padding: '10px 12px', background: 'var(--accent-soft)', border: '1px solid oklch(0.86 0.08 70)', borderRadius: 8, fontSize: 12, color: 'var(--accent-ink)', lineHeight: 1.5 }}>
+                <strong>Recommended for you:</strong>{' '}
+                {enabledPlatforms.map((p) => `${PLATFORM_NAMES[p]} ${recommended.perPlatform[p]}/wk`).join(' · ')}.{' '}
+                {recommended.why}
+                <div style={{ marginTop: 8 }}>
+                  <button className="btn sm" onClick={applyRecommended} disabled={unauth || savingRules || isRecommended}>
+                    <Icon name="check" size={11} /> {isRecommended ? 'Applied' : 'Use recommended'}
+                  </button>
+                </div>
+              </div>
+            )}
             <div>
               <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
                 Per-platform caps
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                {(['x', 'linkedin', 'instagram', 'facebook', 'tiktok', 'youtube'] as const).map((p) => {
+                {(Object.keys(PLATFORM_NAMES) as Array<keyof typeof PLATFORM_NAMES>).map((p) => {
                   const on = enabledPlatforms.includes(p);
                   const cap = postsPerPlatform[p] ?? 0;
                   return (
                     <div key={p} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', background: on ? 'var(--accent-soft)' : 'var(--bg-sunk)', border: `1px solid ${on ? 'var(--accent)' : 'var(--line-2)'}`, borderRadius: 8 }}>
                       <span style={{ flex: 1, fontSize: 12, fontWeight: 500 }}>
-                        {p === 'x' ? 'X' : p === 'linkedin' ? 'LinkedIn' : p === 'youtube' ? 'YouTube' : p === 'tiktok' ? 'TikTok' : p === 'instagram' ? 'Instagram' : 'Facebook'}
+                        {PLATFORM_NAMES[p]}
                       </span>
                       <button
                         className={`chip ${on ? 'accent' : 'ghost'}`}

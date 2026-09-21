@@ -344,6 +344,10 @@ export const agentSettings = pgTable('agent_settings', {
   companyName: text('company_name'),
   brandBio: text('brand_bio'),
   website: text('website'),
+  // LLM summary of what the website actually says (lib/ai/brand-brief.ts), and
+  // the URL it was built from — a differing `website` means the brief is stale.
+  brandBrief: text('brand_brief'),
+  brandBriefSource: text('brand_brief_source'),
   // Autopilot permission matrix — the user explicitly chooses which
   // platforms autopilot may post to and how many posts/week per platform.
   // enabledPlatforms is a strict allow-list: empty means autopilot posts
@@ -352,6 +356,9 @@ export const agentSettings = pgTable('agent_settings', {
   enabledPlatforms: jsonb('enabled_platforms').$type<Platform[]>().notNull().default([]),
   postsPerWeekByPlatform: jsonb('posts_per_week_by_platform').$type<Partial<Record<Platform, number>>>().notNull().default({}),
   postsPerWeekByContentType: jsonb('posts_per_week_by_content_type').$type<PostsPerWeekByType>().notNull().default({ text: 4, image: 0, video: 0 }),
+  // Most credits autopilot may spend in any 7 days. Null = no cap. Only the
+  // cron path honours it — a manual "draft now" is the user spending on purpose.
+  weeklyCreditCap: integer('weekly_credit_cap'),
   lastRunAt: timestamp('last_run_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),

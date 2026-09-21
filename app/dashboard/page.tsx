@@ -196,7 +196,7 @@ export default function Home() {
   const meta = usePageMeta(page === 'onboarding' ? 'dashboard' : page, displayName, now);
 
   if (page === 'onboarding') {
-    return <Onboarding onDone={() => setPage('dashboard')} />;
+    return <Onboarding onDone={() => setPage('agent')} />;
   }
 
   return (

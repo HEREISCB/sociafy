@@ -6,7 +6,8 @@ import { Icon, Pglyph } from './icons';
 import { apiPatch, useApi } from '../lib/ui/fetcher';
 import { PLATFORM_TO_SHORT, SHORT_TO_PLATFORM } from '../lib/ui/platforms';
 import type { Platform } from '../lib/db/schema';
-import { estimateWeeklyBurn, weeksOfRunway, type ContentMixWeekly } from '../lib/credits/estimator';
+import { estimateWeeklyBurn, weeksOfRunway, CREDIT_PRICES, type ContentMixWeekly } from '../lib/credits/estimator';
+import { recommendPlan } from '../lib/agent/recommend';
 import { BillingDetailsFields, useBillingDetails } from './billing/billing-details';
 import type { CreditsPayload } from './credits';
 
@@ -74,8 +75,12 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
   const [planTextPerWeek, setPlanTextPerWeek] = useState<number>(3);
   const [planImagePerWeek, setPlanImagePerWeek] = useState<number>(1);
   const [planVideoPerWeek, setPlanVideoPerWeek] = useState<number>(0);
-  const [planAutoPublish, setPlanAutoPublish] = useState<boolean>(false);
-  const [planThreshold, setPlanThreshold] = useState<number>(90);
+  // Automatic is the default: autopilot that waits on you for every post isn't
+  // one. The radio spells out that posts go live without review.
+  const [planAutoPublish, setPlanAutoPublish] = useState<boolean>(true);
+  const [planThreshold, setPlanThreshold] = useState<number>(80);
+  /** Most credits autopilot may spend per week. '' = no cap. */
+  const [planCreditCap, setPlanCreditCap] = useState('');
   const [savingPlan, setSavingPlan] = useState(false);
 
   const addCustomNiche = () => {
@@ -96,6 +101,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
     enabledPlatforms: Platform[];
     postsPerWeekByContentType: ContentMixWeekly;
     autoPublishThreshold: number;
+    weeklyCreditCap: number | null;
   }>('/api/agent/settings');
   // Pulled into the Plan step's runway estimate.
   const { data: credits } = useApi<CreditsPayload>('/api/credits');
@@ -115,11 +121,13 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
       setPlanImagePerWeek(settings.postsPerWeekByContentType.image ?? 1);
       setPlanVideoPerWeek(settings.postsPerWeekByContentType.video ?? 0);
     }
-    if (typeof settings?.autoPublishThreshold === 'number') {
-      const t = settings.autoPublishThreshold;
-      setPlanAutoPublish(t <= 100);
-      setPlanThreshold(Math.min(99, Math.max(70, t <= 100 ? t : 90)));
+    // 101 is also the column default, so it can't tell "chose review" from
+    // "never chose" — only an explicit auto threshold overrides our default.
+    if (typeof settings?.autoPublishThreshold === 'number' && settings.autoPublishThreshold <= 100) {
+      setPlanAutoPublish(true);
+      setPlanThreshold(Math.min(99, Math.max(70, settings.autoPublishThreshold)));
     }
+    if (settings?.weeklyCreditCap != null) setPlanCreditCap(String(settings.weeklyCreditCap));
   }, [settings]);
 
   // First time we have connected accounts, pre-check them for autopilot.
@@ -146,6 +154,9 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
     },
     withResearch: false,
   }), [planPlatforms, planTextPerWeek, planImagePerWeek, planVideoPerWeek]);
+
+  const totalPerWeek = planTextPerWeek + planImagePerWeek + planVideoPerWeek;
+  const recommended = useMemo(() => recommendPlan(planPlatforms, topics), [planPlatforms, topics]);
 
   const runwayWeeks = credits ? weeksOfRunway(estimate.weekly, credits.balance) : -1;
   const tierAllocation = credits?.monthlyAllocation ?? 0;
@@ -227,10 +238,16 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
       // We don't yet split per-platform caps in the Plan step — that's a
       // fine-tuning surface on the /agent page. For now we save the total
       // cadence + enabledPlatforms + per-type mix + auto-publish setting.
-      const totalPerWeek = Math.max(1, planTextPerWeek + planImagePerWeek + planVideoPerWeek);
+      const cadence = Math.max(1, totalPerWeek);
       await apiPatch('/api/agent/settings', {
         enabledPlatforms: planPlatforms,
-        cadencePerWeek: totalPerWeek,
+        cadencePerWeek: cadence,
+        // Each draft fans out to every platform; these caps stop the quieter
+        // ones (LinkedIn, YouTube) getting the busiest platform's volume.
+        postsPerWeekByPlatform: Object.fromEntries(
+          planPlatforms.map((p) => [p, Math.min(cadence, recommended.perPlatform[p] ?? cadence)]),
+        ),
+        weeklyCreditCap: planCreditCap.trim() === '' ? null : Math.max(0, parseInt(planCreditCap, 10) || 0),
         postsPerWeekByContentType: {
           text: planTextPerWeek,
           image: planImagePerWeek,
@@ -254,6 +271,8 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
     setSaveError(null);
     try {
       await apiPatch('/api/agent/settings', { enabled: true });
+      // The Auto-pilot page reads this to show the first draft being written.
+      window.sessionStorage.setItem('sociafy:autopilotStartedAt', String(Date.now()));
       onDone();
     } catch (e) {
       // "Enter Sociafy" is the button that turns autopilot ON. Walking the
@@ -475,7 +494,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
           <>
             <h1>How should autopilot <em>behave</em>?</h1>
             <p className="lede">
-              Where can it post, how often, and what mix? You can change this anytime from the Auto-pilot page. We recommend starting with drafts only — review each one before it goes live.
+              Where can it post, how often, and what mix? You can change this anytime from the Auto-pilot page. It runs on its own by default — switch to review-first below if you want to approve every post.
             </p>
 
             <div className="onboard-plan">
@@ -536,6 +555,21 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
                     onChange={setPlanVideoPerWeek}
                   />
                 </div>
+                {recommended.cadencePerWeek > 0 && (
+                  <div style={{ fontSize: 12, color: 'var(--ink-2)', marginTop: 12, lineHeight: 1.5, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span style={{ flex: 1, minWidth: 220 }}>
+                      <strong>We recommend {recommended.cadencePerWeek}/week</strong> ({planPlatforms.map((p) => `${ONBOARD_PLATFORMS.find((o) => o.id === p)?.name ?? p} ${recommended.perPlatform[p]}`).join(' · ')}). {recommended.why}
+                    </span>
+                    <button
+                      type="button"
+                      className="btn sm"
+                      disabled={totalPerWeek === recommended.cadencePerWeek}
+                      onClick={() => setPlanTextPerWeek(Math.min(14, Math.max(0, recommended.cadencePerWeek - planImagePerWeek - planVideoPerWeek)))}
+                    >
+                      {totalPerWeek === recommended.cadencePerWeek ? 'Applied' : 'Use recommended'}
+                    </button>
+                  </div>
+                )}
                 <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 10, lineHeight: 1.5 }}>
                   Exact credit cost depends on the post type — see the live estimate below. Autopilot fans each post out across your selected platforms.
                 </div>
@@ -544,23 +578,16 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
               <section className="plan-card">
                 <div className="plan-card-head">
                   <div>
-                    <h3 className="plan-card-title">3 · Auto-publish?</h3>
-                    <div className="plan-card-sub">Recommended: drafts only — autopilot fills your inbox, you approve each one before it goes live.</div>
+                    <h3 className="plan-card-title">3 · Do you want to approve each post?</h3>
+                    <div className="plan-card-sub">Either way, every draft and every scheduled post is visible on the Auto-pilot page, and you can pause anytime.</div>
                   </div>
                 </div>
                 <div className="plan-radio-group">
-                  <label className={`plan-radio ${!planAutoPublish ? 'on' : ''}`}>
-                    <input type="radio" checked={!planAutoPublish} onChange={() => setPlanAutoPublish(false)} />
-                    <div>
-                      <div className="plan-radio-title"><Icon name="edit" size={11} /> Draft &amp; review <span className="plan-radio-pill mono">recommended</span></div>
-                      <div className="plan-radio-sub">Autopilot drafts every post and parks it in your inbox. You hit publish.</div>
-                    </div>
-                  </label>
                   <label className={`plan-radio ${planAutoPublish ? 'on' : ''}`}>
                     <input type="radio" checked={planAutoPublish} onChange={() => setPlanAutoPublish(true)} />
                     <div>
-                      <div className="plan-radio-title"><Icon name="bolt" size={11} /> Auto-publish high-confidence drafts</div>
-                      <div className="plan-radio-sub">When autopilot scores a draft above your threshold, it schedules without asking.</div>
+                      <div className="plan-radio-title"><Icon name="bolt" size={11} /> No — post automatically <span className="plan-radio-pill mono">recommended</span></div>
+                      <div className="plan-radio-sub">Posts go live on their own, without you seeing them first. Only drafts the AI scores above your threshold; weaker ones wait for your review.</div>
                       {planAutoPublish && (
                         <div className="plan-threshold">
                           <span className="mono">Threshold</span>
@@ -574,6 +601,31 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
                       )}
                     </div>
                   </label>
+                  <label className={`plan-radio ${!planAutoPublish ? 'on' : ''}`}>
+                    <input type="radio" checked={!planAutoPublish} onChange={() => setPlanAutoPublish(false)} />
+                    <div>
+                      <div className="plan-radio-title"><Icon name="edit" size={11} /> Yes — ask me first</div>
+                      <div className="plan-radio-sub">Autopilot writes every post and parks it on the Auto-pilot page. Nothing goes out until you schedule it.</div>
+                    </div>
+                  </label>
+                </div>
+              </section>
+
+              <section className="plan-card">
+                <div className="plan-card-head">
+                  <div>
+                    <h3 className="plan-card-title">4 · Weekly credit cap</h3>
+                    <div className="plan-card-sub">The most autopilot may spend in a week. It stops drafting when it gets there and picks up again the week after. Leave empty for no cap.</div>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
+                  <input
+                    type="number" min={0} placeholder="No cap"
+                    value={planCreditCap}
+                    onChange={(e) => setPlanCreditCap(e.target.value)}
+                    style={{ width: 110, padding: '8px 10px', border: '1px solid var(--line-2)', borderRadius: 8, background: 'var(--bg)', color: 'var(--ink)', fontFamily: 'var(--mono)', fontSize: 13 }}
+                  />
+                  <span style={{ color: 'var(--ink-3)' }}>credits / week · this plan&apos;s drafts need about {Math.max(1, totalPerWeek) * CREDIT_PRICES.agent_draft}</span>
                 </div>
               </section>
 
@@ -607,7 +659,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
           <>
             <h1>You&apos;re <em>ready</em>.</h1>
             <p className="lede">
-              I&apos;ll start watching trends across your niches and drafting on the cadence you set. Hit &quot;Enter Sociafy&quot; to enable autopilot — you can pause it anytime from the topbar.
+              Hit &quot;Enter Sociafy&quot; and I&apos;ll write your first post straight away — it&apos;ll be on the Auto-pilot page within a minute, along with a countdown to the next one. {planAutoPublish ? `Posts scoring ${planThreshold}+ go out on their own; the rest wait for you.` : 'Nothing goes out until you approve it.'} You can pause anytime.
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 32 }}>
               {[

@@ -5,5 +5,5 @@ import Onboarding from '../../components/onboarding';
 
 export default function OnboardingClient() {
   const router = useRouter();
-  return <Onboarding onDone={() => router.push('/dashboard')} />;
+  return <Onboarding onDone={() => router.push('/dashboard?tab=agent')} />;
 }

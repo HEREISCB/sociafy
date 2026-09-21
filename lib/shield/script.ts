@@ -9,6 +9,8 @@ export interface ScriptInput {
   /** Optional brand knowledge base — approved facts, voice, and messaging the
    *  AI should ground the response in (assembled from shield_documents). */
   knowledge?: string;
+  /** Pre-rendered brand context block from `renderBrandBlock(ctx, 'text')`. */
+  brandBlock?: string;
   /** Optional user-customized system prompt. May contain {{variables}}
    *  (see TEMPLATE_VARS) that are substituted with live mention data. Empty
    *  string / undefined → use the built-in default prompt. */
@@ -150,7 +152,8 @@ function buildPrompt(input: ScriptInput): string {
   const knowledgeBlock = input.knowledge
     ? `\n\nBrand knowledge base — use ONLY these approved facts, voice, and messaging. Do not invent facts or contradict anything here:\n"""\n${input.knowledge}\n"""`
     : '';
-  return base + knowledgeBlock;
+  const brandBlock = input.brandBlock ? `\n\n${input.brandBlock}` : '';
+  return base + brandBlock + knowledgeBlock;
 }
 
 export async function generateScript(input: ScriptInput): Promise<ScriptOutput> {

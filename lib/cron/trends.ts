@@ -5,6 +5,35 @@ import { fetchTrendsForNiches } from '../trends/sources';
 
 export type TrendsResult = { userId: string; inserted: number; pruned: number };
 
+/** Pull fresh trends for one user's niches, skipping URLs they already have. */
+export async function refreshTrendsForUser(userId: string, niches: string[]): Promise<number> {
+  const candidates = await fetchTrendsForNiches(niches);
+  if (candidates.length === 0) return 0;
+  const existing = await db()
+    .select({ url: trends.sourceUrl })
+    .from(trends)
+    .where(and(eq(trends.userId, userId), inArray(trends.sourceUrl, candidates.map((c) => c.sourceUrl))));
+  const have = new Set(existing.map((e) => e.url));
+
+  let inserted = 0;
+  for (const c of candidates) {
+    if (have.has(c.sourceUrl)) continue;
+    await db().insert(trends).values({
+      userId,
+      niche: c.niche as 'saas' | 'creator-economy' | 'marketing' | 'ai' | 'design' | 'devtools' | 'fintech' | 'media' | 'community',
+      title: c.title,
+      summary: c.summary ?? null,
+      source: c.source,
+      sourceUrl: c.sourceUrl,
+      volume: c.volume ?? null,
+      delta: c.delta != null ? String(c.delta) : null,
+      score: scoreFromVolume(c.source, c.volume, c.delta),
+    });
+    inserted++;
+  }
+  return inserted;
+}
+
 /**
  * Pull fresh trend rows for every user with autopilot enabled, dedupe by
  * sourceUrl, and prune 'new' trends older than 7 days that never got used.
@@ -24,31 +53,7 @@ export async function runTrends(): Promise<TrendsResult[]> {
       out.push({ userId: settings.userId, inserted: 0, pruned: 0 });
       continue;
     }
-    const candidates = await fetchTrendsForNiches(niches);
-    const incomingUrls = candidates.map((c) => c.sourceUrl);
-    const existing = await db()
-      .select({ url: trends.sourceUrl })
-      .from(trends)
-      .where(and(eq(trends.userId, settings.userId), inArray(trends.sourceUrl, incomingUrls)));
-    const have = new Set(existing.map((e) => e.url));
-
-    let inserted = 0;
-    for (const c of candidates) {
-      if (have.has(c.sourceUrl)) continue;
-      const score = scoreFromVolume(c.source, c.volume, c.delta);
-      await db().insert(trends).values({
-        userId: settings.userId,
-        niche: c.niche as 'saas' | 'creator-economy' | 'marketing' | 'ai' | 'design' | 'devtools' | 'fintech' | 'media' | 'community',
-        title: c.title,
-        summary: c.summary ?? null,
-        source: c.source,
-        sourceUrl: c.sourceUrl,
-        volume: c.volume ?? null,
-        delta: c.delta != null ? String(c.delta) : null,
-        score,
-      });
-      inserted++;
-    }
+    const inserted = await refreshTrendsForUser(settings.userId, niches);
 
     const pruned = await db()
       .delete(trends)
