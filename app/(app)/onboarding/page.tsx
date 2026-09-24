@@ -1,8 +1,8 @@
 import { redirect } from 'next/navigation';
 import { auth } from '@clerk/nextjs/server';
 import { eq } from 'drizzle-orm';
-import { db } from '../../lib/db';
-import { agentSettings, profiles } from '../../lib/db/schema';
+import { db } from '../../../lib/db';
+import { agentSettings, profiles } from '../../../lib/db/schema';
 import OnboardingClient from './client';
 
 /**

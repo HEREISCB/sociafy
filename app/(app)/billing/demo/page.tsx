@@ -3,9 +3,9 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Sidebar, Topbar } from '../../../components/shell';
-import { Icon } from '../../../components/icons';
-import { apiPost, useApi } from '../../../lib/ui/fetcher';
+import { Sidebar, Topbar } from '../../../../components/shell';
+import { Icon } from '../../../../components/icons';
+import { apiPost, useApi } from '../../../../lib/ui/fetcher';
 
 type Page = 'dashboard' | 'compose' | 'agent' | 'calendar' | 'connections' | 'onboarding';
 

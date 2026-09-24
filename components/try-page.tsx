@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { LPNav, Footer } from './landing';
+import { LPNav, Footer } from './site-chrome';
 import { TryTool } from './try-tool';
 import { TRY_PAGES } from '../lib/try-presets';
 

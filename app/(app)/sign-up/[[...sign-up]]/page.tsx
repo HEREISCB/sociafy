@@ -2,7 +2,7 @@
 
 import { SignUp, ClerkLoading, ClerkLoaded } from '@clerk/nextjs';
 import Link from 'next/link';
-import { AuthLoading } from '../../../components/auth-loading';
+import { AuthLoading } from '../../../../components/auth-loading';
 
 /**
  * Free-try visitors sign up to unlock a blurred result; send them back to it

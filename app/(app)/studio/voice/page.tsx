@@ -3,29 +3,29 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Sidebar, Topbar } from '../../components/shell';
-import { Icon } from '../../components/icons';
-import { ApiKeys } from '../../components/api-keys';
-import { DeveloperDocs } from '../../components/developers';
+import { Sidebar, Topbar } from '../../../../components/shell';
+import { Icon } from '../../../../components/icons';
+import { VoicesManager } from '../../../../components/voice-studio';
 
 type Page = 'dashboard' | 'compose' | 'agent' | 'calendar' | 'connections' | 'onboarding';
 
-export default function DevelopersPage() {
+export default function VoiceStudioPage() {
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
     <div className="app">
       <Sidebar
-        // Same as /usage and /billing: this is a route, not a dashboard tab, so
-        // no Workspace item is highlighted.
         page={'onboarding' as Page}
         onNav={(p) => router.push(p === 'dashboard' ? '/dashboard' : `/dashboard?tab=${p}`)}
         mobileOpen={sidebarOpen}
         onMobileClose={() => setSidebarOpen(false)}
       />
       <div className="main">
-        <Topbar crumbs={['Sociafy', 'Account', 'API']} onMenuClick={() => setSidebarOpen(true)}>
+        <Topbar
+          crumbs={['Sociafy', 'Studio', 'Voice']}
+          onMenuClick={() => setSidebarOpen(true)}
+        >
           <Link href="/dashboard" className="btn ghost">
             <Icon name="home" size={13} /> <span className="hide-mobile">Dashboard</span>
           </Link>
@@ -33,19 +33,14 @@ export default function DevelopersPage() {
         <div className="page">
           <div className="page-head">
             <div>
-              <h1>Developers</h1>
+              <h1>Voice Twin</h1>
               <div className="sub">
-                Generate video and images from your own code with an API key, billed in credits from
-                this account. Keys, quickstart, prices and limits all live here.
+                Clone your voice once — then any post you write becomes a clip in your voice.
+                Upload 20–60 seconds of clean audio to create a Twin.
               </div>
             </div>
           </div>
-
-          {/* Reuses the /usage column layout — same centred 900px measure. */}
-          <div className="usage-page">
-            <ApiKeys />
-            <DeveloperDocs />
-          </div>
+          <VoicesManager />
         </div>
       </div>
     </div>
