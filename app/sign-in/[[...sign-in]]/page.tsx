@@ -13,7 +13,7 @@ import { AuthLoading } from '../../../components/auth-loading';
 function tryReturn(): string | null {
   if (typeof window === 'undefined') return null;
   const next = new URLSearchParams(window.location.search).get('redirect_url');
-  return next && /^\/try-(image|video)(\?id=[0-9a-f-]{36})?$/.test(next) ? next : null;
+  return next && /^\/try-(image|video)(\?id=[0-9a-f-]{36}(&download=1)?)?$/.test(next) ? next : null;
 }
 
 export default function Page() {

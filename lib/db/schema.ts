@@ -701,7 +701,7 @@ export const apiKeys = pgTable(
 // =====================================================
 // try_generations — free public /try-image and /try-video runs. The original
 // file sits at an unguessable R2 key that is only handed out once the visitor
-// signs in (claimed_by); until then they see preview_url, a blurred copy.
+// signs in (claimed_by); until then they see preview_url, a watermarked copy.
 // =====================================================
 export const tryGenerations = pgTable(
   'try_generations',

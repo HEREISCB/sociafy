@@ -55,13 +55,34 @@ export async function tryQuota(kind: TryKind, who: { visitor: string; ipHash: st
   return { left: Math.max(0, TRY_PER_DAY[kind] - used), siteFull: total >= dailyCap(kind) };
 }
 
+/**
+ * Tiled "Sociafy" watermark plus a bottom banner, as a PNG the size of the
+ * preview. Baked into the pixels (sharp for images, ffmpeg overlay for video),
+ * so there is no clean copy to pull out of the page.
+ */
+export function watermarkPng(w: number, h: number): Promise<Buffer> {
+  const bar = Math.round(h * 0.075);
+  const fs = Math.round(w / 16);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">
+    <defs><pattern id="p" width="${fs * 7}" height="${fs * 4}" patternUnits="userSpaceOnUse" patternTransform="rotate(-28)">
+      <text x="0" y="${fs * 2}" font-family="DejaVu Sans, Arial, Helvetica, sans-serif" font-weight="700" font-size="${fs}"
+        fill="#ffffff" fill-opacity="0.42" stroke="#000000" stroke-opacity="0.18" stroke-width="1">Sociafy</text>
+    </pattern></defs>
+    <rect width="100%" height="100%" fill="url(#p)"/>
+    <rect y="${h - bar}" width="100%" height="${bar}" fill="#000000" fill-opacity="0.55"/>
+    <text x="50%" y="${h - bar / 2}" dominant-baseline="middle" text-anchor="middle" font-family="DejaVu Sans, Arial, Helvetica, sans-serif"
+      font-weight="700" font-size="${Math.round(bar * 0.42)}" fill="#ffffff">Made with Sociafy · sociafy.app</text>
+  </svg>`;
+  return sharp(Buffer.from(svg)).png().toBuffer();
+}
+
 const secretKey = (id: string, ext: string) => `try/${id}/${crypto.randomBytes(16).toString('hex')}.${ext}`;
 
 async function fail(id: string, error: string) {
   await db().update(tryGenerations).set({ status: 'failed', error: error.slice(0, 300), updatedAt: new Date() }).where(eq(tryGenerations.id, id));
 }
 
-/** Runs after the response: rewrite, generate, store the original privately and a blurred copy publicly. */
+/** Runs after the response: rewrite, generate, store the original privately and a watermarked copy publicly. */
 export async function runImageTry(row: TryRow) {
   try {
     const openai = getOpenAI();
@@ -77,7 +98,10 @@ export async function runImageTry(row: TryRow) {
     if (!b64) return fail(row.id, 'The model returned no image. Try a different prompt.');
     const buf = Buffer.from(b64, 'base64');
     const originalKey = secretKey(row.id, 'png');
-    const preview = await sharp(buf).resize(512).blur(14).jpeg({ quality: 60 }).toBuffer();
+    // Smaller than the original too, so cropping the banner off still isn't the real thing.
+    const preview = await sharp(buf).resize(768, 768)
+      .composite([{ input: await watermarkPng(768, 768) }])
+      .jpeg({ quality: 78 }).toBuffer();
     const previewKey = `try/${row.id}/preview.jpg`;
     await Promise.all([
       uploadBuffer({ key: originalKey, body: buf, contentType: 'image/png' }),
@@ -103,20 +127,20 @@ export async function submitVideoTry(row: TryRow) {
 
 const run = promisify(execFile);
 
-/** Small, heavily blurred, silent copy. Null when ffmpeg isn't installed — the page then shows a locked card instead. */
-async function blurVideo(buf: Buffer): Promise<Buffer | null> {
+/** Watermarked 360×640 copy, sound kept. Null when ffmpeg isn't installed — the page then shows a locked card instead. */
+async function watermarkVideo(buf: Buffer): Promise<Buffer | null> {
   const base = join(tmpdir(), `try-${crypto.randomUUID()}`);
   try {
-    await writeFile(`${base}.in.mp4`, buf);
-    await run('ffmpeg', ['-y', '-i', `${base}.in.mp4`, '-vf', 'scale=320:-2,boxblur=16:2', '-an',
-      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '34', '-movflags', '+faststart', `${base}.out.mp4`], { timeout: 60_000 });
+    await Promise.all([writeFile(`${base}.in.mp4`, buf), watermarkPng(360, 640).then((wm) => writeFile(`${base}.wm.png`, wm))]);
+    await run('ffmpeg', ['-y', '-i', `${base}.in.mp4`, '-i', `${base}.wm.png`,
+      '-filter_complex', '[0:v]scale=360:640:force_original_aspect_ratio=decrease,pad=360:640:(ow-iw)/2:(oh-ih)/2[v];[v][1:v]overlay=0:0',
+      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '28', '-c:a', 'aac', '-b:a', '96k', '-movflags', '+faststart', `${base}.out.mp4`], { timeout: 60_000 });
     return await readFile(`${base}.out.mp4`);
   } catch (e) {
-    console.warn('[try] ffmpeg blur unavailable', (e as Error).message?.slice(0, 200));
+    console.warn('[try] ffmpeg watermark unavailable', (e as Error).message?.slice(0, 200));
     return null;
   } finally {
-    await rm(`${base}.in.mp4`, { force: true });
-    await rm(`${base}.out.mp4`, { force: true });
+    await Promise.all(['in.mp4', 'wm.png', 'out.mp4'].map((x) => rm(`${base}.${x}`, { force: true })));
   }
 }
 
@@ -143,7 +167,7 @@ export async function advanceVideoTry(row: TryRow) {
     if (!res.ok) throw new Error(`download ${res.status}`);
     const buf = Buffer.from(await res.arrayBuffer());
     const originalKey = secretKey(row.id, 'mp4');
-    const [preview] = await Promise.all([blurVideo(buf), uploadBuffer({ key: originalKey, body: buf, contentType: 'video/mp4' })]);
+    const [preview] = await Promise.all([watermarkVideo(buf), uploadBuffer({ key: originalKey, body: buf, contentType: 'video/mp4' })]);
     let previewUrl: string | null = null;
     if (preview) {
       const previewKey = `try/${row.id}/preview.mp4`;

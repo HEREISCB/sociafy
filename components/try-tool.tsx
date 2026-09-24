@@ -39,13 +39,19 @@ export function TryTool({ kind }: { kind: Kind }) {
     return v;
   }, []);
 
-  // Coming back from sign-up lands on ?id=… — pick the generation back up.
+  // Coming back from sign-up lands on ?id=…&download=1 — pick the generation
+  // back up and, once it is theirs, start the clean download by itself.
   useEffect(() => {
-    const id = new URLSearchParams(window.location.search).get('id');
+    const q = new URLSearchParams(window.location.search);
+    const id = q.get('id');
     if (!id) return;
     started.current = Date.now();
-    void Promise.resolve().then(() => load(id));
-  }, [load]);
+    void Promise.resolve().then(() => load(id)).then((v) => {
+      if (q.get('download') !== '1' || !v?.unlocked || !v.url) return;
+      window.history.replaceState(null, '', `${path}?id=${id}`);
+      window.location.assign(`/api/try/${id}/download`);
+    });
+  }, [load, path]);
 
   // Poll while it renders.
   useEffect(() => {
@@ -78,12 +84,14 @@ export function TryTool({ kind }: { kind: Kind }) {
     }
   }
 
-  const unlockHref = gen ? `/sign-up?redirect_url=${encodeURIComponent(`${path}?id=${gen.id}`)}` : '/sign-up';
-  const media = (src: string, blurred: boolean) =>
+  // Both routes back carry download=1, so the clean file downloads the moment they return.
+  const back = gen ? encodeURIComponent(`${path}?id=${gen.id}&download=1`) : '';
+  const unlockHref = gen ? `/sign-up?redirect_url=${back}` : '/sign-up';
+  const media = (src: string) =>
     kind === 'image'
       // eslint-disable-next-line @next/next/no-img-element
-      ? <img src={src} alt={gen?.prompt ?? ''} style={{ width: '100%', display: 'block', borderRadius: 12, filter: blurred ? 'blur(2px)' : undefined }} />
-      : <video src={src} autoPlay loop muted playsInline controls={!blurred} style={{ width: '100%', maxHeight: 560, display: 'block', borderRadius: 12, background: '#000' }} />;
+      ? <img src={src} alt={gen?.prompt ?? ''} style={{ width: '100%', display: 'block', borderRadius: 12 }} />
+      : <video src={src} autoPlay loop muted playsInline controls style={{ width: '100%', maxHeight: 560, display: 'block', borderRadius: 12, background: '#000' }} />;
 
   return (
     <div className="card" style={{ padding: 20, maxWidth: 720, margin: '0 auto', textAlign: 'left' }}>
@@ -127,27 +135,27 @@ export function TryTool({ kind }: { kind: Kind }) {
           )}
           {gen.status === 'ready' && gen.unlocked && gen.url && (
             <div>
-              {media(gen.url, false)}
+              {media(gen.url)}
               <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
-                <a className="btn btn-lg primary" href={gen.url} target="_blank" rel="noopener" download>Download</a>
+                <a className="btn btn-lg primary" href={`/api/try/${gen.id}/download`}>Download HD</a>
                 <a className="btn btn-lg" href="/dashboard?tab=compose">Post it with Sociafy</a>
               </div>
               <p style={{ fontSize: 12.5, color: 'var(--ink-3)', marginTop: 8 }}>Saved to your media library.</p>
             </div>
           )}
           {gen.status === 'ready' && !gen.unlocked && (
-            <div style={{ position: 'relative', borderRadius: 12, overflow: 'hidden', minHeight: 280, background: 'var(--bg-sunk)' }}>
-              {gen.previewUrl && media(gen.previewUrl, true)}
-              <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', background: 'rgba(0,0,0,0.25)' }}>
-                <div style={{ background: 'var(--bg-elev, #fff)', padding: '18px 22px', borderRadius: 14, textAlign: 'center', maxWidth: 320, boxShadow: '0 20px 50px -20px rgba(0,0,0,.4)' }}>
-                  <div style={{ fontWeight: 600, fontSize: 16, marginBottom: 4 }}>Your {kind} is ready</div>
-                  <div style={{ fontSize: 13, color: 'var(--ink-3)', marginBottom: 12 }}>Create a free Sociafy account to see it in full quality and download it.</div>
-                  <a className="btn btn-lg primary" href={unlockHref}>Sign up free to unlock</a>
-                  <div style={{ fontSize: 12, marginTop: 8 }}>
-                    Have an account? <a href={`/sign-in?redirect_url=${encodeURIComponent(`${path}?id=${gen.id}`)}`} style={{ textDecoration: 'underline' }}>Log in</a>
-                  </div>
-                </div>
+            <div>
+              {gen.previewUrl
+                ? media(gen.previewUrl)
+                : <div style={{ padding: 32, textAlign: 'center', background: 'var(--bg-sunk)', borderRadius: 12, fontSize: 14 }}>Your {kind} is ready.</div>}
+              <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+                <a className="btn btn-lg primary" href={unlockHref}>Download HD, no watermark</a>
+                <a className="btn btn-lg" href={unlockHref}>Remove watermark</a>
               </div>
+              <p style={{ fontSize: 12.5, color: 'var(--ink-3)', marginTop: 8 }}>
+                Create a free Sociafy account and the clean {kind} downloads straight away. Already have one?{' '}
+                <a href={`/sign-in?redirect_url=${back}`} style={{ textDecoration: 'underline' }}>Log in</a>
+              </p>
             </div>
           )}
         </div>
