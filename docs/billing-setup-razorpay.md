@@ -24,8 +24,12 @@
    - Generate a secret → copy into `RAZORPAY_WEBHOOK_SECRET`.
 
 3. **API keys**: Settings → API Keys → Generate.
-   - Copy `key_id` into both `RAZORPAY_KEY_ID` and `NEXT_PUBLIC_RAZORPAY_KEY_ID`.
+   - Copy `key_id` into `RAZORPAY_KEY_ID`.
    - Copy `key_secret` into `RAZORPAY_KEY_SECRET`.
+
+   No `NEXT_PUBLIC_` copy is needed: the browser gets `key_id` from the
+   server-built CheckoutHandoff (`providers/razorpay/index.ts` → `keyId`),
+   not from the client bundle.
 
 4. **Test mode first**: do steps 1–3 in Test Mode. Use test cards from
    [razorpay.com/docs/payments/payments/test-card-details](https://razorpay.com/docs/payments/payments/test-card-details)

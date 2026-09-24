@@ -12,7 +12,8 @@
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "db:bootstrap": "node scripts/db-bootstrap.mjs",
-    "api-key": "node scripts/create-api-key.mjs"
+    "api-key": "node scripts/create-api-key.mjs",
+    "verify:razorpay": "node scripts/verify-razorpay.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",
@@ -42,6 +43,7 @@
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.2.4",
+    "playwright": "^1.62.1",
     "typescript": "^5",
     "vitest": "^4.1.7"
   }
