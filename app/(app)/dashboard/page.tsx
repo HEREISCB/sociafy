@@ -3,14 +3,14 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useUser } from '@clerk/nextjs';
 import { useSWRConfig } from 'swr';
-import { Sidebar, Topbar } from '../../components/shell';
-import Dashboard from '../../components/dashboard';
-import Compose from '../../components/compose';
-import AgentPage from '../../components/agent';
-import CalendarPage from '../../components/calendar';
-import ConnectionsPage from '../../components/connections';
-import Onboarding from '../../components/onboarding';
-import ShieldDashboard from '../../components/shield/ShieldDashboard';
+import { Sidebar, Topbar } from '../../../components/shell';
+import Dashboard from '../../../components/dashboard';
+import Compose from '../../../components/compose';
+import AgentPage from '../../../components/agent';
+import CalendarPage from '../../../components/calendar';
+import ConnectionsPage from '../../../components/connections';
+import Onboarding from '../../../components/onboarding';
+import ShieldDashboard from '../../../components/shield/ShieldDashboard';
 
 type Page = 'dashboard' | 'compose' | 'agent' | 'calendar' | 'connections' | 'shield' | 'onboarding';
 

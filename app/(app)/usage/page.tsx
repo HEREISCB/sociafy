@@ -3,12 +3,12 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Sidebar, Topbar } from '../../components/shell';
-import { Icon } from '../../components/icons';
-import { useApi } from '../../lib/ui/fetcher';
-import type { CreditsPayload } from '../../components/credits';
-import { tierPriceView, type Currency } from '../../lib/billing/pricing';
-import { CREDIT_PRICES } from '../../lib/credits/pricing';
+import { Sidebar, Topbar } from '../../../components/shell';
+import { Icon } from '../../../components/icons';
+import { useApi } from '../../../lib/ui/fetcher';
+import type { CreditsPayload } from '../../../components/credits';
+import { tierPriceView, type Currency } from '../../../lib/billing/pricing';
+import { CREDIT_PRICES } from '../../../lib/credits/pricing';
 
 type Page = 'dashboard' | 'compose' | 'agent' | 'calendar' | 'connections' | 'onboarding';
 

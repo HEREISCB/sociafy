@@ -82,5 +82,5 @@ auto-renders whatever's enabled. Trying to pin specific providers in
 result, more places to forget to update.
 
 The widget appearance / heading / subhead IS controlled in code
-(`app/sign-in/[[...sign-in]]/page.tsx`, `app/sign-up/[[...sign-up]]/page.tsx`).
+(`app/(app)/sign-in/[[...sign-in]]/page.tsx`, `app/(app)/sign-up/[[...sign-up]]/page.tsx`).
 That's where copy and styling live.

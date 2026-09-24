@@ -3,12 +3,12 @@
 import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Sidebar, Topbar } from '../../components/shell';
-import { Icon } from '../../components/icons';
-import { apiPost, friendlyApiError, useApi } from '../../lib/ui/fetcher';
-import { openRazorpayModal } from '../../components/billing/razorpay-checkout';
-import { topupPriceView } from '../../lib/billing/pricing';
-import { BillingDetailsFields, useBillingDetails } from '../../components/billing/billing-details';
+import { Sidebar, Topbar } from '../../../components/shell';
+import { Icon } from '../../../components/icons';
+import { apiPost, friendlyApiError, useApi } from '../../../lib/ui/fetcher';
+import { openRazorpayModal } from '../../../components/billing/razorpay-checkout';
+import { topupPriceView } from '../../../lib/billing/pricing';
+import { BillingDetailsFields, useBillingDetails } from '../../../components/billing/billing-details';
 
 type CheckoutHandoff =
   | { kind: 'redirect'; url: string }
