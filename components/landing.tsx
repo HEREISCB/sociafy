@@ -71,7 +71,7 @@ const SkipLink = () => {
   );
 };
 
-const LPNav = () => (
+export const LPNav = () => (
   <header className="lp-nav-wrap">
     <div className="lp lp-nav">
       <Link href="/" className="brand" style={{ textDecoration: 'none', color: 'inherit' }} aria-label="Sociafy home">
@@ -79,10 +79,12 @@ const LPNav = () => (
         <div className="brand-name">Sociafy<span className="dot">.</span></div>
       </Link>
       <nav className="lp-nav-links" aria-label="Primary">
-        <a href="#agent">Agent</a>
-        <a href="#workflow">Workflow</a>
-        <a href="#voice">Voice</a>
-        <a href="#pricing">Pricing</a>
+        <Link href="/#agent">Agent</Link>
+        <Link href="/#workflow">Workflow</Link>
+        <Link href="/#voice">Voice</Link>
+        <Link href="/#pricing">Pricing</Link>
+        <Link href="/try-image">Free image</Link>
+        <Link href="/try-video">Free video</Link>
       </nav>
       <div className="lp-nav-spacer" />
       <div className="lp-nav-actions">
@@ -119,9 +121,9 @@ const Hero = ({ currency }: { currency: Currency }) => (
             <Link className="btn btn-lg primary" href="/sign-up">
               <SparkleIcon /> Start now
             </Link>
-            <a className="btn btn-lg" href="#agent">
+            <Link className="btn btn-lg" href="/#agent">
               <SparkleIcon /> Build agents
-            </a>
+            </Link>
           </div>
           <div className="hero-meta">
             <span className="dotted">From {tierPriceView(currency, 'starter').display} / month</span>
@@ -161,7 +163,7 @@ const Hero = ({ currency }: { currency: Currency }) => (
 
           <div className="hero-side-foot">
             <Link className="btn accent" href="/sign-up">Review drafts</Link>
-            <a className="btn" href="#workflow">See full briefing</a>
+            <Link className="btn" href="/#workflow">See full briefing</Link>
           </div>
         </aside>
       </div>
@@ -717,8 +719,8 @@ const FinalCTA = () => (
           <p>Connect two accounts in under three minutes. The agent will have your first morning briefing ready by tomorrow at 6 AM.</p>
           <div className="final-cta-actions">
             <Link className="btn primary" href="/sign-up"><SparkleIcon /> Start now</Link>
-            <a className="btn" href="#agent">Build agents</a>
-            <a className="btn" href="#pricing"><LockIcon /> See pricing</a>
+            <Link className="btn" href="/#agent">Build agents</Link>
+            <Link className="btn" href="/#pricing"><LockIcon /> See pricing</Link>
           </div>
         </div>
         <div className="final-cta-side">
@@ -734,7 +736,7 @@ const FinalCTA = () => (
   </section>
 );
 
-const Footer = () => (
+export const Footer = () => (
   <footer className="lp-foot">
     <div className="lp">
       <div className="lp-foot-grid">
@@ -751,10 +753,17 @@ const Footer = () => (
         <div className="lp-foot-col">
           <h6>Product</h6>
           <ul>
-            <li><a href="#agent">Agent</a></li>
-            <li><a href="#workflow">Workflow</a></li>
-            <li><a href="#voice">Voice training</a></li>
-            <li><a href="#pricing">Pricing</a></li>
+            <li><Link href="/#agent">Agent</Link></li>
+            <li><Link href="/#workflow">Workflow</Link></li>
+            <li><Link href="/#voice">Voice training</Link></li>
+            <li><Link href="/#pricing">Pricing</Link></li>
+          </ul>
+        </div>
+        <div className="lp-foot-col">
+          <h6>Free tools</h6>
+          <ul>
+            <li><Link href="/try-image">Free AI image generator</Link></li>
+            <li><Link href="/try-video">Free AI video generator</Link></li>
           </ul>
         </div>
         <div className="lp-foot-col">
@@ -768,8 +777,8 @@ const Footer = () => (
           <h6>Resources</h6>
           <ul>
             <li><a href="mailto:support@sociafy.app">Support</a></li>
-            <li><a href="#voice">Voice guide</a></li>
-            <li><a href="#pricing">Pricing</a></li>
+            <li><Link href="/#voice">Voice guide</Link></li>
+            <li><Link href="/#pricing">Pricing</Link></li>
           </ul>
         </div>
         <div className="lp-foot-col">

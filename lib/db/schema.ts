@@ -697,3 +697,33 @@ export const apiKeys = pgTable(
     index('api_keys_user_idx').on(t.userId),
   ],
 );
+
+// =====================================================
+// try_generations — free public /try-image and /try-video runs. The original
+// file sits at an unguessable R2 key that is only handed out once the visitor
+// signs in (claimed_by); until then they see preview_url, a blurred copy.
+// =====================================================
+export const tryGenerations = pgTable(
+  'try_generations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    kind: text('kind').$type<'image' | 'video'>().notNull(),
+    prompt: text('prompt').notNull(),
+    status: text('status').$type<'pending' | 'finalizing' | 'ready' | 'failed'>().default('pending').notNull(),
+    visitor: text('visitor').notNull(),
+    ipHash: text('ip_hash').notNull(),
+    taskId: text('task_id'),
+    originalKey: text('original_key'),
+    previewUrl: text('preview_url'),
+    claimedBy: text('claimed_by'),
+    mediaAssetId: uuid('media_asset_id'),
+    error: text('error'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('try_gen_created_idx').on(t.kind, t.createdAt),
+    index('try_gen_visitor_idx').on(t.visitor),
+    index('try_gen_ip_idx').on(t.ipHash),
+  ],
+);
