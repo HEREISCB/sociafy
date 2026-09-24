@@ -70,7 +70,14 @@ export function parseResults(raw: string, max = 10): string[] {
       if (arr) items = arr;
     }
   } catch {
-    items = text.split('\n').map((l) => l.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, ''));
+    // Truncated JSON (model hit its token cap): keep every string that closed.
+    // Anything else: one result per line.
+    items = /^[[{]/.test(text)
+      // Consume every complete string literal (keys too, so matching stays aligned), then drop the keys.
+      ? [...text.matchAll(/"(?:[^"\\]|\\.)*"/g)]
+          .filter((m) => !/^\s*:/.test(text.slice(m.index + m[0].length)))
+          .map((m) => JSON.parse(m[0]) as string)
+      : text.split('\n').map((l) => l.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, ''));
   }
   return (items ?? [])
     .filter((s): s is string => typeof s === 'string')

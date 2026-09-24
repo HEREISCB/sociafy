@@ -16,3 +16,11 @@ describe('parseResults', () => {
     expect(parseResults('{"results":[1,"a",null,"b","c"]}', 2)).toEqual(['a', 'b']);
   });
 });
+
+describe('parseResults on truncated JSON', () => {
+  it('keeps the strings that closed and drops the cut-off one', async () => {
+    const { parseResults } = await import('./free-tools');
+    const raw = '{"results": ["#a #b", "#c \\"d\\"", "#e #f #g';
+    expect(parseResults(raw)).toEqual(['#a #b', '#c "d"']);
+  });
+});

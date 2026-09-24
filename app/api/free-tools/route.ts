@@ -57,7 +57,9 @@ export async function POST(req: NextRequest) {
     const raw = await completeText(ai, {
       system,
       user: `${tone ? `Tone: ${tone}.\n` : ''}Topic:\n"""${input}"""`,
-      maxOutputTokens,
+      // gpt-5 spends part of max_output_tokens on reasoning before any text;
+      // without headroom the JSON is cut off mid-string. Still well under a cent.
+      maxOutputTokens: maxOutputTokens + 1500,
       json: true,
       timeoutMs: 30_000,
     });
