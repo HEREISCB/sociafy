@@ -2,6 +2,7 @@
  * Free public text tools (/free-*). Pure data + parsing, safe to import anywhere.
  * FREE_TOOL_PAGES is the list to add to the sitemap and footer.
  */
+import { TRY_PAGES } from './try-presets';
 
 export const FREE_TOOL_IDS = ['caption', 'hashtag', 'linkedin', 'bio', 'tweet', 'youtube'] as const;
 export type FreeToolId = (typeof FREE_TOOL_IDS)[number];
@@ -21,8 +22,7 @@ export const FREE_TOOLS: Record<FreeToolId, { slug: string; title: string }> = {
 export const FREE_TOOL_PAGES: { slug: string; title: string }[] = [
   { slug: '/free-tools', title: 'Free social media tools' },
   ...FREE_TOOL_IDS.map((id) => FREE_TOOLS[id]),
-  { slug: '/try-image', title: 'AI image generator' },
-  { slug: '/try-video', title: 'AI video generator' },
+  ...TRY_PAGES.map((t) => ({ slug: t.path, title: t.title })),
 ];
 
 const JSON_RULE = 'Reply with JSON only, shaped exactly {"results": ["...", "..."]}. Each result is a complete, ready-to-paste string. No markdown, no commentary, no numbering inside the strings.';

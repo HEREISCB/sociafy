@@ -1,6 +1,7 @@
 import Link from 'next/link';
+import { TRY_PAGES } from '../lib/try-presets';
 import type { Metadata } from 'next';
-import { LPNav, Footer } from './landing';
+import { LPNav, Footer } from './site-chrome';
 import { TextTool } from './text-tool';
 import { FREE_TOOLS, FREE_TOOL_IDS, type FreeToolId } from '../lib/free-tools';
 
@@ -62,8 +63,7 @@ export function Benefits() {
 export function ToolLinks({ exclude }: { exclude?: FreeToolId }) {
   const links = [
     ...FREE_TOOL_IDS.filter((id) => id !== exclude).map((id) => ({ href: FREE_TOOLS[id].slug, title: `Free ${FREE_TOOLS[id].title}` })),
-    { href: '/try-image', title: 'Free AI image generator' },
-    { href: '/try-video', title: 'Free AI video generator' },
+    ...TRY_PAGES.map((t) => ({ href: t.path, title: `Free ${t.title.replace(/^Free /, '')}` })),
   ];
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>

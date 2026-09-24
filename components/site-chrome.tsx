@@ -27,8 +27,7 @@ export const LPNav = () => (
         <Link href="/#workflow">Workflow</Link>
         <Link href="/#voice">Voice</Link>
         <Link href="/#pricing">Pricing</Link>
-        <Link href="/try-image">Free image</Link>
-        <Link href="/try-video">Free video</Link>
+        <Link href="/free-tools">Free tools</Link>
       </nav>
       <div className="lp-nav-spacer" />
       <div className="lp-nav-actions">
@@ -68,8 +67,12 @@ export const Footer = () => (
         <div className="lp-foot-col">
           <h6>Free tools</h6>
           <ul>
-            <li><Link href="/try-image">Free AI image generator</Link></li>
-            <li><Link href="/try-video">Free AI video generator</Link></li>
+            <li><Link href="/free-tools">All free tools</Link></li>
+            <li><Link href="/try-image">AI image generator</Link></li>
+            <li><Link href="/try-video">AI video generator</Link></li>
+            <li><Link href="/free-instagram-caption-generator">Instagram captions</Link></li>
+            <li><Link href="/free-hashtag-generator">Hashtag generator</Link></li>
+            <li><Link href="/free-linkedin-post-generator">LinkedIn posts</Link></li>
           </ul>
         </div>
         <div className="lp-foot-col">

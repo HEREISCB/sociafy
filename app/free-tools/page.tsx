@@ -1,4 +1,4 @@
-import { LPNav, Footer } from '../../components/landing';
+import { LPNav, Footer } from '../../components/site-chrome';
 import { ToolLinks, toolMetadata } from '../../components/text-tool-page';
 
 export const metadata = toolMetadata(
