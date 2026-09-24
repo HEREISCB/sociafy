@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { TryView } from '../lib/try';
+import { Turnstile, turnstileRequired } from './turnstile';
 
 type Kind = 'image' | 'video';
 
@@ -21,7 +22,25 @@ const EXAMPLES: Record<Kind, string[]> = {
 
 const WAIT: Record<Kind, string> = { image: 'usually 20–40 seconds', video: 'usually 1–3 minutes' };
 
-export function TryTool({ kind }: { kind: Kind }) {
+// Real results from this tool, watermarked like a visitor's would be.
+const SAMPLES: Record<Kind, string> = {
+  image: 'https://pub-b8668a9ec26147f9bd19ea2e55fee67f.r2.dev/try/ea08c80a-dbbd-4a5c-854b-4ee37acb7bd2/preview.jpg',
+  video: 'https://pub-b8668a9ec26147f9bd19ea2e55fee67f.r2.dev/try/a16d20e7-120e-4273-88f5-18dfa202a252/preview.mp4',
+};
+
+type Props = {
+  kind: Kind;
+  /** This page's URL: sign-up returns here. */
+  path?: string;
+  /** Output shape, see lib/try-presets. Default square / 9:16. */
+  aspect?: string;
+  examples?: string[];
+};
+
+export function TryTool({ kind, path: pagePath, aspect, examples }: Props) {
+  const [token, setToken] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const [copied, setCopied] = useState(false);
   const [prompt, setPrompt] = useState('');
   const [gen, setGen] = useState<TryView | null>(null);
   const [busy, setBusy] = useState(false);
@@ -29,7 +48,8 @@ export function TryTool({ kind }: { kind: Kind }) {
   const [elapsed, setElapsed] = useState(0);
   const started = useRef(0);
 
-  const path = kind === 'image' ? '/try-image' : '/try-video';
+  const path = pagePath ?? (kind === 'image' ? '/try-image' : '/try-video');
+  const ideas = examples ?? EXAMPLES[kind];
 
   const load = useCallback(async (id: string) => {
     const r = await fetch(`/api/try/${id}`, { cache: 'no-store' });
@@ -69,7 +89,7 @@ export function TryTool({ kind }: { kind: Kind }) {
     setBusy(true);
     setError(null);
     try {
-      const r = await fetch('/api/try', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ kind, prompt }) });
+      const r = await fetch('/api/try', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ kind, prompt, aspect, turnstileToken: token ?? undefined }) });
       const body = await r.json().catch(() => ({}));
       if (!r.ok) {
         setError(body.hint ?? 'Something went wrong. Try again.');
@@ -81,6 +101,7 @@ export function TryTool({ kind }: { kind: Kind }) {
       window.history.replaceState(null, '', `${path}?id=${body.id}`);
     } finally {
       setBusy(false);
+      setAttempt((n) => n + 1); // Turnstile tokens are single-use.
     }
   }
 
@@ -105,18 +126,19 @@ export function TryTool({ kind }: { kind: Kind }) {
           onChange={(e) => setPrompt(e.target.value)}
           maxLength={600}
           rows={3}
-          placeholder={EXAMPLES[kind][0]}
+          placeholder={ideas[0]}
           style={{ width: '100%', padding: 12, borderRadius: 10, border: '1px solid var(--line-2)', background: 'var(--bg)', color: 'var(--ink)', font: 'inherit', fontSize: 15, resize: 'vertical' }}
         />
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '10px 0 14px' }}>
-          {EXAMPLES[kind].map((ex) => (
+          {ideas.map((ex) => (
             <button type="button" key={ex} className="prompt-chip" onClick={() => setPrompt(ex)}>{ex}</button>
           ))}
         </div>
-        <button className="btn btn-lg primary" type="submit" disabled={busy || gen?.status === 'pending' || prompt.trim().length < 3}>
+        <button className="btn btn-lg primary" type="submit" disabled={busy || gen?.status === 'pending' || prompt.trim().length < 3 || (turnstileRequired && !token)}>
           {busy ? 'Starting…' : `Generate ${kind} free`}
         </button>
         <span style={{ marginLeft: 12, fontSize: 12.5, color: 'var(--ink-3)' }}>No card. No account needed to try.</span>
+        <Turnstile onToken={setToken} resetKey={attempt} />
       </form>
 
       {error && <p role="alert" style={{ marginTop: 14, color: 'var(--bad, #c0392b)', fontSize: 13.5 }}>{error} {error.includes('account') && <Link href="/sign-up" style={{ textDecoration: 'underline' }}>Sign up free</Link>}</p>}
@@ -124,8 +146,19 @@ export function TryTool({ kind }: { kind: Kind }) {
       {gen && (
         <div style={{ marginTop: 20 }} aria-live="polite">
           {gen.status === 'pending' && (
-            <div style={{ padding: 32, textAlign: 'center', background: 'var(--bg-sunk)', borderRadius: 12, fontSize: 14 }}>
-              Generating your {kind}, {WAIT[kind]}{elapsed > 0 ? ` · ${elapsed}s` : ''}…
+            <div style={{ padding: 24, textAlign: 'center', background: 'var(--bg-sunk)', borderRadius: 12, fontSize: 14 }}>
+              <div>Generating your {kind}, {WAIT[kind]}{elapsed > 0 ? ` · ${elapsed}s` : ''}…</div>
+              <div style={{ fontSize: 12.5, color: 'var(--ink-3)', margin: '8px 0 14px' }}>
+                You can leave this page. Your {kind} keeps rendering and waits at this link.{' '}
+                <button type="button" className="prompt-chip" onClick={() => { void navigator.clipboard?.writeText(window.location.href); setCopied(true); }}>
+                  {copied ? 'Link copied' : 'Copy link'}
+                </button>
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 6 }}>Made with this tool:</div>
+              {kind === 'image'
+                // eslint-disable-next-line @next/next/no-img-element
+                ? <img src={SAMPLES.image} alt="Example AI image made with Sociafy" loading="lazy" style={{ width: 220, borderRadius: 10 }} />
+                : <video src={SAMPLES.video} autoPlay loop muted playsInline preload="metadata" style={{ width: 160, borderRadius: 10 }} />}
             </div>
           )}
           {gen.status === 'failed' && (
@@ -141,6 +174,13 @@ export function TryTool({ kind }: { kind: Kind }) {
                 <a className="btn btn-lg" href="/dashboard?tab=compose">Post it with Sociafy</a>
               </div>
               <p style={{ fontSize: 12.5, color: 'var(--ink-3)', marginTop: 8 }}>Saved to your media library.</p>
+              <div className="card" style={{ marginTop: 14, padding: 16, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                <div style={{ flex: 1, minWidth: 220 }}>
+                  <div style={{ fontWeight: 600, fontSize: 14.5 }}>Next: let Sociafy post for you</div>
+                  <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>Two minutes of setup. Pick your niches and platforms, and autopilot drafts posts like this every week.</div>
+                </div>
+                <Link className="btn btn-lg primary" href="/onboarding">Set up your autopilot</Link>
+              </div>
             </div>
           )}
           {gen.status === 'ready' && !gen.unlocked && (

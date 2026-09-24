@@ -10,7 +10,7 @@ export const metadata = {
 
 const COMPANY = 'GNIX SEMICONDUCTORS PRIVATE LIMITED';
 const SUPPORT_EMAIL = 'support@sociafy.app'; // replace with verified support address
-const LAST_UPDATED = '2026-05-23';
+const LAST_UPDATED = '2026-09-24';
 
 export default function PrivacyPolicyPage() {
   return (
@@ -38,6 +38,7 @@ export default function PrivacyPolicyPage() {
         <li><strong>Content you create</strong> — drafts, scheduled posts, generated media, and the prompts you submit to our AI features.</li>
         <li><strong>Billing data</strong> — handled by our payment processor (Razorpay). We store only a customer reference and subscription/payment IDs; we do not store card numbers.</li>
         <li><strong>Usage telemetry</strong> — basic logs needed to operate the service (request paths, response codes, error traces).</li>
+        <li><strong>Free tools (no account)</strong> — when you use our free generators (for example /try-image, /try-video and the /free-* tools) without signing in, we keep the prompt you enter, the result, a random ID in a cookie (<code>sfy_try</code>, one year), and a one-way salted hash of your IP address. We use these only to enforce the daily free limit, to hand your result to your account if you sign up, and to prevent abuse. We never store your raw IP address for this. We may also use Cloudflare Turnstile to check that a request comes from a person, not a bot.</li>
       </ul>
 
       <h2>3. How we use it</h2>
@@ -50,12 +51,12 @@ export default function PrivacyPolicyPage() {
         <li><strong>AI providers</strong> (OpenAI, PiAPI) — prompts and intermediate generations needed to fulfill your requests. Subject to their respective privacy terms.</li>
         <li><strong>Social platforms</strong> — only the content you explicitly publish.</li>
         <li><strong>Razorpay</strong> (payments) — billing identifiers and the subscription/transaction metadata required for processing.</li>
-        <li><strong>Infrastructure providers</strong> — Vercel (hosting), Cloudflare R2 (media storage), Supabase (database), Clerk (authentication).</li>
+        <li><strong>Infrastructure providers</strong> — Amazon Web Services (hosting), Cloudflare (network, bot protection and R2 media storage), Supabase (database), Clerk (authentication).</li>
       </ul>
 
       <h2>5. Data retention</h2>
       <p>
-        Account and billing data is retained for the lifetime of your subscription plus a reasonable period for legal and accounting obligations. Generated assets and drafts are retained until you delete them. You can request deletion of your account at any time by emailing <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>.
+        Account and billing data is retained for the lifetime of your subscription plus a reasonable period for legal and accounting obligations. Generated assets and drafts are retained until you delete them. Free-tool results that are not claimed by an account, along with their cookie ID and IP hash, are deleted after 30 days. You can request deletion of your account at any time by emailing <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>.
       </p>
 
       <h2>6. Your rights</h2>

@@ -5,28 +5,37 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readFile, writeFile, rm } from 'node:fs/promises';
 import sharp from 'sharp';
-import { and, eq, gte, ne, or, sql, isNull } from 'drizzle-orm';
+import { and, eq, gte, lt, ne, or, sql, isNull, isNotNull, inArray } from 'drizzle-orm';
 import { db } from './db';
 import { mediaAssets, tryGenerations } from './db/schema';
 import { getOpenAI, MODELS } from './ai/client';
 import { rewritePromptForMedia } from './ai/prompt-rewriter';
 import { createSeedanceTask, getSeedanceTask } from './ai/piapi';
-import { publicUrlFor, uploadBuffer } from './storage/r2';
+import { deleteObject, publicUrlFor, uploadBuffer } from './storage/r2';
+import { turnstileEnabled } from './turnstile';
+import { IMAGE_ASPECTS, VIDEO_ASPECTS, type ImageAspect, type VideoAspect } from './try-presets';
 import { ensureProfile } from './api';
 import { classifyImageFailure } from '../app/api/v1/shared';
 
 export type TryKind = 'image' | 'video';
 export type TryRow = typeof tryGenerations.$inferSelect;
 
-/** Free runs per visitor (cookie, IP or account — whichever has used the most) per 24h. */
+/** Free runs per browser or account per 24h. */
 export const TRY_PER_DAY: Record<TryKind, number> = { image: 2, video: 1 };
+/**
+ * Per IP per 24h. Offices, colleges and mobile carriers put many people behind
+ * one IP, so once Turnstile is keeping bots out the IP only needs to stop
+ * someone clearing cookies over and over. Without Turnstile it stays as strict
+ * as the per-browser limit.
+ */
+export const tryPerIp = (k: TryKind) => (turnstileEnabled() ? { image: 6, video: 3 }[k] : TRY_PER_DAY[k]);
 /** Site-wide ceiling per 24h — what bounds the bill when someone rotates IPs. */
 const dailyCap = (k: TryKind) =>
   Number(k === 'image' ? process.env.TRY_IMAGE_DAILY_CAP ?? 150 : process.env.TRY_VIDEO_DAILY_CAP ?? 15);
 
 // The cheapest settings that still look good: a video try costs about $0.45
 // (5s of 480p Seedance fast), an image about $0.02 (1024² low).
-const VIDEO = { durationSec: 5, resolution: '480p', aspect: '9:16', fast: true } as const;
+const VIDEO = { durationSec: 5, resolution: '480p', fast: true } as const;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export const VISITOR_COOKIE = 'sfy_try';
@@ -40,19 +49,58 @@ export function hashIp(ip: string): string {
   return crypto.createHash('sha256').update(`try:${process.env.CRON_SECRET ?? ''}:${ip}`).digest('hex').slice(0, 32);
 }
 
-export async function tryQuota(kind: TryKind, who: { visitor: string; ipHash: string; userId?: string | null }) {
+type Exec = Pick<ReturnType<typeof db>, 'select'>;
+
+export async function tryQuota(kind: TryKind, who: { visitor: string; ipHash: string; userId?: string | null }, x: Exec = db()) {
   const since = new Date(Date.now() - DAY_MS);
   const live = and(eq(tryGenerations.kind, kind), gte(tryGenerations.createdAt, since), ne(tryGenerations.status, 'failed'));
-  const mine = or(
-    eq(tryGenerations.visitor, who.visitor),
-    eq(tryGenerations.ipHash, who.ipHash),
-    ...(who.userId ? [eq(tryGenerations.claimedBy, who.userId)] : []),
-  );
-  const [[{ used }], [{ total }]] = await Promise.all([
-    db().select({ used: sql<number>`count(*)::int` }).from(tryGenerations).where(and(live, mine)),
-    db().select({ total: sql<number>`count(*)::int` }).from(tryGenerations).where(live),
+  const mine = or(eq(tryGenerations.visitor, who.visitor), ...(who.userId ? [eq(tryGenerations.claimedBy, who.userId)] : []));
+  const n = sql<number>`count(*)::int`;
+  const [[{ used }], [{ ipUsed }], [{ total }]] = await Promise.all([
+    x.select({ used: n }).from(tryGenerations).where(and(live, mine)),
+    x.select({ ipUsed: n }).from(tryGenerations).where(and(live, eq(tryGenerations.ipHash, who.ipHash))),
+    x.select({ total: n }).from(tryGenerations).where(live),
   ]);
-  return { left: Math.max(0, TRY_PER_DAY[kind] - used), siteFull: total >= dailyCap(kind) };
+  const left = Math.max(0, Math.min(TRY_PER_DAY[kind] - used, tryPerIp(kind) - ipUsed));
+  return { left, siteFull: total >= dailyCap(kind) };
+}
+
+/**
+ * Check the quota and record the try as one step. The advisory lock serialises
+ * concurrent requests for the same kind, so ten parallel POSTs can't all pass
+ * the count before any of them inserts.
+ */
+export async function reserveTry(
+  v: { kind: TryKind; prompt: string; aspect: string | null; visitor: string; ipHash: string; userId: string | null },
+): Promise<{ row: TryRow } | { error: 'try_limit' | 'try_busy' }> {
+  return db().transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'try:' + v.kind}))`);
+    const q = await tryQuota(v.kind, { visitor: v.visitor, ipHash: v.ipHash, userId: v.userId }, tx);
+    if (q.left === 0) return { error: 'try_limit' as const };
+    if (q.siteFull) return { error: 'try_busy' as const };
+    const [row] = await tx.insert(tryGenerations)
+      .values({ kind: v.kind, prompt: v.prompt, aspect: v.aspect, visitor: v.visitor, ipHash: v.ipHash, claimedBy: v.userId })
+      .returning();
+    return { row };
+  });
+}
+
+/**
+ * OpenAI's moderation endpoint is free. The watermark puts Sociafy's name on
+ * whatever gets made, so refuse flagged prompts before spending anything.
+ * Fails open: an outage shouldn't take the tool down, and both models still
+ * apply their own filters.
+ */
+export async function promptFlagged(prompt: string): Promise<boolean> {
+  const openai = getOpenAI();
+  if (!openai) return false;
+  try {
+    const r = await openai.moderations.create({ model: 'omni-moderation-latest', input: prompt });
+    return r.results.some((x) => x.flagged);
+  } catch (e) {
+    console.warn('[try] moderation unavailable, allowing', (e as Error).message);
+    return false;
+  }
 }
 
 /**
@@ -90,7 +138,8 @@ export async function runImageTry(row: TryRow) {
     const { prompt } = await rewritePromptForMedia({ userPrompt: row.prompt, target: 'gpt-image-2' });
     let res;
     try {
-      res = await openai.images.generate({ model: MODELS.image, prompt, size: '1024x1024', quality: 'low', n: 1 });
+      const { size } = IMAGE_ASPECTS[(row.aspect as ImageAspect) ?? 'square'] ?? IMAGE_ASPECTS.square;
+      res = await openai.images.generate({ model: MODELS.image, prompt, size, quality: 'low', n: 1 });
     } catch (e) {
       return fail(row.id, classifyImageFailure(e).message);
     }
@@ -99,8 +148,10 @@ export async function runImageTry(row: TryRow) {
     const buf = Buffer.from(b64, 'base64');
     const originalKey = secretKey(row.id, 'png');
     // Smaller than the original too, so cropping the banner off still isn't the real thing.
-    const preview = await sharp(buf).resize(768, 768)
-      .composite([{ input: await watermarkPng(768, 768) }])
+    const { w, h } = IMAGE_ASPECTS[(row.aspect as ImageAspect) ?? 'square'] ?? IMAGE_ASPECTS.square;
+    const pw = Math.round((768 * w) / Math.max(w, h)), ph = Math.round((768 * h) / Math.max(w, h));
+    const preview = await sharp(buf).resize(pw, ph)
+      .composite([{ input: await watermarkPng(pw, ph) }])
       .jpeg({ quality: 78 }).toBuffer();
     const previewKey = `try/${row.id}/preview.jpg`;
     await Promise.all([
@@ -121,19 +172,21 @@ export async function submitVideoTry(row: TryRow) {
   const apiKey = process.env.PIAPI_API_KEY;
   if (!apiKey) throw new Error('video_provider_not_configured');
   const { prompt } = await rewritePromptForMedia({ userPrompt: row.prompt, target: 'seedance-2' });
-  const taskId = await createSeedanceTask({ apiKey, prompt, mode: 'text_to_video', ...VIDEO });
+  const aspect = row.aspect && row.aspect in VIDEO_ASPECTS ? (row.aspect as VideoAspect) : '9:16';
+  const taskId = await createSeedanceTask({ apiKey, prompt, mode: 'text_to_video', aspect, ...VIDEO });
   await db().update(tryGenerations).set({ taskId, updatedAt: new Date() }).where(eq(tryGenerations.id, row.id));
 }
 
 const run = promisify(execFile);
 
-/** Watermarked 360×640 copy, sound kept. Null when ffmpeg isn't installed — the page then shows a locked card instead. */
-async function watermarkVideo(buf: Buffer): Promise<Buffer | null> {
+/** Watermarked small copy, sound kept. Null when ffmpeg isn't installed — the page then shows a locked card instead. */
+async function watermarkVideo(buf: Buffer, aspect: string | null): Promise<Buffer | null> {
+  const { w, h } = VIDEO_ASPECTS[(aspect as VideoAspect) ?? '9:16'] ?? VIDEO_ASPECTS['9:16'];
   const base = join(tmpdir(), `try-${crypto.randomUUID()}`);
   try {
-    await Promise.all([writeFile(`${base}.in.mp4`, buf), watermarkPng(360, 640).then((wm) => writeFile(`${base}.wm.png`, wm))]);
+    await Promise.all([writeFile(`${base}.in.mp4`, buf), watermarkPng(w, h).then((wm) => writeFile(`${base}.wm.png`, wm))]);
     await run('ffmpeg', ['-y', '-i', `${base}.in.mp4`, '-i', `${base}.wm.png`,
-      '-filter_complex', '[0:v]scale=360:640:force_original_aspect_ratio=decrease,pad=360:640:(ow-iw)/2:(oh-ih)/2[v];[v][1:v]overlay=0:0',
+      '-filter_complex', `[0:v]scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2[v];[v][1:v]overlay=0:0`,
       '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '28', '-c:a', 'aac', '-b:a', '96k', '-movflags', '+faststart', `${base}.out.mp4`], { timeout: 60_000 });
     return await readFile(`${base}.out.mp4`);
   } catch (e) {
@@ -167,7 +220,7 @@ export async function advanceVideoTry(row: TryRow) {
     if (!res.ok) throw new Error(`download ${res.status}`);
     const buf = Buffer.from(await res.arrayBuffer());
     const originalKey = secretKey(row.id, 'mp4');
-    const [preview] = await Promise.all([watermarkVideo(buf), uploadBuffer({ key: originalKey, body: buf, contentType: 'video/mp4' })]);
+    const [preview] = await Promise.all([watermarkVideo(buf, row.aspect), uploadBuffer({ key: originalKey, body: buf, contentType: 'video/mp4' })]);
     let previewUrl: string | null = null;
     if (preview) {
       const previewKey = `try/${row.id}/preview.mp4`;
@@ -205,8 +258,8 @@ export async function claimTry(row: TryRow, userId: string, visitor: string | un
         storageKey: r.originalKey,
         publicUrl: publicUrlFor(r.originalKey),
         mimeType: r.kind === 'image' ? 'image/png' : 'video/mp4',
-        width: r.kind === 'image' ? 1024 : null,
-        height: r.kind === 'image' ? 1024 : null,
+        width: r.kind === 'image' ? (IMAGE_ASPECTS[(r.aspect as ImageAspect) ?? 'square'] ?? IMAGE_ASPECTS.square).w : null,
+        height: r.kind === 'image' ? (IMAGE_ASPECTS[(r.aspect as ImageAspect) ?? 'square'] ?? IMAGE_ASPECTS.square).h : null,
         label: r.prompt.slice(0, 80),
       });
       r = won;
@@ -230,3 +283,47 @@ export function tryView(r: TryRow, userId: string | null) {
   };
 }
 export type TryView = ReturnType<typeof tryView>;
+
+/**
+ * Cron sweep (finalize-video-jobs, every 5 min):
+ * - collects finished try videos nobody is polling for, before PiAPI's
+ *   download link expires (a visitor may close the tab and come back days later);
+ * - fails videos still unfinished after 6 hours;
+ * - deletes unclaimed tries older than 30 days, files and rows.
+ */
+export async function sweepTryGenerations() {
+  const pending = await db().select().from(tryGenerations)
+    .where(and(eq(tryGenerations.kind, 'video'), inArray(tryGenerations.status, ['pending', 'finalizing']), isNotNull(tryGenerations.taskId)))
+    .limit(25);
+  let advanced = 0, expired = 0, deleted = 0;
+  for (const row of pending) {
+    if (Date.now() - new Date(row.createdAt).getTime() > 6 * 60 * 60 * 1000) {
+      await fail(row.id, 'The video took too long to render. Try again.');
+      expired++;
+      continue;
+    }
+    await advanceVideoTry(row).catch((e) => console.error('[try] sweep advance failed', row.id, e));
+    advanced++;
+  }
+  // An image runs inside the request's after(); a deploy restart mid-run leaves it pending forever.
+  const stuck = await db().update(tryGenerations)
+    .set({ status: 'failed', error: 'Something went wrong on our side. Your free try was not used.', updatedAt: new Date() })
+    .where(and(eq(tryGenerations.kind, 'image'), eq(tryGenerations.status, 'pending'), lt(tryGenerations.createdAt, new Date(Date.now() - 15 * 60 * 1000))))
+    .returning({ id: tryGenerations.id });
+  expired += stuck.length;
+  const old = await db().select({ id: tryGenerations.id, originalKey: tryGenerations.originalKey, previewUrl: tryGenerations.previewUrl, kind: tryGenerations.kind })
+    .from(tryGenerations)
+    .where(and(isNull(tryGenerations.claimedBy), lt(tryGenerations.createdAt, new Date(Date.now() - 30 * DAY_MS))))
+    .limit(50);
+  for (const r of old) {
+    try {
+      if (r.originalKey) await deleteObject(r.originalKey);
+      if (r.previewUrl) await deleteObject(`try/${r.id}/preview.${r.kind === 'image' ? 'jpg' : 'mp4'}`);
+      await db().delete(tryGenerations).where(eq(tryGenerations.id, r.id));
+      deleted++;
+    } catch (e) {
+      console.error('[try] cleanup failed', r.id, e);
+    }
+  }
+  return { advanced, expired, deleted };
+}

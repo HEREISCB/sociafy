@@ -13,7 +13,8 @@
     "db:studio": "drizzle-kit studio",
     "db:bootstrap": "node scripts/db-bootstrap.mjs",
     "api-key": "node scripts/create-api-key.mjs",
-    "verify:razorpay": "node scripts/verify-razorpay.mjs"
+    "verify:razorpay": "node scripts/verify-razorpay.mjs",
+    "try:stats": "node scripts/try-stats.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",

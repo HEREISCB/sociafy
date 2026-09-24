@@ -709,6 +709,8 @@ export const tryGenerations = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     kind: text('kind').$type<'image' | 'video'>().notNull(),
     prompt: text('prompt').notNull(),
+    /** Null = the kind's default (square image, 9:16 video). */
+    aspect: text('aspect'),
     status: text('status').$type<'pending' | 'finalizing' | 'ready' | 'failed'>().default('pending').notNull(),
     visitor: text('visitor').notNull(),
     ipHash: text('ip_hash').notNull(),

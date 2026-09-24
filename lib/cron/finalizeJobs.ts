@@ -4,6 +4,7 @@ import { genJobs, videoJobs } from '../db/schema';
 import { isStubMode } from '../env';
 import { finalizeVideoJob } from '../media/finalizeVideoJob';
 import { attachFinishedVideos } from '../agent/media';
+import { sweepTryGenerations } from '../try';
 // failImageJob is colocated with the /v1/images route that writes these rows and
 // is the only claim-then-refund path for them. Importing app/ from lib/ is
 // unusual here, but a second copy of a refund is how you get a double refund.
@@ -113,6 +114,14 @@ export async function runFinalizeJobs(): Promise<FinalizeJobsResult> {
     await attachFinishedVideos();
   } catch (e) {
     console.error('[cron/finalize-video-jobs] attach', e instanceof Error ? e.message.slice(0, 300) : e);
+  }
+
+  // Free /try-* generations: finish abandoned videos, expire stuck ones, drop old unclaimed files.
+  try {
+    const t = await sweepTryGenerations();
+    if (t.advanced || t.expired || t.deleted) console.log('[cron/finalize-video-jobs] try', JSON.stringify(t));
+  } catch (e) {
+    console.error('[cron/finalize-video-jobs] try', e instanceof Error ? e.message.slice(0, 300) : e);
   }
 
   return {

@@ -6,14 +6,14 @@ import { AuthLoading } from '../../../components/auth-loading';
 
 /**
  * Free-try visitors sign up to unlock a blurred result; send them back to it
- * instead of onboarding. Only /try-* paths, so this is never an open redirect.
+ * instead of onboarding. Only /try-* and /free-* paths on this site, so this is never an open redirect.
  * Read from location (not useSearchParams): this only renders inside
  * ClerkLoaded, which is client-only, so there is no server pass to mismatch.
  */
 function tryReturn(): string | null {
   if (typeof window === 'undefined') return null;
   const next = new URLSearchParams(window.location.search).get('redirect_url');
-  return next && /^\/try-(image|video)(\?id=[0-9a-f-]{36}(&download=1)?)?$/.test(next) ? next : null;
+  return next && /^\/(try-(image|video)|free-[a-z0-9-]{3,60})(\?id=[0-9a-f-]{36}(&download=1)?)?$/.test(next) ? next : null;
 }
 
 export default function Page() {

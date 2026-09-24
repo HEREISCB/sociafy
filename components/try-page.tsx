@@ -1,9 +1,17 @@
 import Link from 'next/link';
 import { LPNav, Footer } from './landing';
 import { TryTool } from './try-tool';
+import { TRY_PAGES } from '../lib/try-presets';
 
 type Props = {
   kind: 'image' | 'video';
+  /** Page URL. Default /try-image or /try-video. */
+  path?: string;
+  /** Output shape for this page's platform, see lib/try-presets. */
+  aspect?: string;
+  examples?: string[];
+  /** Tool name for structured data, e.g. "YouTube thumbnail maker". */
+  toolName?: string;
   h1: React.ReactNode;
   lede: string;
   steps: [string, string][];
@@ -45,14 +53,14 @@ function Benefits() {
 }
 
 /** Server-rendered shell for /try-image and /try-video: everything but the tool itself is static HTML for crawlers. */
-export function TryPage({ kind, h1, lede, steps, faq }: Props) {
+export function TryPage({ kind, path = `/try-${kind}`, aspect, examples, toolName, h1, lede, steps, faq }: Props) {
   const jsonLd = {
     '@context': 'https://schema.org',
     '@graph': [
       {
         '@type': 'WebApplication',
-        name: `Sociafy free AI ${kind} generator`,
-        url: `https://sociafy.app/try-${kind}`,
+        name: `Sociafy ${toolName ?? `free AI ${kind} generator`}`,
+        url: `https://sociafy.app${path}`,
         applicationCategory: 'MultimediaApplication',
         operatingSystem: 'Any',
         offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
@@ -74,7 +82,7 @@ export function TryPage({ kind, h1, lede, steps, faq }: Props) {
             <span className="hero-eyebrow"><span className="pill">FREE</span> No sign-up to try</span>
             <h1 style={{ maxWidth: 820, margin: '16px auto' }}>{h1}</h1>
             <p className="hero-lede" style={{ maxWidth: 640, margin: '0 auto 28px' }}>{lede}</p>
-            <TryTool kind={kind} />
+            <TryTool kind={kind} path={path} aspect={aspect} examples={examples} />
             <Benefits />
           </div>
         </section>
@@ -109,6 +117,12 @@ export function TryPage({ kind, h1, lede, steps, faq }: Props) {
               <p className="blurb">
                 Need a {other} instead? Try the <Link href={`/try-${other}`} style={{ textDecoration: 'underline' }}>free AI {other} generator</Link>.
               </p>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 28 }}>
+              {TRY_PAGES.filter((t) => t.path !== path).map((t) => (
+                <Link key={t.path} href={t.path} className="prompt-chip">{t.title}</Link>
+              ))}
+              <Link href="/free-tools" className="prompt-chip">All free tools</Link>
             </div>
             <div className="faq">
               {faq.map(([q, a], i) => (

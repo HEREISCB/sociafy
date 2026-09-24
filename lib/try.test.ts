@@ -4,7 +4,7 @@ vi.mock('./storage/r2', () => ({ publicUrlFor: (k: string) => `https://cdn/${k}`
 import { tryView, clientIp, hashIp, type TryRow } from './try';
 
 const row = (over: Partial<TryRow> = {}): TryRow => ({
-  id: 'x', kind: 'image', prompt: 'p', status: 'ready', visitor: 'v', ipHash: 'h', taskId: null,
+  id: 'x', kind: 'image', prompt: 'p', aspect: null, status: 'ready', visitor: 'v', ipHash: 'h', taskId: null,
   originalKey: 'try/x/secret.png', previewUrl: 'https://cdn/try/x/preview.jpg', claimedBy: null,
   mediaAssetId: null, error: null, createdAt: new Date(), updatedAt: new Date(), ...over,
 });
@@ -35,5 +35,18 @@ describe('ip', () => {
   it('hashes, never stores the raw ip', () => {
     expect(hashIp('1.1.1.1')).not.toContain('1.1.1.1');
     expect(hashIp('1.1.1.1')).toBe(hashIp('1.1.1.1'));
+  });
+});
+
+describe('per-IP allowance', () => {
+  it('stays strict without Turnstile and loosens once it is on', async () => {
+    const { tryPerIp } = await import('./try');
+    delete process.env.TURNSTILE_SECRET_KEY;
+    expect(tryPerIp('video')).toBe(1);
+    process.env.TURNSTILE_SECRET_KEY = 's';
+    process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY = 'k';
+    expect(tryPerIp('video')).toBe(3);
+    expect(tryPerIp('image')).toBe(6);
+    delete process.env.TURNSTILE_SECRET_KEY;
   });
 });
