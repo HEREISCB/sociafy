@@ -26,6 +26,7 @@ export const LIMITS = {
   voiceCreate: { capacity: 5, refillPerSecond: 5 / 3600 }, // 5/hour — voice clone creation
   tts: { capacity: 10, refillPerSecond: 10 / 60 },         // 10/min — text-to-speech
   avatarGen: { capacity: 2, refillPerSecond: 2 / 60 },     // 2/min — avatar video gen
+  freeText: { capacity: 10, refillPerSecond: 10 / 3600 },  // 10/hour per IP — public /free-* text tools
 } as const satisfies Record<string, Limit>;
 
 type LimitKey = keyof typeof LIMITS;
