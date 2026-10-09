@@ -368,7 +368,11 @@ function BillingPageInner() {
               <div className="billing-balance-row">
                 <div>
                   <div className="big-num mono">{data?.balance?.toLocaleString() ?? '—'}</div>
-                  <div className="muted-line">credits remaining of {data?.monthlyAllocation?.toLocaleString() ?? '—'}</div>
+                  <div className="muted-line">
+                    {data?.hasActiveSubscription
+                      ? `credits remaining of ${data.monthlyAllocation.toLocaleString()}`
+                      : 'credits · subscribe to a plan or top up'}
+                  </div>
                 </div>
                 <div className="billing-meta mono">
                   {data?.hasActiveSubscription ? (
@@ -389,11 +393,13 @@ function BillingPageInner() {
                   <span aria-hidden style={{ marginRight: 4 }}>+</span> Top up credits
                 </button>
               </div>
-              <div className="billing-bar">
-                <div className="fill" style={{ width: `${pct}%` }} />
-              </div>
+              {data?.hasActiveSubscription && (
+                <div className="billing-bar">
+                  <div className="fill" style={{ width: `${pct}%` }} />
+                </div>
+              )}
               <div className="billing-perks">
-                {data && TIER_PERKS[data.currentTier].map((perk) => (
+                {data?.hasActiveSubscription && TIER_PERKS[data.currentTier].map((perk) => (
                   <div key={perk} className="perk">
                     <Icon name="check" size={12} /> {perk}
                   </div>

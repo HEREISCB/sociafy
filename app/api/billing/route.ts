@@ -54,7 +54,9 @@ export async function GET(req: NextRequest) {
 
     return {
       currentTier: tier,
-      currentTierLabel: tier.charAt(0).toUpperCase() + tier.slice(1),
+      // profiles.tier defaults to 'starter' for every new account, paid or not,
+      // so only an active subscription makes a plan "current" on this page.
+      currentTierLabel: hasActiveSubscription ? tier.charAt(0).toUpperCase() + tier.slice(1) : 'No plan',
       monthlyAllocation: TIER_CREDITS[tier],
       balance,
       subscriptionStatus: profile?.subscriptionStatus ?? null,
@@ -83,7 +85,7 @@ export async function GET(req: NextRequest) {
           priceApproximate: p.approximate,
           amountMinor: p.chargeMinor,
           credits: TIER_CREDITS[t],
-          isCurrent: t === tier,
+          isCurrent: hasActiveSubscription && t === tier,
         };
       }),
     };
