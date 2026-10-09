@@ -78,7 +78,7 @@ describe('the docs/api.md renderer', () => {
     // they exist so a renderer that silently drops the tail of the doc fails
     // here rather than shipping a truncated reference page.
     expect((out.match(/<h2>/g) ?? []).length).toBe(14);
-    expect((out.match(/<table/g) ?? []).length).toBe(15);
+    expect((out.match(/<table/g) ?? []).length).toBe(16);
     // Strip code and pre, then nothing markdown-ish may remain in the prose.
     const prose = out
       .replace(/<pre>[\s\S]*?<\/pre>/g, '')
