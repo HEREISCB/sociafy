@@ -37,7 +37,8 @@ export type CreditAction =
   | 'tts_synthesis'
   | 'avatar_video_480p'
   | 'avatar_video_720p'
-  | 'video_cinema';
+  | 'video_cinema'
+  | 'text_chat';
 
 /** Single source-of-truth credit cost per action. */
 export const CREDIT_PRICES: Record<CreditAction, number> = {
@@ -96,6 +97,9 @@ export const CREDIT_PRICES: Record<CreditAction, number> = {
   // which quotes the backend per request. `charge()` takes credits as an
   // argument, not from this table, so the two never disagree on the bill.
   video_cinema: 33,
+  // POST /api/v1/chat/completions. Metered per call from the provider's actual
+  // token usage by priceForChat() below; this number is only the per-call floor.
+  text_chat: 1,
 };
 
 export function creditsFor(action: CreditAction): number {
@@ -262,6 +266,56 @@ export function creditsFromProviderUsd(usd: number): number {
   return Math.max(1, Math.ceil(usd * CREDITS_PER_PROVIDER_USD));
 }
 
+// =====================================================
+// Chat / vision price helper (POST /api/v1/chat/completions)
+// =====================================================
+
+/** Which model tier of lib/ai/client.ts MODELS serves the call. */
+export type ChatTier = 'smart' | 'fast';
+
+/**
+ * Provider list price, USD per 1M tokens, for the model each tier maps to by
+ * default (MODELS.smart = gpt-5, MODELS.fast = gpt-5-mini). Image inputs arrive
+ * already counted inside the provider's prompt_tokens, and reasoning tokens
+ * inside its completion_tokens, so these two rates cover everything billed.
+ * Cached input is billed at the full input rate — a small overcharge, kept for
+ * simplicity. MANDATORY: if OPENAI_MODEL / OPENAI_MODEL_FAST are pointed at a
+ * dearer model, update this table, or chat is sold below cost.
+ */
+export const CHAT_USD_PER_MTOK: Record<ChatTier, { input: number; output: number }> = {
+  smart: { input: 1.25, output: 10 },
+  fast: { input: 0.25, output: 2 },
+};
+
+/**
+ * Credits for one chat call, from token counts.
+ *
+ * Same margin philosophy as every other variable price in this file: provider
+ * USD × CREDITS_PER_PROVIDER_USD (112.5 cr per $), rounded UP, minimum 1 — i.e.
+ * creditsFromProviderUsd(). At the Business rate ($0.012/cr) that is $1.35 of
+ * revenue per $1 of provider cost (~26% margin); at the retail top-up rate
+ * (1,000 cr = ₹1,499 ≈ $17.6, so ≈ $0.0176/cr) it is ≈ $1.98 per $1 (~49%).
+ *
+ * Worked examples (smart tier):
+ *   caption, 1,500 in / 500 out: 1500×$1.25/1M + 500×$10/1M = $0.006875
+ *     → ×112.5 = 0.77 → ceil → 1 credit
+ *   one product photo (~1,100 image tokens + 300 text) in / 400 out:
+ *     1400×$1.25/1M + 400×$10/1M = $0.00575 → 0.65 → 1 credit
+ *   long answer, 3,000 in / 4,000 out: $0.04375 → 4.92 → 5 credits
+ * So the 1-credit floor dominates ordinary calls; only long outputs climb.
+ *
+ * Also used with a worst-case token estimate for the pre-flight balance check.
+ */
+export function priceForChat(
+  tier: ChatTier,
+  promptTokens: number,
+  completionTokens: number,
+): { action: CreditAction; credits: number; usd: number } {
+  const rate = CHAT_USD_PER_MTOK[tier];
+  const usd = (Math.max(0, promptTokens) * rate.input + Math.max(0, completionTokens) * rate.output) / 1_000_000;
+  return { action: 'text_chat', credits: creditsFromProviderUsd(usd), usd };
+}
+
 /**
  * Canvas area the Cinema backend renders at, per quality tier.
  *
@@ -307,6 +361,7 @@ export const ACTION_LABELS: Record<CreditAction, string> = {
   avatar_video_480p: 'Avatar video · 480p',
   avatar_video_720p: 'Avatar video · 720p',
   video_cinema: 'Video · Cinema (sound-on)',
+  text_chat: 'API chat / vision',
 };
 
 // Suppress unused-import warning while keeping the type available to consumers.
