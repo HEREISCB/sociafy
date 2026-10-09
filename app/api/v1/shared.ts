@@ -77,7 +77,7 @@ export function readIdempotencyKey(
    *  /images collides on the unique index: the second endpoint either 409s
    *  forever or resolves to a row of the wrong type. Scoping makes the key mean
    *  "this request on this endpoint", which is what callers assume. */
-  scope: 'videos' | 'images',
+  scope: 'videos' | 'images' | 'chat',
 ): { ok: true; source: string | null } | { ok: false; response: Response } {
   const raw = req.headers.get('idempotency-key');
   if (!raw) return { ok: true, source: null };

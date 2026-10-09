@@ -1087,3 +1087,169 @@ Status codes: `200`, `401`, `500`, `503`.
       see §6.
     - **Postpaid billing.** Prepaid credits are also the spend cap; a balance cannot
       go negative.
+
+    ---
+
+    ## 14. Text and vision: `POST /api/v1/chat/completions`
+
+    Text generation (chat, captions, content plans, prompt rewriting) and image
+    understanding (describe a product photo, pick where a logo fits) through one
+    endpoint, metered per call against the same credit balance.
+
+    **OpenAI-compatible request and response.** Code written against the OpenAI
+    chat-completions API switches by changing two things: the base URL to
+    `https://sociafy.app/api/v1` and the key to your `sfy_live_…` key — plus the
+    `model` string (below). Errors keep this API's own envelope (§10), not OpenAI's.
+
+    ```js
+    const client = new OpenAI({ baseURL: 'https://sociafy.app/api/v1', apiKey: process.env.SOCIAFY_API_KEY });
+    const r = await client.chat.completions.create({ model: 'sociafy-chat-1', messages });
+    ```
+
+    ### Text
+
+    ```bash
+    curl -sS -X POST https://sociafy.app/api/v1/chat/completions \
+      -H "Authorization: Bearer $SOCIAFY_API_KEY" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "model": "sociafy-chat-1",
+        "messages": [
+          {"role": "system", "content": "You write Instagram captions for a fine-jewellery brand. Warm, under 40 words."},
+          {"role": "user", "content": "Caption for our new 18k gold hoop earrings."}
+        ],
+        "max_tokens": 300
+      }'
+    ```
+
+    ```json
+    {
+      "id": "chatcmpl-6f0c…",
+      "object": "chat.completion",
+      "created": 1791000000,
+      "model": "sociafy-chat-1",
+      "choices": [
+        {
+          "index": 0,
+          "message": { "role": "assistant", "content": "Everyday gold, made to be noticed…", "refusal": null },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 41,
+        "completion_tokens": 38,
+        "total_tokens": 79,
+        "completion_tokens_details": { "reasoning_tokens": 0 }
+      },
+      "credits_charged": 1
+    }
+    ```
+
+    `credits_charged` is the only field OpenAI does not send; OpenAI clients ignore it.
+
+    ### JSON output
+
+    `response_format` is passed through: `{"type": "json_object"}` (say "JSON" in a
+    message, as the model requires) or `{"type": "json_schema", "json_schema": {…}}`
+    for a schema the answer must follow. Parse `choices[0].message.content`.
+
+    ```bash
+    curl -sS -X POST https://sociafy.app/api/v1/chat/completions \
+      -H "Authorization: Bearer $SOCIAFY_API_KEY" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "messages": [
+          {"role": "system", "content": "Return JSON only."},
+          {"role": "user", "content": "Plan 3 posts for Diwali week: {\"posts\":[{\"day\":\"\",\"idea\":\"\"}]}"}
+        ],
+        "response_format": {"type": "json_object"}
+      }'
+    ```
+
+    ### An image question
+
+    User messages may be an array of parts: `{"type": "text", "text": "…"}` and
+    `{"type": "image_url", "image_url": {"url": "…", "detail": "auto|low|high"}}`.
+    The `url` is either a public `https://` URL or a `data:image/…;base64,…` URL.
+
+    ```bash
+    curl -sS -X POST https://sociafy.app/api/v1/chat/completions \
+      -H "Authorization: Bearer $SOCIAFY_API_KEY" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "messages": [{
+          "role": "user",
+          "content": [
+            {"type": "text", "text": "Which corner of this photo is emptiest for a logo? Answer top-left, top-right, bottom-left or bottom-right."},
+            {"type": "image_url", "image_url": {"url": "https://cdn.example.com/products/ring-042.jpg"}}
+          ]
+        }],
+        "max_tokens": 50
+      }'
+    ```
+
+    Images follow the reference-image rules of §6: https only, no redirects, no
+    private hosts, `image/png`, `image/jpeg` or `image/webp` with matching bytes,
+    20 MB each. On top of that: **at most 4 images per request and 20 MB in total**.
+    We fetch https URLs ourselves and never hand your URL to anyone else. A bad image
+    is a `400` with a `reference_*` code (§10) — `reference_url` names the https URL
+    at fault, `image_index` (0-based, in message order) the image — and nothing is
+    charged.
+
+    ### Fields
+
+    - `messages` (required) — 1–100 messages with role `system`, `developer`,
+      `user` or `assistant`. Only `user` messages may contain images. At most
+      200,000 characters of text in total.
+    - `model` — `sociafy-chat-1` (default; best writing) or `sociafy-chat-1-mini`
+      (faster, cheaper on long outputs). Any other value is a `400`.
+      `GET /api/v1/models` lists both with `type: "chat"`.
+    - `max_tokens` / `max_completion_tokens` — output budget, 1–8,192, default
+      4,096. Includes any reasoning tokens.
+    - `reasoning_effort` — `minimal` (default), `low`, `medium`, `high`. Higher
+      thinks longer and bills more output tokens.
+    - `temperature` — accepted for compatibility; the current models ignore it.
+    - `response_format` — as above.
+    - `stream` — **not supported**; `stream: true` is a `400`. `n` must be 1.
+      `tools` / `functions` are a `400`. Other OpenAI fields (`user`, `seed`, …)
+      are accepted and ignored.
+
+    ### Cost
+
+    Metered from the call's **actual** token usage, which comes back in `usage`.
+    Image inputs are counted inside `prompt_tokens`; reasoning inside
+    `completion_tokens`. Credits = provider cost × 112.5 per US dollar, **rounded up,
+    minimum 1 credit per call**. Per million tokens, that is:
+
+    | Model | Input | Output |
+    |---|---|---|
+    | `sociafy-chat-1` | 140.6 credits | 1,125 credits |
+    | `sociafy-chat-1-mini` | 28.1 credits | 225 credits |
+
+    So a 1,500-token-in / 500-token-out caption on `sociafy-chat-1` is 0.77 →
+    **1 credit**; a question about one product photo (≈1,400 tokens in, 400 out) is
+    also **1 credit**; a 3,000-in / 4,000-out content plan is **5 credits**. The
+    exact figure is `credits_charged`.
+
+    Because usage is only known afterwards, we first check that your balance covers
+    the request's *worst case* (all of `max_tokens` used, every image at its
+    largest) and answer `402 insufficient_credits` if not — nothing is called or
+    charged. Lower `max_tokens` if a small balance trips that check. The charge itself
+    is the actual usage, taken after the answer is generated.
+
+    **A failed call is never charged**, so there is nothing to refund: provider
+    errors answer `502 upstream_error`, `502 configuration_error` or
+    `503 service_unavailable` (also when the model is momentarily busy), a
+    request the model refuses as too long or malformed is `400 invalid_request`,
+    and a content-filter refusal is `400 prompt_rejected` — all uncharged.
+
+    ### Idempotency and rate limit
+
+    `Idempotency-Key` works as in §8, scoped to this endpoint: a replay of a
+    successful call returns the identical response (`Idempotency-Replay: true`) with
+    no second charge. Since a failed call charges nothing, it also never consumes its
+    key — retrying the same key after a failure is a real new attempt. Responses are
+    stored for replay only when you send a key.
+
+    Rate limit: per API key, 60 immediately, then 1 per second — separate from the
+    image and video buckets. The daily spend caps of §1 apply as to every `POST`.

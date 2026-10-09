@@ -150,3 +150,48 @@ export function validateAgainstModel(
   // model, not this flag.
   return null;
 }
+
+// =====================================================
+// Chat / vision models (POST /api/v1/chat/completions)
+// =====================================================
+
+/**
+ * Public chat ids → the MODELS tier (lib/ai/client.ts) that serves them. Both
+ * tiers default to vision-capable models. The tier, not the provider model
+ * name, is what pricing reads (priceForChat), so an env override of the model
+ * must be matched by a CHAT_USD_PER_MTOK update.
+ */
+export const CHAT_MODELS = {
+  'sociafy-chat-1': {
+    tier: 'smart',
+    name: 'Sociafy Chat 1',
+    summary: 'Best writing quality. Text and image input, text or JSON output.',
+  },
+  'sociafy-chat-1-mini': {
+    tier: 'fast',
+    name: 'Sociafy Chat 1 Mini',
+    summary: 'Faster and cheaper for short, simple tasks. Text and image input.',
+  },
+} as const satisfies Record<string, { tier: 'smart' | 'fast'; name: string; summary: string }>;
+
+export type ChatModelId = keyof typeof CHAT_MODELS;
+export const CHAT_MODEL_IDS = Object.keys(CHAT_MODELS) as ChatModelId[];
+export const DEFAULT_CHAT_MODEL: ChatModelId = 'sociafy-chat-1';
+
+/** Request limits for /chat/completions. Here, not in the route, so GET
+ *  /api/v1/models reports the same numbers the validator enforces. */
+export const CHAT_LIMITS = {
+  /** Images per request. The real bound is bytes (below); this keeps latency sane. */
+  maxImages: 4,
+  /** Raw bytes across all images. base64 inflates by 4/3, so ~27 MB goes upstream,
+   *  under the provider's 50 MB request cap. */
+  maxTotalImageBytes: 20 * 1024 * 1024,
+  maxMessages: 100,
+  /** All text across all messages. */
+  maxTextChars: 200_000,
+  /** Output cap, reasoning included. Bounds the worst case one call can bill. */
+  maxOutputTokens: 8_192,
+  defaultOutputTokens: 4_096,
+  /** Pre-flight only: an upper bound on one image's input tokens at high detail. */
+  worstCaseImageTokens: 2_500,
+} as const;
