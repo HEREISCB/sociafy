@@ -239,10 +239,12 @@ describe('payment.captured grants from the order, not the payment notes', () => 
 
   it('does not grant when the order cannot be fetched', async () => {
     ordersFetch.mockRejectedValue(new Error('razorpay 500'));
-    await post(paymentEvent({
+    const res = await post(paymentEvent({
       id: 'pay_4', amount: 149900, order_id: 'order_real',
       notes: { sociafy_user_id: 'u1', kind: 'topup', credits: '1000' },
     }));
+    // Non-2xx so Razorpay redelivers once the API recovers.
+    expect(res.status).toBe(500);
     expect(grantIdempotent).not.toHaveBeenCalled();
     expect(console.error).toHaveBeenCalled();
   });

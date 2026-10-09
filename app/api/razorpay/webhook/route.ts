@@ -312,12 +312,14 @@ async function handlePaymentCaptured(payload: Record<string, unknown>) {
   try {
     order = await getRazorpay().orders.fetch(payment.order_id);
   } catch (e) {
-    // Never grant on an order we could not read. Razorpay retries the webhook.
+    // Never grant on an order we could not read — but throw, so POST answers
+    // 500 and Razorpay retries. Returning here answered 200 and the paid
+    // credits were silently lost on any transient Razorpay API blip.
     console.error(
       `[razorpay.webhook] payment.captured ${payment.id}: orders.fetch(${payment.order_id}) failed — NOT granting:`,
       e instanceof Error ? e.message : String(e),
     );
-    return;
+    throw e instanceof Error ? e : new Error(`orders.fetch(${payment.order_id}) failed`);
   }
 
   const notes: OrderNotes = order.notes ?? {};
