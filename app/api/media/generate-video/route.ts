@@ -38,7 +38,7 @@ const bodySchema = z.object({
   endFrameUrl: z.string().url().max(2_000).optional(),
   /** Still 9 where v1 caps at 4: REFERENCE_LIMITS.maxTotalBytes bounds the
    *  buffered memory whatever the count is, so nine URLs only means each gets a
-   *  smaller share of the same 48MB — a clean 400, never an OOM. */
+   *  smaller share of the same 64MB — a clean 400, never an OOM. */
   referenceImageUrls: z.array(z.string().url().max(2_000)).max(9).optional(),
   referenceVideoUrl: z.string().url().max(2_000).optional(),
   audioUrl: z.string().url().max(2_000).optional(),

@@ -109,7 +109,7 @@ function generateImageDirect(args: {
 export const runtime = 'nodejs';
 // 90 was already marginal (medium quality measures 66-78s, and `count` runs in
 // parallel). Reference images add up to REFERENCE_LIMITS.totalBudgetMs of
-// fetching plus the upload of up to 48MB to the provider before generation even
+// fetching plus the upload of up to 64MB to the provider before generation even
 // starts, so the ceiling matches /api/v1/images. A ceiling, not a delay.
 export const maxDuration = 300;
 

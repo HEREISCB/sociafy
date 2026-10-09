@@ -531,19 +531,17 @@ describe('POST /api/v1/images — reference_images', () => {
     expect(state.fetched).toHaveLength(4);
   });
 
-  // The limit was 4 for no provider reason — probing OpenAI's images/edits
-  // directly took 20 references in a single call. What actually bounds this
-  // route is maxTotalBytes and totalBudgetMs, and ten 4MB references cost less
-  // of both than four 20MB ones. Asserting the full ten reach the provider is
-  // the only thing that would catch the cap silently regressing to 4, since the
-  // over-the-cap test above passes either way.
-  it('takes the full ten references and forwards every one', async () => {
-    const urls = Array.from({ length: 10 }, (_, n) => `https://93.184.216.34/rings/a-${n}.png`);
+  // 16 is the provider's documented images.edit maximum. What actually bounds
+  // this route is maxTotalBytes and totalBudgetMs; asserting all sixteen reach
+  // the provider is what catches the cap silently regressing, since the
+  // over-the-cap test below passes either way.
+  it('takes the full sixteen references and forwards every one', async () => {
+    const urls = Array.from({ length: 16 }, (_, n) => `https://93.184.216.34/rings/a-${n}.png`);
     const res = await post(ref({ reference_images: urls }));
     expect(res.status).toBe(200);
-    expect((await res.json()).credits_charged).toBe(6 + 10 * 6);
-    expect((state.editCalls[0] as { image: File[] }).image).toHaveLength(10);
-    expect(state.fetched).toHaveLength(10);
+    expect((await res.json()).credits_charged).toBe(6 + 16 * 6);
+    expect((state.editCalls[0] as { image: File[] }).image).toHaveLength(16);
+    expect(state.fetched).toHaveLength(16);
   });
 
   // The bug this endpoint shipped with: a 4000×4000 catalogue photo was charged
@@ -558,13 +556,12 @@ describe('POST /api/v1/images — reference_images', () => {
     expect((await (await post(ref())).json()).credits_charged).toBe(big.credits_charged);
   });
 
-  it('rejects an 11th reference, an empty array and a non-array', async () => {
+  it('rejects a 17th reference, an empty array and a non-array', async () => {
     for (const value of [
-      // One past REFERENCE_LIMITS.maxImages. The count is our budget, not
-      // OpenAI's — images/edits took 20 in one call when probed — but the cap
-      // still has to hold, or maxTotalBytes is the only thing between us and an
+      // One past REFERENCE_LIMITS.maxImages (the provider's documented 16). The
+      // cap has to hold, or maxTotalBytes is the only thing between us and an
       // unbounded fetch loop.
-      Array.from({ length: 11 }, (_, n) => `https://93.184.216.34/${n}.png`),
+      Array.from({ length: 17 }, (_, n) => `https://93.184.216.34/${n}.png`),
       [],
       REF_URL,
     ]) {
@@ -652,12 +649,12 @@ describe('POST /api/v1/images — reference_images', () => {
     await expectRejected(ref(), 'reference_too_large');
   });
 
-  // Per-image is not enough on its own: four 20 MB references are 80 MB buffered
+  // Per-image is not enough on its own: five 20 MB references are 100 MB buffered
   // in one request, so the budget is shared as well.
   it('rejects references that together exceed the total byte budget', async () => {
-    state.refFetch = () => imageResponse(bigPng(15 * 1024 * 1024)); // 4 × 15 = 60 MB
+    state.refFetch = () => imageResponse(bigPng(15 * 1024 * 1024)); // 5 × 15 = 75 MB > 64
     await expectRejected(
-      ref({ reference_images: [1, 2, 3, 4].map((n) => `https://93.184.216.34/${n}.png`) }),
+      ref({ reference_images: [1, 2, 3, 4, 5].map((n) => `https://93.184.216.34/${n}.png`) }),
       'reference_too_large',
     );
   });
@@ -706,6 +703,99 @@ describe('POST /api/v1/images — reference_images', () => {
     expect(res.status).toBe(502);
     expect(state.refunds).toHaveLength(1);
     expect((state.charges[0] as { credits: number }).credits).toBe(12);
+  });
+
+  it('accepts an 8,000-char prompt (and the provider\'s 32,000), refuses 32,001', async () => {
+    expect((await post({ prompt: 'a'.repeat(8_000) })).status).toBe(200);
+    expect((await post({ prompt: 'a'.repeat(32_000) })).status).toBe(200);
+    Object.assign(state, { charges: [], generateCalls: [], uploads: 0 });
+    await expectRejected({ prompt: 'a'.repeat(32_001) }, 'invalid_request');
+  });
+});
+
+describe('POST /api/v1/images — mask', () => {
+  const MASK_URL = 'https://93.184.216.34/rings/mask.png';
+  /** A PNG IHDR with a real colour type: 6 = RGBA, 2 = RGB (no alpha). */
+  const maskPng = (w: number, h: number, colorType = 6) => {
+    const b = png(w, h);
+    b[24] = 8; // bit depth
+    b[25] = colorType;
+    return b;
+  };
+  const body = (extra: object = {}) => ({
+    prompt: 'white marble, soft window light',
+    reference_images: [REF_URL],
+    mask: MASK_URL,
+    ...extra,
+  });
+  /** Reference is png(1024, 1024) by default; the mask is whatever the test says. */
+  const serveMask = (mask: Buffer, type = 'image/png') => {
+    state.refFetch = (url) => (url.toString() === MASK_URL ? imageResponse(mask, type) : null) as Response;
+  };
+
+  async function expectFree(b: unknown, code: string) {
+    const res = await post(b);
+    const json = await res.json();
+    expect([res.status, json.error]).toEqual([400, code]);
+    expect(state.charges).toHaveLength(0);
+    expect(state.editCalls).toHaveLength(0);
+    return json;
+  }
+
+  it('passes the mask to images.edit, apart from the references, priced as one more input image', async () => {
+    serveMask(maskPng(1024, 1024));
+    const res = await post(body());
+    expect(res.status).toBe(200);
+    expect((await res.json()).credits_charged).toBe(6 + 6 + 6);
+    const call = state.editCalls[0] as { image: File[]; mask: File };
+    expect(call.image).toHaveLength(1);
+    expect(call.mask).toBeInstanceOf(File);
+    expect(call.mask.name).toBe('reference-2.png');
+    expect((state.charges[0] as { meta: Record<string, unknown> }).meta).toMatchObject({ mask: true, referenceImages: 1 });
+  });
+
+  it('carries the mask through the async path too', async () => {
+    serveMask(maskPng(1024, 1024));
+    expect((await post(body({ async: true }))).status).toBe(202);
+    for (const fn of state.afters) await fn();
+    expect((state.editCalls[0] as { mask?: File }).mask).toBeInstanceOf(File);
+  });
+
+  it('is a free 400 without reference_images', async () => {
+    const json = await expectFree({ prompt: 'marble', mask: MASK_URL }, 'invalid_request');
+    expect(json.issues[0].field).toBe('mask');
+    expect(state.fetched).toHaveLength(0);
+  });
+
+  it('is a free 400 when the mask is not a PNG', async () => {
+    const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(64)]);
+    serveMask(jpeg, 'image/jpeg');
+    expect((await expectFree(body(), 'mask_invalid')).mask_url).toBe(MASK_URL);
+  });
+
+  it('is a free 400 when the mask has no alpha channel', async () => {
+    serveMask(maskPng(1024, 1024, 2));
+    await expectFree(body(), 'mask_invalid');
+  });
+
+  it('is a free 400 when the mask does not match the first reference\'s dimensions', async () => {
+    serveMask(maskPng(1024, 1536));
+    const json = await expectFree(body(), 'mask_invalid');
+    expect(json.message).toContain('1024x1536');
+  });
+
+  it('is a free 400 when the mask is over the provider\'s 4 MB', async () => {
+    serveMask(Buffer.concat([maskPng(1024, 1024), Buffer.alloc(4 * 1024 * 1024)]));
+    await expectFree(body(), 'mask_invalid');
+  });
+
+  it('sends the mask through the reference fetcher\'s SSRF guard', async () => {
+    await expectFree(body({ mask: 'https://169.254.169.254/mask.png' }), 'reference_url_rejected');
+  });
+
+  it('leaves mask out of the provider call entirely when not sent', async () => {
+    await post({ prompt: 'a ring', reference_images: [REF_URL] });
+    expect(Object.keys(state.editCalls[0])).not.toContain('mask');
   });
 });
 

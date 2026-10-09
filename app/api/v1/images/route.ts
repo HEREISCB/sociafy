@@ -12,6 +12,7 @@ import { charge, ensureBalance, InsufficientCreditsError, refund } from '../../.
 import { priceForImage } from '../../../../lib/credits/pricing';
 import {
   apiError,
+  checkMask,
   classifyImageFailure,
   failImageJob,
   fetchReferenceImages,
@@ -33,8 +34,8 @@ export const runtime = 'nodejs';
 // next/server's docs, `after` runs for the route's configured maxDuration).
 // 90s was already marginal — medium quality has been measured at 66-78s, and a
 // client with a 60s default timed out consistently. Reference images add up to
-// REFERENCE_LIMITS.totalBudgetMs (45s) of fetching before generation even starts,
-// plus the time to upload up to 48MB of them to the provider, so the combined
+// REFERENCE_LIMITS.totalBudgetMs (60s) of fetching before generation even starts,
+// plus the time to upload up to 64MB of them to the provider, so the combined
 // worst case is ~2-3 minutes. Timing out AFTER the charge is the worst outcome
 // this route has, so the ceiling goes to the platform maximum we already use
 // elsewhere (the cron sweeper and the PiAPI webhook are both 300).
@@ -64,7 +65,11 @@ export const maxDuration = 300;
  */
 const bodySchema = z
   .object({
-    prompt: z.string().min(2).max(2_000),
+    // The provider's own bound for GPT image models (32,000 chars per the openai
+    // SDK's ImageGenerateParams / ImageEditParams; dall-e-2/3 are far lower, but
+    // MODELS.image is gpt-image-*). The prompt is otherwise only stored sliced
+    // (ledger meta 200, asset label 80) or in gen_jobs.input_json (jsonb, no cap).
+    prompt: z.string().min(2).max(32_000),
     /**
      * A social preset (`ig_portrait`, `x_post`, `yt_thumbnail`, …) or explicit
      * `WxH` pixels. The old three-value enum was our restriction, not the
@@ -84,6 +89,12 @@ const bodySchema = z
      * validated by fetchReferenceImages — see REFERENCE_LIMITS.
      */
     reference_images: z.array(z.string()).min(1).max(REFERENCE_LIMITS.maxImages).optional(),
+    /**
+     * Public https URL of a PNG whose fully transparent pixels mark where the
+     * FIRST reference may be repainted. Fetched by the same hardened path as the
+     * references, then checked by checkMask — both before the charge.
+     */
+    mask: z.string().optional(),
     /** Opt-in, not a default: flipping it would change the status code and the
      *  response body of every existing caller's working code. */
     async: z.boolean().default(false),
@@ -96,6 +107,9 @@ const bodySchema = z
   .superRefine((b, ctx) => {
     const resolved = resolveImageSize(b.size);
     if (!resolved.ok) ctx.addIssue({ code: 'custom', path: ['size'], message: resolved.message });
+    if (b.mask !== undefined && !b.reference_images) {
+      ctx.addIssue({ code: 'custom', path: ['mask'], message: 'mask requires reference_images: it applies to the first one.' });
+    }
   });
 
 export async function POST(req: NextRequest) {
@@ -116,7 +130,7 @@ export async function POST(req: NextRequest) {
         issues: parsed.error.issues.slice(0, 5).map((i) => ({ field: i.path.join('.'), message: i.message })),
       });
     }
-    const { prompt, quality, reference_images: referenceUrls, async: wantAsync } = parsed.data;
+    const { prompt, quality, reference_images: referenceUrls, mask: maskUrl, async: wantAsync } = parsed.data;
 
     // Presets become concrete pixels HERE, once, so everything downstream — the
     // provider call, the ledger meta, the stored job row, and completeImageJob's
@@ -157,16 +171,29 @@ export async function POST(req: NextRequest) {
     // Reference images are fetched BEFORE the charge: every way they can be
     // wrong is the caller's own input, and §6 promises a 400 costs nothing. A
     // rejected reference must not be a charged reference.
+    // The mask rides the same fetch (and the same shared byte/time budget) as the
+    // last entry, so it gets every SSRF and size guard without a second path.
     let refs: File[] | null = null;
+    let mask: File | null = null;
     if (referenceUrls) {
-      const fetched = await fetchReferenceImages(referenceUrls);
+      const fetched = await fetchReferenceImages(maskUrl ? [...referenceUrls, maskUrl] : referenceUrls);
       if (!fetched.ok) return fetched.response;
       refs = fetched.files;
+      if (maskUrl) {
+        mask = refs.pop()!;
+        const bad = await checkMask(mask, refs[0], maskUrl);
+        if (bad) return bad;
+      }
     }
 
     // Flat per reference — their resolution does not enter into it, because the
-    // provider's input token count is bounded either way.
-    const unit = priceForImage(size, quality, refs?.length);
+    // provider's input token count is bounded either way. The mask is priced as
+    // one more reference: it is an input image to the same edit call, so we
+    // assume it is billed as one (unverified — if the provider does not bill it,
+    // that is 6 credits of extra margin, never a loss). Same margin philosophy as
+    // image_reference in lib/credits/pricing.ts.
+    const inputImages = (refs?.length ?? 0) + (mask ? 1 : 0);
+    const unit = priceForImage(size, quality, inputImages);
     // Pre-flight so an under-funded key doesn't get as far as the provider.
     // `charge` below is still the authority (it re-checks under FOR UPDATE).
     const funded = await ensureBalance(auth.userId, unit.credits);
@@ -200,6 +227,7 @@ export async function POST(req: NextRequest) {
           via: 'api_v1',
           prompt: prompt.slice(0, 200),
           ...(refs ? { referenceImages: refs.length, referenceSurcharge: unit.surcharge } : {}),
+          ...(mask ? { mask: true } : {}),
           ...(source ? { source } : {}),
           // Lets a replay of this key resolve back to the job (and its 202)
           // rather than to an asset id the caller cannot poll.
@@ -235,7 +263,7 @@ export async function POST(req: NextRequest) {
       // runImageJob handles its own failures — it leaves the row terminal and the
       // money settled. Only a database fault can escape it, and the cron sweeper
       // closes that row out after its grace window.
-      after(() => runImageJob(row, refs));
+      after(() => runImageJob(row, refs, mask));
       return asyncResponse(row, unit.credits, false);
     }
 
@@ -245,10 +273,11 @@ export async function POST(req: NextRequest) {
       // images.edit is the only mechanism that takes input images. NOT sending
       // input_fidelity: the SDK's comment claims "gpt-image-1.5 and later", but
       // the live API answers 400 invalid_input_fidelity_model on gpt-image-2
-      // (verified twice). Likeness is therefore guided, not pinned.
+      // (verified twice). Likeness is therefore guided, not pinned — and so is the
+      // mask: for GPT image models it is guidance, not a pixel-exact stencil.
       const res = refs
         ? await openai.images.edit(
-            { model: MODELS.image, image: refs, prompt, size, quality, n: 1 },
+            { model: MODELS.image, image: refs, ...(mask ? { mask } : {}), prompt, size, quality, n: 1 },
             { maxRetries: 0 },
           )
         : await openai.images.generate(

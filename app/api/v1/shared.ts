@@ -7,7 +7,7 @@ import { isStubMode } from '../../../lib/env';
 import { isPublicHost } from '../../../lib/public-host';
 import { charge, ensureBalance, InsufficientCreditsError, refund } from '../../../lib/credits/ledger';
 import { priceForVideo, type CreditAction, type ImageQuality, type ImageSize, type VideoQuality } from '../../../lib/credits/pricing';
-import { imageFormat, type ImageFormat } from '../../../lib/media/probe';
+import { imageDimensions, imageFormat, type ImageFormat } from '../../../lib/media/probe';
 import { createSeedanceTask, type SeedanceAspect, type SeedanceMode } from '../../../lib/ai/piapi';
 import { createCueRender, priceCinemaRender, CUE_CONCURRENCY } from '../../../lib/ai/cue';
 import { backendFor, type VideoModelId } from '../../../lib/ai/models';
@@ -667,16 +667,22 @@ export async function submitVideo(args: SubmitVideoArgs): Promise<SubmitVideoRes
  * and bytes no longer affect the bill. What is left is memory and latency.
  *
  * 20MB per image clears catalogue masters (the provider's own limit is <50MB) and
- * 48MB across the whole set bounds the buffered total, since we hold every
+ * 64MB across the whole set bounds the buffered total, since we hold every
  * reference in memory at once. That byte ceiling and the fetch budget — not the
  * count — are what actually protect the route: ten 4MB references cost strictly
  * less memory and less time than four 20MB ones, so capping the count low was
  * punishing the common good case without lowering the worst case.
+ *
+ * Sized for 16 references: 16 × 4MB (a typical 4000² catalogue JPEG is ~3.4MB)
+ * = 64MB, so the documented count is actually reachable with real photos. 60s of
+ * fetching + uploading 64MB + a high-quality 16-reference generation still fits
+ * inside the route's maxDuration of 300 with room to spare.
  */
 export const REFERENCE_LIMITS = {
-  /** Images. NOT a provider limit: OpenAI's images/edits accepted 20 references
-   *  in one call when probed directly. This is our memory/latency budget. */
-  maxImages: 10,
+  /** Images. The documented images.edit maximum ("You can provide up to 16
+   *  images", openai SDK types); the live endpoint took 20 when probed, but we
+   *  stay on the documented number rather than an undocumented tolerance. */
+  maxImages: 16,
   /** Video. This one IS the provider's, and it is hard: Seedance answers
    *  `400 invalid request: omni_reference mode accepts at most 9 reference
    *  images, got 10`. Verified against PiAPI, not inferred from docs. */
@@ -684,11 +690,14 @@ export const REFERENCE_LIMITS = {
   maxBytes: 20 * 1024 * 1024,
   /** All references together — the real ceiling. maxImages × maxBytes of
    *  buffered memory is not acceptable, so the bytes bound it, not the count. */
-  maxTotalBytes: 48 * 1024 * 1024,
+  maxTotalBytes: 64 * 1024 * 1024,
+  /** The provider's own mask limit ("less than 4MB"). The mask is fetched with
+   *  the references and also counts against maxTotalBytes / totalBudgetMs. */
+  maxMaskBytes: 4 * 1024 * 1024,
   perFetchMs: 20_000,
   /** All fetches together. Slow hosts must not eat the route's maxDuration
    *  and strand us mid-generation after the charge. */
-  totalBudgetMs: 45_000,
+  totalBudgetMs: 60_000,
 } as const;
 
 const mb = (bytes: number) => bytes / 1024 / 1024;
@@ -826,6 +835,36 @@ export async function fetchReferenceImages(urls: string[]): Promise<ReferenceFet
 }
 
 /**
+ * The provider's mask rules, checked from headers before anything is charged:
+ * a PNG, with an alpha channel, under 4MB, and exactly the first reference's
+ * dimensions. Each of those is otherwise a provider 400 AFTER the charge.
+ * `mask` has already been through fetchReferenceImages (SSRF, type, byte caps).
+ *
+ * Alpha means colour type 4 (grey+alpha) or 6 (RGBA). A palette PNG with a tRNS
+ * chunk is refused too: whether the provider reads it as alpha is unverified, and
+ * a false accept costs the caller money where a false reject costs a re-export.
+ *
+ * Returns the 400 to send, or null when the mask is usable.
+ */
+export async function checkMask(mask: File, firstReference: File, maskUrl: string): Promise<Response | null> {
+  const bad = (message: string) => apiError('mask_invalid', 400, message, { mask_url: maskUrl });
+  const buf = Buffer.from(await mask.arrayBuffer());
+  if (imageFormat(buf) !== 'png') return bad('The mask must be a PNG.');
+  if (buf.length > REFERENCE_LIMITS.maxMaskBytes) return bad(`The mask must be under ${mb(REFERENCE_LIMITS.maxMaskBytes)} MB.`);
+  const dims = imageDimensions(buf);
+  if (!dims || buf.length < 26) return bad('The mask is not a readable PNG.');
+  if (buf[25] !== 4 && buf[25] !== 6) {
+    return bad('The mask must have an alpha channel (RGBA or grey+alpha PNG). Transparent pixels mark where to paint.');
+  }
+  const ref = imageDimensions(Buffer.from(await firstReference.arrayBuffer()));
+  if (!ref) return bad('We could not read the dimensions of the first reference image, so the mask cannot be matched to it.');
+  if (ref.width !== dims.width || ref.height !== dims.height) {
+    return bad(`The mask is ${dims.width}x${dims.height} but the first reference image is ${ref.width}x${ref.height}. They must match exactly.`);
+  }
+  return null;
+}
+
+/**
  * Copy vetted references into our own bucket and return OUR urls, in order.
  *
  * Used by /videos, where the references are handed to the generation provider
@@ -902,7 +941,7 @@ export async function insertImageJob(userId: string, input: ImageJobInput): Prom
  * throw out of here — an unhandled rejection would strand a pending row and its
  * charge until the cron sweeper's grace window expires.
  */
-export async function runImageJob(job: ImageJob, refs: File[] | null): Promise<void> {
+export async function runImageJob(job: ImageJob, refs: File[] | null, mask?: File | null): Promise<void> {
   const { prompt, size, quality } = job.inputJson as ImageJobInput;
   try {
     const openai = getOpenAI();
@@ -911,7 +950,7 @@ export async function runImageJob(job: ImageJob, refs: File[] | null): Promise<v
     // comment there for why input_fidelity is not sent.
     const res = refs
       ? await openai.images.edit(
-          { model: MODELS.image, image: refs, prompt, size, quality, n: 1 },
+          { model: MODELS.image, image: refs, ...(mask ? { mask } : {}), prompt, size, quality, n: 1 },
           { maxRetries: 0 },
         )
       : await openai.images.generate(

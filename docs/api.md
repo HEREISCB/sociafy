@@ -18,7 +18,7 @@
     with one reference image. The 60-second default that most
     HTTP clients apply unasked therefore fails by about ten seconds on *nearly every*
     synchronous call, as a bare read timeout that cannot tell you whether you were
-    charged. Reference images make it worse: up to 20 MB each and 48 MB per request,
+    charged. Reference images make it worse: up to 20 MB each and 64 MB per request,
     uploaded before generation starts.
 
     If you stay synchronous, **set your client timeout to at least 180 seconds**, and
@@ -305,7 +305,7 @@ Status codes: `200`, `401`, `500`, `503`.
     disclosed to them, and a URL that is signed, private or short-lived cannot fail
     opaquely on their side after you have been charged. The requirements are exactly
     those in §6 (`https` only, no redirects, publicly resolvable host, `png`/`jpeg`/
-    `webp` verified by magic bytes, 20 MB each and 48 MB in total, 20 s each and 45 s
+    `webp` verified by magic bytes, 20 MB each and 64 MB in total, 20 s each and 60 s
     across all of them), and each violation is its own `400` carrying `reference_url`.
     Nothing is charged for any of them. The fetch runs before the charge, so a
     non-text submit answers in seconds rather than the usual one or two.
@@ -486,10 +486,11 @@ Status codes: `200`, `401`, `500`, `503`.
 
     | Field | Type | Default |
     |---|---|---|
-    | `prompt` | string, 2–2000 chars | required |
+    | `prompt` | string, 2–32,000 chars | required |
     | `size` | a preset name, or `WxH` in pixels — see below | `1024x1024` |
     | `quality` | `low` \| `medium` \| `high` | `medium` |
-    | `reference_images` | array of 1–10 `https` URLs — see below | omitted |
+    | `reference_images` | array of 1–16 `https` URLs — see below | omitted |
+    | `mask` | one `https` URL of a PNG with alpha — requires `reference_images`; see [Masked edits](#masked-edits) | omitted |
     | `async` | boolean — `true` returns `202` + `poll_url` instead of holding the connection open | `false` |
 
     Unknown fields are rejected with `400`, and there is no `count` — one request,
@@ -546,8 +547,8 @@ Status codes: `200`, `401`, `500`, `503`.
 
     **Timing.** Text-only, `quality: "medium"` has been measured at **66–78 seconds**
     across five runs; with one reference image, **about 83 s**. `high` is
-    slower, `low` is faster. References add up to 45 seconds of fetching plus the time
-    to upload up to 48 MB of them, so plan for **up to ~3 minutes** on that path.
+    slower, `low` is faster. References add up to 60 seconds of fetching plus the time
+    to upload up to 64 MB of them, so plan for **up to ~3 minutes** on that path.
     Asynchronously none of that reaches your client, which sees a `202` in under a
     second. **Synchronously it is all wall-clock time on your socket:** the request is
     held open for up to 300 seconds, so set your client timeout to at least 180 s — a
@@ -603,8 +604,9 @@ Status codes: `200`, `401`, `500`, `503`.
     | `https` only, no redirects | We fetch these ourselves. `http` and a redirect chain are both refused; send the final URL. |
     | Publicly resolvable host | Private, loopback, link-local and metadata addresses are blocked in every notation. |
     | `image/png`, `image/jpeg` or `image/webp` | And the bytes must match the header — we check the magic bytes, not your `content-type`. |
-    | Under 20 MB each, 48 MB in total | Enforced while downloading, so a missing or dishonest `content-length` does not help. We buffer every reference in memory at once, which is what the shared budget bounds — not the price. |
-    | Reachable within 20 s each, 45 s in total | A slow host costs you the whole request. |
+    | At most 16 per request | The provider's documented maximum for one edit. |
+    | Under 20 MB each, 64 MB in total | Enforced while downloading, so a missing or dishonest `content-length` does not help. We buffer every reference in memory at once, which is what the shared budget bounds — not the price. Sixteen typical 4000² catalogue JPEGs (~3–4 MB each) fit. |
+    | Reachable within 20 s each, 60 s in total | A slow host costs you the whole request. |
 
     URLs on our own media host are held to exactly the same checks — hosting an
     object says nothing about its size or its contents.
@@ -616,6 +618,52 @@ Status codes: `200`, `401`, `500`, `503`.
     Cost: the output price from §7 **plus a flat surcharge per reference image**,
     independent of its resolution. Nothing changes for a request without
     `reference_images`.
+
+    ### Masked edits
+
+    To keep a product exactly as photographed, build a canvas with the real product
+    placed where you want it, and a mask the same size: **transparent where the
+    model should paint, opaque over the product.** Send the canvas as the *first*
+    reference and the mask as `mask`.
+
+    ```bash
+    curl -X POST https://sociafy.app/api/v1/images \
+      -H "Authorization: Bearer $SOCIAFY_API_KEY" \
+      -H "Content-Type: application/json" \
+      -H "Idempotency-Key: style-4471-marble-masked" \
+      -d '{
+        "prompt": "white Carrara marble surface, soft window light from the left, shallow depth of field",
+        "reference_images": ["https://cdn.example.com/styles/4471/canvas-1024.png"],
+        "mask": "https://cdn.example.com/styles/4471/mask-1024.png",
+        "size": "1024x1024",
+        "quality": "high",
+        "async": true
+      }'
+    ```
+
+    Checked before anything is charged — each failure is a free `400 mask_invalid`
+    carrying `mask_url`:
+
+    | Requirement | |
+    |---|---|
+    | `reference_images` present | The mask applies to the first one. Without it: `400 invalid_request`. |
+    | PNG with an alpha channel | RGBA or grey+alpha. A palette PNG with a transparency chunk is refused — re-export as RGBA. |
+    | Under 4 MB | The provider's own limit. |
+    | Exactly the first reference's width × height | Read from both files' headers. If we cannot read the first reference's dimensions, the request is refused rather than risked. |
+
+    The mask URL is fetched with the references and passes the same checks (and
+    shares their 64 MB / 60 s budget); a problem fetching it comes back as the usual
+    `reference_*` code with `reference_url` set to your mask URL.
+
+    **A mask is guidance, not a stencil.** With the model behind this endpoint the
+    whole image is regenerated and the mask steers *where* change happens; it does
+    not guarantee the opaque pixels come back bit-identical. If the product must be
+    exact, composite your original product layer back over the result — your
+    canvas and mask already line up with the output when `size` equals the canvas
+    size.
+
+    Cost: the mask is billed as one more reference image (6 credits). A single-canvas
+    masked edit at `medium` is therefore `6 + 6 + 6` = **18 credits**.
 
     ---
 
@@ -678,7 +726,7 @@ Status codes: `200`, `401`, `500`, `503`.
     - four references, any sizes → `6 + 4 × 6` = **30 credits**
 
     Because the price is per image, `credits_charged` is fully computable from your
-    request body before you send it: output tier + 6 × `len(reference_images)`.
+    request body before you send it: output tier + 6 × `len(reference_images)`, plus 6 if you send a `mask`.
 
     Why resolution is not in that formula: the provider bills reference input as
     image *tokens*, which are patch-based and clamped, and it downscales your file
@@ -867,7 +915,8 @@ Status codes: `200`, `401`, `500`, `503`.
     | 400 | `reference_url_rejected` | both POSTs | A reference URL is not an `https` URL we will fetch: wrong scheme, a host that resolves to a private address, or a redirect. Nothing was charged. |
     | 400 | `reference_unfetchable` | both POSTs | We reached the network but got no image: a non-2xx status, a connection failure, or a timeout. Nothing was charged. |
     | 400 | `reference_type_unsupported` | both POSTs | Not `image/png`/`image/jpeg`/`image/webp`, or the bytes do not match the declared type. Nothing was charged. |
-    | 400 | `reference_too_large` | both POSTs | A reference exceeded 20 MB, or all of them together exceeded 48 MB. Nothing was charged. |
+    | 400 | `reference_too_large` | both POSTs | A reference exceeded 20 MB, or all of them together exceeded 64 MB. Nothing was charged. |
+    | 400 | `mask_invalid` | `POST /images` | The `mask` is not a PNG with alpha, is 4 MB or more, or does not match the first reference's dimensions. Carries `mask_url`. Nothing was charged. |
     | 401 | `unauthorized` | everywhere | Missing, malformed, unknown, or revoked API key. |
     | 402 | `insufficient_credits` | both POSTs | Includes `balance` and `needed`. Top up and retry. |
     | 404 | `not_found` | both `GET /{id}`s | No such generation for this account — including a malformed id. |

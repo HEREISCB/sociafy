@@ -81,7 +81,7 @@ export const DeveloperDocs: React.FC = () => (
         whole generation, which typically takes <strong>65–85 seconds</strong> — so the 60 s default
         most HTTP clients apply unasked fails on <em>nearly every</em> synchronous call, as a bare
         read timeout that cannot tell you whether you were charged. References make it worse: up to
-        20 MB each and 48 MB per request, uploaded before generation starts. Staying synchronous?
+        20 MB each and 64 MB per request, uploaded before generation starts. Staying synchronous?
         Set your client timeout to at least 180 s, and read the recovery rule below.
       </div>
 
@@ -170,7 +170,7 @@ curl -sS ${BASE}/me \\
                 <code className="mono">gen_mode: &quot;reference&quot;</code> only, and required by
                 it. Same rules as on <code className="mono">/images</code>:{' '}
                 <code className="mono">png</code> · <code className="mono">jpeg</code> ·{' '}
-                <code className="mono">webp</code>, under 20 MB each and 48 MB in total, no
+                <code className="mono">webp</code>, under 20 MB each and 64 MB in total, no
                 redirects, no private hosts. <strong>No surcharge.</strong>
               </td>
               <td>omitted</td>
@@ -253,7 +253,7 @@ curl -sS ${BASE}/me \\
         </div>
       </Endpoint>
 
-      <Endpoint method="POST" path="/images" blurb='Two modes. With "async": true it books and charges the job, answers 202 with a poll_url, and generates on our side — the same shape as /videos. Without it the connection is held open for the whole generation (66–78s at medium, 83s with a reference, up to ~3 minutes with 48 MB of them) and answers 200; that mode needs a client timeout of at least 180s.'>
+      <Endpoint method="POST" path="/images" blurb='Two modes. With "async": true it books and charges the job, answers 202 with a poll_url, and generates on our side — the same shape as /videos. Without it the connection is held open for the whole generation (66–78s at medium, 83s with a reference, up to ~3 minutes with 64 MB of them) and answers 200; that mode needs a client timeout of at least 180s.'>
         <Code>{`curl -X POST ${BASE}/images \\
   -H "Authorization: Bearer $SOCIAFY_API_KEY" \\
   -H "Content-Type: application/json" \\
@@ -282,7 +282,7 @@ curl -sS ${BASE}/me \\
             <tr><th>Field</th><th>Allowed</th><th>Default</th></tr>
           </thead>
           <tbody>
-            <tr><td className="mono">prompt</td><td>string, 2–2000 chars</td><td>required</td></tr>
+            <tr><td className="mono">prompt</td><td>string, 2–32,000 chars</td><td>required</td></tr>
             <tr><td className="mono">size</td><td className="mono">1024x1024 · 1536x1024 · 1024x1536</td><td className="mono">1024x1024</td></tr>
             <tr><td className="mono">quality</td><td className="mono">low · medium · high</td><td className="mono">medium</td></tr>
             <tr>
@@ -298,12 +298,23 @@ curl -sS ${BASE}/me \\
             <tr>
               <td className="mono">reference_images</td>
               <td>
-                1–4 <strong>https</strong> URLs of photos to work from —{' '}
+                1–16 <strong>https</strong> URLs of photos to work from —{' '}
                 <code className="mono">png</code> · <code className="mono">jpeg</code> ·{' '}
-                <code className="mono">webp</code>, under 20 MB each and 48 MB in total, no
+                <code className="mono">webp</code>, under 20 MB each and 64 MB in total, no
                 redirects, no private hosts. No megapixel limit. Surcharged{' '}
                 <strong>{P.image_reference} credits per image</strong>, whatever its resolution
                 (see below).
+              </td>
+              <td>omitted</td>
+            </tr>
+            <tr>
+              <td className="mono">mask</td>
+              <td>
+                One <strong>https</strong> URL of a PNG with alpha, under 4 MB, exactly the size of
+                the first reference — transparent where to paint. Requires{' '}
+                <code className="mono">reference_images</code>. Guidance, not a stencil: composite
+                your product back if it must be pixel-exact. Billed as one more reference; a bad
+                mask is a free <code className="mono">400 mask_invalid</code>.
               </td>
               <td>omitted</td>
             </tr>
