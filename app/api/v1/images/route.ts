@@ -5,7 +5,8 @@ import { withApiKey } from '../../../../lib/api-key';
 import { rateLimit } from '../../../../lib/rate-limit';
 import { db } from '../../../../lib/db';
 import { genJobs, mediaAssets } from '../../../../lib/db/schema';
-import { getOpenAI, MODELS } from '../../../../lib/ai/client';
+import { getOpenAI } from '../../../../lib/ai/client';
+import { upright } from '../../../../lib/media/paste-back';
 import { resolveImageSize } from '../../../../lib/ai/image-sizes';
 import { makeMediaKey, publicUrlFor, uploadBuffer } from '../../../../lib/storage/r2';
 import { charge, ensureBalance, InsufficientCreditsError, refund } from '../../../../lib/credits/ledger';
@@ -16,6 +17,8 @@ import {
   classifyImageFailure,
   failImageJob,
   fetchReferenceImages,
+  generateImage,
+  publicPreserved,
   findChargeBySource,
   type ImageJob,
   insertImageJob,
@@ -95,6 +98,13 @@ const bodySchema = z
      * references, then checked by checkMask — both before the charge.
      */
     mask: z.string().optional(),
+    /**
+     * With a mask, paste the first reference's pixels back wherever the mask is
+     * opaque (see pasteBack) so the product is exactly what was sent — the
+     * provider only treats a mask as guidance. Default on, because that is what a
+     * mask is for; `false` returns the raw model output at `size`.
+     */
+    preserve_masked_pixels: z.boolean().optional(),
     /** Opt-in, not a default: flipping it would change the status code and the
      *  response body of every existing caller's working code. */
     async: z.boolean().default(false),
@@ -110,14 +120,16 @@ const bodySchema = z
     if (b.mask !== undefined && !b.reference_images) {
       ctx.addIssue({ code: 'custom', path: ['mask'], message: 'mask requires reference_images: it applies to the first one.' });
     }
+    if (b.preserve_masked_pixels !== undefined && b.mask === undefined) {
+      ctx.addIssue({ code: 'custom', path: ['preserve_masked_pixels'], message: 'preserve_masked_pixels only applies with a mask.' });
+    }
   });
 
 export async function POST(req: NextRequest) {
   return withApiKey(req, async (auth) => {
     const pre = providerPreflight({ r2: true, openai: true });
     if (pre) return pre;
-    const openai = getOpenAI();
-    if (!openai) return apiError('service_unavailable', 503, 'Image generation is temporarily unavailable.');
+    if (!getOpenAI()) return apiError('service_unavailable', 503, 'Image generation is temporarily unavailable.');
 
     const idem = readIdempotencyKey(req, 'images');
     if (!idem.ok) return idem.response;
@@ -131,6 +143,7 @@ export async function POST(req: NextRequest) {
       });
     }
     const { prompt, quality, reference_images: referenceUrls, mask: maskUrl, async: wantAsync } = parsed.data;
+    const preserve = parsed.data.preserve_masked_pixels ?? true;
 
     // Presets become concrete pixels HERE, once, so everything downstream — the
     // provider call, the ledger meta, the stored job row, and completeImageJob's
@@ -181,8 +194,11 @@ export async function POST(req: NextRequest) {
       refs = fetched.files;
       if (maskUrl) {
         mask = refs.pop()!;
-        const bad = await checkMask(mask, refs[0], maskUrl);
+        const bad = await checkMask(mask, refs[0], maskUrl, preserve ? size : null);
         if (bad) return bad;
+        // The mask was drawn over the photo as displayed, so the provider (and
+        // paste-back) must see it upright too, not in its stored EXIF rotation.
+        refs[0] = await upright(refs[0]);
       }
     }
 
@@ -210,6 +226,7 @@ export async function POST(req: NextRequest) {
         quality,
         referenceCount: refs?.length ?? 0,
         source,
+        ...(mask ? { preserveMaskedPixels: preserve } : {}),
       });
     }
 
@@ -270,27 +287,12 @@ export async function POST(req: NextRequest) {
     // Any failure past this point must return the money. Charging for an image
     // we never delivered is the one bug this endpoint cannot ship with.
     try {
-      // images.edit is the only mechanism that takes input images. NOT sending
-      // input_fidelity: the SDK's comment claims "gpt-image-1.5 and later", but
-      // the live API answers 400 invalid_input_fidelity_model on gpt-image-2
-      // (verified twice). Likeness is therefore guided, not pinned — and so is the
-      // mask: for GPT image models it is guidance, not a pixel-exact stencil.
-      const res = refs
-        ? await openai.images.edit(
-            { model: MODELS.image, image: refs, ...(mask ? { mask } : {}), prompt, size, quality, n: 1 },
-            { maxRetries: 0 },
-          )
-        : await openai.images.generate(
-            { model: MODELS.image, prompt, size, quality, n: 1 },
-            { maxRetries: 0 },
-          );
-      const b64 = res.data?.[0]?.b64_json;
-      if (!b64) throw new Error('no_image_returned');
-
-      const buf = Buffer.from(b64, 'base64');
+      // Same helper as the async path. Paste-back failures do not throw out of it
+      // (the raw image comes back with preserved=false), so only a genuine
+      // generation or storage failure reaches the refund below.
+      const out = await generateImage({ prompt, size, quality, refs, mask, preserve });
       const key = makeMediaKey(auth.userId, `api-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.png`);
-      await uploadBuffer({ key, body: buf, contentType: 'image/png' });
-      const [w, h] = size.split('x').map((n) => parseInt(n, 10));
+      await uploadBuffer({ key, body: out.buf, contentType: 'image/png' });
       const [asset] = await db()
         .insert(mediaAssets)
         .values({
@@ -298,20 +300,22 @@ export async function POST(req: NextRequest) {
           storageKey: key,
           publicUrl: publicUrlFor(key),
           mimeType: 'image/png',
-          sizeBytes: buf.length,
-          width: w,
-          height: h,
+          sizeBytes: out.buf.length,
+          width: out.width,
+          height: out.height,
           label: prompt.slice(0, 80),
         })
         .returning();
 
       // Lets an idempotent replay resolve to this asset instead of a 409.
-      if (source) await patchChargeMeta(charged.ledgerId, { mediaAssetId: asset.id });
+      // The paste-back outcome goes on the ledger row too, so a replay reports it.
+      const preserved = out.preserved === null ? {} : { preservedMaskedPixels: out.preserved };
+      if (source || mask) await patchChargeMeta(charged.ledgerId, { ...(source ? { mediaAssetId: asset.id } : {}), ...preserved });
 
       // Header on the fresh path too, so `Idempotency-Replay` is always present
       // on both POSTs rather than only appearing on an images replay.
       return Response.json(
-        { id: asset.id, image_url: asset.publicUrl, credits_charged: unit.credits },
+        { id: asset.id, image_url: asset.publicUrl, credits_charged: unit.credits, ...publicPreserved(out.preserved) },
         { headers: { 'idempotency-replay': 'false' } },
       );
     } catch (e) {
@@ -390,8 +394,10 @@ async function replayOf(userId: string, source: string): Promise<Response | null
   }
   const [asset] = await db().select().from(mediaAssets).where(eq(mediaAssets.id, assetId)).limit(1);
   if (!asset || asset.userId !== userId) return null;
+  const preserved = (original.meta as { preservedMaskedPixels?: boolean } | null)?.preservedMaskedPixels;
   return Response.json(
-    { id: asset.id, image_url: asset.publicUrl, credits_charged: Math.abs(original.credits) },
+    { id: asset.id, image_url: asset.publicUrl, credits_charged: Math.abs(original.credits), ...publicPreserved(preserved ?? null) },
     { headers: { 'idempotency-replay': 'true' } },
   );
 }
+

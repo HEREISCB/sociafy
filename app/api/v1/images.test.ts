@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import sharp from 'sharp';
 
 /**
  * Images are OpenAI-backed, not the video provider — but the money contract is
@@ -34,6 +35,9 @@ const state = vi.hoisted(() => ({
   /** Lets a test simulate a refund that did NOT land, which must keep the
    *  idempotency claim rather than free it for a second charge. */
   refundLands: true,
+  /** What the fake provider returns; null = a non-image placeholder. */
+  genImage: null as Buffer | null,
+  uploadSink: null as ((b: Buffer) => void) | null,
 }));
 
 vi.mock('../../../lib/api-key', () => ({
@@ -199,8 +203,9 @@ vi.mock('../../../lib/credits/ledger', () => ({
 vi.mock('../../../lib/storage/r2', () => ({
   makeMediaKey: (u: string, n: string) => `users/${u}/${n}`,
   publicUrlFor: (k: string) => `https://cdn.test/${k}`,
-  uploadBuffer: () => {
+  uploadBuffer: (a: { body: Buffer }) => {
     state.uploads++;
+    state.uploadSink?.(a.body);
     return Promise.resolve();
   },
 }));
@@ -208,7 +213,7 @@ vi.mock('../../../lib/storage/r2', () => ({
 vi.mock('../../../lib/ai/client', () => {
   const answer = () => {
     if (state.genError) return Promise.reject(state.genError);
-    return Promise.resolve({ data: [{ b64_json: Buffer.from('png').toString('base64') }] });
+    return Promise.resolve({ data: [{ b64_json: (state.genImage ?? Buffer.from('png')).toString('base64') }] });
   };
   return {
     MODELS: { image: 'gpt-image-test' },
@@ -287,6 +292,8 @@ beforeEach(() => {
   state.transactions = 0;
   state.genError = null;
   state.refundLands = true;
+  state.genImage = null;
+  state.uploadSink = null;
   state.generateCalls = [];
   state.editCalls = [];
   state.refFetch = null;
@@ -715,12 +722,22 @@ describe('POST /api/v1/images — reference_images', () => {
 
 describe('POST /api/v1/images — mask', () => {
   const MASK_URL = 'https://93.184.216.34/rings/mask.png';
-  /** A PNG IHDR with a real colour type: 6 = RGBA, 2 = RGB (no alpha). */
-  const maskPng = (w: number, h: number, colorType = 6) => {
-    const b = png(w, h);
-    b[24] = 8; // bit depth
-    b[25] = colorType;
-    return b;
+  const RED = { r: 255, g: 0, b: 0 };
+  const BLUE = { r: 0, g: 0, b: 255 };
+  const solid = (w: number, h: number, c: typeof RED) =>
+    sharp({ create: { width: w, height: h, channels: 3, background: c } }).png().toBuffer();
+  /** RGBA mask: transparent border (paint here), opaque centre half (keep). */
+  const centreMask = async (w = 64, h = 64) => {
+    const px = Buffer.alloc(w * h * 4);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const keep = x >= w / 4 && x < (3 * w) / 4 && y >= h / 4 && y < (3 * h) / 4;
+      px[(y * w + x) * 4 + 3] = keep ? 255 : 0;
+    }
+    return sharp(px, { raw: { width: w, height: h, channels: 4 } }).png().toBuffer();
+  };
+  /** Serve `ref` at every reference URL and `mask` at MASK_URL. */
+  const serve = (ref: Buffer, mask: Buffer, refType = 'image/png', maskType = 'image/png') => {
+    state.refFetch = (url) => (url.toString() === MASK_URL ? imageResponse(mask, maskType) : imageResponse(ref, refType));
   };
   const body = (extra: object = {}) => ({
     prompt: 'white marble, soft window light',
@@ -728,10 +745,19 @@ describe('POST /api/v1/images — mask', () => {
     mask: MASK_URL,
     ...extra,
   });
-  /** Reference is png(1024, 1024) by default; the mask is whatever the test says. */
-  const serveMask = (mask: Buffer, type = 'image/png') => {
-    state.refFetch = (url) => (url.toString() === MASK_URL ? imageResponse(mask, type) : null) as Response;
+  const pixel = async (img: Buffer, x: number, y: number) => {
+    const { data, info } = await sharp(img).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+    const i = (y * info.width + x) * info.channels;
+    return { r: data[i], g: data[i + 1], b: data[i + 2] };
   };
+  /** What was uploaded to R2 — the image the caller gets. */
+  let uploaded: Buffer[] = [];
+  beforeEach(async () => {
+    uploaded = [];
+    state.uploadSink = (b) => uploaded.push(b);
+    state.genImage = await solid(1024, 1024, BLUE);
+    serve(await solid(64, 64, RED), await centreMask());
+  });
 
   async function expectFree(b: unknown, code: string) {
     const res = await post(b);
@@ -742,50 +768,124 @@ describe('POST /api/v1/images — mask', () => {
     return json;
   }
 
-  it('passes the mask to images.edit, apart from the references, priced as one more input image', async () => {
-    serveMask(maskPng(1024, 1024));
+  it('pastes the reference back where the mask is opaque, at the reference dimensions', async () => {
     const res = await post(body());
     expect(res.status).toBe(200);
-    expect((await res.json()).credits_charged).toBe(6 + 6 + 6);
+    expect(await res.json()).toMatchObject({ credits_charged: 6 + 6 + 6, preserved_masked_pixels: true });
+    const out = uploaded[0];
+    const meta = await sharp(out).metadata();
+    expect([meta.width, meta.height]).toEqual([64, 64]);
+    expect(await pixel(out, 32, 32)).toEqual(RED); // centre: exactly the product
+    expect(await pixel(out, 16, 16)).toEqual(RED); // first opaque pixel
+    expect(await pixel(out, 0, 0)).toEqual(BLUE); // border: the model's paint
+    expect(await pixel(out, 15, 32)).toEqual(BLUE);
+    expect(state.assets[0]).toMatchObject({ width: 64, height: 64 });
     const call = state.editCalls[0] as { image: File[]; mask: File };
     expect(call.image).toHaveLength(1);
     expect(call.mask).toBeInstanceOf(File);
-    expect(call.mask.name).toBe('reference-2.png');
     expect((state.charges[0] as { meta: Record<string, unknown> }).meta).toMatchObject({ mask: true, referenceImages: 1 });
   });
 
-  it('carries the mask through the async path too', async () => {
-    serveMask(maskPng(1024, 1024));
-    expect((await post(body({ async: true }))).status).toBe(202);
-    for (const fn of state.afters) await fn();
+  it('blends a feathered edge by mask alpha', async () => {
+    const half = Buffer.alloc(64 * 64 * 4);
+    for (let i = 3; i < half.length; i += 4) half[i] = 128;
+    serve(await solid(64, 64, RED), await sharp(half, { raw: { width: 64, height: 64, channels: 4 } }).png().toBuffer());
+    await post(body());
+    const p = await pixel(uploaded[0], 10, 10);
+    for (const v of [p.r, p.b]) {
+      expect(v).toBeGreaterThan(110);
+      expect(v).toBeLessThan(145);
+    }
+  });
+
+  it('opt-out returns the raw model output at the requested size', async () => {
+    const json = await (await post(body({ preserve_masked_pixels: false }))).json();
+    expect(json.preserved_masked_pixels).toBe(false);
+    expect(await pixel(uploaded[0], 32, 32)).toEqual(BLUE);
+    expect((await sharp(uploaded[0]).metadata()).width).toBe(1024);
     expect((state.editCalls[0] as { mask?: File }).mask).toBeInstanceOf(File);
   });
 
-  it('is a free 400 without reference_images', async () => {
+  it('falls back to the raw output, charged and flagged, when paste-back fails', async () => {
+    state.genImage = Buffer.from('not an image'); // pasteBack cannot decode it
+    const res = await post(body());
+    expect(res.status).toBe(200);
+    expect((await res.json()).preserved_masked_pixels).toBe(false);
+    expect(state.refunds).toHaveLength(0);
+    expect(uploaded[0].toString()).toBe('not an image');
+    expect((state.ledger[0].meta as Record<string, unknown>).preservedMaskedPixels).toBe(false);
+  });
+
+  it('pastes back on the async path too, and the poll reports it', async () => {
+    const res = await post(body({ async: true }));
+    expect(res.status).toBe(202);
+    const { id } = await res.json();
+    for (const fn of state.afters) await fn();
+    expect(await pixel(uploaded[0], 32, 32)).toEqual(RED);
+    expect(await pixel(uploaded[0], 0, 0)).toEqual(BLUE);
+    expect(state.jobs[0].status).toBe('completed');
+    expect((state.jobs[0].inputJson as Record<string, unknown>).preservedMaskedPixels).toBe(true);
+    const polled = await (await GET(new Request('https://sociafy.test/x') as never, { params: Promise.resolve({ id }) })).json();
+    expect(polled).toMatchObject({ status: 'completed', preserved_masked_pixels: true });
+  });
+
+  it('accepts a size of the same shape as the reference and refuses a different shape, free', async () => {
+    expect((await post(body({ size: '1024x1024' }))).status).toBe(200);
+    Object.assign(state, { charges: [], editCalls: [] });
+    const json = await expectFree(body({ size: 'ig_portrait' }), 'invalid_request');
+    expect(json.issues[0]).toMatchObject({ field: 'size', message: expect.stringContaining('different shape') });
+    // Without paste-back nothing is resized, so the shape is the caller's call.
+    expect((await post(body({ size: 'ig_portrait', preserve_masked_pixels: false }))).status).toBe(200);
+  });
+
+  it('works with a canvas that is not itself a valid provider size', async () => {
+    // 1000×1000 is not a multiple of 16; size 1024x1024 is the same shape.
+    serve(await solid(1000, 1000, RED), await centreMask(1000, 1000));
+    expect((await post(body())).status).toBe(200);
+    expect((await sharp(uploaded[0]).metadata()).width).toBe(1000);
+    expect(await pixel(uploaded[0], 500, 500)).toEqual(RED);
+    expect(await pixel(uploaded[0], 10, 10)).toEqual(BLUE);
+  });
+
+  it('matches an EXIF-rotated JPEG reference by its upright dimensions and sends it upright', async () => {
+    // Stored 64×32 landscape with EXIF orientation 6, i.e. displayed 32×64.
+    const rotated = await sharp({ create: { width: 64, height: 32, channels: 3, background: RED } })
+      .jpeg()
+      .withMetadata({ orientation: 6 })
+      .toBuffer();
+    serve(rotated, await centreMask(32, 64), 'image/jpeg');
+    const res = await post(body({ size: 'ig_story', preserve_masked_pixels: false }));
+    expect(res.status).toBe(200);
+    const sent = (state.editCalls[0] as { image: File[] }).image[0];
+    const meta = await sharp(Buffer.from(await sent.arrayBuffer())).metadata();
+    expect([meta.width, meta.height, meta.orientation ?? 1]).toEqual([32, 64, 1]);
+  });
+
+  it('is a free 400 without reference_images, and for preserve_masked_pixels without a mask', async () => {
     const json = await expectFree({ prompt: 'marble', mask: MASK_URL }, 'invalid_request');
     expect(json.issues[0].field).toBe('mask');
     expect(state.fetched).toHaveLength(0);
+    const j2 = await expectFree({ prompt: 'marble', reference_images: [REF_URL], preserve_masked_pixels: true }, 'invalid_request');
+    expect(j2.issues[0].field).toBe('preserve_masked_pixels');
   });
 
   it('is a free 400 when the mask is not a PNG', async () => {
-    const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(64)]);
-    serveMask(jpeg, 'image/jpeg');
+    serve(await solid(64, 64, RED), await sharp(await centreMask()).jpeg().toBuffer(), 'image/png', 'image/jpeg');
     expect((await expectFree(body(), 'mask_invalid')).mask_url).toBe(MASK_URL);
   });
 
   it('is a free 400 when the mask has no alpha channel', async () => {
-    serveMask(maskPng(1024, 1024, 2));
+    serve(await solid(64, 64, RED), await solid(64, 64, BLUE));
     await expectFree(body(), 'mask_invalid');
   });
 
   it('is a free 400 when the mask does not match the first reference\'s dimensions', async () => {
-    serveMask(maskPng(1024, 1536));
-    const json = await expectFree(body(), 'mask_invalid');
-    expect(json.message).toContain('1024x1536');
+    serve(await solid(64, 64, RED), await centreMask(64, 96));
+    expect((await expectFree(body(), 'mask_invalid')).message).toContain('64x96');
   });
 
   it('is a free 400 when the mask is over the provider\'s 4 MB', async () => {
-    serveMask(Buffer.concat([maskPng(1024, 1024), Buffer.alloc(4 * 1024 * 1024)]));
+    serve(await solid(64, 64, RED), Buffer.concat([await centreMask(), Buffer.alloc(4 * 1024 * 1024)]));
     await expectFree(body(), 'mask_invalid');
   });
 
@@ -793,9 +893,10 @@ describe('POST /api/v1/images — mask', () => {
     await expectFree(body({ mask: 'https://169.254.169.254/mask.png' }), 'reference_url_rejected');
   });
 
-  it('leaves mask out of the provider call entirely when not sent', async () => {
-    await post({ prompt: 'a ring', reference_images: [REF_URL] });
+  it('leaves mask, and the flag, out entirely when not sent', async () => {
+    const json = await (await post({ prompt: 'a ring', reference_images: [REF_URL] })).json();
     expect(Object.keys(state.editCalls[0])).not.toContain('mask');
+    expect(json).not.toHaveProperty('preserved_masked_pixels');
   });
 });
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { imageDimensions, imageFormat, videoDurationSec } from './probe';
+import { imageFormat, videoDurationSec } from './probe';
 
 /** Minimal ISO-BMFF box builder — enough to exercise the atom walk. */
 function box(type: string, body: Buffer): Buffer {
@@ -167,37 +167,5 @@ describe('imageFormat (magic bytes)', () => {
     // RIFF, but a WAV rather than a WEBP.
     expect(imageFormat(Buffer.from('RIFF....WAVEfmt ', 'latin1'))).toBeNull();
     expect(imageFormat(Buffer.alloc(0))).toBeNull();
-  });
-});
-
-describe('imageDimensions', () => {
-  // Real 37×23 files encoded by libvips (sharp), so every container variant is
-  // what an encoder actually writes, not what we think it writes.
-  const b64 = (s: string) => Buffer.from(s, 'base64');
-  const FIXTURES: Record<string, Buffer> = {
-    jpeg: b64('/9j/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAXACUDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFgEBAQEAAAAAAAAAAAAAAAAAAAUG/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AgACa2wAAAAAAAAAD/9k='),
-    'progressive jpeg': b64('/9j/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wgARCAAXACUDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAWAQEBAQAAAAAAAAAAAAAAAAAABAX/2gAMAwEAAhADEAAAAZ+JtsAAAAD/xAAUEAEAAAAAAAAAAAAAAAAAAAAw/9oACAEBAAEFAn//xAAUEQEAAAAAAAAAAAAAAAAAAAAg/9oACAEDAQE/AV//xAAUEQEAAAAAAAAAAAAAAAAAAAAg/9oACAECAQE/AV//xAAUEAEAAAAAAAAAAAAAAAAAAAAw/9oACAEBAAY/An//xAAUEAEAAAAAAAAAAAAAAAAAAAAw/9oACAEBAAE/IX//2gAMAwEAAgADAAAAEPPPPPPP/8QAFBEBAAAAAAAAAAAAAAAAAAAAIP/aAAgBAwEBPxBf/8QAFBEBAAAAAAAAAAAAAAAAAAAAIP/aAAgBAgEBPxBf/8QAFBABAAAAAAAAAAAAAAAAAAAAMP/aAAgBAQABPxB//9k='),
-    'webp VP8': b64('UklGRkwAAABXRUJQVlA4IEAAAABQAwCdASolABcAPm02l0ikIyIhJWgAgA2JZwB2AABYzxq0AAD+8iJf/+xZy2BKD//7nA/7nA/7nA/isc2A0AAA'),
-    'webp VP8L': b64('UklGRh4AAABXRUJQVlA4TBEAAAAvJIAFEAdQhSJXoYCBiOh/AAA='),
-    'webp VP8X': b64('UklGRnAAAABXRUJQVlA4WAoAAAAQAAAAJAAAFgAAQUxQSAoAAAABB1DAiAhERP8DVlA4IEAAAABQAwCdASolABcAPm02l0ikIyIhJWgAgA2JZwB2AABYzxq0AAD+8iJf/+xZy2BKD//7nA/7nA/7nA/isc2A0AAA'),
-  };
-
-  it.each(Object.keys(FIXTURES))('reads %s', (name) => {
-    expect(imageDimensions(FIXTURES[name])).toEqual({ width: 37, height: 23 });
-  });
-
-  it('reads a PNG IHDR', () => {
-    const b = Buffer.alloc(33);
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(b, 0);
-    b.write('IHDR', 12, 'latin1');
-    b.writeUInt32BE(1088, 16);
-    b.writeUInt32BE(1360, 20);
-    expect(imageDimensions(b)).toEqual({ width: 1088, height: 1360 });
-  });
-
-  it('returns null rather than guessing', () => {
-    expect(imageDimensions(Buffer.from([0xff, 0xd8, 0xff, 0xda, 0, 2, 0, 0, 0, 0]))).toBeNull(); // SOS, no SOF
-    expect(imageDimensions(FIXTURES.jpeg.subarray(0, 40))).toBeNull(); // truncated
-    expect(imageDimensions(Buffer.from('not an image at all'))).toBeNull();
   });
 });

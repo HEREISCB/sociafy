@@ -491,6 +491,7 @@ Status codes: `200`, `401`, `500`, `503`.
     | `quality` | `low` \| `medium` \| `high` | `medium` |
     | `reference_images` | array of 1–16 `https` URLs — see below | omitted |
     | `mask` | one `https` URL of a PNG with alpha — requires `reference_images`; see [Masked edits](#masked-edits) | omitted |
+    | `preserve_masked_pixels` | boolean — with a `mask`, paste the first reference's pixels back wherever the mask is opaque; output is at the reference's dimensions | `true` (with a `mask`) |
     | `async` | boolean — `true` returns `202` + `poll_url` instead of holding the connection open | `false` |
 
     Unknown fields are rejected with `400`, and there is no `count` — one request,
@@ -649,18 +650,35 @@ Status codes: `200`, `401`, `500`, `503`.
     | `reference_images` present | The mask applies to the first one. Without it: `400 invalid_request`. |
     | PNG with an alpha channel | RGBA or grey+alpha. A palette PNG with a transparency chunk is refused — re-export as RGBA. |
     | Under 4 MB | The provider's own limit. |
-    | Exactly the first reference's width × height | Read from both files' headers. If we cannot read the first reference's dimensions, the request is refused rather than risked. |
+    | Exactly the first reference's width × height | As displayed: a JPEG's EXIF rotation is applied first (and the reference is sent to the model upright), so draw the mask over the photo as you see it. If we cannot read the first reference, the request is refused rather than risked. |
+    | `size` the same shape as the first reference | Only while paste-back is on (below). Within 1%, the slack that multiples-of-16 sizes need. A different shape is `400 invalid_request` on `size`. |
 
     The mask URL is fetched with the references and passes the same checks (and
     shares their 64 MB / 60 s budget); a problem fetching it comes back as the usual
     `reference_*` code with `reference_url` set to your mask URL.
 
-    **A mask is guidance, not a stencil.** With the model behind this endpoint the
-    whole image is regenerated and the mask steers *where* change happens; it does
-    not guarantee the opaque pixels come back bit-identical. If the product must be
-    exact, composite your original product layer back over the result — your
-    canvas and mask already line up with the output when `size` equals the canvas
-    size.
+    **The product comes back exact — we paste it back.** The model treats a mask
+    only as guidance and regenerates every pixel, so after it answers we lay your
+    first reference's pixels back over its output wherever the mask is opaque, using
+    the mask's alpha as the blend: fully opaque is exactly your pixels, fully
+    transparent is exactly the model's, and a feathered edge is a smooth mix. This is
+    on by default whenever you send a `mask`.
+
+    - **The image you get is at the first reference's dimensions, not `size`.** The
+      model renders at `size` (which must still be a valid size); its output is then
+      resized to your canvas before the paste. So your canvas does *not* need to be a
+      valid size itself: a `1000x1000` canvas with `size: "1024x1024"`, or a
+      `1080x1350` canvas with `size: "ig_portrait"`, both come back at the canvas size
+      with your product untouched. A large canvas means a large output: a 4000×4000
+      canvas returns a 4000×4000 PNG, with the generated parts upscaled.
+    - The response carries `"preserved_masked_pixels": true` (on the `200`, on a
+      replay, and on a completed `GET /api/v1/images/{id}`). If it is ever `false`
+      with paste-back on, the paste failed on our side and you received the model's
+      raw output, at `size`. You are still charged — the image was generated — and
+      the failure is logged for us to fix.
+    - **Opt out** with `"preserve_masked_pixels": false` to get the model's raw output
+      at `size`, with no shape requirement. Sending the field without a `mask` is a
+      `400`.
 
     Cost: the mask is billed as one more reference image (6 credits). A single-canvas
     masked edit at `medium` is therefore `6 + 6 + 6` = **18 credits**.

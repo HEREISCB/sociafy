@@ -7,7 +7,8 @@ import { isStubMode } from '../../../lib/env';
 import { isPublicHost } from '../../../lib/public-host';
 import { charge, ensureBalance, InsufficientCreditsError, refund } from '../../../lib/credits/ledger';
 import { priceForVideo, type CreditAction, type ImageQuality, type ImageSize, type VideoQuality } from '../../../lib/credits/pricing';
-import { imageDimensions, imageFormat, type ImageFormat } from '../../../lib/media/probe';
+import { imageFormat, type ImageFormat } from '../../../lib/media/probe';
+import { orientedSize, pasteBack } from '../../../lib/media/paste-back';
 import { createSeedanceTask, type SeedanceAspect, type SeedanceMode } from '../../../lib/ai/piapi';
 import { createCueRender, priceCinemaRender, CUE_CONCURRENCY } from '../../../lib/ai/cue';
 import { backendFor, type VideoModelId } from '../../../lib/ai/models';
@@ -844,24 +845,95 @@ export async function fetchReferenceImages(urls: string[]): Promise<ReferenceFet
  * chunk is refused too: whether the provider reads it as alpha is unverified, and
  * a false accept costs the caller money where a false reject costs a re-export.
  *
+ * Dimensions are compared with EXIF orientation applied (the first reference is
+ * sent to the provider upright — see `upright`), so a rotated phone photo
+ * matches the mask its owner drew over it.
+ *
+ * `preserveAt` is the output `size` when paste-back will run. The generated
+ * image is then resized to the reference's dimensions, which is only harmless if
+ * the shapes agree — so a different aspect ratio (beyond 1%, the slack needed
+ * because provider sizes are multiples of 16) is refused here, for free, rather
+ * than stretched after the charge.
+ *
  * Returns the 400 to send, or null when the mask is usable.
  */
-export async function checkMask(mask: File, firstReference: File, maskUrl: string): Promise<Response | null> {
+export async function checkMask(
+  mask: File,
+  firstReference: File,
+  maskUrl: string,
+  preserveAt: string | null,
+): Promise<Response | null> {
   const bad = (message: string) => apiError('mask_invalid', 400, message, { mask_url: maskUrl });
   const buf = Buffer.from(await mask.arrayBuffer());
   if (imageFormat(buf) !== 'png') return bad('The mask must be a PNG.');
   if (buf.length > REFERENCE_LIMITS.maxMaskBytes) return bad(`The mask must be under ${mb(REFERENCE_LIMITS.maxMaskBytes)} MB.`);
-  const dims = imageDimensions(buf);
-  if (!dims || buf.length < 26) return bad('The mask is not a readable PNG.');
+  const dims = await orientedSize(buf);
+  if (!dims) return bad('The mask is not a readable PNG.');
+  // IHDR colour type, byte 25 of any PNG sharp could read.
   if (buf[25] !== 4 && buf[25] !== 6) {
     return bad('The mask must have an alpha channel (RGBA or grey+alpha PNG). Transparent pixels mark where to paint.');
   }
-  const ref = imageDimensions(Buffer.from(await firstReference.arrayBuffer()));
+  const ref = await orientedSize(Buffer.from(await firstReference.arrayBuffer()));
   if (!ref) return bad('We could not read the dimensions of the first reference image, so the mask cannot be matched to it.');
   if (ref.width !== dims.width || ref.height !== dims.height) {
     return bad(`The mask is ${dims.width}x${dims.height} but the first reference image is ${ref.width}x${ref.height}. They must match exactly.`);
   }
+  if (preserveAt) {
+    const [w, h] = preserveAt.split('x').map(Number);
+    const want = ref.width / ref.height;
+    if (Math.abs(w / h - want) > 0.01 * want) {
+      return apiError('invalid_request', 400, 'Request body failed validation.', {
+        issues: [{
+          field: 'size',
+          message: `size ${preserveAt} is a different shape from the first reference (${ref.width}x${ref.height}). With a mask, pick a size with the same aspect ratio, or send preserve_masked_pixels: false.`,
+        }],
+      });
+    }
+  }
   return null;
+}
+
+/**
+ * One generation, shared by the synchronous path and runImageJob so the two can
+ * never drift. Provider errors propagate (the callers refund). Paste-back errors
+ * do NOT: a charged request still gets the model's raw image, flagged with
+ * `preserved: false`, rather than a refund for a picture we do have.
+ */
+export async function generateImage(args: {
+  prompt: string;
+  size: ImageSize;
+  quality: ImageQuality;
+  refs: File[] | null;
+  mask: File | null;
+  preserve: boolean;
+}): Promise<{ buf: Buffer; width: number; height: number; preserved: boolean | null }> {
+  const { prompt, size, quality, refs, mask } = args;
+  const openai = getOpenAI();
+  if (!openai) throw new Error('openai_not_configured');
+  // images.edit is the only mechanism that takes input images. NOT sending
+  // input_fidelity: the SDK's comment claims "gpt-image-1.5 and later", but the
+  // live API answers 400 invalid_input_fidelity_model on gpt-image-2 (verified
+  // twice). Likeness is therefore guided, not pinned — and so is the mask, which
+  // the provider treats as guidance; paste-back below is what makes it exact.
+  const res = refs
+    ? await openai.images.edit(
+        { model: MODELS.image, image: refs, ...(mask ? { mask } : {}), prompt, size, quality, n: 1 },
+        { maxRetries: 0 },
+      )
+    : await openai.images.generate({ model: MODELS.image, prompt, size, quality, n: 1 }, { maxRetries: 0 });
+  const b64 = res.data?.[0]?.b64_json;
+  if (!b64) throw new Error('no_image_returned');
+  const raw = Buffer.from(b64, 'base64');
+  const [w, h] = size.split('x').map((n) => parseInt(n, 10));
+
+  if (!refs || !mask || !args.preserve) return { buf: raw, width: w, height: h, preserved: mask ? false : null };
+  try {
+    const out = await pasteBack(raw, Buffer.from(await refs[0].arrayBuffer()), Buffer.from(await mask.arrayBuffer()));
+    return { ...out, preserved: true };
+  } catch (e) {
+    console.error('[v1/images] paste-back failed, returning raw model output:', e instanceof Error ? e.message : e);
+    return { buf: raw, width: w, height: h, preserved: false };
+  }
 }
 
 /**
@@ -902,6 +974,10 @@ export type ImageJobInput = {
   quality: ImageQuality;
   referenceCount: number;
   source: string | null;
+  /** Paste-back requested (masked edits only; absent = true). After completion,
+   *  preservedMaskedPixels records whether it actually happened. */
+  preserveMaskedPixels?: boolean;
+  preservedMaskedPixels?: boolean;
 };
 
 /**
@@ -942,30 +1018,22 @@ export async function insertImageJob(userId: string, input: ImageJobInput): Prom
  * charge until the cron sweeper's grace window expires.
  */
 export async function runImageJob(job: ImageJob, refs: File[] | null, mask?: File | null): Promise<void> {
-  const { prompt, size, quality } = job.inputJson as ImageJobInput;
+  const input = job.inputJson as ImageJobInput;
   try {
-    const openai = getOpenAI();
-    if (!openai) throw new Error('openai_not_configured');
-    // Same two calls with the same arguments as the synchronous path — see the
-    // comment there for why input_fidelity is not sent.
-    const res = refs
-      ? await openai.images.edit(
-          { model: MODELS.image, image: refs, ...(mask ? { mask } : {}), prompt, size, quality, n: 1 },
-          { maxRetries: 0 },
-        )
-      : await openai.images.generate(
-          { model: MODELS.image, prompt, size, quality, n: 1 },
-          { maxRetries: 0 },
-        );
-    const b64 = res.data?.[0]?.b64_json;
-    if (!b64) throw new Error('no_image_returned');
-
-    const buf = Buffer.from(b64, 'base64');
+    // The same call as the synchronous path, by construction.
+    const out = await generateImage({
+      prompt: input.prompt,
+      size: input.size,
+      quality: input.quality,
+      refs,
+      mask: mask ?? null,
+      preserve: input.preserveMaskedPixels ?? true,
+    });
     const key = makeMediaKey(job.userId, `api-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.png`);
     // Upload BEFORE claiming the row: a row claimed 'completed' with no asset is
     // a zombie the caller polls forever.
-    await uploadBuffer({ key, body: buf, contentType: 'image/png' });
-    await completeImageJob(job, key, buf.length);
+    await uploadBuffer({ key, body: out.buf, contentType: 'image/png' });
+    await completeImageJob(job, key, out);
   } catch (e) {
     const failure = classifyImageFailure(e);
     logImageFailure('v1/images async', e, failure);
@@ -996,14 +1064,24 @@ export async function runImageJob(job: ImageJob, refs: File[] | null, mask?: Fil
  * never be held open across a network hop, least of all through a
  * transaction-mode pooler.
  */
-async function completeImageJob(job: ImageJob, key: string, sizeBytes: number): Promise<void> {
-  const { prompt, size } = job.inputJson as ImageJobInput;
-  const [w, h] = size.split('x').map((n) => parseInt(n, 10));
+async function completeImageJob(
+  job: ImageJob,
+  key: string,
+  out: { buf: Buffer; width: number; height: number; preserved: boolean | null },
+): Promise<void> {
+  const input = job.inputJson as ImageJobInput;
 
   await db().transaction(async (tx) => {
     const claimed = await tx
       .update(genJobs)
-      .set({ status: 'completed', error: null, updatedAt: new Date() })
+      .set({
+        status: 'completed',
+        error: null,
+        updatedAt: new Date(),
+        // The paste-back outcome rides on the row GET /images/{id} reads, so the
+        // poll can report it without a schema change.
+        ...(out.preserved !== null ? { inputJson: { ...input, preservedMaskedPixels: out.preserved } } : {}),
+      })
       .where(and(eq(genJobs.id, job.id), ne(genJobs.status, 'completed')))
       .returning({ id: genJobs.id });
     // Lost the race — abort before inserting anything. Our R2 object is a
@@ -1017,10 +1095,10 @@ async function completeImageJob(job: ImageJob, key: string, sizeBytes: number): 
         storageKey: key,
         publicUrl: publicUrlFor(key),
         mimeType: 'image/png',
-        sizeBytes,
-        width: w,
-        height: h,
-        label: prompt.slice(0, 80),
+        sizeBytes: out.buf.length,
+        width: out.width,
+        height: out.height,
+        label: input.prompt.slice(0, 80),
       })
       .returning();
 
@@ -1080,4 +1158,9 @@ async function replayOf(userId: string, source: string): Promise<SubmitVideoResu
     .limit(1);
   if (!job) return null;
   return { job, creditsCharged: Math.abs(original.credits), replayed: true };
+}
+
+/** `preserved_masked_pixels` on a masked request's response; absent otherwise. */
+export function publicPreserved(preserved: boolean | null): { preserved_masked_pixels?: boolean } {
+  return preserved === null ? {} : { preserved_masked_pixels: preserved };
 }

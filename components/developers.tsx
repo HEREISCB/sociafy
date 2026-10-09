@@ -312,11 +312,23 @@ curl -sS ${BASE}/me \\
               <td>
                 One <strong>https</strong> URL of a PNG with alpha, under 4 MB, exactly the size of
                 the first reference — transparent where to paint. Requires{' '}
-                <code className="mono">reference_images</code>. Guidance, not a stencil: composite
-                your product back if it must be pixel-exact. Billed as one more reference; a bad
+                <code className="mono">reference_images</code>. Billed as one more reference; a bad
                 mask is a free <code className="mono">400 mask_invalid</code>.
               </td>
               <td>omitted</td>
+            </tr>
+            <tr>
+              <td className="mono">preserve_masked_pixels</td>
+              <td>
+                With a <code className="mono">mask</code>: we paste the first reference&apos;s pixels
+                back wherever the mask is opaque (alpha-blended at soft edges), so the product is
+                exactly what you sent. The image comes back at the reference&apos;s dimensions, and{' '}
+                <code className="mono">size</code> must be the same shape.{' '}
+                <code className="mono">false</code> returns the raw model output at{' '}
+                <code className="mono">size</code>. The response reports{' '}
+                <code className="mono">preserved_masked_pixels</code>.
+              </td>
+              <td className="mono">true</td>
             </tr>
           </tbody>
         </table>

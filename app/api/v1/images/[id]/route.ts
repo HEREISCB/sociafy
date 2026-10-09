@@ -3,7 +3,7 @@ import { and, eq } from 'drizzle-orm';
 import { withApiKey } from '../../../../../lib/api-key';
 import { db } from '../../../../../lib/db';
 import { genJobs, mediaAssets } from '../../../../../lib/db/schema';
-import { apiError, IMAGE_JOB_KIND, providerPreflight, UUID_RX } from '../../shared';
+import { apiError, IMAGE_JOB_KIND, type ImageJobInput, providerPreflight, publicPreserved, UUID_RX } from '../../shared';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -62,6 +62,10 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       credits_charged: job.creditsCharged ?? 0,
       // Already a public code when it is written; nothing internal reaches here.
       error: job.status === 'failed' ? (job.error ?? 'generation_failed') : null,
+      // Masked requests only, once completed: whether paste-back ran (see generateImage).
+      ...(status === 'completed'
+        ? publicPreserved((job.inputJson as ImageJobInput | null)?.preservedMaskedPixels ?? null)
+        : {}),
     });
   });
 }
