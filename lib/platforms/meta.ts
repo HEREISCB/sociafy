@@ -375,11 +375,14 @@ export const instagramAdapter: PlatformAdapter = {
     if (!shortResp.ok) {
       throw new PlatformError('ig_short_token_failed', shortResp.status, await shortResp.text());
     }
-    const short = (await shortResp.json()) as {
-      access_token: string;
-      user_id: number | string;
-      permissions?: string;
-    };
+    // Meta documents this response wrapped as { data: [{ access_token, ... }] }
+    // but has also returned it flat — accept both.
+    type ShortToken = { access_token: string; user_id: number | string; permissions?: string };
+    const shortJson = (await shortResp.json()) as ShortToken | { data: ShortToken[] };
+    const short = 'data' in shortJson ? shortJson.data[0] : shortJson;
+    if (!short?.access_token) {
+      throw new PlatformError('ig_short_token_failed', 502, JSON.stringify(shortJson));
+    }
 
     // Step 2: swap short-lived for long-lived (60 days) immediately. Store
     // ONLY the long-lived token — the short-lived one is useless once we

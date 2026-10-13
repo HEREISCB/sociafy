@@ -52,6 +52,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ platform: s
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
+    // The redirect only carries the error code; keep the provider's body in logs.
+    console.error(`[oauth:${platform}] exchange failed`, msg, (e as { detail?: unknown }).detail);
     return NextResponse.redirect(
       absoluteUrl(req, `${back}${backSep}oauth_error=${encodeURIComponent(msg)}&platform=${platform}`),
     );

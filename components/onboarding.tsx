@@ -62,6 +62,19 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
   // save attempt. When a PATCH rejects we keep the user on the current step
   // instead of silently advancing past an unsaved change.
   const [saveError, setSaveError] = useState<string | null>(null);
+  // The OAuth callback reports failures as ?oauth_error=…&platform=… — surface
+  // them instead of silently landing back on "Not connected".
+  const [oauthError, setOauthError] = useState<{ platform: string; detail: string } | null>(null);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const detail = params.get('oauth_error');
+    if (!detail) return;
+    queueMicrotask(() => setOauthError({ platform: params.get('platform') ?? 'platform', detail }));
+    params.delete('oauth_error');
+    params.delete('platform');
+    const qs = params.toString();
+    window.history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : ''));
+  }, []);
   // Brand profile — flows into every AI surface (image, video, text).
   // The richer these fields are, the more on-brand the output. The same
   // fields are editable later from Auto-pilot → Brand profile.
@@ -337,6 +350,11 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
             <p className="lede">
               Sociafy needs publish access so it can schedule on your behalf. You can revoke any time. If a platform isn&apos;t configured yet, we&apos;ll connect a demo-only account (won&apos;t post) so you can keep exploring.
             </p>
+            {oauthError && (
+              <div role="alert" style={{ padding: 12, background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.25)', borderRadius: 10, fontSize: 13, marginBottom: 18, wordBreak: 'break-word' }}>
+                Couldn&apos;t connect {oauthError.platform}: <span className="mono">{oauthError.detail}</span>
+              </div>
+            )}
             <div className="connect-grid">
               {ONBOARD_PLATFORMS.map((p) => {
                 const isConnected = connectedShorts.includes(p.short);
