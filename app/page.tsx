@@ -2,6 +2,7 @@ import { headers } from 'next/headers';
 import LandingPage from '../components/landing';
 import { geoCountry } from '../lib/env';
 import type { Currency } from '../lib/billing/pricing';
+import { TIER_CREDITS } from '../lib/db/schema';
 
 /**
  * Server shell for the marketing page. Its only job is to resolve the visitor's
@@ -24,5 +25,5 @@ export const dynamic = 'force-dynamic';
 export default async function Page() {
   const country = geoCountry(await headers());
   const initialCurrency: Currency | null = country ? (country === 'IN' ? 'INR' : 'USD') : null;
-  return <LandingPage initialCurrency={initialCurrency} />;
+  return <LandingPage initialCurrency={initialCurrency} credits={TIER_CREDITS} />;
 }

@@ -1,12 +1,12 @@
-import CalendarPage from '../../../../components/calendar';
+import Calendar from '../../../../components/calendar';
 
 export default function CalendarRoute() {
   return (
     <>
-      <div className="page-head">
-        <div><h1>Calendar</h1></div>
-      </div>
-      <CalendarPage />
+      <header className="page-header">
+        <h1>Calendar</h1>
+      </header>
+      <Calendar />
     </>
   );
 }

@@ -1,13 +1,8 @@
 import Link from 'next/link';
 
-// Static site header/footer shared by the landing and /try-* pages. Server
-// component on purpose: keeps these pages off the landing client chunk.
-
-const ArrowIcon = () => (
-  <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
-    <path d="M5 12h14M13 6l6 6-6 6" />
-  </svg>
-);
+// Static site header/footer shared by every public page (landing, free tools,
+// legal, 404). Server component on purpose: keeps these pages off the landing
+// client chunk.
 
 export const PG = ({ k }: { k: string }) => (
   <span className={`pglyph ${k}`} aria-hidden="true">
@@ -15,27 +10,33 @@ export const PG = ({ k }: { k: string }) => (
   </span>
 );
 
+const Brand = () => (
+  <Link href="/" className="brand lp-brand" aria-label="Sociafy home">
+    <span className="brand-mark" aria-hidden="true">S</span>
+    <span className="brand-name">Sociafy<span className="dot">.</span></span>
+  </Link>
+);
+
 export const LPNav = () => (
   <header className="lp-nav-wrap">
     <div className="lp lp-nav">
-      <Link href="/" className="brand" style={{ textDecoration: 'none', color: 'inherit' }} aria-label="Sociafy home">
-        <div className="brand-mark" aria-hidden="true">S</div>
-        <div className="brand-name">Sociafy<span className="dot">.</span></div>
-      </Link>
+      <Brand />
       <nav className="lp-nav-links" aria-label="Primary">
-        <Link href="/#agent">Agent</Link>
-        <Link href="/#workflow">Workflow</Link>
-        <Link href="/#voice">Voice</Link>
         <Link href="/#pricing">Pricing</Link>
         <Link href="/free-tools">Free tools</Link>
       </nav>
-      <div className="lp-nav-spacer" />
       <div className="lp-nav-actions">
-        <span className="lp-nav-status"><span className="dot" /> Built for founders who&apos;d rather be building</span>
-        <Link className="btn" href="/sign-in">Log in</Link>
-        <Link className="btn primary" href="/sign-up">
-          Start now <ArrowIcon />
-        </Link>
+        <Link className="btn ghost lp-nav-login" href="/sign-in">Log in</Link>
+        <Link className="btn primary" href="/sign-up">Get started</Link>
+        {/* Native disclosure: no JS, works on the server-rendered pages too. */}
+        <details className="lp-menu">
+          <summary aria-label="Menu">Menu</summary>
+          <nav aria-label="Mobile">
+            <Link href="/#pricing">Pricing</Link>
+            <Link href="/free-tools">Free tools</Link>
+            <Link href="/sign-in">Log in</Link>
+          </nav>
+        </details>
       </div>
     </div>
   </header>
@@ -43,67 +44,37 @@ export const LPNav = () => (
 
 export const Footer = () => (
   <footer className="lp-foot">
-    <div className="lp">
-      <div className="lp-foot-grid">
-        <div className="lp-foot-brand">
-          <div className="brand">
-            <div className="brand-mark" aria-hidden="true">S</div>
-            <div className="brand-name">Sociafy<span className="dot">.</span></div>
-          </div>
-          <p>The AI social agent for founders who&apos;d rather be building.</p>
-          <div className="lp-foot-socials" style={{ marginTop: 16 }}>
-            <PG k="x" /><PG k="li" /><PG k="ig" /><PG k="yt" />
-          </div>
-        </div>
-        <div className="lp-foot-col">
-          <h6>Product</h6>
-          <ul>
-            <li><Link href="/#agent">Agent</Link></li>
-            <li><Link href="/#workflow">Workflow</Link></li>
-            <li><Link href="/#voice">Voice training</Link></li>
-            <li><Link href="/#pricing">Pricing</Link></li>
-          </ul>
-        </div>
-        <div className="lp-foot-col">
-          <h6>Free tools</h6>
-          <ul>
-            <li><Link href="/free-tools">All free tools</Link></li>
-            <li><Link href="/try-image">AI image generator</Link></li>
-            <li><Link href="/try-video">AI video generator</Link></li>
-            <li><Link href="/free-instagram-caption-generator">Instagram captions</Link></li>
-            <li><Link href="/free-hashtag-generator">Hashtag generator</Link></li>
-            <li><Link href="/free-linkedin-post-generator">LinkedIn posts</Link></li>
-          </ul>
-        </div>
-        <div className="lp-foot-col">
-          <h6>Company</h6>
-          <ul>
-            <li><a href="mailto:hello@sociafy.app">Contact</a></li>
-            <li><a href="mailto:careers@sociafy.app">Careers</a></li>
-          </ul>
-        </div>
-        <div className="lp-foot-col">
-          <h6>Resources</h6>
-          <ul>
-            <li><a href="mailto:support@sociafy.app">Support</a></li>
-            <li><Link href="/#voice">Voice guide</Link></li>
-            <li><Link href="/#pricing">Pricing</Link></li>
-          </ul>
-        </div>
-        <div className="lp-foot-col">
-          <h6>Legal</h6>
-          <ul>
-            <li><a href="/legal/privacy">Privacy</a></li>
-            <li><a href="/legal/terms">Terms</a></li>
-            <li><a href="/legal/refund">Refund &amp; Cancellation</a></li>
-          </ul>
-        </div>
+    <div className="lp lp-foot-grid">
+      <div>
+        <Brand />
+        <p className="lp-foot-note">
+          A product of GNIX SEMICONDUCTORS PRIVATE LIMITED, 2TF, Satyam Complex 2, Sector Alpha II,
+          Greater Noida, Uttar Pradesh 201310, India.
+        </p>
+        <p className="lp-foot-note">© 2026 GNIX SEMICONDUCTORS PRIVATE LIMITED</p>
       </div>
-      <div className="lp-foot-bottom" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
-        <span>Sociafy is a product of <strong>GNIX SEMICONDUCTORS PRIVATE LIMITED</strong>.</span>
-        <span>2TF, Satyam Complex 2, Sector Alpha II, Greater Noida, Uttar Pradesh 201310, India</span>
-        <span>© 2026 GNIX SEMICONDUCTORS PRIVATE LIMITED · Made for founders.</span>
-      </div>
+      <nav className="lp-foot-col" aria-label="Product">
+        <h2>Product</h2>
+        <Link href="/#pricing">Pricing</Link>
+        <Link href="/free-tools">Free tools</Link>
+        <a href="mailto:support@sociafy.app">Support</a>
+      </nav>
+      <nav className="lp-foot-col" aria-label="Legal">
+        <h2>Legal</h2>
+        <Link href="/legal/privacy">Privacy</Link>
+        <Link href="/legal/terms">Terms</Link>
+        <Link href="/legal/refund">Refund &amp; cancellation</Link>
+      </nav>
     </div>
   </footer>
+);
+
+/** Header + main + footer, for every public page. */
+export const SiteShell = ({ children, className }: { children: React.ReactNode; className?: string }) => (
+  <>
+    <a className="skip-link" href="#main">Skip to content</a>
+    <LPNav />
+    <main id="main" className={className}>{children}</main>
+    <Footer />
+  </>
 );

@@ -159,50 +159,31 @@ export function VoiceCreatorDrawer({
   if (!open) return null;
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="Create a Voice Twin"
-      style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', justifyContent: 'flex-end', background: 'rgba(10,10,10,0.45)' }}
-      onClick={onClose}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{ width: 'min(440px, 100%)', height: '100%', background: 'var(--bg)', borderLeft: '1px solid var(--line)', padding: 20, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 16 }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Icon name="waveform" size={16} />
-            <strong style={{ fontSize: 15 }}>Create a Voice Twin</strong>
-          </div>
+    <div className="voice-drawer-scrim" onClick={onClose}>
+      <div className="voice-drawer" role="dialog" aria-modal="true" aria-labelledby="voice-drawer-head" onClick={(e) => e.stopPropagation()}>
+        <div className="voice-drawer-head">
+          <h2 id="voice-drawer-head">Create a Voice Twin</h2>
           <button onClick={onClose} className="btn sm ghost" aria-label="Close"><Icon name="x" size={12} /></button>
         </div>
 
-        {/* Step indicator */}
-        <div style={{ display: 'flex', gap: 6, fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
-          <span style={{ fontWeight: step === 'audio' ? 700 : 400, color: step === 'audio' ? 'var(--ink)' : 'var(--ink-3)' }}>1 · Your voice</span>
-          <span>›</span>
-          <span style={{ fontWeight: step === 'consent' ? 700 : 400, color: step === 'consent' ? 'var(--ink)' : 'var(--ink-3)' }}>2 · Consent</span>
+        <div className="voice-steps">
+          <span className={step === 'audio' ? 'on' : undefined}>1 · Your voice</span>
+          <span aria-hidden>›</span>
+          <span className={step === 'consent' ? 'on' : undefined}>2 · Consent</span>
         </div>
 
         {step === 'audio' && (
           <>
-            <label style={{ fontSize: 11.5, color: 'var(--ink-2)' }}>
-              Voice name
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. My voice"
-                maxLength={60}
-                style={{ width: '100%', marginTop: 4, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--line)', background: 'var(--bg-elev)', color: 'var(--ink)' }}
-              />
+            <label className="set-field">
+              <span className="set-label">Voice name</span>
+              <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. My voice" maxLength={60} />
             </label>
 
-            <div style={{ fontSize: 11, color: 'var(--ink-3)', lineHeight: 1.5 }}>
-              Provide <strong>{MIN_S}–{MAX_S}s</strong> of clean, single-speaker speech — no music or background noise. 20–40s works best.
-            </div>
+            <p className="set-hint">
+              {MIN_S}–{MAX_S}s of clean, single-speaker speech with no music or background noise. 20–40s works best.
+            </p>
 
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div className="row">
               <button className="btn sm" onClick={() => fileRef.current?.click()} disabled={uploading || recording}>
                 <Icon name="upload" size={12} /> Upload audio
               </button>
@@ -214,21 +195,21 @@ export function VoiceCreatorDrawer({
               <input ref={fileRef} type="file" accept="audio/*" hidden onChange={onFile} />
             </div>
 
-            {recording && <div style={{ fontSize: 11, color: 'var(--accent)' }}>● Recording… speak naturally, then Stop.</div>}
-            {uploading && <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>Uploading…</div>}
+            {recording && <p className="set-hint" role="status">Recording. Speak naturally, then press Stop.</p>}
+            {uploading && <p className="set-hint" role="status">Uploading…</p>}
 
             {localUrl && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 10, borderRadius: 10, border: '1px solid var(--line-2)', background: 'var(--bg-sunk)' }}>
-                <audio src={localUrl} controls style={{ flex: 1, height: 32 }} />
+              <div className="voice-clip">
+                <audio src={localUrl} controls />
                 {durationS != null && (
-                  <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: durationOk ? 'var(--ink-3)' : 'var(--danger, #c0392b)' }}>{fmtDur(durationS)}</span>
+                  <span className={`mono set-hint${durationOk ? '' : ' err'}`}>{fmtDur(durationS)}</span>
                 )}
               </div>
             )}
 
-            {err && <div style={{ fontSize: 11, color: 'var(--danger, #c0392b)' }}>{err}</div>}
+            {err && <p className="set-error">{err}</p>}
 
-            <button className="btn" disabled={!canContinue} onClick={() => setStep('consent')} style={{ marginTop: 'auto' }}>
+            <button className="btn primary push" disabled={!canContinue} onClick={() => setStep('consent')}>
               Continue
             </button>
           </>
@@ -236,37 +217,27 @@ export function VoiceCreatorDrawer({
 
         {step === 'consent' && (
           <>
-            <div
-              style={{ whiteSpace: 'pre-wrap', fontSize: 11.5, lineHeight: 1.6, color: 'var(--ink-2)', padding: 14, borderRadius: 10, border: '1px solid var(--line)', background: 'var(--bg-elev)', maxHeight: 280, overflowY: 'auto' }}
-            >
-              {VOICE_CONSENT_TEXT}
-            </div>
+            <div className="voice-consent">{VOICE_CONSENT_TEXT}</div>
 
-            <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 11.5, color: 'var(--ink)', cursor: 'pointer' }}>
-              <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} style={{ marginTop: 2 }} />
+            <label className="set-check">
+              <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} />
               <span>This is my own voice. I have the right to clone it and take full responsibility for everything I create with it.</span>
             </label>
 
-            <label style={{ fontSize: 11.5, color: 'var(--ink-2)' }}>
-              Type your legal name to sign
-              <input
-                value={signature}
-                onChange={(e) => setSignature(e.target.value)}
-                placeholder="Full legal name"
-                maxLength={120}
-                style={{ width: '100%', marginTop: 4, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--line)', background: 'var(--bg-elev)', color: 'var(--ink)' }}
-              />
+            <label className="set-field">
+              <span className="set-label">Type your legal name to sign</span>
+              <input className="input" value={signature} onChange={(e) => setSignature(e.target.value)} placeholder="Full legal name" maxLength={120} />
             </label>
 
-            {err && <div style={{ fontSize: 11, color: 'var(--danger, #c0392b)' }}>{err}</div>}
+            {err && <p className="set-error">{err}</p>}
 
-            <div style={{ display: 'flex', gap: 8, marginTop: 'auto' }}>
-              <button className="btn sm ghost" onClick={() => setStep('audio')}>Back</button>
-              <button className="btn" disabled={!canCreate || busy} onClick={submit} style={{ flex: 1 }}>
+            <div className="row push">
+              <button className="btn ghost" onClick={() => setStep('audio')}>Back</button>
+              <button className="btn primary" disabled={!canCreate || busy} onClick={submit}>
                 {busy ? 'Creating…' : 'Create Voice Twin'}
               </button>
             </div>
-            <div style={{ fontSize: 10, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>Consent {VOICE_CONSENT_VERSION} · recorded with your account + a timestamp.</div>
+            <p className="set-hint">Consent {VOICE_CONSENT_VERSION} is recorded with your account and a timestamp.</p>
           </>
         )}
       </div>
@@ -290,14 +261,15 @@ export function VoicePicker({
   const ready = voices.filter((v) => v.status === 'ready');
 
   return (
-    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+    <div className="voice-picker">
       <select
+        className="input"
         value={value ?? ''}
         onChange={(e) => {
           if (e.target.value === '__new') { setDrawerOpen(true); return; }
           onChange(e.target.value);
         }}
-        style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid var(--line)', background: 'var(--bg-elev)', color: 'var(--ink)', fontSize: 12 }}
+        aria-label="Voice"
       >
         <option value="" disabled>Choose a voice…</option>
         {ready.map((v) => (
@@ -306,7 +278,7 @@ export function VoicePicker({
         <option value="__new">+ Create voice…</option>
       </select>
       {voices.some((v) => v.status === 'preparing') && (
-        <span style={{ fontSize: 10.5, color: 'var(--ink-3)' }}>Preparing a voice…</span>
+        <span className="set-hint">Preparing a voice…</span>
       )}
       <button type="button" className="btn sm ghost" onClick={() => setDrawerOpen(true)}>
         <Icon name="plus" size={11} /> New
@@ -388,71 +360,68 @@ export function VoicesManager() {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <strong style={{ fontSize: 13 }}>My Voices</strong>
-        <button className="btn sm" onClick={() => setDrawerOpen(true)}><Icon name="plus" size={11} /> Create voice</button>
+    <section className="card">
+      <div className="card-head">
+        <h3>Your voices</h3>
+        <button className="btn sm" onClick={() => setDrawerOpen(true)}><Icon name="plus" size={12} /> Create voice</button>
       </div>
 
-      {voices.length === 0 && (
-        <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>No voices yet. Create your Voice Twin to make avatars speak in your voice.</div>
-      )}
+      {voices.length === 0 && <div className="plan-empty">No voices yet.</div>}
 
-      {voices.map((v) => (
-        <div key={v.id} style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: 12, borderRadius: 10, border: '1px solid var(--line)', background: 'var(--bg-elev)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Icon name="waveform" size={14} />
-              <span style={{ fontSize: 13, fontWeight: 600 }}>{v.name}</span>
-              <span style={{ fontSize: 10, fontFamily: 'var(--mono)', color: v.status === 'ready' ? 'var(--ink-3)' : v.status === 'failed' ? 'var(--danger, #c0392b)' : 'var(--accent)' }}>
-                {v.status}
-              </span>
-            </div>
-            <div style={{ display: 'flex', gap: 6 }}>
-              {v.status === 'ready' && (
-                <button className="btn sm ghost" onClick={() => togglePreview(v.id)} aria-label="Preview">
-                  <Icon name="play" size={11} />
-                </button>
-              )}
-              {confirmDel === v.id ? (
-                <>
-                  <button className="btn sm ghost" onClick={() => { setConfirmDel(null); setDelError(null); }}>Keep</button>
-                  <button className="btn sm" onClick={() => del(v.id)} style={{ color: 'var(--danger, #c0392b)' }}>Delete for good</button>
-                </>
-              ) : (
-                <button className="btn sm ghost" onClick={() => { setConfirmDel(v.id); setDelError(null); }} aria-label="Delete"><Icon name="trash" size={11} /></button>
-              )}
-            </div>
-          </div>
-          {confirmDel === v.id && (
-            <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>
-              This deletes the Voice Twin permanently. Anything already generated with it keeps working.
-            </div>
-          )}
-          {delError && confirmDel === v.id && (
-            <div style={{ fontSize: 11, color: 'var(--danger, #c0392b)' }}>{delError}</div>
-          )}
-
-          {previewFor === v.id && v.status === 'ready' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <textarea
-                value={previewText}
-                onChange={(e) => setPreviewText(e.target.value)}
-                rows={2}
-                maxLength={300}
-                style={{ width: '100%', padding: 8, borderRadius: 8, border: '1px solid var(--line)', background: 'var(--bg-sunk)', color: 'var(--ink)', fontSize: 12, resize: 'vertical' }}
-              />
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <button className="btn sm" disabled={previewBusy} onClick={() => preview(v.id)}>{previewBusy ? 'Synthesizing…' : 'Preview speech'}</button>
-                {previewUrl && <audio src={previewUrl} controls style={{ flex: 1, height: 30 }} />}
+      <div className="voice-list">
+        {voices.map((v) => (
+          <div key={v.id} className="voice-row">
+            <div className="voice-row-top">
+              <div className="voice-row-name">
+                <Icon name="waveform" size={14} />
+                <span>{v.name}</span>
+                {v.status !== 'ready' && (
+                  <span className={`badge ${v.status === 'failed' ? 'badge--err' : ''}`}>{v.status}</span>
+                )}
               </div>
-              {previewError && <div style={{ fontSize: 11, color: 'var(--danger, #c0392b)' }}>{previewError}</div>}
+              <div className="row">
+                {v.status === 'ready' && (
+                  <button className="btn sm ghost" onClick={() => togglePreview(v.id)} aria-label={`Preview ${v.name}`} aria-expanded={previewFor === v.id}>
+                    <Icon name="play" size={12} />
+                  </button>
+                )}
+                {confirmDel === v.id ? (
+                  <>
+                    <button className="btn sm ghost" onClick={() => { setConfirmDel(null); setDelError(null); }}>Keep</button>
+                    <button className="btn sm danger" onClick={() => del(v.id)}>Delete for good</button>
+                  </>
+                ) : (
+                  <button className="btn sm ghost" onClick={() => { setConfirmDel(v.id); setDelError(null); }} aria-label={`Delete ${v.name}`}><Icon name="trash" size={12} /></button>
+                )}
+              </div>
             </div>
-          )}
-        </div>
-      ))}
+            {confirmDel === v.id && (
+              <p className="set-hint">Deletes this voice permanently. Anything already made with it keeps working.</p>
+            )}
+            {delError && confirmDel === v.id && <p className="set-error">{delError}</p>}
+
+            {previewFor === v.id && v.status === 'ready' && (
+              <div className="voice-preview">
+                <textarea
+                  className="input"
+                  value={previewText}
+                  onChange={(e) => setPreviewText(e.target.value)}
+                  rows={2}
+                  maxLength={300}
+                  aria-label="Preview text"
+                />
+                <div className="row">
+                  <button className="btn sm" disabled={previewBusy} onClick={() => preview(v.id)}>{previewBusy ? 'Synthesizing…' : 'Preview speech'}</button>
+                </div>
+                {previewUrl && <audio src={previewUrl} controls />}
+                {previewError && <p className="set-error">{previewError}</p>}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
 
       <VoiceCreatorDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} onCreated={() => mutate()} />
-    </div>
+    </section>
   );
 }

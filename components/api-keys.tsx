@@ -83,33 +83,37 @@ export const ApiKeys: React.FC = () => {
     }
   }
 
-  // id="api-keys" kept as the anchor target: it outlived the /usage panel and is
-  // still what older links point at.
+  // id="api-keys" kept as the anchor target older links point at.
   return (
-    <section className="usage-card" id="api-keys" style={{ scrollMarginTop: 24 }}>
-      <h3>API keys</h3>
-      <div className="sub" style={{ marginBottom: 14 }}>
-        Call the Sociafy API from your own code. Requests authenticate with{' '}
-        <code className="mono">Authorization: Bearer sfy_live_…</code> and spend credits from this account.
-        <br />
-        Each key has its own rolling 24-hour credit cap (default {DEFAULT_CAP.toLocaleString()}). Edit a
-        key&apos;s cap below to change it — no need to rotate the key.
+    <section className="card" id="api-keys">
+      <div className="api-create">
+        <input
+          className="input"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Key name, e.g. production"
+          aria-label="Key name"
+          maxLength={60}
+        />
+        <input
+          className="input mono cap"
+          value={cap}
+          onChange={(e) => setCap(e.target.value.replace(/[^0-9]/g, ''))}
+          placeholder={`${DEFAULT_CAP} / day`}
+          aria-label="Daily credit cap"
+          inputMode="numeric"
+          title="Rolling 24-hour credit cap for this key"
+        />
+        <button className="btn primary" onClick={create} disabled={busy}>
+          <Icon name="plus" size={14} /> {busy ? 'Creating…' : 'New key'}
+        </button>
       </div>
 
       {fresh && (
-        <div
-          style={{
-            border: '1px solid var(--line)', borderRadius: 10, padding: 12,
-            background: 'var(--accent-soft)', marginBottom: 14,
-          }}
-        >
-          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
-            <Icon name="alert" size={12} /> Copy this key now — you won&apos;t see it again.
-          </div>
-          <div className="mono" style={{ fontSize: 11.5, wordBreak: 'break-all', marginBottom: 8 }}>
-            {fresh.key}
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
+        <div className="api-fresh" role="status">
+          <strong className="set-label">Copy this key now. You won&apos;t see it again.</strong>
+          <div className="api-fresh-key">{fresh.key}</div>
+          <div className="row">
             <button
               className="btn sm"
               onClick={async () => {
@@ -124,71 +128,31 @@ export const ApiKeys: React.FC = () => {
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Key name (e.g. production)"
-          maxLength={60}
-          style={{
-            flex: 1, minWidth: 0, padding: '6px 10px', fontSize: 12.5,
-            border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg)',
-          }}
-        />
-        <input
-          value={cap}
-          onChange={(e) => setCap(e.target.value.replace(/[^0-9]/g, ''))}
-          placeholder={`${DEFAULT_CAP} cr/day`}
-          inputMode="numeric"
-          title="Rolling 24-hour credit cap for this key"
-          style={{
-            width: 110, padding: '6px 10px', fontSize: 12.5,
-            border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg)',
-          }}
-        />
-        <button className="btn primary sm" onClick={create} disabled={busy}>
-          <Icon name="plus" size={12} /> {busy ? 'Creating…' : 'New key'}
-        </button>
-      </div>
+      {error && <p className="set-error api-row">{error}</p>}
 
-      {error && <div className="sub" style={{ color: 'var(--danger)', marginBottom: 10 }}>{error}</div>}
-
-      {isLoading && <div className="sub">Loading keys…</div>}
-      {!isLoading && keys.length === 0 && (
-        <div className="sub">No API keys yet. Create one to start calling the API.</div>
-      )}
+      {isLoading && <div className="plan-empty">Loading…</div>}
+      {!isLoading && keys.length === 0 && <div className="plan-empty">No keys yet.</div>}
 
       {keys.map((k) => (
-        <div
-          key={k.id}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0',
-            borderTop: '1px solid var(--line)',
-          }}
-        >
-          <Icon name="lock" size={13} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 500 }}>{k.name || 'Untitled key'}</div>
-            <div className="mono" style={{ fontSize: 11, color: 'var(--ink-3)', display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
-              {k.prefix}… ·{' '}
+        <div key={k.id} className="api-row">
+          <div className="api-row-main">
+            <div className="api-row-name">{k.name || 'Untitled key'}</div>
+            <div className="api-row-meta">
+              <span className="mono">{k.prefix}…</span> ·
               <input
+                className="input"
                 defaultValue={k.dailyCreditCap}
                 onBlur={(e) => saveCap(k, e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
                 inputMode="numeric"
-                title="Rolling 24-hour credit cap. Saves on blur."
-                style={{
-                  width: 68, padding: '1px 4px', fontSize: 11, font: 'inherit',
-                  border: '1px solid var(--line)', borderRadius: 5, background: 'var(--bg)',
-                }}
+                aria-label={`Daily credit cap for ${k.name || k.prefix}`}
+                title="Rolling 24-hour credit cap. Saves when you leave the field."
               />
-              cr/day cap ·{' '}
+              credits / day ·{' '}
               {k.lastUsedAt ? `used ${new Date(k.lastUsedAt).toLocaleDateString()}` : 'never used'}
             </div>
           </div>
-          <button className="btn ghost sm" onClick={() => revoke(k)}>
-            <Icon name="trash" size={12} /> Revoke
-          </button>
+          <button className="btn ghost sm" onClick={() => revoke(k)}>Revoke</button>
         </div>
       ))}
     </section>

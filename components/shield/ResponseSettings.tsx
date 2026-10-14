@@ -67,53 +67,40 @@ const ResponseSettings: React.FC = () => {
   const isCustom = prompt.trim().length > 0;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink-3)', lineHeight: 1.5 }}>
-            Controls how the AI writes responses. Leave blank to use the built-in default. Click a
-            variable to insert it — it&apos;s auto-filled with the mention&apos;s live data at generation time.
-          </p>
-
-          {/* Variable chips */}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {TEMPLATE_VARS.map(v => (
-              <button
-                key={v}
-                onClick={() => insertVar(v)}
-                className="mono"
-                style={{ fontSize: 11, padding: '3px 8px', borderRadius: 100, border: '1px solid var(--line-2)', background: 'var(--bg-sunk)', color: 'var(--ink-2)', cursor: 'pointer' }}
-              >
-                {`{{${v}}}`}
-              </button>
-            ))}
-          </div>
-
-          <textarea
-            ref={taRef}
-            value={prompt}
-            onChange={e => { setPrompt(e.target.value); setSaved(false); }}
-            placeholder={DEFAULT_SYSTEM_PROMPT}
-            rows={10}
-            style={{ width: '100%', padding: '10px 12px', borderRadius: 'var(--r-sm)', border: '1px solid var(--line-2)', background: 'var(--bg)', color: 'var(--ink)', fontSize: 13, lineHeight: 1.5, resize: 'vertical', fontFamily: 'inherit' }}
-          />
-
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn sm" onClick={() => { setPrompt(DEFAULT_SYSTEM_PROMPT); setSaved(false); }} disabled={busy}>
-                Load default template
-              </button>
-              {isCustom && (
-                <button className="btn sm" onClick={() => { setPrompt(''); setSaved(false); }} disabled={busy}>
-                  Clear
-                </button>
-              )}
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              {saved && <span className="mono" style={{ fontSize: 11, color: 'oklch(0.55 0.13 145)' }}>Saved ✓</span>}
-              <button className="btn primary sm" onClick={save} disabled={busy}>
-                {busy ? 'Saving…' : 'Save prompt'}
-              </button>
-            </div>
-          </div>
+    <div className="stack">
+      <p className="set-hint">
+        How the AI writes replies. Leave blank for the default. Variables fill in from the mention.
+      </p>
+      <div className="row shield-vars">
+        {TEMPLATE_VARS.map(v => (
+          <button key={v} type="button" className="badge mono" onClick={() => insertVar(v)}>
+            {`{{${v}}}`}
+          </button>
+        ))}
+      </div>
+      <textarea
+        ref={taRef}
+        className="input"
+        value={prompt}
+        onChange={e => { setPrompt(e.target.value); setSaved(false); }}
+        placeholder={DEFAULT_SYSTEM_PROMPT}
+        rows={8}
+        aria-label="Custom AI prompt"
+      />
+      <div className="set-actions">
+        <button className="btn sm primary" onClick={save} disabled={busy}>
+          {busy ? 'Saving…' : 'Save prompt'}
+        </button>
+        <button className="btn sm ghost" onClick={() => { setPrompt(DEFAULT_SYSTEM_PROMPT); setSaved(false); }} disabled={busy}>
+          Load default
+        </button>
+        {isCustom && (
+          <button className="btn sm ghost" onClick={() => { setPrompt(''); setSaved(false); }} disabled={busy}>
+            Clear
+          </button>
+        )}
+        {saved && <span className="set-ok" role="status">Saved</span>}
+      </div>
     </div>
   );
 };

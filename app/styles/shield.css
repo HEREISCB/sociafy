@@ -1,0 +1,61 @@
+/* Settings › Brand monitoring. */
+.shield { display: flex; flex-direction: column; gap: var(--s-6); }
+.shield > .set-error, .shield > .set-hint { margin: calc(var(--s-4) * -1) 0 0; }
+.shield-form { padding: var(--s-4); display: flex; flex-direction: column; gap: var(--s-4); }
+
+.shield-tabs { display: inline-flex; gap: 2px; }
+.shield-tabs button {
+  padding: 4px 10px;
+  border-radius: var(--r-sm);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  cursor: pointer;
+}
+.shield-tabs button.on { background: var(--subtle); color: var(--text); font-weight: 500; }
+.shield-tabs .mono { color: var(--text-3); margin-left: 2px; }
+
+.shield-list { display: flex; flex-direction: column; }
+.mention { padding: var(--s-4); border-bottom: 1px solid var(--line); }
+.mention:last-child { border-bottom: none; }
+.mention.crisis { box-shadow: inset 2px 0 0 var(--err); }
+.mention.done {
+  display: flex; align-items: center; gap: var(--s-2);
+  padding: var(--s-3) var(--s-4);
+  font-size: var(--fs-sm); color: var(--text-3);
+}
+.mention.done.ok { color: var(--ok-ink); }
+.mention.done a { margin-left: auto; color: inherit; }
+.mention-head { display: flex; gap: var(--s-4); align-items: flex-start; }
+.mention-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.mention-tags { flex-wrap: wrap; }
+.mention-title {
+  font-size: var(--fs-md); font-weight: 600; line-height: 1.35;
+  color: var(--text); text-decoration: none;
+}
+@media (hover: hover) and (pointer: fine) { .mention-title:hover { text-decoration: underline; } }
+.mention-body { margin: 0; font-size: var(--fs-sm); color: var(--text-2); line-height: 1.5; }
+.mention-reply { margin-top: var(--s-4); display: flex; flex-direction: column; gap: var(--s-2); }
+.mention-spacer { flex: 1; }
+.mention-actions { flex-wrap: wrap; }
+.mention-actions .input { width: auto; }
+
+.shield-advanced > summary {
+  padding: 14px var(--s-4);
+  font-size: var(--fs-sm); font-weight: 600;
+  cursor: pointer;
+}
+.shield-advanced-body { border-top: 1px solid var(--line); }
+.shield-advanced-body > section { padding: var(--s-4); border-bottom: 1px solid var(--line); }
+.shield-advanced-body > section:last-child { border-bottom: none; }
+.shield-advanced-body h4 { margin: 0 0 var(--s-3); font-size: var(--fs-sm); font-weight: 600; }
+.shield-vars { flex-wrap: wrap; }
+.shield-vars .badge { cursor: pointer; border: 0; }
+.shield-docs { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--r-sm); }
+.shield-doc { display: flex; align-items: center; gap: var(--s-2); padding: var(--s-2) var(--s-3); border-bottom: 1px solid var(--line); }
+.shield-doc:last-child { border-bottom: none; }
+.shield-doc.editing { flex-direction: column; align-items: stretch; }
+.shield-doc-main { flex: 1; min-width: 0; }
+
+@media (max-width: 600px) {
+  .mention-head { flex-direction: column; }
+}

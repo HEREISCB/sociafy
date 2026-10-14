@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
     return jsonError('try_limit', 429, {
       hint: user
         ? 'You have used today’s free tries. Your account credits keep going in the Studio.'
-        : 'You have used today’s free tries. Create a free Sociafy account to keep generating.',
+        : 'You have used today’s free tries. Get a Sociafy plan to keep generating.',
     });
   }
   if ('error' in r) return jsonError('try_busy', 429, { hint: 'Free tries are full for today. Come back tomorrow, or sign up to generate now.' });

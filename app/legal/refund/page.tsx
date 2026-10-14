@@ -1,7 +1,7 @@
 // Refund & Cancellation Policy — required by Razorpay for verification.
 // Reflects the cancel/refund behavior implemented in the billing flow.
 
-import Link from 'next/link';
+import { SiteShell } from '../../../components/site-chrome';
 
 export const metadata = {
   title: 'Refund & Cancellation Policy · Sociafy',
@@ -13,16 +13,13 @@ const LAST_UPDATED = '2026-05-23';
 
 export default function RefundPolicyPage() {
   return (
-    <main style={{ maxWidth: 820, margin: '0 auto', padding: '48px 24px', fontFamily: 'var(--font-geist-sans)', lineHeight: 1.6 }}>
-      <p style={{ marginBottom: 24 }}>
-        <Link href="/" style={{ color: 'var(--ink-3)', fontSize: 13, textDecoration: 'none' }}>&larr; Back to site</Link>
-      </p>
-      <header style={{ marginBottom: 32, borderBottom: '1px solid var(--line)', paddingBottom: 16 }}>
-        <h1 style={{ marginBottom: 8 }}>Refund &amp; Cancellation Policy</h1>
-        <p style={{ color: 'var(--ink-3)', fontSize: 14, margin: 0 }}>
+    <SiteShell className="lp legal">
+      <header>
+        <h1>Refund &amp; Cancellation Policy</h1>
+        <p>
           Applies to Sociafy subscriptions and credit top-ups sold by {COMPANY}.
         </p>
-        <p style={{ color: 'var(--ink-3)', fontSize: 13, marginTop: 8 }}>Last updated: {LAST_UPDATED}</p>
+        <p className="legal-date">Last updated: {LAST_UPDATED}</p>
       </header>
 
       <h2>1. Cancelling your subscription</h2>
@@ -61,6 +58,6 @@ export default function RefundPolicyPage() {
         <strong>{COMPANY}</strong><br />
         Email: <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>
       </p>
-    </main>
+    </SiteShell>
   );
 }

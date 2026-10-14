@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { TryView } from '../lib/try';
+import { PostedForYou } from './text-tool';
 import { Turnstile, turnstileRequired } from './turnstile';
 
 type Kind = 'image' | 'video';
@@ -111,92 +112,80 @@ export function TryTool({ kind, path: pagePath, aspect, examples }: Props) {
   const media = (src: string) =>
     kind === 'image'
       // eslint-disable-next-line @next/next/no-img-element
-      ? <img src={src} alt={gen?.prompt ?? ''} style={{ width: '100%', display: 'block', borderRadius: 12 }} />
-      : <video src={src} autoPlay loop muted playsInline controls style={{ width: '100%', maxHeight: 560, display: 'block', borderRadius: 12, background: '#000' }} />;
+      ? <img src={src} alt={gen?.prompt ?? ''} className="tool-media" />
+      : <video src={src} autoPlay loop muted playsInline controls className="tool-media" />;
 
   return (
-    <div className="card" style={{ padding: 20, maxWidth: 720, margin: '0 auto', textAlign: 'left' }}>
+    <div className="card tool-card">
       <form onSubmit={submit}>
-        <label htmlFor="try-prompt" style={{ fontSize: 13, fontWeight: 550, display: 'block', marginBottom: 8 }}>
-          Describe the {kind} you want
-        </label>
+        <label htmlFor="try-prompt" className="tool-label">Describe the {kind} you want</label>
         <textarea
           id="try-prompt"
+          className="input"
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           maxLength={600}
           rows={3}
           placeholder={ideas[0]}
-          style={{ width: '100%', padding: 12, borderRadius: 10, border: '1px solid var(--line-2)', background: 'var(--bg)', color: 'var(--ink)', font: 'inherit', fontSize: 15, resize: 'vertical' }}
         />
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '10px 0 14px' }}>
+        <div className="tool-chips">
           {ideas.map((ex) => (
             <button type="button" key={ex} className="prompt-chip" onClick={() => setPrompt(ex)}>{ex}</button>
           ))}
         </div>
-        <button className="btn btn-lg primary" type="submit" disabled={busy || gen?.status === 'pending' || prompt.trim().length < 3 || (turnstileRequired && !token)}>
-          {busy ? 'Starting…' : `Generate ${kind} free`}
-        </button>
-        <span style={{ marginLeft: 12, fontSize: 12.5, color: 'var(--ink-3)' }}>No card. No account needed to try.</span>
+        <div className="tool-submit">
+          <button className="btn btn-lg primary" type="submit" disabled={busy || gen?.status === 'pending' || prompt.trim().length < 3 || (turnstileRequired && !token)}>
+            {busy ? 'Starting…' : `Generate ${kind}`}
+          </button>
+          <span className="tool-hint">Free to try. No account needed.</span>
+        </div>
         <Turnstile onToken={setToken} resetKey={attempt} />
       </form>
 
-      {error && <p role="alert" style={{ marginTop: 14, color: 'var(--bad, #c0392b)', fontSize: 13.5 }}>{error} {error.includes('account') && <Link href="/sign-up" style={{ textDecoration: 'underline' }}>Sign up free</Link>}</p>}
+      {error && <p role="alert" className="tool-error">{error} {error.includes('account') && <Link href="/sign-up">Sign up</Link>}</p>}
 
       {gen && (
-        <div style={{ marginTop: 20 }} aria-live="polite">
+        <div className="tool-output" aria-live="polite">
           {gen.status === 'pending' && (
-            <div style={{ padding: 24, textAlign: 'center', background: 'var(--bg-sunk)', borderRadius: 12, fontSize: 14 }}>
-              <div>Generating your {kind}, {WAIT[kind]}{elapsed > 0 ? ` · ${elapsed}s` : ''}…</div>
-              <div style={{ fontSize: 12.5, color: 'var(--ink-3)', margin: '8px 0 14px' }}>
+            <div className="tool-wait">
+              <p>Generating your {kind}, {WAIT[kind]}{elapsed > 0 ? ` · ${elapsed}s` : ''}…</p>
+              <p className="tool-hint">
                 You can leave this page. Your {kind} keeps rendering and waits at this link.{' '}
                 <button type="button" className="prompt-chip" onClick={() => { void navigator.clipboard?.writeText(window.location.href); setCopied(true); }}>
                   {copied ? 'Link copied' : 'Copy link'}
                 </button>
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 6 }}>Made with this tool:</div>
+              </p>
+              <p className="tool-hint">Made with this tool:</p>
               {kind === 'image'
                 // eslint-disable-next-line @next/next/no-img-element
-                ? <img src={SAMPLES.image} alt="Example AI image made with Sociafy" loading="lazy" style={{ width: 220, borderRadius: 10 }} />
-                : <video src={SAMPLES.video} autoPlay loop muted playsInline preload="metadata" style={{ width: 160, borderRadius: 10 }} />}
+                ? <img src={SAMPLES.image} alt="Example AI image made with Sociafy" loading="lazy" className="tool-sample" />
+                : <video src={SAMPLES.video} autoPlay loop muted playsInline preload="metadata" className="tool-sample" />}
             </div>
           )}
           {gen.status === 'failed' && (
-            <div style={{ padding: 20, background: 'var(--bg-sunk)', borderRadius: 12, fontSize: 14 }}>
-              {gen.error ?? 'That one didn’t work.'} Try another prompt, this did not use up your free try.
-            </div>
+            <p className="tool-wait">{gen.error ?? 'That one didn’t work.'} Try another prompt, this did not use up your free try.</p>
           )}
           {gen.status === 'ready' && gen.unlocked && gen.url && (
-            <div>
+            <>
               {media(gen.url)}
-              <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+              <div className="tool-submit">
                 <a className="btn btn-lg primary" href={`/api/try/${gen.id}/download`}>Download HD</a>
-                <a className="btn btn-lg" href="/compose">Post it with Sociafy</a>
+                <span className="tool-hint">Saved to your media library.</span>
               </div>
-              <p style={{ fontSize: 12.5, color: 'var(--ink-3)', marginTop: 8 }}>Saved to your media library.</p>
-              <div className="card" style={{ marginTop: 14, padding: 16, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-                <div style={{ flex: 1, minWidth: 220 }}>
-                  <div style={{ fontWeight: 600, fontSize: 14.5 }}>Next: let Sociafy post for you</div>
-                  <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>Two minutes of setup. Pick your niches and platforms, and autopilot drafts posts like this every week.</div>
-                </div>
-                <Link className="btn btn-lg primary" href="/onboarding">Set up your autopilot</Link>
-              </div>
-            </div>
+              <PostedForYou />
+            </>
           )}
           {gen.status === 'ready' && !gen.unlocked && (
-            <div>
-              {gen.previewUrl
-                ? media(gen.previewUrl)
-                : <div style={{ padding: 32, textAlign: 'center', background: 'var(--bg-sunk)', borderRadius: 12, fontSize: 14 }}>Your {kind} is ready.</div>}
-              <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            <>
+              {gen.previewUrl ? media(gen.previewUrl) : <p className="tool-wait">Your {kind} is ready.</p>}
+              <div className="tool-submit">
                 <a className="btn btn-lg primary" href={unlockHref}>Download HD, no watermark</a>
-                <a className="btn btn-lg" href={unlockHref}>Remove watermark</a>
+                <span className="tool-hint">
+                  Sign up and the clean {kind} downloads straight away. Have an account?{' '}
+                  <a href={`/sign-in?redirect_url=${back}`}>Log in</a>
+                </span>
               </div>
-              <p style={{ fontSize: 12.5, color: 'var(--ink-3)', marginTop: 8 }}>
-                Create a free Sociafy account and the clean {kind} downloads straight away. Already have one?{' '}
-                <a href={`/sign-in?redirect_url=${back}`} style={{ textDecoration: 'underline' }}>Log in</a>
-              </p>
-            </div>
+            </>
           )}
         </div>
       )}

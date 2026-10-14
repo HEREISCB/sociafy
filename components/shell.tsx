@@ -7,49 +7,32 @@ import { UserButton, useUser } from '@clerk/nextjs';
 import { Icon } from './icons';
 import { useApi } from '../lib/ui/fetcher';
 import { CreditMeter } from './credits';
+import type { AgentStatus } from '../lib/agent/status';
 import { createSpring, project, rubberband, type Spring } from '../lib/ui/spring';
 
 
 /**
- * AutopilotStatusPill — persistent at-a-glance state indicator for the
- * autopilot. Replaces the old "Co-pilot ↔ Agent" mode toggle which created
- * three names for two concepts (Compose vs Auto-pilot in the sidebar
- * already distinguishes "you driving" from "AI driving"). Clicking the pill
- * jumps to /autopilot.
- *
- * Polls /api/agent/settings every 60s. Loading state is the same as paused
- * — a slow nav shouldn't flash misleading "ON" then "off."
+ * AutopilotStatusPill — at-a-glance autopilot state; click jumps to /autopilot.
+ * Loading reads as paused so a slow nav never flashes "on" then "paused".
  */
 interface AutopilotStatusPillProps {
   onClick?: () => void;
 }
 
 export const AutopilotStatusPill: React.FC<AutopilotStatusPillProps> = ({ onClick }) => {
-  const { data } = useApi<{ enabled?: boolean; autoPublishThreshold?: number }>('/api/agent/settings', {
+  const { data } = useApi<Pick<AgentStatus, 'enabled' | 'blocked' | 'pendingReview'>>('/api/agent/status', {
     refreshInterval: 60_000,
   });
-  const enabled = !!data?.enabled;
-  // Threshold 101 (or absent) means drafts-only; anything ≤ 100 means it
-  // auto-publishes high-scorers.
-  const draftsOnly = !data?.autoPublishThreshold || data.autoPublishThreshold > 100;
+  const state = !data?.enabled ? 'off' : data.blocked ? 'blocked' : 'on';
+  const toReview = data?.pendingReview?.length ?? 0;
   return (
-    <button
-      type="button"
-      className={`autopilot-pill ${enabled ? 'on' : 'off'}`}
-      onClick={onClick}
-      title={
-        enabled
-          ? draftsOnly
-            ? 'Autopilot is on · drafts only (you review)'
-            : `Autopilot is on · auto-publishes ≥ ${data?.autoPublishThreshold}`
-          : 'Autopilot is paused'
-      }
-    >
-      <span className={`status-dot ${enabled ? 'live' : 'idle'}`} />
-      <span className="autopilot-pill-label">
-        <span className="mono kicker">Autopilot</span>
-        <span className="state">{enabled ? (draftsOnly ? 'drafts only' : 'auto-publish') : 'paused'}</span>
-      </span>
+    <button type="button" className={`shell-pill ${state}`} onClick={onClick}>
+      <span className="dot" aria-hidden />
+      {state === 'off' && <span>Autopilot paused</span>}
+      {state === 'blocked' && <span>Autopilot needs you</span>}
+      {state === 'on' && (
+        <span>Autopilot on{toReview > 0 && <span className="detail"> · {toReview} to review</span>}</span>
+      )}
     </button>
   );
 };
@@ -284,7 +267,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onMobileCl
       href={href}
       className={`nav-item ${isActive(href) ? 'active' : ''}`}
       aria-current={isActive(href) ? 'page' : undefined}
-      style={{ textDecoration: 'none' }}
       onClick={close}
     >
       <Icon name={icon} className="ic" />
@@ -299,7 +281,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onMobileCl
           and click-through until the drawer actually moves. */}
       <div ref={scrimRef} className="sidebar-scrim" onClick={close} aria-hidden="true" />
       <aside ref={asideRef} {...handlers} className={`sidebar${open ? ' mobile-open' : ''}`}>
-        <Link href="/" className="brand" style={{ textDecoration: 'none', color: 'inherit' }} onClick={close}>
+        <Link href="/" className="brand" onClick={close}>
           <div className="brand-mark">S</div>
           <span className="brand-name">sociafy<span className="dot">.</span></span>
         </Link>
@@ -353,11 +335,10 @@ const UserCard: React.FC = () => {
   }
   if (!isSignedIn) {
     return (
-      <Link href="/sign-in" className="user-card" style={{ textDecoration: 'none' }}>
+      <Link href="/sign-in" className="user-card">
         <div className="user-avatar">?</div>
         <div className="user-meta">
           <span className="user-name">Sign in</span>
-          <span className="user-plan">to wire up your workspace</span>
         </div>
       </Link>
     );
@@ -373,17 +354,16 @@ const UserCard: React.FC = () => {
       tabIndex={0}
       onClick={openMenu}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openMenu(e); } }}
-      style={{ cursor: 'pointer' }}
       aria-label="Open account menu"
     >
       <UserButton
-        appearance={{ elements: { userButtonAvatarBox: { width: 32, height: 32 } } }}
+        appearance={{ elements: { userButtonAvatarBox: { width: 28, height: 28 } } }}
       >
         <UserButton.MenuItems>
           <UserButton.Link label="Settings" labelIcon={<Icon name="settings" size={14} />} href="/settings" />
         </UserButton.MenuItems>
       </UserButton>
-      <div className="user-meta" style={{ marginLeft: 4 }}>
+      <div className="user-meta">
         <span className="user-name">{name}</span>
       </div>
     </div>
@@ -419,8 +399,8 @@ export const Topbar: React.FC<TopbarProps> = ({ onMenuClick }) => {
         <AutopilotStatusPill onClick={() => router.push('/autopilot')} />
         <CreditMeter />
         <NotificationsBell />
-        <Link href="/compose" className="btn primary" style={{ textDecoration: 'none' }}>
-          <Icon name="plus" size={13} /> New post
+        <Link href="/compose" className="btn accent shell-new" aria-label="New post">
+          <Icon name="plus" size={14} /> <span className="shell-new-label">New post</span>
         </Link>
       </div>
     </div>
@@ -463,55 +443,30 @@ const NotificationsBell: React.FC = () => {
   };
 
   return (
-    <div ref={rootRef} style={{ position: 'relative' }}>
+    <div ref={rootRef} className="shell-pop-anchor">
       <button
-        className="btn ghost"
-        title="Notifications"
+        type="button"
+        className="btn ghost shell-bell"
+        aria-label={unread > 0 ? `Notifications, ${unread} new` : 'Notifications'}
+        aria-expanded={open}
         onClick={() => { setOpen((o) => !o); if (!open) markRead(); }}
-        style={{ position: 'relative' }}
       >
         <Icon name="bell" size={14} />
-        {unread > 0 && (
-          <span style={{
-            position: 'absolute', top: 2, right: 2,
-            minWidth: 14, height: 14, padding: '0 4px',
-            background: 'var(--accent)', color: 'white',
-            borderRadius: 999, fontSize: 9.5, fontWeight: 600,
-            display: 'grid', placeItems: 'center', lineHeight: 1,
-            fontFamily: 'var(--mono)',
-          }}>{unread > 9 ? '9+' : unread}</span>
-        )}
+        {unread > 0 && <span className="unread" aria-hidden />}
       </button>
       {open && (
-        <div style={{
-          position: 'absolute', top: 'calc(100% + 8px)', right: 0,
-          width: 'min(360px, calc(100vw - 24px))', maxHeight: 480, overflow: 'auto',
-          background: 'var(--bg-elev)',
-          border: '1px solid var(--line)',
-          borderRadius: 12,
-          boxShadow: '0 20px 50px -20px rgba(0,0,0,0.25)',
-          zIndex: 60,
-        }}>
-          <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <strong style={{ fontSize: 13, letterSpacing: '-0.01em' }}>Activity</strong>
-            <span className="chip ghost mono" style={{ fontSize: 10 }}>{items.length}</span>
-          </div>
+        <div className="shell-pop">
+          <div className="shell-pop-head">Activity</div>
           {items.length === 0 ? (
-            <div style={{ padding: 18, fontSize: 13, color: 'var(--ink-3)' }}>
-              Nothing yet. Activity from your agent + publishing will land here.
-            </div>
+            <div className="shell-pop-empty">Nothing yet.</div>
           ) : (
-            <div>
-              {items.map((a) => (
-                <div key={a.id} style={{ padding: '10px 14px', borderBottom: '1px solid var(--line)' }}>
-                  <div style={{ fontSize: 12.5, fontWeight: 500, lineHeight: 1.4 }}>{a.title}</div>
-                  {a.body && (
-                    <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginTop: 3, lineHeight: 1.4, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{a.body}</div>
-                  )}
-                  <div className="mono" style={{ fontSize: 10, color: 'var(--ink-4)', marginTop: 4 }}>{relTime(a.createdAt)}</div>
-                </div>
-              ))}
-            </div>
+            items.map((a) => (
+              <div key={a.id} className="shell-pop-item">
+                <div className="shell-pop-title">{a.title}</div>
+                {a.body && <div className="shell-pop-body">{a.body}</div>}
+                <div className="shell-pop-time">{relTime(a.createdAt)}</div>
+              </div>
+            ))
           )}
         </div>
       )}

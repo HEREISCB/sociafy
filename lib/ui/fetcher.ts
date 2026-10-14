@@ -61,7 +61,17 @@ export async function apiPost<T = unknown>(
   }
 }
 
-/** apiPost/apiPatch throw `Error("<status>: <json-body>")`. Pull out the
+/** Copy for the machine error codes routes return as `{ error }`. */
+const ERROR_COPY: Record<string, string> = {
+  account_disconnected: 'The account for this post is disconnected. Reconnect it, then try again.',
+  not_cancelable: 'This post is already publishing or live, so it can\u2019t be canceled.',
+  already_published: 'This post is already publishing or live, so it can\u2019t be moved.',
+  scheduledAt_in_past: 'That time has passed. Pick a later time.',
+  conflict: 'This post changed while you were looking at it. Refresh and try again.',
+  not_found: 'This post no longer exists.',
+};
+
+/** apiPost/apiPatch/apiDelete throw `Error("<status>: <json-body>")`. Pull out the
  *  structured hint when there is one so the UI shows actionable copy ("top up
  *  your credits", "X is not connected") instead of a raw status dump. */
 export function friendlyApiError(e: unknown): string {
@@ -75,6 +85,7 @@ export function friendlyApiError(e: unknown): string {
       return `You need ${body.needed ?? 'more'} credits but have ${body.balance ?? 0}. Top up on the Billing page, then try again.`;
     }
     if (body.hint) return body.hint;
+    if (body.error && ERROR_COPY[body.error]) return ERROR_COPY[body.error];
     if (status === 401) return 'Your session expired — sign in again.';
     if (status === 429) return 'Too many requests — wait a minute and try again.';
     if (status >= 500) return 'Something went wrong on the server. Try again shortly.';
@@ -99,6 +110,9 @@ export async function apiPatch<T = unknown>(url: string, body: unknown): Promise
 
 export async function apiDelete<T = unknown>(url: string): Promise<T> {
   const r = await fetch(url, { method: 'DELETE', credentials: 'include' });
-  if (!r.ok) throw new Error(`${r.status}`);
+  if (!r.ok) {
+    const detail = await r.text().catch(() => '');
+    throw new Error(`${r.status}: ${detail}`);
+  }
   return r.json();
 }

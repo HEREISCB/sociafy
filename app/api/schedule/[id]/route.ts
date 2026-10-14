@@ -71,10 +71,12 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   }, req);
 }
 
-// What the calendar's "cancel" (DELETE) and status:'canceled' may touch. A
-// 'publishing' row is in flight and a 'published' one is history.
+// What cancel (DELETE, or PATCH status:'canceled') may touch. A 'publishing'
+// row is in flight and a 'published' one is history.
 const CANCELABLE: ScheduledStatus[] = ['pending', 'failed'];
 
+// Soft cancel: the row stays as 'canceled' so the calendar can Restore it
+// (a PATCH with a new scheduledAt requeues it as 'pending').
 export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
   return withUser(async (user) => {
@@ -84,15 +86,19 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: stri
       .where(and(eq(scheduledPosts.id, id), eq(scheduledPosts.userId, user.id)))
       .limit(1);
     if (!existing) return jsonError('not_found', 404);
+    if (!CANCELABLE.includes(existing.status)) return jsonError('not_cancelable', 409);
+    // Conditional on a cancelable status: the cron may claim the row between
+    // the read and this write.
     const [row] = await db()
-      .delete(scheduledPosts)
+      .update(scheduledPosts)
+      .set({ status: 'canceled', updatedAt: new Date() })
       .where(and(
         eq(scheduledPosts.id, id),
         eq(scheduledPosts.userId, user.id),
-        inArray(scheduledPosts.status, [...CANCELABLE, 'canceled']),
+        inArray(scheduledPosts.status, CANCELABLE),
       ))
       .returning();
     if (!row) return jsonError('not_cancelable', 409);
-    return { ok: true };
+    return row;
   }, req);
 }

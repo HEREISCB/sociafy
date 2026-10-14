@@ -1,0 +1,156 @@
+/* Settings: layout + sub-nav, shared form bits, voice, API keys. */
+.settings-layout {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: var(--s-8);
+  align-items: start;
+}
+.settings-nav {
+  display: flex; flex-direction: column; gap: 2px;
+  position: sticky; top: 0;
+}
+.settings-nav a {
+  padding: 7px 10px;
+  border-radius: var(--r-sm);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  text-decoration: none;
+  white-space: nowrap;
+}
+@media (hover: hover) and (pointer: fine) { .settings-nav a:hover { background: var(--subtle); color: var(--text); } }
+.settings-nav a.active { background: var(--subtle); color: var(--text); font-weight: 500; }
+.settings-body { min-width: 0; max-width: 760px; }
+.settings-intro { margin: 0 0 var(--s-6); font-size: var(--fs-sm); color: var(--text-2); max-width: 60ch; }
+.settings-intro a { color: var(--text); }
+
+@media (max-width: 900px) {
+  .settings-layout { grid-template-columns: 1fr; gap: var(--s-4); }
+  .settings-nav {
+    position: static;
+    flex-direction: row;
+    gap: var(--s-4);
+    overflow-x: auto;
+    scrollbar-width: none;
+    border-bottom: 1px solid var(--line);
+  }
+  .settings-nav::-webkit-scrollbar { display: none; }
+  .settings-nav a {
+    padding: 10px 0;
+    border-radius: 0;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+  }
+  .settings-nav a.active { background: none; border-bottom-color: var(--accent); }
+}
+
+/* ---------- Shared form bits ---------- */
+.set-field { display: flex; flex-direction: column; gap: 6px; }
+.set-label { font-size: var(--fs-sm); font-weight: 500; color: var(--text); }
+.set-label .opt { font-weight: 400; color: var(--text-3); }
+.set-hint { margin: 0; font-size: var(--fs-xs); color: var(--text-2); }
+.set-hint.err, .set-error { color: var(--err-ink); }
+.set-error { font-size: var(--fs-sm); margin: 0; }
+.set-ok { font-size: var(--fs-xs); color: var(--ok-ink); }
+.set-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-3); }
+.input.mono { font-family: var(--mono); }
+.input[aria-invalid="true"] { border-color: var(--err); }
+.set-check { display: flex; align-items: flex-start; gap: var(--s-2); font-size: var(--fs-sm); cursor: pointer; }
+.set-check input { margin-top: 3px; accent-color: var(--text); }
+.set-actions { display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap; }
+.set-notice {
+  padding: 10px var(--s-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  font-size: var(--fs-sm);
+}
+/* Text-weight button for quiet actions (cancel subscription, show all). */
+.set-link {
+  padding: 0;
+  background: none;
+  border: 0;
+  font: inherit;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+@media (hover: hover) and (pointer: fine) { .set-link:hover { color: var(--text); } }
+
+@media (max-width: 600px) {
+  .set-grid-2 { grid-template-columns: 1fr; }
+}
+
+/* ---------- Voice ---------- */
+.voice-list { display: flex; flex-direction: column; }
+.voice-row { padding: var(--s-3) var(--s-4); border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: var(--s-2); }
+.voice-row:last-child { border-bottom: none; }
+.voice-row-top { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); }
+.voice-row-name { display: flex; align-items: center; gap: var(--s-2); font-size: var(--fs-sm); font-weight: 500; min-width: 0; }
+.voice-row audio, .voice-drawer audio { width: 100%; height: 32px; }
+.voice-preview { display: flex; flex-direction: column; gap: var(--s-2); }
+
+.voice-drawer-scrim {
+  position: fixed; inset: 0; z-index: 200;
+  display: flex; justify-content: flex-end;
+  background: rgba(10, 10, 10, 0.32);
+}
+.voice-drawer {
+  width: min(440px, 100%); height: 100%;
+  background: var(--surface);
+  border-left: 1px solid var(--line);
+  padding: var(--s-6);
+  overflow-y: auto;
+  display: flex; flex-direction: column; gap: var(--s-4);
+}
+.voice-drawer-head { display: flex; align-items: center; justify-content: space-between; }
+.voice-drawer-head h2 { margin: 0; font-size: var(--fs-md); font-weight: 600; }
+.voice-steps { display: flex; gap: var(--s-2); font-size: var(--fs-xs); color: var(--text-3); }
+.voice-steps .on { color: var(--text); font-weight: 600; }
+.voice-clip {
+  display: flex; align-items: center; gap: var(--s-2);
+  padding: var(--s-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+.voice-consent {
+  white-space: pre-wrap;
+  font-size: var(--fs-xs); line-height: 1.6; color: var(--text-2);
+  padding: var(--s-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  max-height: 280px; overflow-y: auto;
+}
+.voice-drawer .push { margin-top: auto; }
+.voice-picker { display: flex; gap: var(--s-2); align-items: center; flex-wrap: wrap; }
+.voice-picker .input { width: auto; }
+
+/* ---------- API keys ---------- */
+.api-create { display: flex; gap: var(--s-2); padding: var(--s-4); border-bottom: 1px solid var(--line); }
+.api-create .input:first-child { flex: 1; min-width: 0; }
+.api-create .cap { width: 120px; }
+.api-fresh {
+  margin: var(--s-4);
+  padding: var(--s-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--subtle);
+  display: flex; flex-direction: column; gap: var(--s-2);
+}
+.api-fresh-key { font-family: var(--mono); font-size: var(--fs-xs); word-break: break-all; }
+.api-row { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-3) var(--s-4); border-bottom: 1px solid var(--line); }
+.api-row:last-child { border-bottom: none; }
+.api-row-main { flex: 1; min-width: 0; }
+.api-row-name { font-size: var(--fs-sm); font-weight: 500; }
+.api-row-meta {
+  display: flex; align-items: center; gap: var(--s-1); flex-wrap: wrap;
+  font-size: var(--fs-xs); color: var(--text-2);
+}
+.api-row-meta .input { width: 76px; padding: 2px 6px; font-size: var(--fs-xs); font-family: var(--mono); }
+
+@media (max-width: 600px) {
+  .api-create { flex-wrap: wrap; }
+  .api-create .input:first-child { flex-basis: 100%; }
+  .api-create .cap { flex: 1; }
+}

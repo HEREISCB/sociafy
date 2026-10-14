@@ -15,6 +15,10 @@ const state = vi.hoisted(() => ({
   /** What each submitVideo call does: 'ok' | 'full' | 'boom'. */
   outcomes: [] as string[],
   submits: [] as Row[],
+  /** attachFinishedVideos' join result. */
+  joined: [] as { draft: Row; job: Row }[],
+  assets: [] as Row[],
+  settings: [] as Row[],
 }));
 
 vi.mock('drizzle-orm', () => ({
@@ -27,14 +31,15 @@ const col = vi.hoisted(() => (t: string, ...cs: string[]) => Object.fromEntries(
 vi.mock('../db/schema', () => ({
   videoJobs: col('videos', 'id', 'status', 'createdAt'),
   drafts: col('drafts', 'id', 'status', 'videoJobId'),
-  agentSettings: col('settings'), genJobs: col('gen'), mediaAssets: col('assets'), activityLog: col('log'),
+  agentSettings: col('settings', 'userId'), genJobs: col('gen'), mediaAssets: col('assets', 'id'), activityLog: col('log'),
 }));
 vi.mock('../db', () => {
-  const table = (t: { __t: 'videos' | 'drafts' }) => state[t.__t];
+  const table = (t: { __t: 'videos' | 'drafts' | 'assets' | 'settings' }) => state[t.__t];
   return {
     db: () => ({
       select: () => ({
-        from: (t: { __t: 'videos' | 'drafts' }) => ({
+        from: (t: { __t: 'videos' | 'drafts' | 'assets' | 'settings' }) => ({
+          innerJoin: () => ({ where: () => ({ limit: () => Promise.resolve(state.joined) }) }),
           where: (p: Pred) => {
             const rows = () => table(t).filter(p);
             return { limit: (n: number) => Promise.resolve(rows().slice(0, n)), orderBy: () => ({ limit: (n: number) => Promise.resolve(rows().slice(0, n)) }) };
@@ -91,14 +96,22 @@ vi.mock('../ai/prompt-rewriter', async (orig) => ({
   rewritePromptForMedia: () => Promise.resolve({ prompt: 'A cup on a counter.', enhanced: true }),
 }));
 vi.mock('./publish', () => ({ publishOrHold: vi.fn() }));
+vi.mock('./plan', async () => ({
+  isApproved: (await vi.importActual<typeof import('./plan')>('./plan')).isApproved,
+  queueApprovedRender: vi.fn(),
+}));
 vi.mock('../credits/ledger', () => ({ charge: vi.fn() }));
 
-import { submitAgentVideo, submitQueuedVideos, VIDEO_QUEUED } from './media';
+import { submitAgentVideo, submitQueuedVideos, attachFinishedVideos, VIDEO_QUEUED } from './media';
+import { publishOrHold } from './publish';
+import { queueApprovedRender } from './plan';
 
 const post = { userId: 'u1', title: 't', body: 'b', brandBlock: '' };
 
 beforeEach(() => {
   state.videos = []; state.drafts = []; state.outcomes = []; state.submits = [];
+  state.joined = []; state.assets = []; state.settings = [];
+  vi.mocked(publishOrHold).mockClear(); vi.mocked(queueApprovedRender).mockClear();
 });
 
 describe('submitAgentVideo', () => {
@@ -157,5 +170,29 @@ describe('submitQueuedVideos', () => {
     await submitQueuedVideos();
     expect(state.submits).toHaveLength(0);
     expect(state.videos[0]).toMatchObject({ status: 'failed', error: 'queue_timeout' });
+  });
+});
+
+describe('attachFinishedVideos', () => {
+  const land = (variants: Row[]) => {
+    const draft = { id: 'd1', userId: 'u1', status: 'draft', videoJobId: 'j1', media: [], variants };
+    state.drafts = [draft];
+    state.assets = [{ id: 'a1', publicUrl: 'https://x/v.mp4', mimeType: 'video/mp4' }];
+    state.settings = [{ userId: 'u1', quietHours: null }];
+    state.joined = [{ draft: { ...draft }, job: { id: 'j1', status: 'completed', mediaAssetId: 'a1' } }];
+  };
+
+  it('schedules a render the user approved mid-render instead of re-reviewing it', async () => {
+    land([{ label: 'A', text: 'b', score: 50, approved: true }]);
+    await attachFinishedVideos();
+    expect(queueApprovedRender).toHaveBeenCalledTimes(1);
+    expect(publishOrHold).not.toHaveBeenCalled();
+  });
+
+  it('leaves an unapproved render to the autopilot decision', async () => {
+    land([{ label: 'A', text: 'b', score: 50 }]);
+    await attachFinishedVideos();
+    expect(publishOrHold).toHaveBeenCalledTimes(1);
+    expect(queueApprovedRender).not.toHaveBeenCalled();
   });
 });

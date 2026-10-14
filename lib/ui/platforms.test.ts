@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { oauthErrorCopy, oauthErrorRetryable } from './platforms';
+import { PLATFORMS, defaultMix, oauthErrorCopy, oauthErrorRetryable } from './platforms';
 
 describe('oauthErrorCopy', () => {
   it('names the platform and never echoes a raw code', () => {
@@ -28,5 +28,22 @@ describe('oauthErrorCopy', () => {
       expect(oauthErrorCopy(code, 'youtube'), code).not.toBe(generic);
     }
     expect(oauthErrorCopy('youtube_no_channel', 'youtube')).toContain('youtube.com');
+  });
+});
+
+describe('defaultMix', () => {
+  it('fits what the connected platforms accept', () => {
+    expect(defaultMix(['x', 'linkedin'])).toEqual({ text: 3, image: 1, video: 0 });
+    expect(defaultMix(['instagram'])).toEqual({ text: 0, image: 3, video: 0 });
+    expect(defaultMix(['youtube', 'tiktok'])).toEqual({ text: 0, image: 0, video: 3 });
+    expect(defaultMix(['linkedin', 'youtube'])).toEqual({ text: 3, image: 1, video: 1 });
+    expect(defaultMix([])).toEqual({ text: 0, image: 0, video: 0 });
+  });
+});
+
+describe('PLATFORMS', () => {
+  it('lists every platform once, with a tip', () => {
+    expect(new Set(PLATFORMS.map((p) => p.id)).size).toBe(7);
+    for (const p of PLATFORMS) expect(p.tip.length).toBeGreaterThan(0);
   });
 });

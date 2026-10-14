@@ -3,26 +3,23 @@ import { describe, it, expect, vi } from 'vitest';
 vi.mock('../db', () => ({ db: () => ({}) }));
 vi.mock('../credits/ledger', () => ({ getBalance: async () => 0 }));
 
-import { nextDraftDue, nextTick, kindQueue, affordableKind } from './status';
-import { recommendPlan } from './recommend';
+import { planGap, nextTick, kindQueue, affordableKind } from './status';
+import { recommendPlan, mixFor, presetOf, platformCaps } from './recommend';
 
-const H = 60 * 60 * 1000;
 const at = (iso: string) => new Date(iso);
 
-describe('nextDraftDue', () => {
-  it('is due immediately when nothing has been drafted', () => {
-    expect(nextDraftDue(4, [])!.getTime()).toBeLessThan(Date.now());
+describe('planGap', () => {
+  const now = at('2026-09-21T10:01:00Z');
+  it('scales the weekly target to the horizon', () => {
+    expect(planGap(7, 30, 0, now, true).target).toBe(30);
+    expect(planGap(4, 7, 0, now, true).target).toBe(4);
   });
-  it('spaces drafts evenly across the week', () => {
-    const last = at('2026-09-21T10:00:00Z');
-    expect(nextDraftDue(4, [last])).toEqual(new Date(last.getTime() + 42 * H));
+  it('tops up at the next cron tick while the plan has gaps', () => {
+    expect(planGap(4, 7, 2, now, true)).toEqual({ target: 4, gap: true, nextTopUpAt: '2026-09-21T12:00:00.000Z' });
   });
-  it('waits for the oldest draft to age out once the weekly budget is spent', () => {
-    const times = [at('2026-09-15T00:00:00Z'), at('2026-09-15T01:00:00Z')];
-    expect(nextDraftDue(2, times)).toEqual(at('2026-09-22T00:00:00Z'));
-  });
-  it('never drafts at cadence 0', () => {
-    expect(nextDraftDue(0, [])).toBeNull();
+  it('has no top-up when the plan is full, paused or blocked', () => {
+    expect(planGap(4, 7, 4, now, true).nextTopUpAt).toBeNull();
+    expect(planGap(4, 7, 0, now, false)).toMatchObject({ gap: true, nextTopUpAt: null });
   });
 });
 
@@ -77,5 +74,28 @@ describe('recommendPlan', () => {
   });
   it('recommends nothing for no platforms', () => {
     expect(recommendPlan([], ['saas']).cadencePerWeek).toBe(0);
+  });
+});
+
+describe('mixFor', () => {
+  it('splits one weekly number by preset', () => {
+    expect(mixFor('text', 5, ['x'])).toEqual({ text: 5, image: 0, video: 0 });
+    expect(mixFor('mixed', 7, ['x'])).toEqual({ text: 4, image: 2, video: 1 });
+    expect(mixFor('video', 5, ['linkedin'])).toEqual({ text: 1, image: 1, video: 3 });
+  });
+  it('gives video-only and media-only platforms something they can post', () => {
+    expect(mixFor('text', 5, ['x', 'tiktok'])).toEqual({ text: 4, image: 0, video: 1 });
+    expect(mixFor('text', 3, ['instagram'])).toEqual({ text: 2, image: 1, video: 0 });
+    expect(mixFor('mixed', 2, ['youtube']).video).toBeGreaterThan(0);
+  });
+  it('round-trips through presetOf', () => {
+    expect(presetOf(mixFor('video', 6, ['x']), ['x'])).toBe('video');
+    expect(presetOf({ text: 1, image: 5, video: 0 }, ['x'])).toBeNull();
+  });
+});
+
+describe('platformCaps', () => {
+  it('caps each platform at its recommendation, never above the weekly total', () => {
+    expect(platformCaps(['x', 'youtube'], [], 3)).toEqual({ x: 3, youtube: 1 });
   });
 });

@@ -1,16 +1,15 @@
-'use client';
-
-import { useRouter } from 'next/navigation';
-import AgentPage from '../../../../components/agent';
+import PlanSettings from '../../../../components/autopilot/plan-settings';
 
 export default function AutopilotPage() {
-  const router = useRouter();
   return (
     <>
-      <div className="page-head">
-        <div><h1>Autopilot</h1></div>
+      <div className="page-header">
+        <div>
+          <h1>Your plan</h1>
+          <p className="page-header__sub">What autopilot prepares for you between visits.</p>
+        </div>
       </div>
-      <AgentPage onEditDraft={(id) => router.push(`/compose?draft=${encodeURIComponent(id)}`)} />
+      <PlanSettings />
     </>
   );
 }

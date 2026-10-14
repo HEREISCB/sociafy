@@ -28,9 +28,8 @@ const TIER_LABEL: Record<CreditsPayload['tier'], string> = {
 };
 
 /**
- * Compact credit-balance pill for the topbar. Shows balance with a thin
- * fuel-bar; pulses amber under 15% of the monthly allocation, red under 5%.
- * Click to open a small popover with tier + quick top-up CTA.
+ * Topbar credit balance. Quiet when healthy; turns into a warning chip under
+ * 15% of the monthly allocation (red under 5%). Click for a small popover.
  */
 export const CreditMeter: React.FC = () => {
   const { data } = useApi<CreditsPayload>('/api/credits', {
@@ -50,95 +49,63 @@ export const CreditMeter: React.FC = () => {
 
   if (!data) {
     return (
-      <div className="credit-meter ghost" title="Loading credits…">
-        <span className="credit-meter-icon"><Icon name="bolt" size={11} /></span>
-        <span className="credit-meter-amt mono">—</span>
+      <div className="credit-meter ghost" aria-hidden>
+        <Icon name="bolt" size={12} />
+        <span className="mono">—</span>
       </div>
     );
   }
 
-  const pct = Math.min(100, Math.max(0, Math.round((data.balance / data.monthlyAllocation) * 100)));
+  const pct = percentLeft(data);
   const state = pct <= 5 ? 'crit' : pct <= 15 ? 'warn' : 'ok';
 
   return (
-    <div ref={ref} style={{ position: 'relative' }}>
+    <div ref={ref} className="shell-pop-anchor">
       <button
         type="button"
         className={`credit-meter ${state}`}
         onClick={() => setOpen((o) => !o)}
-        title={`${data.balance.toLocaleString()} credits · ${TIER_LABEL[data.tier]}`}
+        aria-expanded={open}
+        aria-label={`${data.balance.toLocaleString()} credits left`}
       >
-        <span className="credit-meter-icon"><Icon name="bolt" size={11} /></span>
-        <span className="credit-meter-amt mono">{formatBalance(data.balance)}</span>
-        <span className="credit-meter-bar" aria-hidden>
-          <span className="fill" style={{ width: `${pct}%` }} />
-        </span>
+        <Icon name="bolt" size={12} />
+        {state !== 'ok' && <span className="credit-meter-low">Low</span>}
+        <span className="mono">{formatBalance(data.balance)}</span>
       </button>
       {open && <CreditPopover data={data} onClose={() => setOpen(false)} />}
     </div>
   );
 };
 
+function percentLeft(data: CreditsPayload): number {
+  if (!data.monthlyAllocation) return 0;
+  return Math.min(100, Math.max(0, Math.round((data.balance / data.monthlyAllocation) * 100)));
+}
+
 const CreditPopover: React.FC<{ data: CreditsPayload; onClose: () => void }> = ({ data, onClose }) => {
-  const pct = Math.min(100, Math.max(0, Math.round((data.balance / data.monthlyAllocation) * 100)));
+  const pct = percentLeft(data);
   const cycleStart = data.creditCycleStart ? new Date(data.creditCycleStart) : null;
   const nextResetEst = cycleStart
     ? new Date(cycleStart.getTime() + 30 * 24 * 60 * 60 * 1000)
     : null;
   return (
     <div className="credit-popover">
-      <div className="credit-popover-head">
-        <div>
-          <div className="credit-popover-tier mono">
-            {TIER_LABEL[data.tier]} · {data.monthlyAllocation.toLocaleString()}/mo
-          </div>
-          <div className="credit-popover-balance">
-            <span className="big">{data.balance.toLocaleString()}</span>
-            <span className="muted"> credits left</span>
-          </div>
+      <div className="credit-popover-tier">
+        {TIER_LABEL[data.tier]} · {data.monthlyAllocation.toLocaleString()} / month
+      </div>
+      <div className="credit-popover-balance">
+        <span className="mono">{data.balance.toLocaleString()}</span> credits left
+      </div>
+      <div className="meter-bar"><div className="fill" style={{ width: `${pct}%` }} /></div>
+      {nextResetEst && (
+        <div className="credit-popover-meta">
+          Resets {nextResetEst.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
         </div>
-        <div className="credit-popover-ring" style={{ '--pct': pct } as React.CSSProperties}>
-          <span className="ring-pct mono">{pct}%</span>
-        </div>
-      </div>
-
-      <div className="credit-popover-bar">
-        <div className="fill" style={{ width: `${pct}%` }} />
-      </div>
-
-      <div className="credit-popover-meta mono">
-        {nextResetEst ? (
-          <>Cycle resets ~ {nextResetEst.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</>
-        ) : null}
-      </div>
-
+      )}
       <div className="credit-popover-actions">
-        <Link href="/settings/plan" className="btn ghost" onClick={onClose}>
-          <Icon name="search" size={12} /> View usage
-        </Link>
-        <Link href="/settings/plan" className="btn primary" onClick={onClose}>
-          <Icon name="bolt" size={12} /> Top up
-        </Link>
+        <Link href="/settings/plan" className="btn ghost sm" onClick={onClose}>Plan &amp; usage</Link>
+        <Link href="/settings/plan?topup=1" className="btn primary sm" onClick={onClose}>Top up</Link>
       </div>
-
-      <RecentLedger ledger={data.ledger.slice(0, 6)} />
-    </div>
-  );
-};
-
-const RecentLedger: React.FC<{ ledger: CreditsPayload['ledger'] }> = ({ ledger }) => {
-  if (ledger.length === 0) return null;
-  return (
-    <div className="credit-recent">
-      <div className="credit-recent-head mono">Recent</div>
-      {ledger.map((row) => (
-        <div key={row.id} className="credit-recent-row">
-          <span className="lbl">{row.label}</span>
-          <span className={`val mono ${row.credits < 0 ? 'neg' : 'pos'}`}>
-            {row.credits > 0 ? '+' : ''}{row.credits}
-          </span>
-        </div>
-      ))}
     </div>
   );
 };
@@ -171,7 +138,7 @@ export const InsufficientCreditsBanner: React.FC<{
     </div>
     <div className="actions">
       <Link href="/settings/plan" className="btn ghost">View usage</Link>
-      <Link href="/settings/plan" className="btn primary">Top up</Link>
+      <Link href="/settings/plan?topup=1" className="btn primary">Top up</Link>
       {onDismiss && (
         <button className="btn ghost icon-only" onClick={onDismiss} aria-label="Dismiss">
           ✕

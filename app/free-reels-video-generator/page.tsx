@@ -23,12 +23,12 @@ export default function Page() {
       steps={[
         ['Describe the scene', 'Subject, motion and camera: "slow push in on…", "top-down shot of…". We polish the prompt for you.'],
         ['Get a vertical clip', 'A 9:16 video that fills the phone screen, the format every short-form feed rewards.'],
-        ['Unlock and post everywhere', 'Create a free Sociafy account to remove the watermark and download it, or schedule it to Reels, TikTok and Shorts at once.'],
+        ['Unlock and post everywhere', 'Create a Sociafy account to remove the watermark and download it, or schedule it to Reels, TikTok and Shorts at once.'],
       ]}
       faq={[
         ['What size is a Reel, TikTok or Short?', 'All three use vertical 9:16 video (1080×1920 at full size). This tool always makes 9:16 clips.'],
         ['How long are the free videos?', 'Free videos are 5-second clips, perfect as a hook or B-roll. Inside Sociafy you can make videos up to 15 seconds in 720p and 1080p.'],
-        ['Is it really free?', 'Yes. You get a free video every day without an account. A free account removes the watermark and unlocks the HD download.'],
+        ['Is it really free?', 'Yes. You get a free video every day without an account. An account removes the watermark and unlocks the HD download.'],
         ['Can Sociafy post to TikTok, Instagram and YouTube?', 'Yes. Connect your accounts and Sociafy schedules the same clip to Reels, TikTok and Shorts, with a caption for each.'],
         ['Does the video have sound?', 'Clips can include ambient sound from the model. Add music or a voiceover in the app you post from.'],
       ]}

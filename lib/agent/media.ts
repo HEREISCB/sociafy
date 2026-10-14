@@ -12,6 +12,7 @@ import { CUE_CONCURRENCY } from '../ai/cue';
 // already work on these rows. (lib/cron/finalizeJobs.ts imports from here too.)
 import { insertImageJob, runImageJob, failImageJob, submitVideo, SubmitFailure } from '../../app/api/v1/shared';
 import { publishOrHold } from './publish';
+import { isApproved, queueApprovedRender } from './plan';
 
 type Post = { userId: string; title: string; body: string; brandBlock: string };
 
@@ -209,7 +210,9 @@ export async function attachFinishedVideos(): Promise<number> {
       continue;
     }
     const [settings] = await db().select().from(agentSettings).where(eq(agentSettings.userId, draft.userId)).limit(1);
-    if (settings) await publishOrHold(settings, updated, draft.variants?.[0]?.score ?? 0);
+    // Approved while rendering: the user already said yes — schedule it, don't re-review.
+    if (isApproved(updated)) await queueApprovedRender(updated, settings?.quietHours);
+    else if (settings) await publishOrHold(settings, updated, draft.variants?.[0]?.score ?? 0);
   }
   return rows.length;
 }

@@ -1,4 +1,5 @@
 import type { Platform } from '../db/schema';
+import { supportsKind, type PostKind } from '../platforms/capabilities';
 
 // The UI uses short codes (x, li, ig, fb, tt, yt). The DB uses full names.
 export const SHORT_TO_PLATFORM: Record<string, Platform> = {
@@ -40,6 +41,38 @@ export const PLATFORM_LABELS: Record<string, string> = {
   youtube: 'YouTube',
   reddit: 'Reddit',
 };
+
+/**
+ * Display metadata for every connectable platform — the single source for the
+ * Connect list on onboarding and Settings → Connections. `tip` is the one line
+ * a user needs before leaving for the platform's sign-in screen.
+ */
+export type PlatformMeta = { id: Platform; short: string; name: string; tip: string };
+
+export const PLATFORMS: PlatformMeta[] = [
+  { id: 'instagram', short: 'ig', name: 'Instagram', tip: 'Switch to a Professional (Business or Creator) account in the Instagram app first.' },
+  { id: 'facebook', short: 'fb', name: 'Facebook', tip: "You'll pick which Page to post to after signing in. Personal profiles aren't supported." },
+  { id: 'linkedin', short: 'li', name: 'LinkedIn', tip: 'Posts go to your personal profile. Company Pages are not supported yet.' },
+  { id: 'x', short: 'x', name: 'X', tip: 'If you manage several X accounts, sign in to the right one first.' },
+  { id: 'tiktok', short: 'tt', name: 'TikTok', tip: 'TikTok takes video posts only.' },
+  { id: 'youtube', short: 'yt', name: 'YouTube', tip: 'Sign in with the Google account that owns your channel. Video posts only.' },
+  { id: 'reddit', short: 'rd', name: 'Reddit', tip: 'Text posts only. A dedicated brand account works best.' },
+];
+
+/**
+ * A weekly content mix the connected platforms can actually take. Each draft
+ * fans out to every platform that supports its kind, so text/image cover most
+ * accounts and video is added only when some platform takes nothing else
+ * (TikTok, YouTube). Video-only setups get video only.
+ */
+export function defaultMix(platforms: Platform[]): Record<PostKind, number> {
+  const has = (k: PostKind) => platforms.some((p) => supportsKind(p, k));
+  const videoOnly = platforms.some((p) => !supportsKind(p, 'text') && !supportsKind(p, 'image'));
+  const text = has('text') ? 3 : 0;
+  const image = has('image') ? (text ? 1 : 3) : 0;
+  const video = videoOnly ? (text || image ? 1 : 3) : 0;
+  return { text, image, video };
+}
 
 // OAuth start/callback report failures as ?oauth_error=<code>&platform=<p>.
 // Shared by Connections and onboarding so a raw machine code never reaches the

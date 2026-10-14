@@ -1,5 +1,10 @@
 import { VoicesManager } from '../../../../../components/voice-studio';
 
 export default function SettingsVoice() {
-  return <VoicesManager />;
+  return (
+    <>
+      <p className="settings-intro">Clone your voice so avatar videos speak like you.</p>
+      <VoicesManager />
+    </>
+  );
 }

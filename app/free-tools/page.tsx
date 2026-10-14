@@ -1,4 +1,4 @@
-import { LPNav, Footer } from '../../components/site-chrome';
+import { SiteShell } from '../../components/site-chrome';
 import { ToolLinks, toolMetadata } from '../../components/text-tool-page';
 
 export const metadata = toolMetadata(
@@ -9,23 +9,15 @@ export const metadata = toolMetadata(
 
 export default function Page() {
   return (
-    <>
-      <LPNav />
-      <main id="main">
-        <section className="hero" style={{ textAlign: 'center' }}>
-          <div className="lp">
-            <span className="hero-eyebrow"><span className="pill">FREE</span> No sign-up needed</span>
-            <h1 style={{ maxWidth: 820, margin: '16px auto' }}>Free social media tools, <span className="accent">one job each</span>.</h1>
-            <p className="hero-lede" style={{ maxWidth: 640, margin: '0 auto 28px' }}>
-              Captions, hashtags, posts, bios, titles, images and videos. Pick a tool, describe what you need, and copy the result.
-            </p>
-            <div style={{ maxWidth: 960, margin: '0 auto', textAlign: 'left' }}>
-              <ToolLinks />
-            </div>
-          </div>
-        </section>
-      </main>
-      <Footer />
-    </>
+    <SiteShell>
+      <section className="lp tool-hero">
+        <p className="tool-eyebrow">Free · no sign-up needed</p>
+        <h1>Free social media tools, one job each.</h1>
+        <p className="hero-lede">
+          Captions, hashtags, posts, bios, titles, images and videos. Pick a tool, describe what you need, and copy the result.
+        </p>
+        <ToolLinks />
+      </section>
+    </SiteShell>
   );
 }

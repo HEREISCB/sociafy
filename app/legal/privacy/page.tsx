@@ -2,7 +2,7 @@
 // The legal entity name and contact details must remain visible for
 // payment-gateway verification.
 
-import Link from 'next/link';
+import { SiteShell } from '../../../components/site-chrome';
 
 export const metadata = {
   title: 'Privacy Policy · Sociafy',
@@ -14,16 +14,13 @@ const LAST_UPDATED = '2026-09-24';
 
 export default function PrivacyPolicyPage() {
   return (
-    <main style={{ maxWidth: 820, margin: '0 auto', padding: '48px 24px', fontFamily: 'var(--font-geist-sans)', lineHeight: 1.6 }}>
-      <p style={{ marginBottom: 24 }}>
-        <Link href="/" style={{ color: 'var(--ink-3)', fontSize: 13, textDecoration: 'none' }}>&larr; Back to site</Link>
-      </p>
-      <header style={{ marginBottom: 32, borderBottom: '1px solid var(--line)', paddingBottom: 16 }}>
-        <h1 style={{ marginBottom: 8 }}>Privacy Policy</h1>
-        <p style={{ color: 'var(--ink-3)', fontSize: 14, margin: 0 }}>
+    <SiteShell className="lp legal">
+      <header>
+        <h1>Privacy Policy</h1>
+        <p>
           {COMPANY} (&ldquo;we&rdquo;, &ldquo;us&rdquo;, &ldquo;our&rdquo;) operates the Sociafy product available at sociafy.app.
         </p>
-        <p style={{ color: 'var(--ink-3)', fontSize: 13, marginTop: 8 }}>Last updated: {LAST_UPDATED}</p>
+        <p className="legal-date">Last updated: {LAST_UPDATED}</p>
       </header>
 
       <h2>1. Who we are</h2>
@@ -80,6 +77,6 @@ export default function PrivacyPolicyPage() {
         Email: <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a><br />
         Registered office: <em>[registered address pending]</em>
       </p>
-    </main>
+    </SiteShell>
   );
 }

@@ -1,9 +1,15 @@
 import { and, asc, eq, gte, inArray, isNotNull, lt, or, sql } from 'drizzle-orm';
 import { db } from '../db';
-import { agentSettings, drafts, scheduledPosts, activityLog, type DraftMedia, type Platform } from '../db/schema';
+import { agentSettings, drafts, scheduledPosts, activityLog, type DraftMedia, type DraftVariant, type Platform } from '../db/schema';
 import { nextFreeSlot } from '../schedule/slots';
+import { PLATFORM_LIMITS } from '../ai/compose';
+import { getBalance } from '../credits/ledger';
+import { draftCost } from '../credits/estimator';
 import { weeklyTarget } from './status';
-import { queueDraft } from './publish';
+import { queueDraft, postText } from './publish';
+
+type Draft = typeof drafts.$inferSelect;
+type QuietHours = (typeof agentSettings.$inferSelect)['quietHours'];
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** A planned time closer than this is treated as passed: re-slot rather than post the instant it's approved. */
@@ -13,12 +19,32 @@ const SOON_MS = 5 * 60_000;
 const inReview = (userId: string) =>
   and(eq(drafts.userId, userId), eq(drafts.status, 'draft'), or(eq(drafts.source, 'agent'), isNotNull(drafts.plannedAt)));
 
+/** Hard character limit per platform, as the composer and autopilot use it. */
+export const CHAR_LIMITS = Object.fromEntries(Object.entries(PLATFORM_LIMITS).map(([p, l]) => [p, l.hard])) as Record<Platform, number>;
+
+/** Platforms whose text for this draft is over their hard limit — the post would be rejected. */
+export function tooLong(d: Pick<Draft, 'body' | 'perPlatformText' | 'variants' | 'targetPlatforms'>): Platform[] {
+  return ((d.targetPlatforms ?? []) as Platform[]).filter((p) => postText(d, p).length > CHAR_LIMITS[p]);
+}
+
+/**
+ * Approved while its video was still rendering. Kept on variant A (no column
+ * for it): attachFinishedVideos sees it and schedules the post when the clip
+ * lands instead of putting it back up for review.
+ */
+type ApprovedVariant = DraftVariant & { approved?: boolean };
+export const isApproved = (d: Pick<Draft, 'variants'>) => !!(d.variants?.[0] as ApprovedVariant | undefined)?.approved;
+const markApproved = (d: Draft): ApprovedVariant[] => {
+  const [a, ...rest] = d.variants?.length ? d.variants : [{ label: 'A', text: d.body }];
+  return [{ ...a, approved: true }, ...rest];
+};
+
 export type PlanView = Awaited<ReturnType<typeof getPlan>>;
 
 /** The upcoming period at a glance — everything the review screen needs. */
-export async function getPlan(userId: string, now = new Date()) {
+export async function getPlan(userId: string, now = new Date(), days?: 7 | 30) {
   const [s] = await db().select().from(agentSettings).where(eq(agentSettings.userId, userId)).limit(1);
-  const horizonDays = s?.planHorizonDays ?? 7;
+  const horizonDays = days ?? s?.planHorizonDays ?? 7;
   const end = new Date(now.getTime() + horizonDays * DAY_MS);
   const [review, scheduled] = await Promise.all([
     db()
@@ -38,6 +64,13 @@ export async function getPlan(userId: string, now = new Date()) {
   const target = s ? Math.ceil(weeklyTarget(s) * horizonDays / 7) : 0;
   const scheduledDrafts = new Set(scheduled.map((p) => p.draftId)).size;
   const planned = review.filter((d) => d.plannedAt).length;
+  const missing = Math.max(0, target - planned - scheduledDrafts);
+  // Why a plan run would refuse right now (same checks as lib/agent/run.ts,
+  // without its side effects). Accounts are the UI's to check: it has them.
+  const blocked = !s ? 'no_settings'
+    : !(s.niches ?? []).length ? 'no_niches'
+    : missing > 0 && (await getBalance(userId)) < draftCost('text') * 2 ? 'insufficient_credits'
+    : null;
   const taken = [...review.flatMap((d) => (d.plannedAt ? [new Date(d.plannedAt)] : [])), ...scheduled.map((p) => new Date(p.scheduledAt))];
 
   return {
@@ -48,6 +81,7 @@ export async function getPlan(userId: string, now = new Date()) {
     mode: (s && s.autoPublishThreshold <= 100 ? 'auto' : 'review') as 'auto' | 'review',
     /** A plan run (cron top-up or Generate) is drafting right now — poll. */
     generating: !!s?.planRunningUntil && new Date(s.planRunningUntil) > now,
+    limits: CHAR_LIMITS,
     review: review.map((d) => ({
       id: d.id,
       title: d.title,
@@ -58,8 +92,12 @@ export async function getPlan(userId: string, now = new Date()) {
       plannedAt: d.plannedAt ? new Date(d.plannedAt).toISOString() : null,
       /** The planned time passed before approval; approve gives it the next free slot. */
       overdue: !!d.plannedAt && new Date(d.plannedAt) < now,
-      /** Video still rendering — can't be approved until the clip lands. */
+      /** Video still rendering. Approving it now schedules it when the clip lands. */
       rendering: !!d.videoJobId,
+      /** Approved while rendering — waiting on the clip, not on the user. */
+      approved: !!d.videoJobId && isApproved(d),
+      /** Platforms whose text is over the limit; approve skips the draft with `too_long`. */
+      tooLong: tooLong(d),
       score: d.variants?.[0]?.score ?? null,
       source: d.source,
       createdAt: new Date(d.createdAt).toISOString(),
@@ -74,7 +112,8 @@ export async function getPlan(userId: string, now = new Date()) {
       media: (p.media ?? []) as DraftMedia[],
     })),
     counts: {
-      review: review.length,
+      /** Drafts that still need the user (approved-while-rendering ones don't). */
+      review: review.filter((d) => !(d.videoJobId && isApproved(d))).length,
       overdue: review.filter((d) => d.plannedAt && new Date(d.plannedAt) < now).length,
       rendering: review.filter((d) => d.videoJobId).length,
       /** Distinct posts (not per-platform rows) queued in the window. */
@@ -82,15 +121,18 @@ export async function getPlan(userId: string, now = new Date()) {
       /** Posts the horizon should hold: weekly target × weeks. */
       target,
       /** Still to be drafted to reach the target. */
-      missing: Math.max(0, target - planned - scheduledDrafts),
+      missing,
     },
+    /** no_settings | no_niches | insufficient_credits — the plan can't be filled until fixed. */
+    blocked,
     nextEmptySlot: nextFreeSlot(now, s?.quietHours, taken).toISOString(),
   };
 }
 
 export type ApproveResult = {
-  approved: { draftId: string; scheduledAt: string; platforms: Platform[]; reslotted: boolean }[];
-  skipped: { draftId: string; reason: string; reasons?: Record<string, string> }[];
+  /** `rendering`: approved ahead of its clip — scheduled when it lands (scheduledAt is the planned slot, if any). */
+  approved: { draftId: string; scheduledAt: string | null; platforms: Platform[]; reslotted: boolean; rendering?: true }[];
+  skipped: { draftId: string; reason: string; reasons?: Record<string, string>; platforms?: Platform[] }[];
 };
 
 /**
@@ -133,7 +175,17 @@ export async function approveDrafts(
   const ordered = rows.sort((a, b) => (wanted(a)?.getTime() ?? Infinity) - (wanted(b)?.getTime() ?? Infinity));
 
   for (const d of ordered) {
-    if (d.videoJobId) { out.skipped.push({ draftId: d.id, reason: 'rendering' }); continue; }
+    const long = tooLong(d);
+    if (long.length) { out.skipped.push({ draftId: d.id, reason: 'too_long', platforms: long }); continue; }
+    if (d.videoJobId) {
+      const when = wanted(d);
+      await db()
+        .update(drafts)
+        .set({ variants: markApproved(d), plannedAt: when, updatedAt: new Date() })
+        .where(and(eq(drafts.id, d.id), eq(drafts.userId, userId), eq(drafts.status, 'draft')));
+      out.approved.push({ draftId: d.id, scheduledAt: when?.toISOString() ?? null, platforms: d.targetPlatforms as Platform[], reslotted: false, rendering: true });
+      continue;
+    }
     let at = wanted(d);
     const reslotted = !at || at.getTime() < now.getTime() + SOON_MS;
     if (reslotted) at = nextFreeSlot(now, s?.quietHours, taken);
@@ -152,6 +204,30 @@ export async function approveDrafts(
     });
   }
   return out;
+}
+
+/**
+ * The clip for a draft the user approved mid-render has landed: schedule it at
+ * its planned slot, or the next free one if that has passed. Called from
+ * attachFinishedVideos in place of the autopilot schedule-or-hold decision.
+ */
+export async function queueApprovedRender(draft: Draft, quiet: QuietHours | undefined, now = new Date()) {
+  const pending = await db()
+    .select({ at: scheduledPosts.scheduledAt })
+    .from(scheduledPosts)
+    .where(and(eq(scheduledPosts.userId, draft.userId), eq(scheduledPosts.status, 'pending'), gte(scheduledPosts.scheduledAt, now)));
+  const planned = draft.plannedAt ? new Date(draft.plannedAt) : null;
+  const at = planned && planned.getTime() >= now.getTime() + SOON_MS ? planned : nextFreeSlot(now, quiet, pending.map((p) => new Date(p.at)));
+  const r = await queueDraft(draft, at);
+  if (r.queued.length) {
+    await db().insert(activityLog).values({
+      userId: draft.userId,
+      kind: 'draft_scheduled',
+      title: `Approved for ${r.queued.join(', ')}`,
+      meta: { draftId: draft.id, platforms: r.queued, scheduledAt: at.toISOString(), via: 'plan_render' },
+    });
+  }
+  return r;
 }
 
 /** Discard a draft from the plan. Its slot frees up for the next top-up. */

@@ -75,13 +75,13 @@ const BrandKnowledge: React.FC = () => {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink-3)', lineHeight: 1.5 }}>
-            Reference text the AI uses when drafting responses — brand voice, approved messaging, key
-            facts, spokesperson details. Paste text or upload a <code>.txt</code>/<code>.md</code> file.
-          </p>
+    <div className="stack">
+      <p className="set-hint">
+        Facts, approved messaging and voice the AI grounds replies in. Paste text or upload a .txt or .md file.
+      </p>
 
-          {/* Existing docs */}
+      {docs.length > 0 && (
+        <div className="shield-docs">
           {docs.map(doc => (
             <DocRow
               key={doc.id}
@@ -94,75 +94,42 @@ const BrandKnowledge: React.FC = () => {
               onDelete={remove}
             />
           ))}
+        </div>
+      )}
 
-          {/* Add new */}
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 8,
-              padding: 12,
-              border: '1px dashed var(--line-2)',
-              borderRadius: 'var(--r)',
-              background: 'var(--bg-sunk)',
-            }}
-          >
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <input
-                type="text"
-                value={draftTitle}
-                onChange={e => setDraftTitle(e.target.value)}
-                placeholder="Document title (e.g. Brand Voice Guide)"
-                style={{
-                  flex: 1,
-                  padding: '8px 12px',
-                  borderRadius: 'var(--r-sm)',
-                  border: '1px solid var(--line-2)',
-                  background: 'var(--bg)',
-                  color: 'var(--ink)',
-                  fontSize: 13,
-                }}
-              />
-              <label className="btn sm" style={{ cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                <Icon name="upload" size={12} /> Upload
-                <input
-                  type="file"
-                  accept=".txt,.md,.markdown,text/plain,text/markdown"
-                  onChange={e => onFile(e.target.files?.[0])}
-                  style={{ display: 'none' }}
-                />
-              </label>
-            </div>
-            <textarea
-              value={draftContent}
-              onChange={e => setDraftContent(e.target.value)}
-              placeholder="Paste your brand knowledge here…"
-              rows={5}
-              style={{
-                width: '100%',
-                padding: '8px 12px',
-                borderRadius: 'var(--r-sm)',
-                border: '1px solid var(--line-2)',
-                background: 'var(--bg)',
-                color: 'var(--ink)',
-                fontSize: 13,
-                resize: 'vertical',
-                fontFamily: 'inherit',
-              }}
-            />
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span className="mono" style={{ fontSize: 10, color: 'var(--ink-3)' }}>
-                {draftContent.length.toLocaleString()} chars
-              </span>
-              <button
-                className="btn primary sm"
-                onClick={add}
-                disabled={busy || !draftContent.trim()}
-              >
-                <Icon name="plus" size={12} /> Add document
-              </button>
-            </div>
-          </div>
+      <div className="row">
+        <input
+          className="input"
+          type="text"
+          value={draftTitle}
+          onChange={e => setDraftTitle(e.target.value)}
+          placeholder="Document title"
+          aria-label="Document title"
+        />
+        <label className="btn sm">
+          <Icon name="upload" size={12} /> Upload
+          <input
+            type="file"
+            accept=".txt,.md,.markdown,text/plain,text/markdown"
+            onChange={e => onFile(e.target.files?.[0])}
+            hidden
+          />
+        </label>
+      </div>
+      <textarea
+        className="input"
+        value={draftContent}
+        onChange={e => setDraftContent(e.target.value)}
+        placeholder="Paste brand knowledge…"
+        rows={4}
+        aria-label="Document text"
+      />
+      <div className="set-actions">
+        <button className="btn sm primary" onClick={add} disabled={busy || !draftContent.trim()}>
+          Add document
+        </button>
+        <span className="set-hint mono">{draftContent.length.toLocaleString()} chars</span>
+      </div>
     </div>
   );
 };
@@ -181,31 +148,13 @@ const DocRow: React.FC<{
 
   if (!editing) {
     return (
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          padding: '10px 12px',
-          border: '1px solid var(--line)',
-          borderRadius: 'var(--r)',
-          background: 'var(--bg)',
-        }}
-      >
-        <Icon name="book" size={13} />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--ink)' }}>{doc.title}</div>
-          <div className="mono" style={{ fontSize: 10, color: 'var(--ink-3)' }}>
-            {doc.content.length.toLocaleString()} chars
-          </div>
+      <div className="shield-doc">
+        <div className="shield-doc-main">
+          <div className="set-label">{doc.title}</div>
+          <div className="set-hint mono">{doc.content.length.toLocaleString()} chars</div>
         </div>
-        <button className="btn sm" onClick={onEdit} disabled={busy}>Edit</button>
-        <button
-          className="btn sm"
-          onClick={() => onDelete(doc.id)}
-          disabled={busy}
-          style={{ color: 'oklch(0.55 0.18 25)' }}
-        >
+        <button className="btn sm ghost" onClick={onEdit} disabled={busy}>Edit</button>
+        <button className="btn sm ghost" onClick={() => onDelete(doc.id)} disabled={busy} aria-label={`Delete ${doc.title}`}>
           <Icon name="trash" size={12} />
         </button>
       </div>
@@ -213,55 +162,14 @@ const DocRow: React.FC<{
   }
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-        padding: 12,
-        border: '1px solid var(--accent)',
-        borderRadius: 'var(--r)',
-        background: 'var(--bg)',
-      }}
-    >
-      <input
-        type="text"
-        value={title}
-        onChange={e => setTitle(e.target.value)}
-        style={{
-          padding: '8px 12px',
-          borderRadius: 'var(--r-sm)',
-          border: '1px solid var(--line-2)',
-          background: 'var(--bg-sunk)',
-          color: 'var(--ink)',
-          fontSize: 13,
-        }}
-      />
-      <textarea
-        value={content}
-        onChange={e => setContent(e.target.value)}
-        rows={6}
-        style={{
-          width: '100%',
-          padding: '8px 12px',
-          borderRadius: 'var(--r-sm)',
-          border: '1px solid var(--line-2)',
-          background: 'var(--bg-sunk)',
-          color: 'var(--ink)',
-          fontSize: 13,
-          resize: 'vertical',
-          fontFamily: 'inherit',
-        }}
-      />
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-        <button className="btn sm" onClick={onCancel} disabled={busy}>Cancel</button>
-        <button
-          className="btn primary sm"
-          onClick={() => onSave(doc.id, title.trim() || 'Untitled', content)}
-          disabled={busy}
-        >
+    <div className="shield-doc editing">
+      <input className="input" type="text" value={title} onChange={e => setTitle(e.target.value)} aria-label="Document title" />
+      <textarea className="input" value={content} onChange={e => setContent(e.target.value)} rows={6} aria-label="Document text" />
+      <div className="set-actions">
+        <button className="btn sm primary" onClick={() => onSave(doc.id, title.trim() || 'Untitled', content)} disabled={busy}>
           Save
         </button>
+        <button className="btn sm ghost" onClick={onCancel} disabled={busy}>Cancel</button>
       </div>
     </div>
   );

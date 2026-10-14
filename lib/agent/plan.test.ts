@@ -14,6 +14,7 @@ const state = vi.hoisted(() => ({
   claimed: new Set<string>(),
   inserts: {} as Record<string, Record<string, unknown>[]>,
   wheres: [] as { table: string; params: unknown[] }[],
+  sets: [] as Record<string, unknown>[],
 }));
 
 vi.mock('../db', async () => {
@@ -49,7 +50,7 @@ vi.mock('../db', async () => {
       }),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       update: (t: any) => ({
-        set: () => ({
+        set: (v: Record<string, unknown>) => (state.sets.push(v), {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           where: (w: any) => {
             record(t, w);
@@ -64,7 +65,7 @@ vi.mock('../db', async () => {
   };
 });
 
-import { approveDrafts, skipDraft, getPlan } from './plan';
+import { approveDrafts, skipDraft, getPlan, queueApprovedRender, isApproved } from './plan';
 
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = new Date('2026-03-02T06:00:00Z'); // Monday
@@ -83,6 +84,7 @@ beforeEach(() => {
   state.claimed = new Set();
   state.inserts = {};
   state.wheres = [];
+  state.sets = [];
 });
 
 describe('approve', () => {
@@ -99,7 +101,7 @@ describe('approve', () => {
     state.pending = [{ at: new Date('2026-03-02T09:30:00Z') }]; // the first window is taken
     const res = await approveDrafts('u1', { all: true }, NOW);
     expect(res.approved[0].reslotted).toBe(true);
-    const at = new Date(res.approved[0].scheduledAt);
+    const at = new Date(res.approved[0].scheduledAt!);
     expect(at.getTime()).toBeGreaterThan(NOW.getTime());
     expect(Math.abs(at.getTime() - new Date('2026-03-02T09:30:00Z').getTime())).toBeGreaterThanOrEqual(2 * 60 * 60 * 1000);
   });
@@ -107,7 +109,7 @@ describe('approve', () => {
   it('two overdue drafts do not land on the same slot', async () => {
     state.drafts = [draft('d-1', { plannedAt: new Date(NOW.getTime() - DAY) }), draft('d-2', { plannedAt: new Date(NOW.getTime() - DAY / 2) })];
     const res = await approveDrafts('u1', { all: true }, NOW);
-    const [a, b] = res.approved.map((r) => new Date(r.scheduledAt).getTime());
+    const [a, b] = res.approved.map((r) => new Date(r.scheduledAt!).getTime());
     expect(Math.abs(a - b)).toBeGreaterThanOrEqual(2 * 60 * 60 * 1000);
   });
 
@@ -118,10 +120,19 @@ describe('approve', () => {
     expect(res.approved[0].scheduledAt).toBe(at);
   });
 
-  it('holds back a video that is still rendering', async () => {
-    state.drafts = [draft('d-1', { videoJobId: 'job', plannedAt: new Date(NOW.getTime() + DAY) })];
+  it('approves a video still rendering ahead of its clip: flagged, not queued yet', async () => {
+    const at = new Date(NOW.getTime() + DAY);
+    state.drafts = [draft('d-1', { videoJobId: 'job', plannedAt: at })];
     const res = await approveDrafts('u1', { all: true }, NOW);
-    expect(res.skipped).toEqual([{ draftId: 'd-1', reason: 'rendering' }]);
+    expect(res.approved).toEqual([{ draftId: 'd-1', scheduledAt: at.toISOString(), platforms: ['x'], reslotted: false, rendering: true }]);
+    expect(posts()).toEqual([]);
+    expect(isApproved({ variants: state.sets[0].variants as never })).toBe(true);
+  });
+
+  it('skips a draft whose text is over a platform limit, naming the platforms', async () => {
+    state.drafts = [draft('d-1', { body: 'x'.repeat(281), variants: [], targetPlatforms: ['x', 'linkedin'], plannedAt: new Date(NOW.getTime() + DAY) })];
+    const res = await approveDrafts('u1', { all: true }, NOW);
+    expect(res.skipped).toEqual([{ draftId: 'd-1', reason: 'too_long', platforms: ['x'] }]);
     expect(posts()).toEqual([]);
   });
 
@@ -164,6 +175,20 @@ describe('approve', () => {
   });
 });
 
+describe('an approved render landing', () => {
+  it('posts at its planned slot', async () => {
+    const at = new Date(NOW.getTime() + DAY);
+    const r = await queueApprovedRender(draft('d-1', { plannedAt: at }) as never, null, NOW);
+    expect(r.queued).toEqual(['x']);
+    expect(posts()[0].scheduledAt).toEqual(at);
+  });
+
+  it('moves to the next free slot when the planned one passed while rendering', async () => {
+    await queueApprovedRender(draft('d-1', { plannedAt: new Date(NOW.getTime() - DAY) }) as never, null, NOW);
+    expect((posts()[0].scheduledAt as Date).getTime()).toBeGreaterThan(NOW.getTime());
+  });
+});
+
 describe('every query is scoped to the user', () => {
   const scoped = () => state.wheres.filter((w) => ['drafts', 'scheduled_posts', 'agent_settings', 'connected_accounts'].includes(w.table));
 
@@ -197,5 +222,12 @@ describe('the plan view', () => {
     expect(v.review[1]).toMatchObject({ id: 'd-2', rendering: true });
     expect(new Date(v.nextEmptySlot).getTime()).toBeGreaterThan(NOW.getTime());
     expect(v.mode).toBe('review');
+  });
+
+  it('a render approved ahead of its clip no longer counts as needing review', async () => {
+    state.drafts = [draft('d-1', { videoJobId: 'job', variants: [{ label: 'A', text: 'body', approved: true }] })];
+    const v = await getPlan('u1', NOW);
+    expect(v.review[0]).toMatchObject({ rendering: true, approved: true });
+    expect(v.counts.review).toBe(0);
   });
 });

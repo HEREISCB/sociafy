@@ -29,7 +29,7 @@ export default function Page() {
         ['Why five different formats?', 'The same idea lands differently as a hot take, a practical tip, a short story, a question or a list. Seeing all five helps you pick what your audience responds to.'],
         ['Does it write threads?', 'This tool writes single posts. For a thread, generate a few posts on related points and chain them, or let Sociafy write full threads for you.'],
         ['Should I use hashtags on X?', 'Rarely. Hashtags on X mostly add clutter; one relevant tag at most. The drafts skip them unless the topic needs one.'],
-        ['Can Sociafy post to X for me?', 'Yes. A free Sociafy account connects X, writes posts in your voice from trends in your niche, and schedules them on autopilot.'],
+        ['Can Sociafy post to X for me?', 'Yes. A Sociafy account connects X, writes posts in your voice from trends in your niche, and schedules them on autopilot.'],
       ]}
     />
   );

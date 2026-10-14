@@ -1,8 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { useApi } from '../../lib/ui/fetcher';
-import { Icon } from '../icons';
+import { useApi, friendlyApiError } from '../../lib/ui/fetcher';
 
 interface ShieldSettings {
   autoFetch: boolean;
@@ -12,25 +11,15 @@ interface ShieldSettings {
   lastAutoFetchAt: string | null;
 }
 
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  padding: '9px 12px',
-  borderRadius: 'var(--r-sm)',
-  border: '1px solid var(--line-2)',
-  background: 'var(--bg-sunk)',
-  color: 'var(--ink)',
-  fontSize: 13,
-};
+const EMPTY: ShieldSettings = { autoFetch: false, autoFetchBrand: '', slackWebhookUrl: '', alertEmail: '', lastAutoFetchAt: null };
 
-const labelStyle: React.CSSProperties = { fontSize: 12.5, fontWeight: 500, color: 'var(--ink-2)' };
-
-/** Scheduled auto-scan + crisis-alert settings. Saves to /api/shield/settings. */
-const MonitoringSettings: React.FC = () => {
+/** Shared load-once + partial-save over /api/shield/settings (PUT accepts any subset). */
+function useShieldSettings() {
   const { data, mutate } = useApi<{ settings: ShieldSettings }>('/api/shield/settings');
-  const [s, setS] = useState<ShieldSettings>({ autoFetch: false, autoFetchBrand: '', slackWebhookUrl: '', alertEmail: '', lastAutoFetchAt: null });
-  const [busy, setBusy] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [s, setS] = useState<ShieldSettings>(EMPTY);
   const [hydrated, setHydrated] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
     if (data?.settings && !hydrated) {
@@ -39,87 +28,110 @@ const MonitoringSettings: React.FC = () => {
     }
   }, [data, hydrated]);
 
-  const save = async () => {
+  const save = async (fields: Partial<ShieldSettings>) => {
     setBusy(true);
-    setSaved(false);
+    setMsg(null);
     try {
-      await fetch('/api/shield/settings', {
+      const res = await fetch('/api/shield/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          autoFetch: s.autoFetch,
-          autoFetchBrand: s.autoFetchBrand,
-          slackWebhookUrl: s.slackWebhookUrl,
-          alertEmail: s.alertEmail,
-        }),
+        body: JSON.stringify(fields),
       });
-      setSaved(true);
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+      setMsg({ ok: true, text: 'Saved' });
       await mutate();
+    } catch (e) {
+      setMsg({ ok: false, text: friendlyApiError(e) });
     } finally {
       setBusy(false);
     }
   };
 
-  const lastScan = s.lastAutoFetchAt ? new Date(s.lastAutoFetchAt).toLocaleString() : 'never';
+  return { s, setS, save, busy, msg };
+}
+
+/** Brand + scheduled scans, with a manual scan. Top of /settings/brand. */
+const MonitoringSettings: React.FC<{ onScan: (brand: string) => void; scanning: boolean }> = ({ onScan, scanning }) => {
+  const { s, setS, save, busy, msg } = useShieldSettings();
+  const brand = s.autoFetchBrand.trim();
+  const lastScan = s.lastAutoFetchAt ? new Date(s.lastAutoFetchAt).toLocaleString() : null;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {/* Auto-fetch */}
-      <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <button
-          onClick={() => setS(v => ({ ...v, autoFetch: !v.autoFetch }))}
-          style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 'var(--r)', border: '1px solid var(--line-2)', background: s.autoFetch ? 'var(--ink)' : 'var(--bg-sunk)', color: s.autoFetch ? 'var(--bg)' : 'var(--ink)', cursor: 'pointer', textAlign: 'left' }}
-        >
-          <Icon name="refresh" size={14} />
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 13, fontWeight: 500 }}>Auto-fetch (scheduled scans)</div>
-            <div style={{ fontSize: 11.5, opacity: 0.8 }}>Re-scan your brand automatically on the monitoring schedule.</div>
-          </div>
-          <span className="mono" style={{ fontSize: 10, padding: '2px 8px', borderRadius: 100, background: s.autoFetch ? 'oklch(1 0 0 / 0.18)' : 'var(--bg-elev)' }}>
-            {s.autoFetch ? 'ON' : 'OFF'}
-          </span>
-        </button>
-        <label style={labelStyle}>Brand / handle to monitor</label>
+    <section className="card shield-form" aria-label="Monitoring">
+      <label className="set-field">
+        <span className="set-label">Brand to monitor</span>
         <input
-          style={inputStyle}
+          className="input"
           value={s.autoFetchBrand}
           onChange={e => setS(v => ({ ...v, autoFetchBrand: e.target.value }))}
-          placeholder="e.g. New Delhi Municipal Council Official or @tweetndmc"
+          onKeyDown={e => { if (e.key === 'Enter' && brand && !scanning) onScan(brand); }}
+          placeholder="Company name or @handle"
+          maxLength={120}
         />
-        <div className="mono" style={{ fontSize: 10.5, color: 'var(--ink-3)' }}>Last auto-scan: {lastScan}</div>
-      </section>
-
-      {/* Alerts */}
-      <section style={{ display: 'flex', flexDirection: 'column', gap: 8, borderTop: '1px solid var(--line)', paddingTop: 14 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>Crisis alerts</div>
-        <p style={{ margin: 0, fontSize: 12, color: 'var(--ink-3)', lineHeight: 1.5 }}>
-          Get pinged the moment a new <strong>crisis</strong> mention appears — on a scheduled or manual scan.
-        </p>
-        <label style={labelStyle}>Slack / Discord incoming webhook URL</label>
+      </label>
+      <label className="set-check">
         <input
-          style={inputStyle}
+          type="checkbox"
+          checked={s.autoFetch}
+          onChange={e => setS(v => ({ ...v, autoFetch: e.target.checked }))}
+        />
+        <span>
+          Scan automatically
+          <span className="set-hint"> · {lastScan ? `last scan ${lastScan}` : 'news, Reddit, Hacker News and X'}</span>
+        </span>
+      </label>
+      {s.autoFetch && !brand && <p className="set-hint err">Add a brand name or nothing gets scanned.</p>}
+      <div className="set-actions">
+        <button
+          className="btn primary"
+          onClick={() => save({ autoFetch: s.autoFetch, autoFetchBrand: s.autoFetchBrand })}
+          disabled={busy}
+        >
+          {busy ? 'Saving…' : 'Save'}
+        </button>
+        <button className="btn" onClick={() => onScan(brand)} disabled={scanning || !brand}>
+          {scanning ? 'Scanning…' : 'Scan now'}
+        </button>
+        {msg && <span className={msg.ok ? 'set-ok' : 'set-hint err'} role="status">{msg.text}</span>}
+      </div>
+    </section>
+  );
+};
+
+/** Crisis alert destinations, behind "Advanced". */
+export const AlertSettings: React.FC = () => {
+  const { s, setS, save, busy, msg } = useShieldSettings();
+  return (
+    <div className="stack">
+      <p className="set-hint">Get pinged when a scan finds a new crisis mention.</p>
+      <label className="set-field">
+        <span className="set-label">Slack or Discord webhook URL</span>
+        <input
+          className="input"
           value={s.slackWebhookUrl}
           onChange={e => setS(v => ({ ...v, slackWebhookUrl: e.target.value }))}
-          placeholder="https://hooks.slack.com/services/…  (Discord webhooks work too)"
+          placeholder="https://hooks.slack.com/services/…"
         />
-        <label style={labelStyle}>Alert email</label>
+      </label>
+      <label className="set-field">
+        <span className="set-label">Alert email</span>
         <input
-          style={inputStyle}
+          className="input"
           type="email"
           value={s.alertEmail}
           onChange={e => setS(v => ({ ...v, alertEmail: e.target.value }))}
           placeholder="you@company.com"
         />
-        <div className="mono" style={{ fontSize: 10.5, color: 'var(--ink-3)' }}>
-          Email needs RESEND_API_KEY set on the server; the webhook works with no extra config.
-        </div>
-      </section>
-
-      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10 }}>
-        {saved && <span className="mono" style={{ fontSize: 11, color: 'oklch(0.55 0.13 145)' }}>Saved ✓</span>}
-        <button className="btn primary sm" onClick={save} disabled={busy}>
-          {busy ? 'Saving…' : 'Save settings'}
+      </label>
+      <div className="set-actions">
+        <button
+          className="btn sm"
+          onClick={() => save({ slackWebhookUrl: s.slackWebhookUrl, alertEmail: s.alertEmail })}
+          disabled={busy}
+        >
+          {busy ? 'Saving…' : 'Save alerts'}
         </button>
+        {msg && <span className={msg.ok ? 'set-ok' : 'set-hint err'} role="status">{msg.text}</span>}
       </div>
     </div>
   );

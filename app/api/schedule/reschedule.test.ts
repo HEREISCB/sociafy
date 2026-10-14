@@ -13,7 +13,7 @@ import type { NextRequest } from 'next/server';
 
 const state = vi.hoisted(() => ({
   row: null as Record<string, unknown> | null,
-  /** The user's connected accounts — the only select with a column list. */
+  /** The user's connected accounts — the select with an `id` column list. */
   accounts: [] as Record<string, unknown>[],
   patches: [] as Record<string, unknown>[],
 }));
@@ -23,7 +23,8 @@ vi.mock('../../../lib/db', () => ({
     select: (cols?: unknown) => ({
       from: () => ({
         where: () => {
-          const rows = cols ? state.accounts : state.row ? [state.row] : [];
+          const isAccounts = !!cols && 'id' in (cols as object);
+          const rows = isAccounts ? state.accounts : state.row ? [state.row] : [];
           return Object.assign(Promise.resolve(rows), { limit: () => Promise.resolve(rows) });
         },
       }),
@@ -46,9 +47,11 @@ vi.mock('../../../lib/api', () => ({
   },
 }));
 
-import { PATCH } from './[id]/route';
+import { PATCH, DELETE } from './[id]/route';
 
 const soon = () => new Date(Date.now() + 3_600_000).toISOString();
+const del = () =>
+  DELETE({} as unknown as NextRequest, { params: Promise.resolve({ id: 'sp1' }) });
 const patch = (body: Record<string, unknown>) =>
   PATCH({ json: async () => body } as unknown as NextRequest, { params: Promise.resolve({ id: 'sp1' }) });
 
@@ -117,5 +120,37 @@ describe('PATCH /api/schedule/[id]', () => {
     expect(res.status).toBe(409);
     expect((await res.json()).error).toBe('account_disconnected');
     expect(state.patches).toEqual([]);
+  });
+});
+
+describe('DELETE /api/schedule/[id] (soft cancel)', () => {
+  it('marks a pending post canceled instead of deleting it', async () => {
+    state.row!.status = 'pending';
+    const res = await del();
+    expect(res.status).toBe(200);
+    expect(state.patches[0]).toMatchObject({ status: 'canceled' });
+    expect((await res.json()).status).toBe('canceled');
+  });
+
+  it('cancels a failed post', async () => {
+    const res = await del();
+    expect(res.status).toBe(200);
+    expect(state.patches[0]).toMatchObject({ status: 'canceled' });
+  });
+
+  it('refuses to cancel a post that is publishing, published or already canceled', async () => {
+    for (const status of ['publishing', 'published', 'canceled']) {
+      state.row!.status = status;
+      const res = await del();
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toBe('not_cancelable');
+    }
+    expect(state.patches).toEqual([]);
+  });
+
+  it('404s for a post that is not the user\'s', async () => {
+    state.row = null;
+    const res = await del();
+    expect(res.status).toBe(404);
   });
 });

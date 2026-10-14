@@ -29,7 +29,7 @@ export default function Page() {
         ['How long should a LinkedIn post be?', 'Posts of roughly 100 to 200 words tend to do well: long enough to share one real insight, short enough to read in a scroll. Our drafts land in that range.'],
         ['Why does the first line matter so much?', 'LinkedIn cuts posts off after two or three lines with “see more”. If the first line does not earn the click, nobody reads the rest, so every draft opens with a hook.'],
         ['Will the posts sound like AI?', 'The generator avoids the usual clichés (“I’m humbled to announce”) and writes short paragraphs with one concrete point. Adding a detail only you know makes it unmistakably yours.'],
-        ['Can Sociafy post to LinkedIn for me?', 'Yes. A free Sociafy account connects your LinkedIn, writes posts in your voice and schedules them at the best time, on autopilot or with your approval.'],
+        ['Can Sociafy post to LinkedIn for me?', 'Yes. A Sociafy account connects your LinkedIn, writes posts in your voice and schedules them at the best time, on autopilot or with your approval.'],
       ]}
     />
   );

@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { SignIn, ClerkLoading, ClerkLoaded } from '@clerk/nextjs';
 import Link from 'next/link';
 import { AuthLoading } from '../../../../components/auth-loading';
@@ -23,21 +24,26 @@ function nextReturn(): string {
   return safeNextPath(new URLSearchParams(window.location.search).get('next'), '/dashboard');
 }
 
+const PLAN_NAMES: Record<string, string> = { starter: 'Starter', pro: 'Pro', business: 'Business' };
+
 export default function Page() {
+  // After mount only: the server render has no query string to read.
+  const [plan, setPlan] = useState<string | null>(null);
+  useEffect(() => {
+    const tier = nextReturn().match(/^\/settings\/plan\?tier=(\w+)/)?.[1];
+    if (tier && PLAN_NAMES[tier]) setPlan(PLAN_NAMES[tier]);
+  }, []);
+
   return (
     <div className="auth-shell">
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 18 }}>
+      <div className="auth-stack">
         <Link href="/" className="auth-brand" aria-label="Sociafy home">
           <div className="brand-mark" aria-hidden="true">S</div>
           <span className="brand-name">Sociafy<span className="dot">.</span></span>
         </Link>
-        <div style={{ textAlign: 'center', maxWidth: 360 }}>
-          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600, letterSpacing: '-0.02em' }}>
-            Welcome back
-          </h1>
-          <p style={{ margin: '6px 0 0', fontSize: 14, color: 'var(--ink-3, #71717a)', lineHeight: 1.5 }}>
-            Continue with Google or your email — same workspace either way.
-          </p>
+        <div className="auth-head">
+          <h1>Welcome back</h1>
+          <p>{plan ? `Log in to check out for the ${plan} plan.` : 'Log in with Google or your email.'}</p>
         </div>
         <ClerkLoading>
           <AuthLoading />
@@ -47,12 +53,7 @@ export default function Page() {
             appearance={{
               elements: {
                 rootBox: { width: '100%' },
-                card: {
-                  background: 'var(--bg-elev, #fff)',
-                  border: '1px solid var(--line, #eaeaea)',
-                  boxShadow: '0 1px 0 rgba(0,0,0,0.02), 0 24px 60px -24px rgba(0,0,0,0.12)',
-                  borderRadius: 18,
-                },
+                card: { background: 'var(--surface)', border: '1px solid var(--line)', boxShadow: 'none', borderRadius: 'var(--r)' },
               },
             }}
             signUpUrl="/sign-up"

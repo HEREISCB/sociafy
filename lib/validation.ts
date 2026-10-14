@@ -37,7 +37,7 @@ export const draftCreateSchema = z.object({
     width: z.number().int().nonnegative().optional(),
     height: z.number().int().nonnegative().optional(),
   })).max(20).optional(),
-  targetPlatforms: z.array(platform).max(6).optional(),
+  targetPlatforms: z.array(platform).max(7).optional(),
   // String-keyed record so missing platform keys are allowed. With
   // z.record(platform, ...), Zod 4 treats the enum as a closed set and
   // requires every platform key to be present — which broke persistDraft
@@ -66,7 +66,7 @@ export const planSkipSchema = z.object({ draftId: uuid });
 // Schedule -------------------------------------------------------------
 export const scheduleCreateSchema = z.object({
   draftId: uuid,
-  platforms: z.array(platform).min(1).max(6).optional(),
+  platforms: z.array(platform).min(1).max(7).optional(),
   scheduledAt: z.string().datetime(),
 });
 
@@ -79,14 +79,14 @@ export const scheduleUpdateSchema = z.object({
 // Publish --------------------------------------------------------------
 export const publishSchema = z.object({
   draftId: uuid,
-  platforms: z.array(platform).min(1).max(6).optional(),
+  platforms: z.array(platform).min(1).max(7).optional(),
 });
 
 // Compose variants -----------------------------------------------------
 export const composeVariantsSchema = z.object({
   prompt: z.string().min(1).max(4_000),
   // Allow empty array — route falls back to generating for all platforms.
-  platforms: z.array(platform).max(6).default([]),
+  platforms: z.array(platform).max(7).default([]),
   preset: z.string().max(80).nullable().optional(),
   voice: z.enum(VOICE_TEMPLATES).optional(),
   count: z.number().int().min(1).max(6).optional(),
@@ -101,7 +101,7 @@ export const agentSettingsUpdateSchema = z.object({
   cadencePerWeek: z.number().int().min(0).max(50).optional(),
   // 101 is the "Drafts only — review every post" sentinel; the agent's
   // run loop treats anything > 100 as never-auto-publish. Keep that ceiling
-  // in sync with components/agent.tsx if you ever change the magic value.
+  // in sync with components/autopilot/plan-settings.tsx if you ever change the magic value.
   autoPublishThreshold: z.number().int().min(0).max(101).optional(),
   quietHours: z.object({
     start: z.string().regex(/^\d{2}:\d{2}$/),
@@ -117,7 +117,7 @@ export const agentSettingsUpdateSchema = z.object({
   brandBio: z.string().max(2_000).optional(),
   website: z.string().url().max(500).optional().or(z.literal('')),
   // Autopilot permission matrix.
-  enabledPlatforms: z.array(platform).max(6).optional(),
+  enabledPlatforms: z.array(platform).max(7).optional(),
   // partialRecord: Zod 4's z.record over an enum demands EVERY key, so caps for
   // just the platforms a user has (the only shape the UI ever sends) were a 400.
   postsPerWeekByPlatform: z.partialRecord(platform, z.number().int().min(0).max(50)).optional(),

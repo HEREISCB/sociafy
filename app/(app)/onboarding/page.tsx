@@ -7,16 +7,16 @@ import OnboardingClient from './client';
 
 /**
  * Server-side guard: if the user has already finished onboarding, send
- * them to the dashboard instead of re-running the four-step setup.
+ * them to the dashboard instead of re-running the three-step setup.
  * Override with `?force=1` for testing.
  *
  * "Finished" has to mean the setup is usable, not just that it was touched.
  * profiles.onboardedAt is stamped by the FIRST settings PATCH — which happens
- * at step 2 of 6 — so a user who bailed halfway (or clicked through the niche
+ * at the Topics step — so a user who bailed halfway (or clicked through the niche
  * step without picking one) got bounced straight back to the dashboard, where
  * every "Finish setup →" link led here and immediately redirected away again.
- * No niches, no way to pick any. onboardedAt is now only stamped when
- * autopilot is switched on at the end, and an OAuth round-trip back here
+ * No niches, no way to pick any. onboardedAt is now only stamped by the
+ * final step's PATCH (enabled: true), and an OAuth round-trip back here
  * (?connected= / ?oauth_error=) always lands on the page, never the redirect.
  */
 export default async function OnboardingPage({

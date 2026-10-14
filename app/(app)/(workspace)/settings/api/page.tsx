@@ -1,13 +1,16 @@
+'use client';
+
 import Link from 'next/link';
-import { ApiKeys } from '../../../../../components/api-keys';
+import { ApiKeys, DEFAULT_CAP } from '../../../../../components/api-keys';
 
 export default function SettingsApi() {
   return (
-    <div className="usage-page">
-      <ApiKeys />
-      <p style={{ marginTop: 16 }}>
-        <Link href="/developers/reference">API reference →</Link>
+    <>
+      <p className="settings-intro">
+        Keys call the Sociafy API and spend this account&apos;s credits, up to a daily cap per key
+        (default {DEFAULT_CAP.toLocaleString()}). <Link href="/developers/reference">API reference</Link>
       </p>
-    </div>
+      <ApiKeys />
+    </>
   );
 }

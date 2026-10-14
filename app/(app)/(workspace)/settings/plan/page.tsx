@@ -1,9 +1,10 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
-import UsageSection from './usage';
+import React, { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Icon } from '../../../../../components/icons';
+import type { CreditsPayload } from '../../../../../components/credits';
+import { CREDIT_PRICES } from '../../../../../lib/credits/pricing';
 import { apiPost, friendlyApiError, useApi } from '../../../../../lib/ui/fetcher';
 import { openRazorpayModal } from '../../../../../components/billing/razorpay-checkout';
 import { topupPriceView } from '../../../../../lib/billing/pricing';
@@ -73,48 +74,22 @@ type BillingPayload = {
 
 const TIER_RANK: Record<BillingPayload['currentTier'], number> = { starter: 0, pro: 1, business: 2 };
 
+// "All 6 platforms", not seven: the Reddit adapter ships but its OAuth app
+// isn't provisioned in production, so nobody can connect it. Raise to seven
+// when it is.
 const TIER_PERKS: Record<BillingPayload['currentTier'], string[]> = {
-  starter: [
-    '2,000 credits / month',
-    // SIX, not seven. Connections ships a seventh adapter (Reddit), but
-    // REDDIT_CLIENT_ID/SECRET are unset in production, so /api/oauth/reddit/start
-    // answers platform_not_configured and nobody can actually connect it.
-    // Advertising it would be a promise the product cannot keep. Raise this to
-    // seven when those credentials are provisioned, not before.
-    'All 6 platforms',
-    'Text, image & 720p video',
-    'Manual posting + scheduling',
-    'Email support',
-  ],
-  pro: [
-    '6,000 credits / month',
-    // SIX, not seven. Connections ships a seventh adapter (Reddit), but
-    // REDDIT_CLIENT_ID/SECRET are unset in production, so /api/oauth/reddit/start
-    // answers platform_not_configured and nobody can actually connect it.
-    // Advertising it would be a promise the product cannot keep. Raise this to
-    // seven when those credentials are provisioned, not before.
-    'All 6 platforms',
-    'Autopilot — trend → draft → schedule',
-    'Web research on captions',
-    'Priority email support',
-  ],
-  business: [
-    '25,000 credits / month',
-    // SIX, not seven. Connections ships a seventh adapter (Reddit), but
-    // REDDIT_CLIENT_ID/SECRET are unset in production, so /api/oauth/reddit/start
-    // answers platform_not_configured and nobody can actually connect it.
-    // Advertising it would be a promise the product cannot keep. Raise this to
-    // seven when those credentials are provisioned, not before.
-    'All 6 platforms',
-    '1080p hero clips included',
-    'Autopilot with media generation',
-    'Daily reel guarantee · onboarding call',
-  ],
+  starter: ['2,000 credits / month', 'All 6 platforms', 'Text, image & 720p video', 'Manual posting + scheduling', 'Email support'],
+  pro: ['6,000 credits / month', 'All 6 platforms', 'Autopilot — trend → draft → schedule', 'Web research on captions', 'Priority email support'],
+  business: ['25,000 credits / month', 'All 6 platforms', '1080p hero clips included', 'Autopilot with media generation', 'Daily reel guarantee · onboarding call'],
 };
+
+/** Shown to users whenever checkout can't start because payments aren't configured. */
+const PAYMENTS_DOWN = 'Payments are temporarily unavailable. Please try again shortly.';
+const LEDGER_PREVIEW = 10;
 
 export default function BillingPage() {
   return (
-    <Suspense fallback={<div>Loading…</div>}>
+    <Suspense fallback={null}>
       <BillingPageInner />
     </Suspense>
   );
@@ -122,6 +97,7 @@ export default function BillingPage() {
 
 function BillingPageInner() {
   const { data, mutate } = useApi<BillingPayload>('/api/billing');
+  const { data: credits, isLoading: ledgerLoading } = useApi<CreditsPayload>('/api/credits', { refreshInterval: 30_000 });
   const params = useSearchParams();
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -129,6 +105,9 @@ function BillingPageInner() {
   const [topupBusy, setTopupBusy] = useState(false);
   const [cancelBusy, setCancelBusy] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
+  // null = not touched yet: plans start open only when there's nothing to manage.
+  const [plansOpen, setPlansOpen] = useState<boolean | null>(null);
+  const [showAllLedger, setShowAllLedger] = useState(false);
   const billing = useBillingDetails();
   const [detailsMsg, setDetailsMsg] = useState<string | null>(null);
   const { data: invoiceData } = useApi<{ invoices: InvoiceRow[] }>('/api/billing/invoices');
@@ -143,6 +122,13 @@ function BillingPageInner() {
     if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
     return r.json() as Promise<T>;
   }
+
+  // Operators get the details in the console; users only ever see PAYMENTS_DOWN.
+  useEffect(() => {
+    if (data && !data.billingConfigured) {
+      console.error('[billing] Payment provider is not configured: checkout and top-up are disabled.');
+    }
+  }, [data]);
 
   const cancelSubscription = async () => {
     setCancelBusy(true);
@@ -172,13 +158,9 @@ function BillingPageInner() {
     }
   };
 
-  // Surface checkout return state from query params. We show a one-shot toast
-  // and nudge SWR a few times so the balance updates after the webhook lands.
-  // The previous "Confirming payment…" sticky banner waited for a balance
-  // delta to dismiss, but if the webhook lands BEFORE the user redirects back
-  // (fast network, fast webhook), the first SWR snapshot is already at the
-  // post-payment value — no delta is ever observed and the banner sticks
-  // forever. The one-shot toast sidesteps that entirely.
+  // Checkout return: one-shot toast, then nudge SWR a few times so the balance
+  // updates once the webhook lands. (A sticky "confirming" banner waiting for a
+  // balance delta never cleared when the webhook beat the redirect.)
   useEffect(() => {
     const result = params.get('checkout');
     if (!result) return;
@@ -200,6 +182,13 @@ function BillingPageInner() {
     }
   }, [params, mutate]);
 
+  // ?topup=1 (from the credit meter / out-of-credits banner) opens the top-up sheet.
+  useEffect(() => {
+    if (!params.get('topup') || !data) return;
+    if (data.billingConfigured) setTopupOpen(true);
+    window.history.replaceState(null, '', '/settings/plan');
+  }, [params, data]);
+
   const dispatchHandoff = async (handoff: CheckoutHandoff) => {
     if (handoff.kind === 'redirect') {
       if (typeof window !== 'undefined') {
@@ -220,12 +209,11 @@ function BillingPageInner() {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg.includes('503') || msg.includes('billing_coming_soon')) {
-        setToast('Payments aren\'t configured yet — please try again shortly or contact support.');
+        console.error('[billing] checkout unavailable:', msg);
+        setToast(PAYMENTS_DOWN);
       } else {
         // friendlyApiError turns `Error("<status>: <json>")` into the server's
-        // `hint` sentence (or a generic one). Never interpolate the raw message
-        // — that is what put `500: {"error":"internal",…}` in front of a
-        // paying customer.
+        // `hint` sentence. Never interpolate the raw message.
         setToast(friendlyApiError(e));
       }
     } finally {
@@ -264,10 +252,9 @@ function BillingPageInner() {
       await dispatchHandoff(handoff);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      // 503 billing_coming_soon = Razorpay credentials missing. Don't show the
-      // raw JSON to the user.
       if (msg.includes('503') || msg.includes('billing_coming_soon')) {
-        setToast('Payments aren\'t configured yet — please try again shortly or contact support.');
+        console.error('[billing] top-up unavailable:', msg);
+        setToast(PAYMENTS_DOWN);
       } else {
         setToast(friendlyApiError(e));
       }
@@ -276,9 +263,17 @@ function BillingPageInner() {
     }
   };
 
+  const showInr = async () => {
+    try {
+      await apiPost('/api/billing/preferences', { currency: 'INR' });
+      await mutate();
+    } catch (e) {
+      setToast(`Couldn't switch currency: ${friendlyApiError(e)}`);
+    }
+  };
+
   const cycleEnd = data?.subscriptionCurrentPeriodEnd ? new Date(data.subscriptionCurrentPeriodEnd) : null;
-  // Use a ticking "now" so this stays pure during render and stays accurate
-  // as the page is left open through midnight UTC.
+  // Ticking "now" keeps render pure and accurate through midnight.
   const [now, setNow] = useState<number>(0);
   useEffect(() => {
     setNow(Date.now());
@@ -291,10 +286,9 @@ function BillingPageInner() {
   const pct = data && data.monthlyAllocation > 0
     ? Math.min(100, Math.round((data.balance / data.monthlyAllocation) * 100))
     : 0;
+  const barState = pct <= 5 ? 'crit' : pct <= 15 ? 'warn' : '';
 
-  // Escape closes whichever modal is up, matching the shield modals. The scrim
-  // click below stays exactly as it was; this only adds a second way out. The
-  // cancel dialog honours the same in-flight guard its scrim does.
+  // Escape closes whichever modal is up; the cancel dialog honours its in-flight guard.
   useEffect(() => {
     if (!topupOpen && !cancelOpen) return;
     const onKey = (e: KeyboardEvent) => {
@@ -306,352 +300,286 @@ function BillingPageInner() {
     return () => window.removeEventListener('keydown', onKey);
   }, [topupOpen, cancelOpen, cancelBusy]);
 
-  return (
-    <>
-          {toast && (
-            <div style={{
-              padding: '10px 14px',
-              background: 'var(--accent-soft)',
-              border: '1px solid oklch(0.86 0.08 70)',
-              borderRadius: 10,
-              marginBottom: 16,
-              fontSize: 13,
-              color: 'var(--accent-ink)',
-            }}>{toast}</div>
-          )}
+  const active = !!data?.hasActiveSubscription;
+  const currentTier = data?.tiers.find((t) => t.isCurrent);
+  const showPlans = plansOpen ?? (!!data && !active);
+  const ledger = credits?.ledger ?? [];
+  const visibleLedger = showAllLedger ? ledger : ledger.slice(0, LEDGER_PREVIEW);
+  const invoices = invoiceData?.invoices ?? [];
 
-          {data && !data.billingConfigured && (
-            <div className="insufficient-credits-banner" style={{ background: '#fff8eb', borderColor: '#f0d68a' }}>
-              <div className="icon" style={{ background: '#fbe9c8', color: '#6b4408' }}>!</div>
-              <div className="copy">
-                <strong>Razorpay isn&apos;t configured yet.</strong>
-                <span className="muted"> Add RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, RAZORPAY_WEBHOOK_SECRET, and the three RAZORPAY_PLAN_* env vars to .env.local. Until then, upgrades just show this page.</span>
+  return (
+    <div className="plan-page">
+      {toast && <div className="set-notice" role="status">{toast}</div>}
+
+      <section className="card plan-balance" aria-label="Credit balance">
+        <div className="plan-balance-top">
+          <div>
+            <div className="plan-label">Credits</div>
+            <div className="plan-big mono">{data ? data.balance.toLocaleString() : '—'}</div>
+            <div className="plan-sub">
+              {active
+                ? <>of {data!.monthlyAllocation.toLocaleString()} this cycle
+                    {daysLeft !== null && <> · {daysLeft === 0 ? 'renews today' : daysLeft === 1 ? 'renews tomorrow' : `renews in ${daysLeft} days`}</>}
+                  </>
+                : data ? 'No active plan' : ' '}
+            </div>
+          </div>
+          <button className={active ? "btn primary" : "btn"} onClick={() => setTopupOpen(true)} disabled={!data?.billingConfigured}>
+            <Icon name="plus" size={14} /> Top up
+          </button>
+        </div>
+        {active && (
+          <div className={`meter-bar ${barState}`} role="presentation">
+            <div className="fill" style={{ width: `${pct}%` }} />
+          </div>
+        )}
+        {data && !data.billingConfigured && <p className="plan-note">{PAYMENTS_DOWN}</p>}
+      </section>
+
+      <section className="card" aria-labelledby="plan-head">
+        <div className="card-head">
+          <h3 id="plan-head">Plan</h3>
+          <button className="btn sm" onClick={() => setPlansOpen(!showPlans)} aria-expanded={showPlans}>
+            {showPlans ? 'Hide plans' : 'Change plan'}
+          </button>
+        </div>
+        <div className="card-body">
+          <div className="plan-current">
+            {active && currentTier ? (
+              <div>
+                <div className="plan-current-name">{currentTier.label}</div>
+                <div className="plan-sub">{currentTier.chargeMonthly} / month</div>
               </div>
+            ) : (
+              <div className="plan-sub">{data ? 'Choose a plan to start posting.' : ' '}</div>
+            )}
+            {data?.subscriptionStatus && data.subscriptionStatus !== 'active' && (
+              <span className="badge badge--warn">{data.subscriptionStatus.replace(/_/g, ' ')}</span>
+            )}
+          </div>
+          {data?.pendingTierChange && (
+            <div className="plan-pending">
+              <span>
+                Switches to {data.pendingTierChange.toTier} on{' '}
+                {data.pendingTierChange.at ? new Date(data.pendingTierChange.at).toLocaleDateString() : 'cycle end'}.
+                Current credits stay usable until then.
+              </span>
+              <button className="btn sm" onClick={clearPendingDowngrade} disabled={busy === 'clear-pending'}>
+                {busy === 'clear-pending' ? 'Working…' : 'Cancel switch'}
+              </button>
             </div>
           )}
+        </div>
 
-          <div className="billing-page">
-            <section className="billing-current">
-              <div className="tier-pill">{data?.currentTierLabel ?? '—'}</div>
-              <div className="billing-balance-row">
-                <div>
-                  <div className="big-num mono">{data?.balance?.toLocaleString() ?? '—'}</div>
-                  <div className="muted-line">
-                    {data?.hasActiveSubscription
-                      ? `credits remaining of ${data.monthlyAllocation.toLocaleString()}`
-                      : 'credits · subscribe to a plan or top up'}
-                  </div>
+        {showPlans && (
+          <div className="plan-grid">
+            {(data?.tiers ?? []).map((t) => (
+              <div key={t.tier} className={`plan-tier ${t.isCurrent ? 'current' : ''}`}>
+                <div className="plan-tier-name">
+                  {t.label}
+                  {t.isCurrent && <span className="badge">Current</span>}
                 </div>
-                <div className="billing-meta mono">
-                  {data?.hasActiveSubscription ? (
-                    <>
-                      <div>Status · {data.subscriptionStatus}</div>
-                      {/* Same as /usage: "Renews in 0d" reads broken, not "today". */}
-                      {daysLeft !== null && (
-                        <div>{daysLeft === 0 ? 'Renews today' : daysLeft === 1 ? 'Renews tomorrow' : `Renews in ${daysLeft} days`}</div>
-                      )}
-                    </>
-                  ) : (
-                    <div>No active subscription</div>
-                  )}
-                </div>
-              </div>
-              <div style={{ marginTop: 12 }}>
-                <button className="btn primary" onClick={() => setTopupOpen(true)} disabled={!data?.billingConfigured}>
-                  <span aria-hidden style={{ marginRight: 4 }}>+</span> Top up credits
-                </button>
-              </div>
-              {data?.hasActiveSubscription && (
-                <div className="billing-bar">
-                  <div className="fill" style={{ width: `${pct}%` }} />
-                </div>
-              )}
-              <div className="billing-perks">
-                {data?.hasActiveSubscription && TIER_PERKS[data.currentTier].map((perk) => (
-                  <div key={perk} className="perk">
-                    <Icon name="check" size={12} /> {perk}
-                  </div>
-                ))}
-              </div>
-              {data?.hasActiveSubscription && (
-                <div style={{ marginTop: 12 }}>
-                  <button className="btn ghost" onClick={() => setCancelOpen(true)} disabled={cancelBusy}>
-                    {cancelBusy ? 'Canceling…' : 'Cancel subscription'}
+                <div className="plan-tier-price">{t.priceMonthly}<span className="per"> / month</span></div>
+                {/* The customer must see the currency they'll actually be charged before subscribing. */}
+                {t.priceApproximate && (
+                  <div className="plan-tier-charge">Billed as {t.chargeMonthly} / month in INR</div>
+                )}
+                <ul>
+                  {TIER_PERKS[t.tier].map((perk) => <li key={perk}>{perk}</li>)}
+                </ul>
+                {t.isCurrent ? (
+                  <button className="btn" disabled>Current plan</button>
+                ) : !data?.subscriptionsAvailable ? (
+                  <button className="btn" disabled title="Monthly plans aren't live yet. Top up credits for now.">
+                    Coming soon — monthly plans
                   </button>
-                </div>
-              )}
-            </section>
-
-            {data?.pendingTierChange && (
-              <div className="insufficient-credits-banner" style={{ background: '#eef6ff', borderColor: '#bcd4f0' }}>
-                <div className="icon" style={{ background: '#cfe3fb', color: '#264b7a' }}>i</div>
-                <div className="copy" style={{ flex: 1 }}>
-                  <strong>Switches to {data.pendingTierChange.toTier} on {data.pendingTierChange.at ? new Date(data.pendingTierChange.at).toLocaleDateString() : 'cycle end'}.</strong>
-                  <span className="muted"> Credits from your current tier remain usable until then.</span>
-                </div>
-                <button className="btn ghost" onClick={clearPendingDowngrade} disabled={busy === 'clear-pending'}>
-                  {busy === 'clear-pending' ? '…' : 'Cancel switch'}
-                </button>
-              </div>
-            )}
-
-            {data && data.canSwitchProvider && (
-              <div className="billing-currency-banner" style={{
-                padding: '10px 14px',
-                background: 'var(--accent-soft)',
-                border: '1px solid var(--border)',
-                borderRadius: 10,
-                marginBottom: 16,
-                fontSize: 13,
-              }}>
-                {data.currency === 'INR' ? (
-                  <>Pay in <strong>₹ INR via Razorpay</strong> · GST invoice.</>
+                ) : data?.hasActiveSubscription ? (
+                  <button className="btn" onClick={() => changeTier(t.tier)} disabled={busy === t.tier}>
+                    {busy === t.tier ? 'Working…' :
+                      TIER_RANK[t.tier] > TIER_RANK[data!.currentTier]
+                        ? `Upgrade to ${t.label}`
+                        : `Downgrade to ${t.label}`}
+                  </button>
                 ) : (
-                  <>All plans are <strong>charged in ₹ INR via Razorpay</strong> — your card is billed in
-                    rupees and your bank converts at its own rate. Dollar figures below are approximate.{' '}
-                    <button
-                      className="btn ghost"
-                      style={{ marginLeft: 8 }}
-                      onClick={async () => {
-                        try {
-                          await apiPost('/api/billing/preferences', { currency: 'INR' });
-                          await mutate();
-                        } catch (e) {
-                          setToast(`Couldn't switch currency: ${e instanceof Error ? e.message : String(e)}`);
-                        }
-                      }}
-                    >Show ₹ prices</button>
-                  </>
+                  <button className="btn" onClick={() => startCheckout(t.tier)} disabled={busy === t.tier}>
+                    {busy === t.tier
+                      ? 'Redirecting…'
+                      // Currency in the label: no one pays in rupees without reading "INR" first.
+                      : t.priceApproximate
+                        ? `Subscribe — ${t.chargeMonthly}/mo INR`
+                        : `Subscribe to ${t.label}`}
+                  </button>
                 )}
               </div>
-            )}
-            {data && !data.canSwitchProvider && (
-              <div className="billing-currency-banner" style={{
-                padding: '10px 14px',
-                background: 'transparent',
-                borderRadius: 10,
-                marginBottom: 16,
-                fontSize: 12,
-                color: 'var(--muted)',
-              }}>
-                Billing in <strong>₹ INR via Razorpay</strong>
-                {data.currency === 'INR' ? null : ' · dollar figures are approximate'}
-              </div>
-            )}
-
-            <section className="billing-tiers" id="billing-plans">
-              <h2 className="billing-section-head">Switch plan</h2>
-              <div className="billing-tier-grid">
-                {(data?.tiers ?? []).map((t) => (
-                  <div key={t.tier} className={`billing-tier-card ${t.isCurrent ? 'current' : ''}`}>
-                    {t.isCurrent && <div className="current-badge mono">Current</div>}
-                    <div className="tier-label">{t.label}</div>
-                    <div className="tier-price">{t.priceMonthly}<span className="per">/mo</span></div>
-                    {/* The customer must see the currency they'll actually be
-                        charged before clicking Subscribe — not in a footnote. */}
-                    {t.priceApproximate && (
-                      <div className="mono" style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: -4 }}>
-                        billed as <strong>{t.chargeMonthly}/mo</strong> in ₹ INR
-                      </div>
-                    )}
-                    <ul className="tier-perks">
-                      {TIER_PERKS[t.tier].map((perk) => (
-                        <li key={perk}>{perk}</li>
-                      ))}
-                    </ul>
-                    {t.isCurrent ? (
-                      <button className="btn" disabled style={{ width: '100%', justifyContent: 'center' }}>
-                        <Icon name="check" size={12} /> Current plan
-                      </button>
-                    ) : !data?.subscriptionsAvailable ? (
-                      <button
-                        className="btn ghost"
-                        disabled
-                        title="Monthly subscriptions aren't live yet. Use Top up credits for now."
-                        style={{ width: '100%', justifyContent: 'center', cursor: 'not-allowed', fontStyle: 'italic', color: 'var(--muted)' }}
-                      >
-                        <Icon name="lock" size={12} /> Coming soon — monthly plans
-                      </button>
-                    ) : data?.hasActiveSubscription ? (
-                      <button
-                        className="btn primary"
-                        style={{ width: '100%', justifyContent: 'center' }}
-                        onClick={() => changeTier(t.tier)}
-                        disabled={busy === t.tier}
-                      >
-                        {busy === t.tier ? 'Working…' :
-                          TIER_RANK[t.tier] > TIER_RANK[data!.currentTier]
-                            ? `Upgrade to ${t.label}`
-                            : `Downgrade to ${t.label}`}
-                      </button>
-                    ) : (
-                      <button
-                        className="btn primary"
-                        style={{ width: '100%', justifyContent: 'center' }}
-                        onClick={() => startCheckout(t.tier)}
-                        disabled={busy === t.tier}
-                      >
-                        {busy === t.tier
-                          ? 'Redirecting…'
-                          // Currency in the button label itself: no one can pay
-                          // in rupees without having read the word "INR" first.
-                          : t.priceApproximate
-                            ? `Subscribe — ${t.chargeMonthly}/mo INR`
-                            : `Subscribe to ${t.label}`}
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            <section className="billing-tiers" id="billing-details">
-              <h2 className="billing-section-head">Invoicing details</h2>
-              <p className="muted" style={{ fontSize: 13, marginTop: 0, maxWidth: 620, lineHeight: 1.55 }}>
-                Every payment raises a GST invoice in your business&apos;s name and emails it to you.
-                Add your GSTIN to get a B2B tax invoice you can claim input credit on — invoices already
-                raised can&apos;t be amended, so enter it before your next charge.
-              </p>
-              <div style={{ maxWidth: 620 }}>
-                <BillingDetailsFields value={billing.value} set={billing.set} setAddress={billing.setAddress} />
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
-                  <button className="btn primary" onClick={saveDetails} disabled={billing.saving || !billing.loaded}>
-                    {billing.saving ? 'Saving…' : 'Save invoicing details'}
-                  </button>
-                  {detailsMsg && (
-                    <span style={{ fontSize: 12, color: billing.validate() ? 'var(--bad)' : 'var(--ink-3)' }}>{detailsMsg}</span>
-                  )}
-                </div>
-              </div>
-            </section>
-
-            <section className="billing-tiers" id="billing-invoices">
-              <h2 className="billing-section-head">Invoices</h2>
-              {!invoiceData?.invoices.length ? (
-                <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
-                  No invoices yet. One is raised automatically for every payment.
-                </p>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {invoiceData.invoices.map((inv) => (
-                    <div
-                      key={inv.id}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
-                        padding: '12px 14px', border: '1px solid var(--line)',
-                        borderRadius: 10, background: 'var(--bg-elev)', fontSize: 13,
-                      }}
-                    >
-                      <span className="mono" style={{ color: 'var(--ink-3)', minWidth: 92 }}>
-                        {new Date(inv.createdAt).toLocaleDateString()}
-                      </span>
-                      <span style={{ flex: 1, minWidth: 180 }}>
-                        {inv.description ?? inv.kind}
-                        {inv.number && <span className="mono" style={{ color: 'var(--ink-4)' }}> · {inv.number}</span>}
-                      </span>
-                      <span className="mono" title={`incl. ${rupees(inv.taxMinor)} GST @ ${inv.taxRatePct}%`}>
-                        {rupees(inv.grossMinor)}
-                      </span>
-                      {inv.url ? (
-                        <a className="btn ghost" href={inv.url} target="_blank" rel="noreferrer">Download</a>
-                      ) : (
-                        // Money moved and credits landed; only the document is late.
-                        <span className="mono" style={{ fontSize: 11, color: 'var(--ink-4)' }}>
-                          {inv.status === 'failed' ? 'Retrying…' : 'Preparing…'}
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-
-            <section className="billing-footnote mono">
-              All charges are in ₹ INR, handled by Razorpay. Cancel anytime — credits remain usable until your renewal date.
-              {data?.currency === 'INR' ? null : <> Dollar amounts are an approximate guide only; your card is billed in rupees and your bank applies its own conversion rate and any foreign-transaction fee.</>}
-              {' '}See our <a href="/legal/refund">Refund &amp; Cancellation Policy</a>.
-              <br />
-              Sociafy is a product of GNIX SEMICONDUCTORS PRIVATE LIMITED.
-              <br />
-              2TF, Satyam Complex 2, Sector Alpha II, Greater Noida, Uttar Pradesh 201310, India
-            </section>
+            ))}
           </div>
-          <UsageSection />
-      {topupOpen && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          className="modal-scrim"
-          onClick={() => setTopupOpen(false)}
-        >
-          <div
-            className="modal-sheet"
-            onClick={(e) => e.stopPropagation()}
-            style={{ width: 'min(420px, 92vw)' }}
-          >
-            <h3 style={{ marginTop: 0 }}>Top up credits</h3>
-            <p className="muted" style={{ fontSize: 13 }}>
-              {topupPriceView(data?.currency ?? 'INR').display} / 1,000 credits. Charged once
-              {data?.currency === 'INR' ? '' : ' in ₹ INR via Razorpay — dollar figures are approximate'}.
+        )}
+        {data && (
+          <div className="plan-currency">
+            {data.currency === 'INR'
+              ? 'Charged in ₹ INR with a GST invoice.'
+              : 'Charged in ₹ INR. Dollar figures are approximate; your bank sets the conversion rate.'}
+            {data.canSwitchProvider && data.currency !== 'INR' && (
+              <button className="set-link" onClick={showInr}>Show ₹ prices</button>
+            )}
+          </div>
+        )}
+      </section>
+
+      <section className="card" aria-labelledby="activity-head">
+        <div className="card-head"><h3 id="activity-head">Credit activity</h3></div>
+        <div className="plan-rows">
+          {ledgerLoading && <div className="plan-empty">Loading…</div>}
+          {!ledgerLoading && ledger.length === 0 && (
+            <div className="plan-empty">No credit activity yet.</div>
+          )}
+          {visibleLedger.map((row) => <LedgerRow key={row.id} row={row} />)}
+        </div>
+        <div className="plan-card-foot">
+          <span>
+            {/* Read off the charge table, never retyped. */}
+            Text {CREDIT_PRICES.text_post} · image {CREDIT_PRICES.image_medium_1024} · 720p reel {CREDIT_PRICES.video_8s_720p_quality}
+            {' '}· 1080p hero {CREDIT_PRICES.video_15s_1080p_quality} credits. Failed generations refund automatically.
+          </span>
+          {ledger.length > LEDGER_PREVIEW && (
+            <button className="set-link" onClick={() => setShowAllLedger((v) => !v)}>
+              {showAllLedger ? 'Show less' : `Show all ${ledger.length}`}
+            </button>
+          )}
+        </div>
+      </section>
+
+      <section className="card" aria-labelledby="invoices-head">
+        <div className="card-head"><h3 id="invoices-head">Invoices</h3></div>
+        <div className="plan-rows">
+          {invoices.length === 0 ? (
+            <div className="plan-empty">No invoices yet. One is issued for every payment.</div>
+          ) : invoices.map((inv) => (
+            <div key={inv.id} className="plan-row">
+              <div className="plan-row-main">
+                <div>{inv.description ?? inv.kind}</div>
+                <div className="plan-row-meta">
+                  {new Date(inv.createdAt).toLocaleDateString()}{inv.number && <> · {inv.number}</>}
+                </div>
+              </div>
+              <span className="num" title={`incl. ${rupees(inv.taxMinor)} GST @ ${inv.taxRatePct}%`}>{rupees(inv.grossMinor)}</span>
+              {inv.url ? (
+                <a className="btn ghost sm" href={inv.url} target="_blank" rel="noreferrer">Download</a>
+              ) : (
+                // Money moved and credits landed; only the document is late.
+                <span className="plan-row-when">{inv.status === 'failed' ? 'Retrying…' : 'Preparing…'}</span>
+              )}
+            </div>
+          ))}
+        </div>
+        <details className="plan-details">
+          <summary>Invoice details — legal name, GSTIN, address</summary>
+          <div className="plan-details-body">
+            <p className="set-hint">
+              Add your GSTIN before your next charge to get a B2B tax invoice. Issued invoices can&apos;t be amended.
             </p>
-            <div style={{ display: 'grid', gap: 8 }}>
+            <BillingDetailsFields value={billing.value} set={billing.set} setAddress={billing.setAddress} />
+            <div className="set-actions">
+              <button className="btn primary" onClick={saveDetails} disabled={billing.saving || !billing.loaded}>
+                {billing.saving ? 'Saving…' : 'Save details'}
+              </button>
+              {detailsMsg && (
+                <span className={billing.validate() ? 'set-hint err' : 'set-hint'}>{detailsMsg}</span>
+              )}
+            </div>
+          </div>
+        </details>
+      </section>
+
+      <footer className="plan-foot">
+        <span>
+          Charges are in ₹ INR. Credits stay usable until your renewal date if you cancel.
+          {' '}<a href="/legal/refund">Refund &amp; cancellation policy</a>.
+        </span>
+        <span>Sociafy is a product of GNIX SEMICONDUCTORS PRIVATE LIMITED, 2TF, Satyam Complex 2, Sector Alpha II, Greater Noida, Uttar Pradesh 201310, India.</span>
+        {active && (
+          <button className="set-link" onClick={() => setCancelOpen(true)} disabled={cancelBusy}>
+            {cancelBusy ? 'Canceling…' : 'Cancel subscription'}
+          </button>
+        )}
+      </footer>
+
+      {topupOpen && (
+        <div role="dialog" aria-modal="true" aria-labelledby="topup-head" className="modal-scrim" onClick={() => setTopupOpen(false)}>
+          <div className="modal-sheet plan-modal" onClick={(e) => e.stopPropagation()}>
+            <h3 id="topup-head">Top up credits</h3>
+            <p>
+              {topupPriceView(data?.currency ?? 'INR').display} per 1,000 credits, charged once
+              {data?.currency === 'INR' ? '' : ' in ₹ INR (dollar figures are approximate)'}.
+            </p>
+            <div className="stack">
               {[1000, 2000, 5000].map((n) => {
                 const v = topupPriceView(data?.currency ?? 'INR', n);
                 return (
-                  <button
-                    key={n}
-                    className="btn primary"
-                    style={{ justifyContent: 'space-between' }}
-                    onClick={() => buyTopUp(n)}
-                    disabled={topupBusy}
-                  >
+                  <button key={n} className="btn" onClick={() => buyTopUp(n)} disabled={topupBusy}>
                     <span>{n.toLocaleString()} credits</span>
-                    {/* Approximate figure never stands alone next to a pay action. */}
+                    {/* An approximate figure never stands alone next to a pay action. */}
                     <span className="mono">{v.approximate ? `${v.display} · ${v.charge}` : v.charge}</span>
                   </button>
                 );
               })}
             </div>
-            <button className="btn ghost" style={{ marginTop: 12, width: '100%' }} onClick={() => setTopupOpen(false)}>
-              Cancel
-            </button>
+            <div className="plan-modal-actions">
+              <button className="btn ghost" onClick={() => setTopupOpen(false)}>Cancel</button>
+            </div>
           </div>
         </div>
       )}
       {cancelOpen && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          className="modal-scrim"
-          onClick={() => { if (!cancelBusy) setCancelOpen(false); }}
-        >
-          <div
-            className="modal-sheet"
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              width: 'min(420px, 92vw)', boxShadow: '0 20px 60px rgba(0,0,0,.3)',
-            }}
-          >
-            <h3 style={{ marginTop: 0 }}>Cancel subscription?</h3>
-            <p className="muted" style={{ fontSize: 13, lineHeight: 1.55 }}>
-              Your subscription stays active until {cycleEnd ? cycleEnd.toLocaleDateString() : 'your renewal date'}, and your remaining credits stay usable until then. After that it won&apos;t renew and autopilot features turn off. You can resubscribe anytime.
+        <div role="dialog" aria-modal="true" aria-labelledby="cancel-head" className="modal-scrim" onClick={() => { if (!cancelBusy) setCancelOpen(false); }}>
+          <div className="modal-sheet plan-modal" onClick={(e) => e.stopPropagation()}>
+            <h3 id="cancel-head">Cancel subscription?</h3>
+            <p>
+              Your plan stays active until {cycleEnd ? cycleEnd.toLocaleDateString() : 'your renewal date'} and your
+              credits stay usable until then. After that it won&apos;t renew and autopilot stops. You can resubscribe anytime.
             </p>
-            <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-              <button className="btn ghost" style={{ flex: 1, justifyContent: 'center' }} onClick={() => setCancelOpen(false)} disabled={cancelBusy}>
-                Keep subscription
+            <div className="plan-modal-actions">
+              <button className="btn ghost" onClick={() => setCancelOpen(false)} disabled={cancelBusy}>
+                Keep plan
               </button>
-              <button
-                className="btn"
-                style={{ flex: 1, justifyContent: 'center', background: 'var(--bad)', borderColor: 'var(--bad)', color: 'white' }}
-                onClick={cancelSubscription}
-                disabled={cancelBusy}
-              >
+              <button className="btn danger" onClick={cancelSubscription} disabled={cancelBusy}>
                 {cancelBusy ? 'Canceling…' : 'Cancel subscription'}
               </button>
             </div>
           </div>
         </div>
       )}
-    </>
+    </div>
   );
+}
+
+const LedgerRow: React.FC<{ row: CreditsPayload['ledger'][number] }> = ({ row }) => {
+  const meta = (row.meta ?? {}) as Record<string, unknown>;
+  const metaLine = [
+    meta.providerTaskId ? `task ${String(meta.providerTaskId).slice(0, 8)}…` : null,
+    meta.draftId ? `draft ${String(meta.draftId).slice(0, 8)}…` : null,
+    meta.reason ? String(meta.reason) : null,
+    row.kind === 'signup_bonus' ? 'welcome bonus' : null,
+    row.kind === 'refund' ? 'refund' : null,
+  ].filter(Boolean).join(' · ');
+  return (
+    <div className="plan-row">
+      <div className="plan-row-main">
+        <div>{row.label}</div>
+        {metaLine && <div className="plan-row-meta">{metaLine}</div>}
+      </div>
+      <span className={`num ${row.credits > 0 ? 'pos' : ''}`}>
+        {row.credits > 0 ? '+' : ''}{row.credits.toLocaleString()}
+      </span>
+      <span className="plan-row-when">{relTime(row.createdAt)}</span>
+    </div>
+  );
+};
+
+function relTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  if (diff < 60_000) return 'just now';
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }

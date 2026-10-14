@@ -29,7 +29,7 @@ export default function Page() {
         ['How long should an Instagram caption be?', 'Instagram allows 2,200 characters, but only the first line or two show before "more". Our captions front-load the hook and stay short, 1 to 4 lines, which works best for most posts.'],
         ['Does it add hashtags?', 'No, captions come without hashtags so they read cleanly. Use our free hashtag generator to get a set of broad, mid-size and niche tags for the same post.'],
         ['Can I use these captions for Reels and carousels?', 'Yes. Mention the format in your description ("Reel", "carousel") and the captions will fit it, for example pointing people to swipe or watch to the end.'],
-        ['Can it write captions in my own voice?', 'This free tool writes good general captions. A free Sociafy account learns your voice from your past posts and writes, schedules and posts captions for you every day.'],
+        ['Can it write captions in my own voice?', 'This free tool writes good general captions. A Sociafy account learns your voice from your past posts and writes, schedules and posts captions for you every day.'],
       ]}
     />
   );

@@ -1,297 +1,213 @@
 /* App shell: sidebar, topbar, drawer, page container. */
-/* ========== App shell ========== */
 .app {
   display: grid;
-  grid-template-columns: 232px 1fr;
+  grid-template-columns: 220px 1fr;
   height: 100vh;
   width: 100vw;
   overflow: hidden;
   background: var(--bg);
 }
 
-/* Sidebar */
+/* ---------- Sidebar ---------- */
 .sidebar {
   background: var(--bg);
   border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
-  padding: 18px 14px 14px;
-  gap: 18px;
+  padding: var(--s-4) var(--s-3) var(--s-3);
+  gap: var(--s-6);
 }
 .brand {
   display: flex; align-items: center; gap: 10px;
   padding: 6px 8px;
+  color: inherit;
+  text-decoration: none;
 }
 .brand-mark {
   width: 26px; height: 26px;
   border-radius: 7px;
-  background: var(--ink);
+  background: var(--text);
   color: var(--bg);
   display: grid; place-items: center;
   font-weight: 600; font-size: var(--fs-sm);
   letter-spacing: -0.02em;
   position: relative;
 }
-.brand-name {
-  font-weight: 600; letter-spacing: -0.02em; font-size: var(--fs-md);
-}
+.brand-name { font-weight: 600; letter-spacing: -0.02em; font-size: var(--fs-md); }
 .brand-name .dot { color: var(--accent); }
 
-.nav-section {
-  display: flex; flex-direction: column; gap: 1px;
-}
-.nav-label {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--ink-4);
-  padding: 4px 8px 6px;
-  font-weight: 500;
-}
+.nav-section { display: flex; flex-direction: column; gap: 2px; }
 .nav-item {
   display: flex; align-items: center; gap: 10px;
   padding: 7px 8px;
   border-radius: var(--r-sm);
-  color: var(--ink-2);
+  color: var(--text-2);
   font-size: var(--fs-sm);
-  font-weight: 400;
-  transition: background 0.12s;
-  position: relative;
-  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.12s, color 0.12s;
 }
-@media (hover: hover) and (pointer: fine) { .nav-item:hover { background: var(--bg-sunk); } }
-.nav-item.active {
-  background: var(--bg-elev);
-  color: var(--ink);
-  font-weight: 500;
-  box-shadow: var(--shadow-1);
-}
-.nav-item .ic { width: 16px; height: 16px; flex: 0 0 16px; opacity: 0.8; }
-.nav-item.active .ic { opacity: 1; color: var(--accent); }
-.nav-item .badge {
-  margin-left: auto;
-  font-family: var(--mono);
-  font-size: 10px;
-  background: var(--ink);
-  color: var(--bg);
-  padding: 1px 5px;
-  border-radius: 4px;
-}
-.nav-item .badge.accent { background: var(--accent); color: white; }
-.nav-item .kbd {
-  margin-left: auto;
-  font-family: var(--mono);
-  font-size: 10px;
-  color: var(--ink-4);
-}
+@media (hover: hover) and (pointer: fine) { .nav-item:hover { background: var(--subtle); color: var(--text); } }
+.nav-item.active { background: var(--subtle); color: var(--text); font-weight: 500; }
+.nav-item .ic { width: 16px; height: 16px; flex: 0 0 16px; }
+.nav-item.active .ic { color: var(--accent); }
 
 .sidebar-foot {
   margin-top: auto;
-  display: flex; flex-direction: column; gap: 10px;
-}
-.tts-card {
-  border: 1px dashed var(--line-2);
-  border-radius: var(--r);
-  padding: 12px;
-  background: var(--bg-elev);
-  position: relative;
-}
-.tts-card .pill {
-  display: inline-block;
-  font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  background: var(--ink);
-  color: var(--bg);
-  padding: 2px 6px;
-  border-radius: 3px;
-  margin-bottom: 8px;
-}
-.tts-card h4 {
-  margin: 0 0 4px;
-  font-size: var(--fs-sm); font-weight: 600;
-  letter-spacing: -0.01em;
-}
-.tts-card p {
-  margin: 0;
-  font-size: var(--fs-xs);
-  color: var(--ink-3);
-  line-height: 1.45;
-}
-.tts-card .wave {
-  display: flex; gap: 2px; align-items: flex-end;
-  height: 14px; margin-top: 8px;
-}
-.tts-card .wave span {
-  display: block; width: 2px; background: var(--accent);
-  border-radius: 1px; opacity: 0.6;
+  display: flex; flex-direction: column; gap: 2px;
 }
 
 .user-card {
   display: flex; align-items: center; gap: 10px;
-  padding: 8px;
-  border-radius: var(--r);
-  border: 1px solid var(--line);
+  padding: 6px 8px;
+  margin-top: var(--s-2);
+  border-radius: var(--r-sm);
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
 }
+@media (hover: hover) and (pointer: fine) { .user-card:hover { background: var(--subtle); } }
 .user-avatar {
   width: 28px; height: 28px;
   border-radius: 50%;
-  background: var(--text);
-  color: white;
+  background: var(--subtle);
+  color: var(--text-2);
   display: grid; place-items: center;
-  font-size: 11px; font-weight: 600;
+  font-size: var(--fs-xs); font-weight: 600;
 }
-.user-meta { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
-.user-name { font-size: var(--fs-sm); font-weight: 500; }
-.user-plan { font-size: 11px; color: var(--ink-3); font-family: var(--mono); }
+.user-meta { display: flex; flex-direction: column; line-height: 1.3; min-width: 0; }
+.user-name {
+  font-size: var(--fs-sm); font-weight: 500;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.user-plan { font-size: var(--fs-xs); color: var(--text-2); }
 
-/* Main area */
-.main {
-  display: flex; flex-direction: column;
-  overflow: hidden;
-}
+/* ---------- Main + topbar ---------- */
+.main { display: flex; flex-direction: column; overflow: hidden; }
 .topbar {
   height: 52px;
   border-bottom: 1px solid var(--line);
   display: flex; align-items: center;
-  padding: 0 24px;
-  gap: 16px;
+  padding: 0 var(--s-6);
+  gap: var(--s-4);
   background: var(--bg);
   flex-shrink: 0;
 }
-.crumbs {
-  display: flex; align-items: center; gap: 8px;
-  font-size: var(--fs-sm);
-}
-.crumbs .sep { color: var(--ink-4); }
-.crumbs .leaf { font-weight: 500; }
-
 .topbar-spacer { flex: 1; }
-.topbar-actions { display: flex; align-items: center; gap: 8px; }
+.topbar-actions { display: flex; align-items: center; gap: var(--s-2); }
 
-.search {
-  display: flex; align-items: center; gap: 8px;
-  border: 1px solid var(--line);
-  background: var(--bg-elev);
+/* Autopilot status: plain text with a status dot, no chrome until hover. */
+.shell-pill {
+  display: inline-flex; align-items: center; gap: var(--s-2);
+  height: 30px;
+  padding: 0 10px;
   border-radius: var(--r-sm);
-  padding: 5px 10px;
-  width: 280px;
-  color: var(--ink-3);
-  font-size: var(--fs-sm);
-  cursor: text;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  cursor: pointer;
 }
-.search .kbd {
-  margin-left: auto;
-  font-family: var(--mono);
-  font-size: 10px;
-  background: var(--bg-sunk);
+@media (hover: hover) and (pointer: fine) { .shell-pill:hover { background: var(--subtle); color: var(--text); } }
+.shell-pill .dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--text-3);
+}
+.shell-pill.on .dot { background: var(--ok); }
+.shell-pill.blocked { color: var(--warn-ink); }
+.shell-pill.blocked .dot { background: var(--warn); }
+
+/* Bell */
+.shell-pop-anchor { position: relative; }
+.shell-bell { position: relative; }
+.shell-bell .unread {
+  position: absolute; top: 5px; right: 6px;
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent);
+}
+.shell-pop {
+  position: absolute; top: calc(100% + 8px); right: 0;
+  width: min(360px, calc(100vw - 24px));
+  max-height: 480px; overflow: auto;
+  background: var(--surface);
   border: 1px solid var(--line);
-  padding: 1px 4px;
-  border-radius: 3px;
-  color: var(--ink-3);
+  border-radius: var(--r);
+  box-shadow: var(--shadow-pop);
+  z-index: 60;
 }
+.shell-pop-head {
+  padding: var(--s-3) var(--s-4);
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-sm); font-weight: 600;
+}
+.shell-pop-empty { padding: var(--s-4); font-size: var(--fs-sm); color: var(--text-2); }
+.shell-pop-item { padding: 10px var(--s-4); border-bottom: 1px solid var(--line); }
+.shell-pop-item:last-child { border-bottom: none; }
+.shell-pop-title { font-size: var(--fs-sm); font-weight: 500; line-height: 1.4; }
+.shell-pop-body {
+  font-size: var(--fs-xs); color: var(--text-2); margin-top: 2px; line-height: 1.4;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.shell-pop-time { font-size: var(--fs-xs); color: var(--text-3); margin-top: var(--s-1); }
 
 /* Page content */
 .page {
   flex: 1;
   overflow: auto;
-  padding: 28px 32px 80px;
+  padding: 28px var(--s-8) 80px;
 }
 
-/* ===================================================================
-   Mobile drawer infrastructure — desktop hides these, mobile shows them
-   =================================================================== */
+/* ---------- Mobile drawer (desktop hides these) ---------- */
 .topbar-menu-btn {
   display: none;
-  width: 36px;
-  height: 36px;
+  width: 36px; height: 36px;
   border-radius: var(--r-sm);
-  align-items: center;
-  justify-content: center;
-  color: var(--ink-2);
+  align-items: center; justify-content: center;
+  color: var(--text-2);
   cursor: pointer;
   margin-right: -4px;
   flex-shrink: 0;
 }
-@media (hover: hover) and (pointer: fine) { .topbar-menu-btn:hover { background: var(--bg-sunk); color: var(--ink); } }
-.sidebar-scrim {
-  display: none;
-}
+@media (hover: hover) and (pointer: fine) { .topbar-menu-btn:hover { background: var(--subtle); color: var(--text); } }
+.sidebar-scrim { display: none; }
 
 @media (max-width: 900px) {
-  /* App shell: collapse sidebar into a drawer; main becomes the only column. */
-  .app {
-    grid-template-columns: 1fr;
-    height: 100dvh;
-  }
+  .app { grid-template-columns: 1fr; height: 100dvh; }
   .sidebar {
     position: fixed;
     inset: 0 auto 0 0;
     width: min(280px, 84vw);
     z-index: 90;
-    background: var(--bg-elev);
-    border-right: 1px solid var(--line);
+    background: var(--surface);
     /* Position is owned by shell.tsx: 1:1 with the finger while dragging,
        then a spring. Deliberately NO css transition — a scripted curve
-       cannot be grabbed and reversed mid-flight, and one layered on top of
-       the rAF loop would only lag it. The fallback keeps it shut before
-       hydration. */
+       cannot be grabbed and reversed mid-flight. The fallback keeps it shut
+       before hydration. */
     transform: translateX(var(--drawer-x, -100%));
     will-change: transform;
-    /* Let the browser keep vertical scrolling; we want the horizontal axis. */
     touch-action: pan-y;
     -webkit-user-select: none;
     user-select: none;
-    box-shadow: var(--shadow-pop);
     overflow-y: auto;
   }
   .sidebar-scrim {
     display: block;
-    position: fixed;
-    inset: 0;
+    position: fixed; inset: 0;
     background: rgba(10, 10, 10, 0.42);
     z-index: 89;
-    /* Starts out of the way; shell.tsx fades it in step with the drawer, so a
-       half-dragged drawer gets a half-dark scrim instead of a scripted fade
-       that knows nothing about the gesture. */
+    /* shell.tsx fades it in step with the drawer. */
     opacity: 0;
     pointer-events: none;
   }
+  .nav-item { padding: 10px 8px; }
 
   .topbar-menu-btn { display: inline-flex; }
+  .topbar { padding: 0 var(--s-3); gap: var(--s-2); height: 56px; }
+  .topbar-actions { gap: var(--s-1); }
+  .shell-pill .detail { display: none; }
+  .shell-new-label { display: none; }
+  .shell-new { padding: 6px 10px; }
 
-  /* Topbar: tighten paddings, hide search, hide all crumbs except the leaf. */
-  .topbar {
-    padding: 0 12px;
-    gap: 10px;
-    height: 56px;
-  }
-  .search { display: none; }
-  .crumbs {
-    font-size: var(--fs-sm);
-    overflow: hidden;
-  }
-  .crumbs .sep, .crumbs .muted { display: none; }
-  .crumbs .leaf {
-    font-size: var(--fs-md);
-    font-weight: 600;
-    letter-spacing: -0.01em;
-  }
-  .topbar-actions { gap: 6px; }
-  /* The standalone "Compose" button in the topbar is redundant on mobile
-     (sidebar nav + briefing CTA both reach it) and it overflows the row.
-     Only the dashboard passes a primary button here; ghost links stay. */
-  .topbar-actions .btn.primary { display: none; }
-  /* Bell button: shrink to a clean square. */
-  .topbar-actions .btn.ghost { padding: 6px 8px; }
-
-  /* Page padding: pull in tighter. */
-  .page {
-    padding: 16px 14px 64px;
-  }
+  .page { padding: var(--s-4) 14px 64px; }
 }
 
 @media (max-width: 480px) {
-  .page { padding: 12px 12px 56px; }
+  .page { padding: var(--s-3) var(--s-3) 56px; }
 }
