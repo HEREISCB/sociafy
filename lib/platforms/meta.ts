@@ -464,9 +464,18 @@ export const instagramAdapter: PlatformAdapter = {
     longUrl.searchParams.set('grant_type', 'ig_exchange_token');
     longUrl.searchParams.set('client_secret', env.platforms.instagram.appSecret!);
     longUrl.searchParams.set('access_token', short.access_token);
-    const longResp = await fetch(longUrl);
+    // Meta intermittently answers a valid exchange with code 100 "Unsupported
+    // request - method type: get" (developer-forum reports, no official fix),
+    // so retry once before giving up.
+    let longResp = await fetch(longUrl);
+    if (!longResp.ok) longResp = await fetch(longUrl);
     if (!longResp.ok) {
-      throw new PlatformError('ig_long_token_failed', longResp.status, await longResp.text());
+      const body = await longResp.text();
+      // Tell "Meta won't let this app touch this account" (the short token
+      // can't even read /me: app not Live / account not an Instagram tester /
+      // no Advanced Access) apart from a flaky exchange.
+      const probe = await fetch(`${IG_GRAPH}/me?fields=user_id&access_token=${short.access_token}`);
+      throw new PlatformError(probe.ok ? 'ig_long_token_failed' : 'ig_account_not_allowed', longResp.status, body);
     }
     const long = (await longResp.json()) as {
       access_token: string;

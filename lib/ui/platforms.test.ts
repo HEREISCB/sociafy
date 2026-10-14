@@ -23,7 +23,7 @@ describe('oauthErrorCopy', () => {
       'x_token_exchange_failed', 'x_me_failed', 'x_missing_code_verifier',
       'tiktok_token_failed', 'reddit_token_exchange_failed', 'reddit_me_failed',
       'meta_token_failed', 'meta_me_failed', 'meta_pages_failed',
-      'ig_short_token_failed', 'ig_long_token_failed', 'ig_me_failed', 'save_failed',
+      'ig_short_token_failed', 'ig_long_token_failed', 'ig_account_not_allowed', 'ig_me_failed', 'save_failed',
     ]) {
       expect(oauthErrorCopy(code, 'youtube'), code).not.toBe(generic);
     }
