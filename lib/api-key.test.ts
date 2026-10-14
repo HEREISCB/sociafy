@@ -222,7 +222,7 @@ describe('error envelope', () => {
   it('points the cap hint at a control that actually exists', async () => {
     state.spend = { key: 100, all: 100 };
     const body = await (await withApiKey(req(`Bearer ${generateApiKey().full}`), vi.fn())).json();
-    // /developers is where the cap is editable now — the panel moved off /usage.
-    expect(body.message).toMatch(/\/developers/);
+    // /settings/api is where the cap is editable.
+    expect(body.message).toMatch(/\/settings\/api/);
   });
 });

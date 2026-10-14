@@ -202,6 +202,7 @@ vi.stubGlobal('fetch', (input: URL | string) => {
 const { POST } = await import('./videos/route');
 const { GET } = await import('./videos/[id]/route');
 
+/** These pin the Motion path, so they name it — an omitted model is Cinema. */
 function post(body: unknown, idempotencyKey?: string) {
   return POST(
     new Request('https://sociafy.test/api/v1/videos', {
@@ -210,7 +211,7 @@ function post(body: unknown, idempotencyKey?: string) {
         'content-type': 'application/json',
         ...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {}),
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ model: 'sociafy-motion-1', ...(body as object) }),
     }) as never,
   );
 }

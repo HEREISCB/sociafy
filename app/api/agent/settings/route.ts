@@ -22,6 +22,9 @@ async function ensureSettings(userId: string) {
     .values({
       userId,
       instructions: DEFAULT_INSTRUCTIONS,
+      // New users start on "Ask me first": nothing posts until they approve
+      // it. (Also the column default; explicit so a default change can't flip it.)
+      autoPublishThreshold: 101,
     })
     .returning();
   return created;
@@ -71,6 +74,7 @@ export async function PATCH(req: NextRequest) {
       if (text + image + video > 0) patch.cadencePerWeek = text + image + video;
     }
     if (body.weeklyCreditCap !== undefined) patch.weeklyCreditCap = body.weeklyCreditCap;
+    if (body.planHorizonDays !== undefined) patch.planHorizonDays = body.planHorizonDays;
     const [row] = await db()
       .update(agentSettings)
       .set(patch)

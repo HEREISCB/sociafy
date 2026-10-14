@@ -171,7 +171,7 @@ export function TryTool({ kind, path: pagePath, aspect, examples }: Props) {
               {media(gen.url)}
               <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
                 <a className="btn btn-lg primary" href={`/api/try/${gen.id}/download`}>Download HD</a>
-                <a className="btn btn-lg" href="/dashboard?tab=compose">Post it with Sociafy</a>
+                <a className="btn btn-lg" href="/compose">Post it with Sociafy</a>
               </div>
               <p style={{ fontSize: 12.5, color: 'var(--ink-3)', marginTop: 8 }}>Saved to your media library.</p>
               <div className="card" style={{ marginTop: 14, padding: 16, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>

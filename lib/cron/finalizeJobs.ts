@@ -3,7 +3,7 @@ import { db } from '../db';
 import { genJobs, videoJobs } from '../db/schema';
 import { isStubMode } from '../env';
 import { finalizeVideoJob } from '../media/finalizeVideoJob';
-import { attachFinishedVideos } from '../agent/media';
+import { attachFinishedVideos, submitQueuedVideos } from '../agent/media';
 import { sweepTryGenerations } from '../try';
 // failImageJob is colocated with the /v1/images route that writes these rows and
 // is the only claim-then-refund path for them. Importing app/ from lib/ is
@@ -106,6 +106,14 @@ export async function runFinalizeJobs(): Promise<FinalizeJobsResult> {
       console.error('[cron/finalize-video-jobs] image', job.id, msg.slice(0, 300));
       results.push({ id: job.id, status: 'error', error: msg.slice(0, 200) });
     }
+  }
+
+  // Autopilot renders parked for a slot. After the sweep above, which is what
+  // frees slots by closing finished renders.
+  try {
+    await submitQueuedVideos();
+  } catch (e) {
+    console.error('[cron/finalize-video-jobs] queued', e instanceof Error ? e.message.slice(0, 300) : e);
   }
 
   // Autopilot video posts whose render just ended (above, or via the webhook):

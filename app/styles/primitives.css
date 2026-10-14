@@ -1,0 +1,332 @@
+/* Primitives: the small set of building blocks pages compose from.
+   Legacy modifier names (.btn.primary, .card-head, .page-head, .chip.live …)
+   are kept alongside the BEM names so existing markup keeps working. */
+
+/* ---------- Layout helpers ---------- */
+.stack { display: flex; flex-direction: column; gap: var(--s-3); }
+.row { display: flex; align-items: center; gap: var(--s-2); }
+
+/* ---------- Button ---------- */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--r-sm);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+@media (hover: hover) and (pointer: fine) { .btn:hover { background: var(--subtle); } }
+.btn .ic { width: 14px; height: 14px; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* Primary = the one dark action per view. */
+.btn.primary, .btn--primary {
+  background: var(--text);
+  color: var(--bg);
+  border-color: var(--text);
+}
+@media (hover: hover) and (pointer: fine) {
+  .btn.primary:hover, .btn--primary:hover { background: var(--ink-2); }
+}
+/* Accent = rare brand-orange call to action. */
+.btn.accent, .btn--accent {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+@media (hover: hover) and (pointer: fine) {
+  .btn.accent:hover, .btn--accent:hover { filter: brightness(0.96); }
+}
+.btn.ghost, .btn--ghost { border-color: transparent; background: transparent; }
+@media (hover: hover) and (pointer: fine) {
+  .btn.ghost:hover, .btn--ghost:hover { background: var(--subtle); }
+}
+.btn.sm, .btn--sm { padding: 4px 8px; font-size: var(--fs-xs); }
+
+.icon-btn {
+  width: 26px; height: 26px;
+  display: grid; place-items: center;
+  border-radius: var(--r-sm);
+  color: var(--text-2);
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+@media (hover: hover) and (pointer: fine) {
+  .icon-btn:hover { background: var(--surface); border-color: var(--line); color: var(--text); }
+}
+
+/* ---------- Form controls ---------- */
+.input,
+textarea.input,
+select.input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.input::placeholder { color: var(--text-3); }
+.input:focus,
+.input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.input:disabled { opacity: 0.55; cursor: not-allowed; }
+textarea.input { resize: vertical; min-height: 72px; }
+
+/* ---------- Page header ---------- */
+.page-header,
+.page-head {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: var(--s-6);
+  margin-bottom: var(--s-6);
+}
+.page-header h1,
+.page-head h1 {
+  margin: 0 0 var(--s-1);
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+.page-header__sub,
+.page-head .sub {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.page-header__actions,
+.page-head-actions { display: flex; gap: var(--s-2); align-items: center; margin-left: auto; }
+
+/* ---------- Card ---------- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  overflow: hidden;
+}
+.card__head,
+.card-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--s-3);
+  padding: 14px var(--s-4);
+  border-bottom: 1px solid var(--line);
+}
+.card__head h3,
+.card-head h3 {
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  display: flex; align-items: center; gap: var(--s-2);
+}
+.card-head .meta {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  font-family: var(--mono);
+}
+.card__body,
+.card-body { padding: var(--s-4); }
+.card-body.flush { padding: 0; }
+
+/* ---------- Badge / chip ---------- */
+.badge {
+  display: inline-flex; align-items: center; gap: var(--s-1);
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  background: var(--subtle);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.badge--ok { background: var(--ok-soft); color: var(--ok-ink); }
+.badge--warn { background: var(--warn-soft); color: var(--warn-ink); }
+.badge--err { background: var(--err-soft); color: var(--err-ink); }
+.badge--accent { background: var(--accent-soft); color: var(--accent-ink); }
+
+.chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 7px;
+  border-radius: var(--r-pill);
+  background: var(--subtle);
+  border: 1px solid var(--line);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ink-2);
+}
+.chip .dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--text-3);
+}
+.chip.live .dot { background: var(--ok); }
+.chip.warn .dot { background: var(--warn); }
+.chip.accent { background: var(--accent-soft); border-color: oklch(0.86 0.08 70); color: var(--accent-ink); }
+.chip.accent .dot { background: var(--accent); }
+.chip.ghost { background: transparent; }
+
+/* ---------- Empty state ---------- */
+.empty-state {
+  display: flex; flex-direction: column; align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-12) var(--s-6);
+  text-align: center;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+.empty-state h3 {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text);
+}
+.empty-state p { margin: 0; max-width: 44ch; }
+.empty-state .btn { margin-top: var(--s-2); }
+
+/* ---------- Platform glyph ---------- */
+.pglyph {
+  width: 18px; height: 18px;
+  border-radius: 4px;
+  display: inline-grid; place-items: center;
+  color: white;
+  font-size: 10px;
+  font-weight: 600;
+  flex: 0 0 18px;
+}
+.pglyph.ig { background: linear-gradient(135deg, #F58529 0%, #DD2A7B 50%, #8134AF 100%); } /* brand mark, not decoration */
+.pglyph.fb { background: var(--fb); }
+.pglyph.x  { background: var(--x); }
+.pglyph.li { background: var(--li); }
+.pglyph.tt { background: #000; }
+.pglyph.yt { background: var(--yt); }
+.pglyph.lg { width: 28px; height: 28px; border-radius: 6px; font-size: var(--fs-sm); flex: 0 0 28px; }
+.pglyph.xl {
+  width: 44px; height: 44px;
+  border-radius: 10px;
+  font-size: 17px;
+  flex: 0 0 44px;
+}
+
+/* ---------- Segmented controls ---------- */
+.media-tabs {
+  display: inline-flex;
+  background: var(--subtle);
+  border-radius: var(--r-sm);
+  padding: 2px;
+  gap: 2px;
+}
+.media-tabs .opt {
+  padding: 4px 10px;
+  font-size: 11px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text-2);
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.media-tabs .opt.active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-1);
+}
+
+.mode-switch {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  padding: 3px;
+  background: var(--surface);
+  position: relative;
+}
+.mode-switch .opt {
+  padding: 5px 14px;
+  border-radius: var(--r-pill);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--text-2);
+  cursor: pointer;
+  position: relative;
+  z-index: 1;
+  display: inline-flex; align-items: center; gap: 5px;
+}
+/* The active option paints its own dark background (no call site renders a
+   sliding indicator). */
+.mode-switch .opt.active {
+  color: var(--bg);
+  background: var(--text);
+}
+
+/* ---------- Modal ---------- */
+@keyframes modalScrimIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes modalSheetIn {
+  from { opacity: 0; transform: scale(0.98) translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+.modal-scrim {
+  position: fixed; inset: 0;
+  background: rgba(10, 10, 10, 0.32);
+  display: grid; place-items: center;
+  z-index: 50;
+  animation: modalScrimIn 150ms ease-out both;
+}
+.modal-sheet {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: var(--s-6);
+  box-shadow: var(--shadow-pop);
+  animation: modalSheetIn 180ms cubic-bezier(0.2, 0, 0, 1) both;
+  transform-origin: 50% 30%;
+  max-height: 90dvh;       /* never trap action buttons off-screen on phones */
+  overflow-y: auto;
+}
+
+@media (max-width: 900px) {
+  .page-header,
+  .page-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--s-3);
+    margin-bottom: var(--s-4);
+  }
+  .page-header h1,
+  .page-head h1 { font-size: 22px; }
+  .page-header__actions,
+  .page-head-actions { flex-wrap: wrap; margin-left: 0; }
+
+  /* Card headers wrap so tab groups / actions drop to a second line instead
+     of being clipped by the card's overflow:hidden. */
+  .card__head,
+  .card-head {
+    flex-wrap: wrap;
+    gap: var(--s-2);
+    padding: 12px 14px;
+  }
+
+  /* Tap targets: bigger icon buttons on touch. */
+  .icon-btn { width: 36px; height: 36px; }
+  .icon-btn svg { width: 16px; height: 16px; }
+
+  .modal-sheet {
+    padding: 18px;
+    width: min(92vw, 560px);
+  }
+}
+
+@media (hover: none) {
+  .icon-btn { width: 36px; height: 36px; }
+  /* Comfortable tap targets on touch devices (44px guideline). */
+  .btn { min-height: 44px; }
+  .btn.sm, .btn--sm { min-height: 38px; }
+}

@@ -113,10 +113,10 @@ const CreditPopover: React.FC<{ data: CreditsPayload; onClose: () => void }> = (
       </div>
 
       <div className="credit-popover-actions">
-        <Link href="/usage" className="btn ghost" onClick={onClose}>
+        <Link href="/settings/plan" className="btn ghost" onClick={onClose}>
           <Icon name="search" size={12} /> View usage
         </Link>
-        <Link href="/billing" className="btn primary" onClick={onClose}>
+        <Link href="/settings/plan" className="btn primary" onClick={onClose}>
           <Icon name="bolt" size={12} /> Top up
         </Link>
       </div>
@@ -170,8 +170,8 @@ export const InsufficientCreditsBanner: React.FC<{
       </span>
     </div>
     <div className="actions">
-      <Link href="/usage" className="btn ghost">View usage</Link>
-      <Link href="/billing" className="btn primary">Top up</Link>
+      <Link href="/settings/plan" className="btn ghost">View usage</Link>
+      <Link href="/settings/plan" className="btn primary">Top up</Link>
       {onDismiss && (
         <button className="btn ghost icon-only" onClick={onDismiss} aria-label="Dismiss">
           ✕

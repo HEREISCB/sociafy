@@ -447,7 +447,7 @@ const startCheckoutFromLanding = async (tier: Tier, setBusy: (t: Tier | null) =>
     });
     if (r.status === 401) {
       // Not signed in — bounce through sign-up then back to billing for upgrade.
-      window.location.href = `/sign-up?next=${encodeURIComponent(`/billing?tier=${tier}`)}`;
+      window.location.href = `/sign-up?next=${encodeURIComponent(`/settings/plan?tier=${tier}`)}`;
       return;
     }
     const data = await r.json().catch(() => ({} as { url?: string }));
@@ -456,7 +456,7 @@ const startCheckoutFromLanding = async (tier: Tier, setBusy: (t: Tier | null) =>
     } else {
       // Billing isn't configured yet — send them to /billing so they see the
       // friendly "Stripe not configured" banner instead of a raw error.
-      window.location.href = '/billing';
+      window.location.href = '/settings/plan';
     }
   } finally {
     setBusy(null);

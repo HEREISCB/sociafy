@@ -63,7 +63,7 @@ describe('oauth callback', () => {
   it('rejects a state minted for another user (account hijack)', async () => {
     state.user = { id: 'victim' };
     const res = await cb('x', good({ code: 'c' }), 'nonce1.ver');
-    expect(loc(res).pathname + loc(res).search).toBe('/dashboard?tab=connections&oauth_error=oauth_state&platform=x');
+    expect(loc(res).pathname + loc(res).search).toBe('/settings/connections?oauth_error=oauth_state&platform=x');
     expect(state.upserts).toHaveLength(0);
   });
 
@@ -119,10 +119,10 @@ describe('oauth callback', () => {
 describe('oauth start', () => {
   it('redirects rate-limited users back with oauth_error=rate_limited', async () => {
     state.user = { id: 'u1' };
-    const req = new NextRequest('https://app.test/api/oauth/x/start?next=/dashboard?tab=connections');
+    const req = new NextRequest('https://app.test/api/oauth/x/start?next=/settings/connections');
     const res = await start(req, { params: Promise.resolve({ platform: 'x' }) });
     expect(res.status).toBe(307);
-    expect(loc(res).pathname).toBe('/dashboard');
+    expect(loc(res).pathname).toBe('/settings/connections');
     expect(loc(res).searchParams.get('oauth_error')).toBe('rate_limited');
   });
 });

@@ -37,10 +37,15 @@ describe('the white-label boundary', () => {
     expect(modelForBackend('cue-h3')).toBe('sociafy-cinema-1');
     expect(modelForBackend('piapi-seedance-2')).toBe('sociafy-motion-1');
     expect(modelForBackend('piapi-seedance-2-fast')).toBe('sociafy-motion-1');
-    // Legacy and unknown rows resolve to a real model, never to null or the
-    // backend string itself.
-    expect(modelForBackend(null)).toBe(DEFAULT_VIDEO_MODEL);
-    expect(modelForBackend('something-new')).toBe(DEFAULT_VIDEO_MODEL);
+    // Legacy and unknown rows are Motion — a fact about history, so it must not
+    // follow the default for new renders.
+    expect(modelForBackend(null)).toBe('sociafy-motion-1');
+    expect(modelForBackend('something-new')).toBe('sociafy-motion-1');
+  });
+
+  it('defaults new renders to Cinema without relabelling old ones', () => {
+    expect(DEFAULT_VIDEO_MODEL).toBe('sociafy-cinema-1');
+    expect(DEFAULT_VIDEO_MODEL).not.toBe(modelForBackend(null));
   });
 
   it('routes a public id to the right backend', () => {

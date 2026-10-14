@@ -11,7 +11,7 @@ import { encryptToken } from '../../../../../lib/crypto/tokens';
 
 // A bad state can't tell us where the user came from (its `next` is untrusted),
 // so every state failure lands on the connections tab.
-const STATE_FAIL = '/dashboard?tab=connections&oauth_error=oauth_state';
+const STATE_FAIL = '/settings/connections?oauth_error=oauth_state';
 
 /** Provider `?error=` → our oauth_error code. Cancels collapse to access_denied. */
 function providerError(raw: string): string {

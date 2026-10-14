@@ -47,14 +47,14 @@ describe('docs/api.md documents the async image flow', () => {
 });
 
 describe('key-management location', () => {
-  it('docs point at /developers, not the retired /usage anchor', () => {
-    expect(doc).toContain('/developers');
+  it('docs point at /settings/api, not the retired /usage anchor', () => {
+    expect(doc).toContain('/settings/api');
     expect(doc).not.toContain('/usage#api-keys');
   });
 
-  it('the daily-cap 429 sends developers to /developers', () => {
+  it('the daily-cap 429 sends developers to /settings/api', () => {
     const src = fs.readFileSync(path.join(root, 'lib/api-key.ts'), 'utf8');
     const hint = src.split('\n').find((l) => l.includes('credit daily cap.'));
-    expect(hint).toContain('/developers');
+    expect(hint).toContain('/settings/api');
   });
 });

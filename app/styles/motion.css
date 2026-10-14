@@ -1,0 +1,97 @@
+/* ===================================================================
+   Press feedback, and honouring the three accessibility preferences
+
+   The stylesheet had 29 `:hover` rules and exactly one `:active` rule
+   (.cal-month-event). Hover does not exist on a touchscreen, so every
+   button, chip, tile and card in the app gave a phone user NO feedback
+   at all between the tap and whatever happened next — and on a slow
+   request, "nothing happened" and "it didn't register" look identical.
+   Feedback belongs on the press, not on the result.
+   =================================================================== */
+
+/* Button-like controls: they shrink under the finger. Transform only on
+   things small enough that scaling reads as a press rather than as the
+   layout moving — and never on a container that might hold a positioned
+   child, since a transform would become its containing block. */
+.btn:active,
+.icon-btn:active,
+.prompt-chip:active,
+.topbar-menu-btn:active,
+.autopilot-pill:active,
+.mode-switch .opt:active {
+  transform: scale(0.97);
+}
+.btn,
+.icon-btn,
+.prompt-chip,
+.topbar-menu-btn,
+.autopilot-pill,
+.mode-switch .opt {
+  /* Fast enough to feel like a response rather than an animation. The
+     press itself is instant; this only smooths the release. */
+  transition: transform 100ms ease-out, background 0.12s, border-color 0.12s;
+}
+.btn:active:disabled,
+.icon-btn:active:disabled { transform: none; }
+
+/* Larger surfaces darken instead of scaling: a 300px tile scaling down
+   reads as the page shifting, and several of these host absolutely
+   positioned children. */
+.billing-tier-card:active,
+.connect-tile:active,
+.queue-item:active,
+.trend-item:active,
+.plan-platform:active,
+.plan-radio:active,
+.topic:active,
+.cal-slot:active {
+  background: var(--bg-sunk);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* The only looping animation left is the render progress sweep. */
+  .render-bar::after { animation: none !important; }
+  /* Entrances become cross-fades — the information still arrives, the
+     movement does not. */
+  .modal-scrim,
+  .modal-sheet { animation: none !important; }
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+  }
+  .btn:active,
+  .icon-btn:active,
+  .prompt-chip:active,
+  .topbar-menu-btn:active,
+  .autopilot-pill:active,
+  .mode-switch .opt:active { transform: none; }
+}
+
+/* Continues the block above, but has to be width-scoped: `.sidebar` is a real
+   layout column on desktop, and hiding it there would delete the navigation.
+   The mobile drawer under reduced motion does not slide and does not spring —
+   it cross-fades in place, and shell.tsx disables the drag, since dragging a
+   panel across the screen is exactly the vestibular motion being declined. */
+@media (max-width: 900px) and (prefers-reduced-motion: reduce) {
+  .sidebar {
+    transform: none !important;
+    will-change: auto;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 160ms ease, visibility 160ms;
+  }
+  .sidebar.mobile-open { opacity: 1; visibility: visible; }
+  .sidebar-scrim { transition: opacity 160ms ease; }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  /* Surfaces are already opaque; only the scrim needs firming up. */
+  .modal-scrim { background: rgba(10, 10, 10, 0.82); }
+}
+
+@media (prefers-contrast: more) {
+  /* Near-solid surfaces with a defined edge, so a panel's boundary does
+     not depend on a shadow or a translucent wash to be seen. */
+  .modal-sheet,
+  .lp-nav-wrap { background: var(--bg-elev); border: 1px solid var(--ink); }
+  .btn { border-color: var(--ink-2); }
+}

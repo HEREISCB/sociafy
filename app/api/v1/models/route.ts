@@ -8,7 +8,7 @@ import {
   CHAT_MODEL_IDS,
   CHAT_MODELS,
   DEFAULT_CHAT_MODEL,
-  DEFAULT_VIDEO_MODEL,
+  API_DEFAULT_VIDEO_MODEL,
   VIDEO_MODELS,
   VIDEO_MODEL_IDS,
   type VideoModelId,
@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
           type: 'video' as const,
           name: m.name,
           summary: m.summary,
-          default: id === DEFAULT_VIDEO_MODEL,
+          default: id === API_DEFAULT_VIDEO_MODEL,
           available: availability(id),
           capabilities: {
             duration_sec: m.durationSec,

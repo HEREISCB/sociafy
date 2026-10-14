@@ -36,6 +36,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     if (body.perPlatformText !== undefined) patch.perPlatformText = body.perPlatformText;
     if (body.preset !== undefined) patch.preset = body.preset ?? null;
     if (body.status !== undefined) patch.status = body.status;
+    if (body.plannedAt !== undefined) patch.plannedAt = body.plannedAt ? new Date(body.plannedAt) : null;
     patch.updatedAt = new Date();
 
     const [row] = await db()

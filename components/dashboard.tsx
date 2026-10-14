@@ -317,7 +317,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose, onEditDraft }) => {
               Scheduled posts to {needsReconnect.length === 1 ? 'it' : 'them'} will keep failing until you do.
             </span>
           </div>
-          <a className="btn sm" href="/dashboard?tab=connections" style={{ flexShrink: 0, textDecoration: 'none' }}>
+          <a className="btn sm" href="/settings/connections" style={{ flexShrink: 0, textDecoration: 'none' }}>
             Reconnect
           </a>
         </div>

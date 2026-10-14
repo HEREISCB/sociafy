@@ -68,6 +68,34 @@ const nextConfig: NextConfig = {
     '*.sociafy.app',
   ],
 
+  // Old URLs from the /dashboard?tab= era and the pre-Settings account pages.
+  // Query strings pass through to the destination (oauth_error, connected,
+  // handle, platform, checkout all survive). 307s: the IA may still move.
+  async redirects() {
+    const tab = (value: string, destination: string) => ({
+      source: '/dashboard',
+      has: [{ type: 'query' as const, key: 'tab', value }],
+      destination,
+      permanent: false,
+    });
+    const moved = (source: string, destination: string) => ({ source, destination, permanent: false });
+    return [
+      tab('compose', '/compose'),
+      tab('calendar', '/calendar'),
+      tab('agent', '/autopilot'),
+      tab('connections', '/settings/connections'),
+      tab('shield', '/settings/brand'),
+      tab('onboarding', '/onboarding'),
+      moved('/agent', '/autopilot'),
+      moved('/connections', '/settings/connections'),
+      moved('/billing', '/settings/plan'),
+      moved('/usage', '/settings/plan'),
+      // Exact match: /developers/reference stays a real page.
+      moved('/developers', '/settings/api'),
+      moved('/studio/voice', '/settings/voice'),
+    ];
+  },
+
   async headers() {
     if (!isProd) return [];
     return [

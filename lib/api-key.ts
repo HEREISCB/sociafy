@@ -173,7 +173,7 @@ export async function withApiKey(
       return err(
         'daily_cap_exceeded',
         429,
-        `This API key has spent ${keySpent} of its ${key.dailyCreditCap} credit daily cap. Raise the cap at ${process.env.NEXT_PUBLIC_APP_URL || 'https://sociafy.app'}/developers, or wait for the rolling 24h window to roll off.`,
+        `This API key has spent ${keySpent} of its ${key.dailyCreditCap} credit daily cap. Raise the cap at ${process.env.NEXT_PUBLIC_APP_URL || 'https://sociafy.app'}/settings/api, or wait for the rolling 24h window to roll off.`,
         { spent: keySpent, cap: key.dailyCreditCap },
       );
     }

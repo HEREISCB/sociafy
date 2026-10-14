@@ -2643,7 +2643,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                   <> · balance <span className="strong">{balance.toLocaleString()}</span></>
                 )}
                 {credits && balance < previewCost.credits && (
-                  <> · <span className="danger">need {(previewCost.credits - balance).toLocaleString()} more</span> — <Link href="/billing" style={{ color: 'var(--accent-ink)', textDecoration: 'underline' }}>upgrade</Link></>
+                  <> · <span className="danger">need {(previewCost.credits - balance).toLocaleString()} more</span> — <Link href="/settings/plan" style={{ color: 'var(--accent-ink)', textDecoration: 'underline' }}>upgrade</Link></>
                 )}
               </span>
             </div>
@@ -3278,7 +3278,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                                 <span>{recoveryHint}</span>
                                 {(isMetaPermission || isMetaNoPage || isAuthExpired) && (
                                   <a
-                                    href="/dashboard?tab=connections"
+                                    href="/settings/connections"
                                     style={{ marginLeft: 'auto', color: 'var(--accent)', fontWeight: 600, textDecoration: 'underline' }}
                                   >
                                     Reconnect →

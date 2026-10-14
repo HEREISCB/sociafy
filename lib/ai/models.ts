@@ -22,7 +22,17 @@ export type VideoBackend = 'piapi-seedance-2' | 'piapi-seedance-2-fast' | 'cue-h
 export const VIDEO_MODEL_IDS = ['sociafy-motion-1', 'sociafy-cinema-1'] as const;
 export type VideoModelId = (typeof VIDEO_MODEL_IDS)[number];
 
-export const DEFAULT_VIDEO_MODEL: VideoModelId = 'sociafy-motion-1';
+/** What a NEW generation renders on when the caller does not choose. */
+export const DEFAULT_VIDEO_MODEL: VideoModelId = 'sociafy-cinema-1';
+
+/** What an OLD row is. Every backend id that predates the catalogue is Motion,
+ *  and that is a fact about history — it must not follow the default above, or
+ *  flipping the default would relabel every existing Motion render. */
+const LEGACY_VIDEO_MODEL: VideoModelId = 'sociafy-motion-1';
+
+/** Public API default. Pinned to Motion so integrators who omit `model` keep
+ *  the behaviour (1080p, reference mode) they built against. */
+export const API_DEFAULT_VIDEO_MODEL: VideoModelId = LEGACY_VIDEO_MODEL;
 
 export type VideoModel = {
   id: VideoModelId;
@@ -107,10 +117,10 @@ export function backendFor(model: VideoModelId, fast: boolean): VideoBackend {
 }
 
 /** Public model id for a stored backend id. Legacy rows predate the catalogue
- *  and are all Motion, so an unknown backend answers the default rather than
+ *  and are all Motion, so an unknown backend answers Motion rather than
  *  leaking the raw column into a response. */
 export function modelForBackend(backend: string | null | undefined): VideoModelId {
-  return backend === 'cue-h3' ? 'sociafy-cinema-1' : DEFAULT_VIDEO_MODEL;
+  return backend === 'cue-h3' ? 'sociafy-cinema-1' : LEGACY_VIDEO_MODEL;
 }
 
 export function isVideoModelId(v: unknown): v is VideoModelId {

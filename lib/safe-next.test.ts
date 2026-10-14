@@ -3,7 +3,7 @@ import { safeNextPath } from './safe-next';
 
 describe('safeNextPath', () => {
   it('keeps same-origin paths', () => {
-    expect(safeNextPath('/dashboard?tab=connections')).toBe('/dashboard?tab=connections');
+    expect(safeNextPath('/settings/connections?oauth_error=x')).toBe('/settings/connections?oauth_error=x');
     expect(safeNextPath('/onboarding#step-2')).toBe('/onboarding#step-2');
   });
 

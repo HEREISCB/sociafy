@@ -162,12 +162,9 @@ const ConnectionsPage: React.FC = () => {
     return () => clearInterval(id);
   }, []);
 
-  // Read OAuth callback query params once on mount — synchronously. The
-  // dashboard's [page] effect runs right after ours in the same commit (on a
-  // cold /dashboard?tab=connections load this component mounts in the same
-  // commit that flips `page`) and rewrites the URL to `?tab=connections`, so
-  // a deferred read would find the params already gone. Only the setState is
-  // deferred, to satisfy react-hooks/set-state-in-effect.
+  // Read OAuth callback query params once on mount, then strip them so a
+  // refresh doesn't replay the flash. Only the setState is deferred, to
+  // satisfy react-hooks/set-state-in-effect.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
@@ -180,6 +177,7 @@ const ConnectionsPage: React.FC = () => {
     params.delete('handle');
     params.delete('oauth_error');
     params.delete('platform');
+    params.delete('tab'); // left over from the old /dashboard?tab=connections redirect
     const qs = params.toString();
     window.history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : ''));
     queueMicrotask(() => {
@@ -201,7 +199,7 @@ const ConnectionsPage: React.FC = () => {
   const accountFor = (p: Platform) => accounts?.find((a) => a.platform === p) ?? null;
 
   const connect = (p: Platform) => {
-    const next = encodeURIComponent('/dashboard?tab=connections');
+    const next = encodeURIComponent('/settings/connections');
     if (typeof window !== 'undefined') {
       window.location.assign(`/api/oauth/${p}/start?next=${next}`);
     }

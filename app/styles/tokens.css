@@ -1,0 +1,84 @@
+/* Sociafy design tokens.
+   New code uses the short names (--text, --surface, --fs-*, --s-*).
+   The legacy names further down are aliases so existing CSS and the ~1,200
+   inline styles keep resolving; migrate them opportunistically. */
+:root {
+  /* Neutrals: warm paper, near-black ink, hairline borders. */
+  --bg: #FAFAF7;
+  --surface: #FFFFFF;
+  --subtle: #F4F3EE;
+  --line: #E8E7E1;
+  --line-strong: #D8D7D0;
+  --text: #0A0A0A;
+  --text-2: #6B6B66;
+  --text-3: #76766F; /* ~4:1 on --bg */
+
+  /* One accent: the brand orange. Primary action + active nav only. */
+  --accent: oklch(0.72 0.18 55);
+  --accent-soft: oklch(0.96 0.04 70);
+  --accent-ink: oklch(0.42 0.16 55); /* accent-coloured text on light surfaces */
+
+  /* Status. *-soft = tinted surface, *-ink = readable text on it. */
+  --ok: oklch(0.68 0.14 155);
+  --ok-soft: oklch(0.96 0.04 155);
+  --ok-ink: oklch(0.45 0.12 155);
+  --warn: oklch(0.72 0.16 75);
+  --warn-soft: oklch(0.95 0.05 80);
+  --warn-ink: oklch(0.45 0.10 70);
+  --err: oklch(0.62 0.20 25);
+  --err-soft: oklch(0.95 0.03 25);
+  --err-ink: oklch(0.45 0.16 25);
+
+  /* Type: weights 400 / 500 / 600 only. */
+  --sans: var(--font-geist-sans), "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --mono: var(--font-geist-mono), ui-monospace, "SF Mono", Menlo, monospace; /* numbers only */
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 15px;
+  --fs-lg: 20px;
+  --fs-xl: 32px;
+
+  /* Spacing */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-12: 48px;
+  --s-16: 64px;
+
+  /* Radii + the one elevation (menus, popovers, modals). */
+  --r-sm: 6px;
+  --r: 12px;
+  --r-pill: 999px;
+  --shadow-pop: 0 8px 32px rgba(10,10,10,0.12), 0 2px 6px rgba(10,10,10,0.06);
+
+  /* Platform brand colours */
+  --ig: #E1306C;
+  --fb: #1877F2;
+  --x:  #0A0A0A;
+  --li: #0A66C2;
+  --tt: #FE2C55;
+  --yt: #FF0000;
+  --th: #0A0A0A;
+
+  /* ---- Legacy aliases ---- */
+  --bg-elev: var(--surface);
+  --bg-sunk: var(--subtle);
+  --ink: var(--text);
+  --ink-2: color-mix(in oklch, var(--text) 85%, var(--bg)); /* body text / dark hover */
+  --ink-3: var(--text-2);
+  --ink-4: var(--text-3);
+  --line-2: var(--line-strong);
+  --good: var(--ok);
+  --bad: var(--err);
+  --danger: var(--err);
+  --r-lg: var(--r);
+  --r-xl: var(--r);
+  --shadow-1: 0 0 0 1px var(--line); /* was a soft drop shadow; now a hairline */
+  --shadow-2: none;
+  /* Referenced by inline styles but never defined before. */
+  --border: var(--line);
+  --muted: var(--text-2);
+}

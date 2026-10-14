@@ -61,8 +61,8 @@ export default function ApiReferencePage() {
     <main className="doc-page">
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
       <p style={{ marginBottom: 20 }}>
-        <Link href="/developers" style={{ color: 'var(--ink-3)', fontSize: 13, textDecoration: 'none' }}>
-          &larr; Back to Developers
+        <Link href="/settings/api" style={{ color: 'var(--ink-3)', fontSize: 13, textDecoration: 'none' }}>
+          &larr; Back to API settings
         </Link>
       </p>
       <article className="md-doc">{renderMarkdown(REFERENCE)}</article>

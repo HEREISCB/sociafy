@@ -47,9 +47,9 @@ export function nextTick(d: Date): Date {
   return t;
 }
 
-/** What autopilot has done in the trailing 7 days — the inputs to every pacing decision. */
-export async function loadWeek(userId: string, now = new Date()) {
-  const since = new Date(now.getTime() - WEEK_MS);
+/** What autopilot has done in the trailing `days` (default 7) — the inputs to every pacing decision. */
+export async function loadWeek(userId: string, now = new Date(), days = 7) {
+  const since = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
   const recent = await db()
     .select({ createdAt: drafts.createdAt, media: drafts.media, videoJobId: drafts.videoJobId })
     .from(drafts)

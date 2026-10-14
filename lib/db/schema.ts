@@ -10,6 +10,7 @@ import {
   index,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 
 export const PLATFORMS = ['x', 'linkedin', 'instagram', 'facebook', 'tiktok', 'youtube', 'reddit'] as const;
 export type Platform = (typeof PLATFORMS)[number];
@@ -232,6 +233,9 @@ export type DraftVariant = {
   text: string;
   score?: number;
   rationale?: string;
+  /** Autopilot only: the per-platform copy as the model wrote it, so an edited
+   *  body can tell machine copy from the user's own (lib/agent/publish.ts postText). */
+  perPlatform?: Partial<Record<Platform, string>>;
 };
 
 export type DraftMedia = {
@@ -263,12 +267,16 @@ export const drafts = pgTable(
     // Autopilot video drafts: the render still in flight. lib/agent/media.ts
     // attaches the clip (and schedules the post) when it lands, then nulls this.
     videoJobId: uuid('video_job_id'),
+    // The plan's proposed slot (lib/agent/plan.ts). Becomes scheduled_posts.
+    // scheduled_at on approve, or at once in auto mode. Null = not planned.
+    plannedAt: timestamp('planned_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
     index('drafts_user_idx').on(t.userId),
     index('drafts_status_idx').on(t.status),
+    index('drafts_user_planned_idx').on(t.userId, t.plannedAt).where(sql`planned_at IS NOT NULL`),
   ],
 );
 
@@ -362,6 +370,10 @@ export const agentSettings = pgTable('agent_settings', {
   // cron path honours it — a manual "draft now" is the user spending on purpose.
   weeklyCreditCap: integer('weekly_credit_cap'),
   lastRunAt: timestamp('last_run_at', { withTimezone: true }),
+  // How many days ahead the plan is kept filled: 7 or 30.
+  planHorizonDays: integer('plan_horizon_days').notNull().default(7),
+  // Lease on an in-flight plan run (lib/agent/plan.ts). Null or past = free.
+  planRunningUntil: timestamp('plan_running_until', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });

@@ -27,7 +27,7 @@ export default function RefundPolicyPage() {
 
       <h2>1. Cancelling your subscription</h2>
       <p>
-        You can cancel your subscription at any time from the <a href="/billing">Billing page</a> in your Sociafy account. Cancellation takes effect at the end of your current billing cycle. You retain access to the credits already granted for that cycle until the cycle ends; no further charges are made after that.
+        You can cancel your subscription at any time from the <a href="/settings/plan">Plan settings</a> in your Sociafy account. Cancellation takes effect at the end of your current billing cycle. You retain access to the credits already granted for that cycle until the cycle ends; no further charges are made after that.
       </p>
 
       <h2>2. Subscription refunds</h2>

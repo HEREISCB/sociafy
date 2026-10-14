@@ -46,6 +46,9 @@ export async function finalizeVideoJob(job: VideoJob): Promise<FinalizeVideoResu
     return { status: 'completed', asset: await loadAsset(job.mediaAssetId), rewrittenPrompt: job.rewrittenPrompt };
   }
   if (job.status === 'failed') return { status: 'failed', error: job.error ?? 'unknown' };
+  // Parked for a render slot (lib/agent/media.ts): uncharged and not upstream,
+  // so the no-task-id grace below must not fail it. Its sweep owns it.
+  if (job.status === 'queued' || job.status === 'submitting') return { status: 'pending', providerStatus: 'queued' };
 
   // Cinema runs on a different backend with a different poll, a different
   // failure vocabulary and an AUTHENTICATED artifact URL. Split here rather

@@ -78,7 +78,8 @@ vi.mock('../credits/ledger', () => ({
   charge: async () => undefined,
 }));
 
-import { runAgentForUser } from './run';
+import { runAgentForUser, planPeriod } from './run';
+import { draftCost } from '../credits/estimator';
 
 const SETTINGS = {
   userId: 'u1',
@@ -172,7 +173,7 @@ describe('score gate', () => {
 describe('weekly per-platform caps', () => {
   it('does not mark a draft scheduled when every platform was capped out', async () => {
     state.settings = settingsWith({ enabledPlatforms: ['x'], postsPerWeekByPlatform: { x: 1 } });
-    state.recentSched = [{ platform: 'x' }]; // cap already used
+    state.recentSched = [{ platform: 'x', draftId: 'old', scheduledAt: new Date(Date.now() - 86_400_000) }]; // cap already used
     const res = await runAgentForUser('u1');
     expect(scheduled()).toEqual([]);
     expect(res.published).toBe(0);
@@ -182,11 +183,11 @@ describe('weekly per-platform caps', () => {
 });
 
 describe('pacing', () => {
-  it('does not draft again until the next slot in the week', async () => {
-    state.settings = settingsWith({ enabledPlatforms: ['x'] });
-    state.recentDrafts = [{ createdAt: new Date() }];
+  it('drafts nothing when the plan already holds the week', async () => {
+    state.settings = settingsWith({ enabledPlatforms: ['x'] }); // cadence 3
+    state.recentDrafts = [1, 2, 3].map((d) => ({ plannedAt: new Date(Date.now() + d * 86_400_000), media: [] }));
     const res = await runAgentForUser('u1');
-    expect(res.reason).toBe('not_due');
+    expect(res.reason).toBe('plan_full');
     expect(draftFromTrends).not.toHaveBeenCalled();
   });
 
@@ -261,7 +262,7 @@ describe('the content mix is the weekly plan', () => {
   it('keeps drafting past cadencePerWeek when the mix asks for more', async () => {
     // cadence says 1, mix says 7: one draft 2 days ago is not "budget met".
     state.settings = settingsWith({ cadencePerWeek: 1, enabledPlatforms: ['x'], postsPerWeekByContentType: { text: 7, image: 0, video: 0 } } as never);
-    state.recentDrafts = [{ createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000), media: [] }];
+    state.recentDrafts = [{ plannedAt: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000), media: [] }];
     expect((await runAgentForUser('u1')).drafted).toBe(1);
   });
 });
@@ -273,5 +274,91 @@ describe('overlapping runs', () => {
     const res = await runAgentForUser('u1');
     expect(res.reason).toBe('already_running');
     expect(draftFromTrends).not.toHaveBeenCalled();
+  });
+});
+
+describe('the plan', () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const drafts = () => state.inserts['drafts'] ?? [];
+  beforeEach(() => {
+    // The model writes as many posts as it is asked for.
+    draftFromTrends.mockImplementation(async ({ count }: { count: number }) =>
+      Array.from({ length: count }, (_, i) => ({ title: `T${i}`, body: `B${i}`, perPlatform: {}, score: 99, rationale: 'r', trendId: `t${i}` })));
+  });
+
+  it('the cron tops up a few posts per tick, each with its own slot inside the horizon', async () => {
+    state.settings = settingsWith({ enabledPlatforms: ['x'], postsPerWeekByContentType: { text: 7, image: 0, video: 0 } } as never);
+    const res = await runAgentForUser('u1');
+    expect(res.drafted).toBe(3);
+    const at = drafts().map((d) => (d.plannedAt as Date).getTime());
+    expect(new Set(at).size).toBe(3);
+    for (const t of at) expect(t > Date.now() && t < Date.now() + 7 * DAY).toBe(true);
+  });
+
+  it('a 30-day plan drafts weekly target × weeks, a few posts per model call', async () => {
+    state.settings = settingsWith({ enabledPlatforms: ['x'], postsPerWeekByContentType: { text: 7, image: 0, video: 0 } } as never);
+    const res = await planPeriod('u1', { horizonDays: 30 });
+    expect(res.drafted).toBe(30);
+    expect(draftFromTrends.mock.calls.length).toBeGreaterThan(1);
+    for (const c of draftFromTrends.mock.calls) expect(c[0].count).toBeLessThanOrEqual(4);
+    const last = Math.max(...drafts().map((d) => (d.plannedAt as Date).getTime()));
+    expect(last).toBeGreaterThan(Date.now() + 25 * DAY);
+  });
+
+  it('counts what is already planned or queued against the target', async () => {
+    state.settings = settingsWith({ enabledPlatforms: ['x'], postsPerWeekByContentType: { text: 5, image: 0, video: 0 } } as never);
+    state.recentDrafts = [{ plannedAt: new Date(Date.now() - DAY), media: [] }]; // overdue, still unreviewed
+    state.recentSched = [
+      { draftId: 'd1', platform: 'x', scheduledAt: new Date(Date.now() + DAY), media: [] },
+      { draftId: 'd1', platform: 'linkedin', scheduledAt: new Date(Date.now() + DAY), media: [] },
+    ];
+    expect((await planPeriod('u1')).drafted).toBe(3); // 5 − 1 overdue − 1 queued post
+  });
+
+  it('scales the weekly credit cap to the horizon', async () => {
+    const cap = draftCost('text');
+    state.settings = settingsWith({ enabledPlatforms: ['x'], weeklyCreditCap: cap, postsPerWeekByContentType: { text: 7, image: 0, video: 0 } } as never);
+    expect((await planPeriod('u1', { horizonDays: 7 })).drafted).toBe(1);
+    state.inserts = {};
+    expect((await planPeriod('u1', { horizonDays: 30 })).drafted).toBe(4);
+  });
+
+  it('auto mode schedules each post AT its planned slot, not now', async () => {
+    state.settings = settingsWith({ enabledPlatforms: ['x'] });
+    await planPeriod('u1');
+    expect(scheduled().length).toBe(3);
+    scheduled().forEach((p, i) => expect(p.scheduledAt).toEqual(drafts()[i].plannedAt));
+    expect(Math.max(...scheduled().map((p) => (p.scheduledAt as Date).getTime()))).toBeGreaterThan(Date.now() + DAY);
+  });
+
+  it('review mode leaves every post waiting with its slot', async () => {
+    state.settings = settingsWith({ enabledPlatforms: ['x'], autoPublishThreshold: 101 });
+    const res = await planPeriod('u1');
+    expect(res.held).toBe(3);
+    expect(scheduled()).toEqual([]);
+    for (const d of drafts()) expect(d.plannedAt).toBeInstanceOf(Date);
+  });
+
+  it('gives videos the latest slots — their render needs the head start', async () => {
+    state.settings = settingsWith({ enabledPlatforms: ['linkedin'], autoPublishThreshold: 101, postsPerWeekByContentType: { text: 2, image: 0, video: 1 } } as never);
+    submitAgentVideo.mockResolvedValue('job-1');
+    await planPeriod('u1');
+    const video = drafts().find((d) => d.videoJobId)!;
+    const latest = Math.max(...drafts().map((d) => (d.plannedAt as Date).getTime()));
+    expect((video.plannedAt as Date).getTime()).toBe(latest);
+  });
+
+  it('refuses to run twice at once', async () => {
+    state.settings = settingsWith({ enabledPlatforms: ['x'] });
+    state.claimFails = true;
+    expect((await planPeriod('u1')).reason).toBe('already_running');
+    expect(draftFromTrends).not.toHaveBeenCalled();
+  });
+
+  it('snapshots the model\'s per-platform copy on the variant', async () => {
+    state.settings = settingsWith({ enabledPlatforms: ['x'] });
+    draftFromTrends.mockResolvedValue([{ title: 'T', body: 'B', perPlatform: { x: 'short' }, score: 99, rationale: 'r', trendId: 't1' }]);
+    await runAgentForUser('u1', { force: true });
+    expect((drafts()[0].variants as { perPlatform?: unknown }[])[0].perPlatform).toEqual({ x: 'short' });
   });
 });

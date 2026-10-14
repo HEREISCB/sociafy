@@ -257,6 +257,15 @@ describe('finalizeVideoJob', () => {
     expect(state.refunds[0].reason).toContain('submit_unconfirmed');
   });
 
+  it('leaves a render parked for a slot alone, however old', async () => {
+    const res = await finalizeVideoJob(job({
+      status: 'queued', provider: 'cue-h3', providerTaskId: '', creditLedgerId: null,
+      createdAt: new Date(Date.now() - 30 * 60_000),
+    }));
+    expect(res).toEqual({ status: 'pending', providerStatus: 'queued' });
+    expect(state.updates).toHaveLength(0);
+  });
+
   it('stays pending (no refund, no store) when R2 is unconfigured', async () => {
     state.r2Stub = true;
     const res = await finalizeVideoJob(job());

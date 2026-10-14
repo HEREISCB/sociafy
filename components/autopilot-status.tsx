@@ -15,8 +15,8 @@ const AUTO_THRESHOLD = 80;
 
 const BLOCKED: Record<NonNullable<AgentStatus['blocked']>, { text: string; href?: string; cta?: string }> = {
   no_niches: { text: 'It has nothing to write about yet. Pick at least one niche above and the first post starts right away.' },
-  no_platforms: { text: 'It has nowhere to post — no connected account is switched on. Turn one on under Autopilot rules, or connect one.', href: '/connections', cta: 'Connections' },
-  no_credits: { text: 'You are out of credits. Drafting resumes as soon as you top up.', href: '/billing', cta: 'Top up' },
+  no_platforms: { text: 'It has nowhere to post — no connected account is switched on. Turn one on under Autopilot rules, or connect one.', href: '/settings/connections', cta: 'Connections' },
+  no_credits: { text: 'You are out of credits. Drafting resumes as soon as you top up.', href: '/settings/plan', cta: 'Top up' },
   no_trends: { text: 'Nothing fresh in your niches right now. It looks again every hour and drafts as soon as something turns up.' },
   credit_cap: { text: 'It hit your weekly credit cap. Drafting resumes as older spend ages out — or raise the cap below.' },
 };
@@ -123,8 +123,7 @@ export const AutopilotStatus: React.FC<Props> = ({ status, autopilot, starting, 
             {pending.length === 0 ? (
               <div style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>
                 No drafts waiting. {auto ? 'Auto-posted ones show up on your ' : 'Approved ones show up on your '}
-                {/* Plain <a>: the dashboard reads ?tab= on load only, so a soft nav wouldn't switch tabs. */}
-                <a href="/dashboard?tab=calendar" style={{ textDecoration: 'underline', color: 'var(--ink)' }}>calendar</a>.
+                <Link href="/calendar" style={{ textDecoration: 'underline', color: 'var(--ink)' }}>calendar</Link>.
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>

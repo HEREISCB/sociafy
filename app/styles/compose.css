@@ -1,0 +1,213 @@
+/* Composer: prompt box, preview phone, cost pills, render progress. */
+/* Composer layout */
+.composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 420px;
+  gap: 20px;
+  height: 100%;
+}
+.composer-left { display: flex; flex-direction: column; gap: 16px; }
+.composer-right { display: flex; flex-direction: column; gap: 16px; }
+
+.prompt-box {
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: 16px;
+  position: relative;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.prompt-box:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.prompt-box textarea {
+  width: 100%;
+  border: 0; outline: 0; background: transparent;
+  resize: none;
+  font-size: var(--fs-md);
+  line-height: 1.55;
+  min-height: 72px;
+  font-family: var(--sans);
+  color: var(--ink);
+}
+.prompt-box textarea::placeholder { color: var(--ink-4); }
+.prompt-foot {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.prompt-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.prompt-chip {
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 100px;
+  font-size: var(--fs-xs);
+  color: var(--ink-2);
+  background: var(--bg);
+  display: inline-flex; align-items: center; gap: 5px;
+  cursor: pointer;
+}
+@media (hover: hover) and (pointer: fine) { .prompt-chip:hover { background: var(--bg-sunk); } }
+.prompt-chip.active { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.prompt-spacer { flex: 1; }
+
+/* Preview phone */
+.preview-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px;
+  background: var(--bg-sunk);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+}
+.preview-tab {
+  flex: 1;
+  padding: 8px;
+  display: grid; place-items: center;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+.preview-tab.active { background: var(--bg-elev); border-color: var(--line); }
+.preview-tab .pglyph { opacity: 0.55; }
+.preview-tab.active .pglyph { opacity: 1; }
+
+.phone {
+  background: var(--ink);
+  border-radius: 32px;
+  padding: 8px;
+  width: 100%;
+  max-width: 320px;
+  margin: 0 auto;
+  box-shadow: var(--shadow-pop);
+}
+.phone-screen {
+  background: var(--bg-elev);
+  border-radius: 24px;
+  overflow: hidden;
+  aspect-ratio: 9/19;
+  overflow-y: auto;
+}
+.phone-statusbar {
+  height: 36px;
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 0 18px 0 22px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+}
+.phone-statusbar .icons { display: flex; gap: 4px; opacity: 0.7; }
+
+/* ===================================================================
+   Cost preview pills on Compose generate buttons
+   =================================================================== */
+.cost-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 10px;
+  background: rgba(255, 255, 255, 0.18);
+  color: inherit;
+  letter-spacing: 0.02em;
+  margin-left: 2px;
+}
+.cost-pill.ghost {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+.cost-pill svg { opacity: 0.75; }
+.cost-pill.cant-afford {
+  background: var(--err-soft);
+  color: var(--err-ink);
+}
+.cost-line {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-3);
+}
+.cost-line .strong { color: var(--ink); font-weight: 600; }
+.cost-line .danger { color: var(--err-ink); }
+
+/* Video render card: indeterminate on purpose. Nothing in the render
+   pipeline reports progress, so a sweeping bar is the honest signal. */
+.render-bar {
+  position: relative;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--bg-sunk);
+  overflow: hidden;
+}
+.render-bar::after {
+  content: '';
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 38%;
+  border-radius: 999px;
+  background: var(--accent);
+  animation: render-sweep 1.7s ease-in-out infinite;
+}
+@keyframes render-sweep {
+  from { left: -40%; }
+  to   { left: 100%; }
+}
+.render-dot {
+  display: inline-block;
+  flex: 0 0 auto;
+  margin: 0 2px;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.5;
+}
+@media (prefers-reduced-motion: reduce) {
+  .render-bar::after { animation: none; left: 0; width: 100%; opacity: 0.3; }
+}
+
+@media (max-width: 900px) {
+  .composer {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+  .composer,
+  .composer-left,
+  .composer-right {
+    min-width: 0;
+  }
+  .composer { height: auto; }
+
+  /* Compose toolbar (preset chips + toggles + Generate) must wrap, and the
+     flex spacer that pushes the button right on desktop must collapse. */
+  .prompt-foot {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .prompt-foot .prompt-spacer { display: none; }
+  .prompt-foot .btn.accent { width: 100%; justify-content: center; }
+
+  /* Inline grids inside compose (mode cards, variants, media gallery) — these
+     carry inline grid-template-columns, so the component sets a className we
+     override here at the media-query level. */
+  .compose-modes { grid-template-columns: 1fr !important; }
+  .compose-variant-grid { grid-template-columns: 1fr !important; }
+  .compose-media-grid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+
+  /* Distribution row: let the datetime picker + buttons wrap full width. */
+  .distribution-row .dist-spacer { display: none; }
+  .distribution-row input[type="datetime-local"] { flex: 1 1 100%; min-width: 0; }
+
+  /* Composer: phone preview shrinks. */
+  .phone { max-width: 280px; }
+}
+
+@media (hover: none) {
+  .prompt-chip { min-height: 36px; display: inline-flex; align-items: center; }
+}

@@ -363,7 +363,7 @@ const QuickComposeModal: React.FC<QuickComposeModalProps> = ({ whenIso, onWhenCh
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <a
-            href={`/dashboard?tab=compose&prompt=${encodeURIComponent(prompt)}&slot=${encodeURIComponent(whenIso)}&platforms=${encodeURIComponent(platforms.join(','))}`}
+            href={`/compose?prompt=${encodeURIComponent(prompt)}&slot=${encodeURIComponent(whenIso)}&platforms=${encodeURIComponent(platforms.join(','))}`}
             className="chip ghost"
             style={{ fontSize: 11 }}
           >
@@ -446,14 +446,7 @@ function shortTzLabel(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone;
 }
 
-interface CalendarPageProps {
-  /** Optional handler for the "New post" button — when provided, the button
-   *  hands off to the compose surface. Falls back to a /dashboard?tab=compose
-   *  navigation when omitted so the calendar stays usable in isolation. */
-  onCompose?: () => void;
-}
-
-const CalendarPage: React.FC<CalendarPageProps> = ({ onCompose }) => {
+const CalendarPage: React.FC = () => {
   const router = useRouter();
   const slotH = 48;
   // Week-grid is unusable below ~900px (7 columns + time gutter don't fit).
@@ -631,15 +624,6 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onCompose }) => {
             List
           </span>
         </div>
-        <button
-          className="btn sm primary"
-          onClick={() => {
-            if (onCompose) onCompose();
-            else router.push('/dashboard?tab=compose');
-          }}
-        >
-          <Icon name="plus" size={11} /> New post
-        </button>
       </div>
 
       {unauth && (

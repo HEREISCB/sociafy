@@ -15,6 +15,7 @@ import { PlatformError, publishWarning } from '../../../lib/platforms/types';
 import { ensureFreshToken } from '../../../lib/platforms/token';
 import { rateLimit } from '../../../lib/rate-limit';
 import { publishSchema, parseBody } from '../../../lib/validation';
+import { postText } from '../../../lib/agent/publish';
 
 /** A draft published to a platform this recently is treated as a duplicate
  *  click, not a deliberate repost. */
@@ -125,7 +126,7 @@ export async function POST(req: NextRequest) {
             platform,
             scheduledAt: now,
             status: 'publishing',
-            text: (draft.perPlatformText as Record<string, string> | null)?.[platform] ?? draft.body,
+            text: postText(draft, platform),
             media,
             attempts: 1,
           })

@@ -13,6 +13,7 @@ import {
 } from '../../../lib/db/schema';
 import { scheduleCreateSchema, parseBody } from '../../../lib/validation';
 import { postKind, supportsKind, unsupportedReason } from '../../../lib/platforms/capabilities';
+import { postText } from '../../../lib/agent/publish';
 
 export async function GET(req: NextRequest) {
   return withUser(async (user) => {
@@ -98,7 +99,7 @@ export async function POST(req: NextRequest) {
       if (platform in reasons) continue;
       const acct = accountByPlatform.get(platform);
       if (!acct) continue; // skip platforms with no connected account
-      const text = (draft.perPlatformText as Record<string, string> | null)?.[platform] ?? draft.body;
+      const text = postText(draft, platform);
       const [row] = await db()
         .insert(scheduledPosts)
         .values({

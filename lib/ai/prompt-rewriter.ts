@@ -17,12 +17,22 @@ import { getTextAI, completeText } from './client';
 
 const SKILLS_DIR = path.join(process.cwd(), 'lib', 'ai', 'skills', 'prompts');
 
-export type RewriteTarget = 'gpt-image-2' | 'seedance-2';
+export type RewriteTarget = 'gpt-image-2' | 'seedance-2' | 'cinema';
 
 const SKILL_BY_TARGET: Record<RewriteTarget, string> = {
   'gpt-image-2': 'gpt-image-2.md',
   'seedance-2': 'seedance-2.md',
+  cinema: 'cinema.md',
 };
+
+/** Cinema scores its own soundtrack and invents one when the prompt is silent,
+ *  so every Cinema prompt must end with an `Audio:` line — including the ones
+ *  where the rewriter fell through and returned the user's words untouched. */
+export function ensureAudioLine(prompt: string): string {
+  return /\bAudio:/i.test(prompt)
+    ? prompt
+    : `${prompt.trim()}\nAudio: natural ambient sound that fits the scene, a light music bed, no dialogue.`;
+}
 
 // Cache: skill files don't change at runtime.
 const skillCache = new Map<RewriteTarget, string>();

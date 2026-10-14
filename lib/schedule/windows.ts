@@ -1,12 +1,12 @@
 import type { QuietHours } from '../db/schema';
 
-const BUSINESS_WINDOWS = [
+export const BUSINESS_WINDOWS = [
   [9, 11],   // morning
   [12, 13],  // lunch
   [16, 18],  // afternoon
 ];
 
-function inQuiet(d: Date, quiet: QuietHours | null | undefined): boolean {
+export function inQuiet(d: Date, quiet: QuietHours | null | undefined): boolean {
   if (!quiet) return false;
   const hour = d.getUTCHours() + d.getUTCMinutes() / 60;
   const [sh, sm] = quiet.start.split(':').map(Number);

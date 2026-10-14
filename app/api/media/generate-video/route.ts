@@ -4,7 +4,9 @@ import { and, eq } from 'drizzle-orm';
 import { withUser, jsonError } from '../../../../lib/api';
 import { parseBody } from '../../../../lib/validation';
 import { rateLimit } from '../../../../lib/rate-limit';
-import { rewritePromptForMedia } from '../../../../lib/ai/prompt-rewriter';
+import { rewritePromptForMedia, ensureAudioLine } from '../../../../lib/ai/prompt-rewriter';
+import { DEFAULT_VIDEO_MODEL, VIDEO_MODEL_IDS, validateAgainstModel, type VideoModelId } from '../../../../lib/ai/models';
+import { encodeCinemaFrames, CinemaAttachmentTooLarge } from '../../../../lib/ai/cue';
 import { loadBrandContext, renderBrandBlock } from '../../../../lib/ai/brand-context';
 import { getOpenAI } from '../../../../lib/ai/client';
 import { isStubMode } from '../../../../lib/env';
@@ -13,10 +15,10 @@ import { db } from '../../../../lib/db';
 import { mediaAssets, videoJobs } from '../../../../lib/db/schema';
 import { createSeedanceTask, type SeedanceMode, type SeedanceAspect, type SeedanceQuality } from '../../../../lib/ai/piapi';
 import { priceForVideo } from '../../../../lib/credits/pricing';
-import { ensureBalance, charge, refund, insufficientCreditsResponse } from '../../../../lib/credits/ledger';
+import { ensureBalance, charge, refund, insufficientCreditsResponse, InsufficientCreditsError } from '../../../../lib/credits/ledger';
 // Same fetcher + re-hoster /api/v1/videos uses. Imported rather than
 // reimplemented: a second copy of an SSRF guard is a second copy to get wrong.
-import { fetchReferenceImages, rehostReferences } from '../../v1/shared';
+import { fetchReferenceImages, rehostReferences, submitVideo, SubmitFailure } from '../../v1/shared';
 
 export const runtime = 'nodejs';
 // Submitting a non-text mode now fetches the caller's stills first (up to
@@ -27,7 +29,10 @@ export const maxDuration = 300;
 
 const bodySchema = z.object({
   prompt: z.string().min(2).max(2_000),
-  durationSec: z.number().int().min(4).max(15).default(8),
+  /** Omitted = DEFAULT_VIDEO_MODEL when it can serve the request, else Motion —
+   *  see resolveModel. Each model's own envelope is enforced below. */
+  model: z.enum(VIDEO_MODEL_IDS).optional(),
+  durationSec: z.number().int().min(4).max(30).default(8),
   quality: z.enum(['480p', '720p', '1080p']).default('720p'),
   aspect: z.enum(['9:16', '1:1', '16:9']).default('9:16'),
   count: z.number().int().min(1).max(3).default(1),
@@ -99,14 +104,24 @@ function mapToSeedanceInput(args: {
   }
 }
 
+/**
+ * Which model renders this request.
+ *
+ * An explicit `model` is honoured and its envelope enforced. When the client
+ * says nothing, new renders go to DEFAULT_VIDEO_MODEL — unless the request
+ * needs something only Motion offers (1080p, reference stills or clips,
+ * audio-driven), in which case it stays on Motion rather than 400ing a request
+ * the composer has always been allowed to make.
+ */
+function resolveModel(d: z.infer<typeof bodySchema>): { model: VideoModelId } | { field: string; message: string } {
+  const req = { durationSec: d.durationSec, quality: d.quality, aspect: d.aspect, genMode: d.genMode, fast: d.fast };
+  if (!d.model) return { model: validateAgainstModel(DEFAULT_VIDEO_MODEL, req) ? 'sociafy-motion-1' : DEFAULT_VIDEO_MODEL };
+  return validateAgainstModel(d.model, req) ?? { model: d.model };
+}
+
 export async function POST(req: NextRequest) {
   return withUser(async (user) => {
     if (!getOpenAI()) return jsonError('ai_not_configured', 503);
-    if (!process.env.PIAPI_API_KEY) {
-      return jsonError('video_provider_not_configured', 503, {
-        hint: 'Set PIAPI_API_KEY in .env.local — get a key at https://piapi.ai',
-      });
-    }
     // R2 is a hard requirement, not a nice-to-have: the finished MP4 only
     // exists on PiAPI's CDN for a few hours. Without a bucket we'd charge the
     // user, pay PiAPI, and have nowhere to put the result. Same pre-flight as
@@ -131,6 +146,17 @@ export async function POST(req: NextRequest) {
       prompt, durationSec, quality, aspect, count, caption, rawPrompt, genMode,
       startFrameUrl, endFrameUrl, referenceImageUrls, referenceVideoUrl, audioUrl, fast,
     } = parsed.data;
+
+    const resolved = resolveModel(parsed.data);
+    if (!('model' in resolved)) return jsonError('invalid_request', 400, resolved);
+    if (resolved.model === 'sociafy-cinema-1') {
+      return submitCinema(user.id, parsed.data);
+    }
+    if (!process.env.PIAPI_API_KEY) {
+      return jsonError('video_provider_not_configured', 503, {
+        hint: 'Set PIAPI_API_KEY in .env.local — get a key at https://piapi.ai',
+      });
+    }
 
     // Pre-flight: each gen mode needs its own anchors.
     if (genMode === 'image-to-video' && !startFrameUrl) {
@@ -379,4 +405,101 @@ export async function POST(req: NextRequest) {
       { status: 202, headers: { 'content-type': 'application/json' } },
     );
   }, req);
+}
+
+/**
+ * The Cinema path. Delegates each clip to submitVideo — the same row → charge
+ * → render → refund-on-failure path /api/v1/videos and autopilot use — rather
+ * than growing a third copy of it here. Only text and image-to-video reach
+ * this (resolveModel), and Cinema takes frame BYTES, so stills are encoded,
+ * not re-hosted, and size-checked before anything is charged.
+ */
+async function submitCinema(userId: string, d: z.infer<typeof bodySchema>): Promise<Response> {
+  if (isStubMode.cue()) return jsonError('video_provider_not_configured', 503);
+  if (d.genMode === 'image-to-video' && !d.startFrameUrl && !d.endFrameUrl) {
+    return jsonError('image_to_video_needs_start_frame', 400);
+  }
+
+  let frames: { first?: string; last?: string } | undefined;
+  if (d.genMode === 'image-to-video') {
+    const slots = [...(d.startFrameUrl ? ['first' as const] : []), ...(d.endFrameUrl ? ['last' as const] : [])];
+    const fetched = await fetchReferenceImages([d.startFrameUrl, d.endFrameUrl].filter((u): u is string => !!u));
+    if (!fetched.ok) return fetched.response;
+    try {
+      const encoded = encodeCinemaFrames(await Promise.all(fetched.files.map(async (f) => Buffer.from(await f.arrayBuffer()))));
+      frames = {};
+      slots.forEach((slot, i) => { frames![slot] = encoded[i]; });
+    } catch (e) {
+      if (e instanceof CinemaAttachmentTooLarge) {
+        return jsonError('reference_too_large', 400, { hint: 'Use smaller frames — 1536px on the long edge is plenty. Nothing was charged.' });
+      }
+      throw e;
+    }
+  }
+
+  const brandBlock = renderBrandBlock(await loadBrandContext(userId), 'media');
+  const rewrite = d.rawPrompt
+    ? { prompt: d.prompt, enhanced: false }
+    : await rewritePromptForMedia({ userPrompt: d.prompt, target: 'cinema', caption: d.caption, brandBlock });
+  const prompt = ensureAudioLine(rewrite.prompt);
+
+  // Sequential, not parallel: each submit counts the account-wide slots
+  // before charging, and racing them would let all of them pass the count.
+  const ok: Awaited<ReturnType<typeof submitVideo>>[] = [];
+  let firstError: unknown = null;
+  for (let i = 0; i < d.count; i++) {
+    try {
+      ok.push(await submitVideo({
+        auth: { userId },
+        model: 'sociafy-cinema-1',
+        prompt,
+        durationSec: d.durationSec,
+        quality: d.quality,
+        aspect: d.aspect as SeedanceAspect,
+        fast: false,
+        genMode: d.genMode === 'image-to-video' ? 'image-to-video' : 'text',
+        frames,
+        source: null,
+        via: 'compose',
+      }));
+    } catch (e) {
+      firstError = e;
+      break; // out of slots or credits for this one means the same for the next
+    }
+  }
+
+  if (ok.length === 0) {
+    if (firstError instanceof InsufficientCreditsError) {
+      return insufficientCreditsResponse({ balance: firstError.balance, needed: firstError.needed });
+    }
+    if (firstError instanceof SubmitFailure && firstError.code === 'at_capacity') {
+      return jsonError('video_at_capacity', 503, { hint: 'Video rendering is busy right now. Nothing was charged — try again in a few minutes.' });
+    }
+    if (firstError instanceof SubmitFailure && firstError.code === 'prompt_rejected') {
+      return jsonError('prompt_rejected', 422);
+    }
+    // White-label: vendor detail goes to the log, never the response.
+    console.error('[generate-video] cinema submit failed:', firstError instanceof Error ? firstError.message.slice(0, 400) : firstError);
+    return jsonError('video_submit_failed', 502);
+  }
+
+  return new Response(
+    JSON.stringify({
+      model: 'sociafy-cinema-1',
+      jobs: ok.map(({ job, creditsCharged }) => ({
+        id: job.id,
+        status: job.status,
+        durationSec: job.durationSec,
+        aspect: job.aspect,
+        quality: job.quality,
+        creditsCharged,
+      })),
+      submitted: ok.length,
+      failed: d.count - ok.length,
+      rewrittenPrompt: prompt,
+      enhanced: rewrite.enhanced,
+      creditsChargedTotal: ok.reduce((n, r) => n + r.creditsCharged, 0),
+    }),
+    { status: 202, headers: { 'content-type': 'application/json' } },
+  );
 }

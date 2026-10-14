@@ -18,6 +18,16 @@ const state = vi.hoisted(() => ({
   submits: [] as Record<string, unknown>[],
   fetched: [] as string[],
   uploads: 0,
+  /** Cinema submits, which go through the shared v1 path. */
+  cinema: [] as Record<string, unknown>[],
+}));
+
+vi.mock('../../v1/shared', async (orig) => ({
+  ...(await orig<typeof import('../../v1/shared')>()),
+  submitVideo: (a: Record<string, unknown>) => {
+    state.cinema.push(a);
+    return Promise.resolve({ job: { id: `cin_${state.cinema.length}`, status: 'pending', durationSec: 8, aspect: '9:16', quality: '720p' }, creditsCharged: 22, replayed: false });
+  },
 }));
 
 vi.mock('../../../../lib/api', () => ({
@@ -70,7 +80,7 @@ vi.mock('../../../../lib/db/schema', () => ({
 }));
 vi.mock('../../../../lib/rate-limit', () => ({ rateLimit: () => ({ ok: true }) }));
 vi.mock('../../../../lib/ai/client', () => ({ getOpenAI: () => ({}) }));
-vi.mock('../../../../lib/env', () => ({ isStubMode: { r2: () => state.r2Stub } }));
+vi.mock('../../../../lib/env', () => ({ isStubMode: { r2: () => state.r2Stub, cue: () => false } }));
 vi.mock('../../../../lib/storage/r2', () => ({
   keyFromPublicUrl: (u: string) => (u.startsWith('https://cdn.test/') ? u.slice('https://cdn.test/'.length) : u),
   // rehostReferences (app/api/v1/shared) copies vetted stills into our bucket.
@@ -78,7 +88,8 @@ vi.mock('../../../../lib/storage/r2', () => ({
   publicUrlFor: (k: string) => `https://cdn.test/${k}`,
   uploadBuffer: () => { state.uploads++; return Promise.resolve(); },
 }));
-vi.mock('../../../../lib/ai/prompt-rewriter', () => ({
+vi.mock('../../../../lib/ai/prompt-rewriter', async (orig) => ({
+  ...(await orig<typeof import('../../../../lib/ai/prompt-rewriter')>()),
   rewritePromptForMedia: () => Promise.resolve({ prompt: 'rewritten', enhanced: true }),
 }));
 vi.mock('../../../../lib/ai/brand-context', () => ({
@@ -131,15 +142,44 @@ vi.stubGlobal('fetch', (input: URL | string) => {
   return Promise.resolve(new Response(new Uint8Array(png()), { status: 200, headers: { 'content-type': 'image/png' } }));
 });
 
+/** These pin the Motion path, so they name it: an omitted model now defaults
+ *  to Cinema wherever Cinema can serve the request. */
 function call(body: Record<string, unknown>) {
-  return POST({ json: async () => body } as never) as unknown as Promise<Response & Record<string, unknown>>;
+  return POST({ json: async () => ({ model: 'sociafy-motion-1', ...body }) } as never) as unknown as Promise<Response & Record<string, unknown>>;
 }
 
 beforeEach(() => {
   process.env.PIAPI_API_KEY = 'k';
   state.calls = []; state.rows = []; state.updates = []; state.refunds = [];
   state.submitError = null; state.r2Stub = false; state.refDurationS = 12;
-  state.submits = []; state.fetched = []; state.uploads = 0;
+  state.submits = []; state.fetched = []; state.uploads = 0; state.cinema = [];
+});
+
+describe('POST /api/media/generate-video — model default', () => {
+  const raw = (body: Record<string, unknown>) =>
+    POST({ json: async () => body } as never) as unknown as Promise<Response>;
+
+  it('renders on Cinema when no model is named, with an Audio line', async () => {
+    const res = await raw({ prompt: 'a coffee pour', count: 2 });
+    expect(res.status).toBe(202);
+    expect(state.calls).not.toContain('submit'); // never touched Motion
+    expect(state.cinema).toHaveLength(2);
+    expect(state.cinema[0]).toMatchObject({ model: 'sociafy-cinema-1', fast: false, quality: '720p' });
+    expect(String(state.cinema[0].prompt)).toMatch(/\nAudio: /);
+  });
+
+  it('stays on Motion when only Motion can serve the request', async () => {
+    await raw({ prompt: 'a coffee pour', quality: '1080p' });
+    expect(state.cinema).toHaveLength(0);
+    expect(state.calls).toEqual(['insert', 'charge', 'submit']);
+  });
+
+  it('rejects an explicit model outside its envelope, before charging', async () => {
+    const res = (await raw({ prompt: 'a coffee pour', model: 'sociafy-cinema-1', quality: '1080p' })) as unknown as Record<string, unknown>;
+    expect(res.status).toBe(400);
+    expect(state.cinema).toHaveLength(0);
+    expect(state.calls).toEqual([]);
+  });
 });
 
 describe('POST /api/media/generate-video', () => {

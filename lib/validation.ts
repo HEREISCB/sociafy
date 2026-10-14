@@ -48,7 +48,20 @@ export const draftCreateSchema = z.object({
 
 export const draftUpdateSchema = draftCreateSchema.partial().extend({
   status: z.enum(['draft', 'scheduled', 'published', 'archived']).optional(),
+  // Move a planned post. null = unplanned (approve picks the next free slot).
+  plannedAt: z.string().datetime().nullable().optional(),
 });
+
+// Plan (weekly/monthly review) -------------------------------------------
+const horizonDays = z.union([z.literal(7), z.literal(30)]);
+export const planGenerateSchema = z.object({ horizonDays: horizonDays.optional() });
+export const planApproveSchema = z.object({
+  draftIds: z.array(uuid).min(1).max(100).optional(),
+  all: z.literal(true).optional(),
+  // draftId → ISO time. A time already past is re-slotted like any overdue draft.
+  overrides: z.record(uuid, z.string().datetime()).optional(),
+}).refine((b) => b.all || b.draftIds, { message: 'draftIds or all:true required' });
+export const planSkipSchema = z.object({ draftId: uuid });
 
 // Schedule -------------------------------------------------------------
 export const scheduleCreateSchema = z.object({
@@ -115,6 +128,7 @@ export const agentSettingsUpdateSchema = z.object({
   }).optional(),
   // null clears the cap.
   weeklyCreditCap: z.number().int().min(0).max(1_000_000).nullable().optional(),
+  planHorizonDays: horizonDays.optional(),
 });
 
 // Accounts -------------------------------------------------------------

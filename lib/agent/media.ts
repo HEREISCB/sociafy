@@ -1,20 +1,21 @@
-import { and, eq, ne } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import { db } from '../db';
 import { agentSettings, drafts, genJobs, videoJobs, mediaAssets, activityLog, type DraftMedia } from '../db/schema';
 import { charge } from '../credits/ledger';
 import { priceForImage } from '../credits/pricing';
 import { AGENT_IMAGE, AGENT_VIDEO } from '../credits/estimator';
-import { rewritePromptForMedia } from '../ai/prompt-rewriter';
-import { DEFAULT_VIDEO_MODEL } from '../ai/models';
+import { rewritePromptForMedia, ensureAudioLine } from '../ai/prompt-rewriter';
+import { DEFAULT_VIDEO_MODEL, backendFor } from '../ai/models';
+import { CUE_CONCURRENCY } from '../ai/cue';
 // The hardened generation paths live with the public API. Reused rather than
 // copied: row → charge → provider, refund-on-failure and the cron sweepers all
 // already work on these rows. (lib/cron/finalizeJobs.ts imports from here too.)
-import { insertImageJob, runImageJob, failImageJob, submitVideo } from '../../app/api/v1/shared';
+import { insertImageJob, runImageJob, failImageJob, submitVideo, SubmitFailure } from '../../app/api/v1/shared';
 import { publishOrHold } from './publish';
 
 type Post = { userId: string; title: string; body: string; brandBlock: string };
 
-const mediaPrompt = (p: Post, target: 'gpt-image-2' | 'seedance-2') =>
+const mediaPrompt = (p: Post, target: 'gpt-image-2' | 'cinema') =>
   rewritePromptForMedia({ userPrompt: `${p.title}\n\n${p.body}`.slice(0, 1_500), target, caption: p.body, brandBlock: p.brandBlock });
 
 /** Generate the image for an autopilot post. Null = it failed and the charge was refunded. */
@@ -44,18 +45,124 @@ export async function generateAgentImage(p: Post): Promise<DraftMedia | null> {
   return a ? { id: a.id, url: a.publicUrl, mimeType: a.mimeType, width: a.width ?? undefined, height: a.height ?? undefined } : null;
 }
 
-/** Start the render for an autopilot video post. Returns the video_jobs id to park on the draft. */
+/**
+ * A video_jobs row parked because every render slot was busy. Not 'pending':
+ * nothing was charged and nothing is upstream, so the finalizer, the in-flight
+ * slot count and the poller must all ignore it. submitQueuedVideos owns it.
+ */
+export const VIDEO_QUEUED = 'queued';
+const VIDEO_SUBMITTING = 'submitting';
+/** A queued render that has not found a slot in a day is not going to. */
+const QUEUE_MAX_MS = 24 * 60 * 60_000;
+
+/** All slots busy — before the charge (our own count) or after it (the
+ *  backend's 429, already refunded by submitVideo). Either way: retry later. */
+const isAtCapacity = (e: unknown) =>
+  e instanceof SubmitFailure && (e.code === 'at_capacity' || /cue_429/.test(e.detail));
+
+const renderAgentVideo = (userId: string, prompt: string) =>
+  submitVideo({ auth: { userId }, model: DEFAULT_VIDEO_MODEL, prompt, ...AGENT_VIDEO, source: null, via: 'autopilot' });
+
+/**
+ * Start the render for an autopilot video post. Returns the video_jobs id to
+ * park on the draft.
+ *
+ * When every render slot is taken (three, account-wide), the post is not
+ * dropped to text: a VIDEO_QUEUED row is parked instead, uncharged, and the
+ * five-minute sweep submits it once a slot frees.
+ */
 export async function submitAgentVideo(p: Post): Promise<string> {
-  const { prompt } = await mediaPrompt(p, 'seedance-2');
-  const { job } = await submitVideo({
-    auth: { userId: p.userId },
-    model: DEFAULT_VIDEO_MODEL,
-    prompt,
-    ...AGENT_VIDEO,
-    source: null,
-    via: 'autopilot',
-  });
-  return job.id;
+  const prompt = ensureAudioLine((await mediaPrompt(p, 'cinema')).prompt);
+  try {
+    return (await renderAgentVideo(p.userId, prompt)).job.id;
+  } catch (e) {
+    if (!isAtCapacity(e)) throw e;
+    const [row] = await db()
+      .insert(videoJobs)
+      .values({
+        userId: p.userId,
+        provider: backendFor(DEFAULT_VIDEO_MODEL, AGENT_VIDEO.fast),
+        providerTaskId: '',
+        status: VIDEO_QUEUED,
+        prompt,
+        durationSec: AGENT_VIDEO.durationSec,
+        aspect: AGENT_VIDEO.aspect,
+        quality: AGENT_VIDEO.quality,
+        genMode: 'text',
+      })
+      .returning();
+    return row.id;
+  }
+}
+
+/**
+ * Submit parked autopilot renders, oldest first, until the slots run out.
+ *
+ * The parked row only holds the request. A real submit goes through
+ * submitVideo (its own row → charge → render, refund on failure), then the
+ * draft is repointed at that job and the placeholder deleted — so the money
+ * path is exactly the one an immediate submit takes. The placeholder is
+ * claimed first so two overlapping sweeps cannot both submit (and charge) it.
+ *
+ * ponytail: a process that dies between the claim and the repoint leaves the
+ * row 'submitting' until QUEUE_MAX_MS fails it (the post then falls back to
+ * text; any render that did start still lands in the library).
+ */
+export async function submitQueuedVideos(): Promise<number> {
+  const parked = await db()
+    .select()
+    .from(videoJobs)
+    .where(inArray(videoJobs.status, [VIDEO_QUEUED, VIDEO_SUBMITTING]))
+    .orderBy(asc(videoJobs.createdAt))
+    .limit(CUE_CONCURRENCY * 4);
+
+  let submitted = 0;
+  for (const q of parked) {
+    const fail = (error: string) =>
+      db().update(videoJobs).set({ status: 'failed', error, updatedAt: new Date() }).where(eq(videoJobs.id, q.id));
+
+    if (Date.now() - q.createdAt.getTime() > QUEUE_MAX_MS) {
+      await fail('queue_timeout');
+      continue;
+    }
+    if (q.status !== VIDEO_QUEUED) continue;
+
+    // Only render for a post that is still waiting on it — a draft the user
+    // deleted, scheduled as text or archived must not be billed for a clip.
+    const [draft] = await db()
+      .select({ id: drafts.id })
+      .from(drafts)
+      .where(and(eq(drafts.videoJobId, q.id), eq(drafts.status, 'draft')))
+      .limit(1);
+    if (!draft) {
+      await fail('abandoned');
+      continue;
+    }
+
+    const [claimed] = await db()
+      .update(videoJobs)
+      .set({ status: VIDEO_SUBMITTING, updatedAt: new Date() })
+      .where(and(eq(videoJobs.id, q.id), eq(videoJobs.status, VIDEO_QUEUED)))
+      .returning({ id: videoJobs.id });
+    if (!claimed) continue;
+
+    try {
+      const { job } = await renderAgentVideo(q.userId, q.prompt);
+      await db().update(drafts).set({ videoJobId: job.id, updatedAt: new Date() }).where(eq(drafts.videoJobId, q.id));
+      await db().delete(videoJobs).where(eq(videoJobs.id, q.id));
+      submitted++;
+    } catch (e) {
+      if (isAtCapacity(e)) {
+        await db().update(videoJobs).set({ status: VIDEO_QUEUED, updatedAt: new Date() }).where(eq(videoJobs.id, q.id));
+        break; // slots are full for everyone behind this one too
+      }
+      // Nothing was charged against this placeholder; submitVideo has already
+      // settled any charge of its own. attachFinishedVideos turns it into text.
+      console.warn('[agent.media] queued render failed:', e instanceof Error ? e.message : e);
+      await fail('submit_failed');
+    }
+  }
+  return submitted;
 }
 
 /**
@@ -69,7 +176,7 @@ export async function attachFinishedVideos(): Promise<number> {
     .select({ draft: drafts, job: videoJobs })
     .from(drafts)
     .innerJoin(videoJobs, eq(drafts.videoJobId, videoJobs.id))
-    .where(ne(videoJobs.status, 'pending'))
+    .where(inArray(videoJobs.status, ['completed', 'failed']))
     .limit(50);
 
   for (const { draft, job } of rows) {

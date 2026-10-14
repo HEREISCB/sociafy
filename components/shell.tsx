@@ -1,24 +1,21 @@
 'use client';
 
-import React, { useCallback, useEffect, useRef, useState, Fragment } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { UserButton, useUser } from '@clerk/nextjs';
 import { Icon } from './icons';
 import { useApi } from '../lib/ui/fetcher';
 import { CreditMeter } from './credits';
 import { createSpring, project, rubberband, type Spring } from '../lib/ui/spring';
 
-type Page = 'dashboard' | 'compose' | 'agent' | 'calendar' | 'connections' | 'shield' | 'onboarding';
-// Legacy alias kept so callers compile during the topbar refactor.
-type Mode = 'manual' | 'auto';
 
 /**
  * AutopilotStatusPill — persistent at-a-glance state indicator for the
  * autopilot. Replaces the old "Co-pilot ↔ Agent" mode toggle which created
  * three names for two concepts (Compose vs Auto-pilot in the sidebar
  * already distinguishes "you driving" from "AI driving"). Clicking the pill
- * jumps to the Auto-pilot tab.
+ * jumps to /autopilot.
  *
  * Polls /api/agent/settings every 60s. Loading state is the same as paused
  * — a slow nav shouldn't flash misleading "ON" then "off."
@@ -58,12 +55,6 @@ export const AutopilotStatusPill: React.FC<AutopilotStatusPillProps> = ({ onClic
 };
 
 interface SidebarProps {
-  page: Page;
-  onNav: (p: Page) => void;
-  /** Legacy — accepted for backward compat but no longer driving UI. */
-  mode?: Mode;
-  onMode?: (m: Mode) => void;
-  showTTS?: boolean;
   /** When true on mobile, the sidebar slides in from the left as a drawer. */
   mobileOpen?: boolean;
   /** Called when the drawer should close (scrim click, nav, or Esc). */
@@ -257,15 +248,15 @@ function useDrawerDrag(open: boolean, onClose: () => void, onOpen: () => void) {
   };
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ page, onNav, showTTS = true, mobileOpen = false, onMobileClose }) => {
-  const items = [
-    { id: 'dashboard' as Page, label: 'Dashboard', icon: 'home' as const, kbd: '1' },
-    { id: 'compose' as Page, label: 'Compose', icon: 'sparkle' as const, kbd: '2', badge: 'AI', accent: true },
-    { id: 'agent' as Page, label: 'Auto-pilot', icon: 'bolt' as const, kbd: '3' },
-    { id: 'calendar' as Page, label: 'Calendar', icon: 'calendar' as const, kbd: '4' },
-    { id: 'connections' as Page, label: 'Connections', icon: 'globe' as const, kbd: '5' },
-    { id: 'shield' as Page, label: 'Reputation Shield', icon: 'shield' as const, kbd: '6', badge: 'New', accent: true },
-  ];
+const NAV = [
+  { href: '/dashboard', label: 'Home', icon: 'home' as const },
+  { href: '/calendar', label: 'Calendar', icon: 'calendar' as const },
+  { href: '/autopilot', label: 'Autopilot', icon: 'bolt' as const },
+];
+
+export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onMobileClose }) => {
+  const pathname = usePathname() ?? '';
+  const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
   // The parent's `mobileOpen` is a trigger, not the truth: a gesture can pull a
   // closing drawer back open, and the parent has no callback to hear about it.
@@ -287,6 +278,20 @@ export const Sidebar: React.FC<SidebarProps> = ({ page, onNav, showTTS = true, m
     return () => window.removeEventListener('keydown', onKey);
   }, [open, close]);
 
+  const navLink = (href: string, label: string, icon: React.ComponentProps<typeof Icon>['name']) => (
+    <Link
+      key={href}
+      href={href}
+      className={`nav-item ${isActive(href) ? 'active' : ''}`}
+      aria-current={isActive(href) ? 'page' : undefined}
+      style={{ textDecoration: 'none' }}
+      onClick={close}
+    >
+      <Icon name={icon} className="ic" />
+      {label}
+    </Link>
+  );
+
   return (
     <>
       {/* Always mounted: it has to be able to fade back OUT with the drawer,
@@ -299,79 +304,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ page, onNav, showTTS = true, m
           <span className="brand-name">sociafy<span className="dot">.</span></span>
         </Link>
 
-        <div className="nav-section">
-          <div className="nav-label">Workspace</div>
-          {items.map((it) => (
-            <button
-              type="button"
-              key={it.id}
-              className={`nav-item ${page === it.id ? 'active' : ''}`}
-              aria-current={page === it.id ? 'page' : undefined}
-              onClick={() => { onNav(it.id); close(); }}
-            >
-              <Icon name={it.icon} className="ic" />
-              {it.label}
-              {it.badge && (
-                <span className={`badge ${it.accent ? 'accent' : ''}`}>{it.badge}</span>
-              )}
-              {!it.badge && <span className="kbd">⌘{it.kbd}</span>}
-            </button>
-          ))}
-        </div>
-
-        {/* Separate section because these are real routes, not dashboard tabs —
-            the items above switch a tab via onNav, these navigate. /usage and
-            /billing previously had no entry at all, so the API-keys panel was
-            reachable only by typing the URL. */}
-        <div className="nav-section">
-          <div className="nav-label">Account</div>
-          <Link
-            href="/developers"
-            className="nav-item"
-            style={{ textDecoration: 'none' }}
-            onClick={close}
-          >
-            <Icon name="lock" className="ic" />
-            API
-          </Link>
-          <Link
-            href="/usage"
-            className="nav-item"
-            style={{ textDecoration: 'none' }}
-            onClick={close}
-          >
-            <Icon name="chart" className="ic" />
-            Usage
-          </Link>
-          <Link
-            href="/billing"
-            className="nav-item"
-            style={{ textDecoration: 'none' }}
-            onClick={close}
-          >
-            <Icon name="bolt" className="ic" />
-            Billing
-          </Link>
-        </div>
+        <nav className="nav-section">
+          {NAV.map((it) => navLink(it.href, it.label, it.icon))}
+        </nav>
 
         <div className="sidebar-foot">
-          {showTTS && (
-            <Link
-              href="/studio/voice"
-              className="tts-card"
-              style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}
-              onClick={close}
-            >
-              <span className="pill">New</span>
-              <h4>Voice cloner</h4>
-              <p>Clone your voice once — your avatar speaks every post in it.</p>
-              <div className="wave">
-                {[6, 10, 4, 12, 8, 14, 7, 11, 5, 9, 13, 6, 10, 4, 8].map((h, i) => (
-                  <span key={i} style={{ height: h }} />
-                ))}
-              </div>
-            </Link>
-          )}
+          {navLink('/settings', 'Settings', 'settings')}
           <UserCard />
         </div>
       </aside>
@@ -426,7 +364,6 @@ const UserCard: React.FC = () => {
   }
 
   const name = user?.fullName || user?.username || user?.primaryEmailAddress?.emailAddress || 'You';
-  const plan = user?.primaryEmailAddress?.emailAddress?.split('@')[1] || 'sociafy.app';
 
   return (
     <div
@@ -441,32 +378,25 @@ const UserCard: React.FC = () => {
     >
       <UserButton
         appearance={{ elements: { userButtonAvatarBox: { width: 32, height: 32 } } }}
-      />
+      >
+        <UserButton.MenuItems>
+          <UserButton.Link label="Settings" labelIcon={<Icon name="settings" size={14} />} href="/settings" />
+        </UserButton.MenuItems>
+      </UserButton>
       <div className="user-meta" style={{ marginLeft: 4 }}>
         <span className="user-name">{name}</span>
-        <span className="user-plan">Studio · {plan}</span>
       </div>
     </div>
   );
 };
 
 interface TopbarProps {
-  crumbs: string[];
-  /** Optional callback for clicking the Autopilot status pill — typically
-   *  navigates to the Auto-pilot tab. When omitted the pill becomes a
-   *  Link to /dashboard?tab=agent. */
-  onAutopilotClick?: () => void;
-  /** Mobile hamburger handler — when provided, shows a menu button visible
-   *  only at narrow viewports. The dashboard shell wires this to its
-   *  sidebar-drawer open state. */
+  /** Mobile hamburger handler — shows a menu button visible only at narrow
+   *  viewports, wired to the sidebar-drawer open state. */
   onMenuClick?: () => void;
-  /** Legacy mode props — accepted for backward compat, ignored. */
-  mode?: Mode;
-  onMode?: (m: Mode) => void;
-  children?: React.ReactNode;
 }
 
-export const Topbar: React.FC<TopbarProps> = ({ crumbs, onAutopilotClick, onMenuClick, children }) => {
+export const Topbar: React.FC<TopbarProps> = ({ onMenuClick }) => {
   const router = useRouter();
   return (
     <div className="topbar">
@@ -484,22 +414,14 @@ export const Topbar: React.FC<TopbarProps> = ({ crumbs, onAutopilotClick, onMenu
           </svg>
         </button>
       )}
-      <div className="crumbs">
-        {crumbs.map((c, i) => (
-          <Fragment key={i}>
-            {i > 0 && <span className="sep">/</span>}
-            <span className={i === crumbs.length - 1 ? 'leaf' : 'muted'}>{c}</span>
-          </Fragment>
-        ))}
-      </div>
       <div className="topbar-spacer" />
       <div className="topbar-actions">
-        <AutopilotStatusPill
-          onClick={onAutopilotClick ?? (() => router.push('/dashboard?tab=agent'))}
-        />
+        <AutopilotStatusPill onClick={() => router.push('/autopilot')} />
         <CreditMeter />
         <NotificationsBell />
-        {children}
+        <Link href="/compose" className="btn primary" style={{ textDecoration: 'none' }}>
+          <Icon name="plus" size={13} /> New post
+        </Link>
       </div>
     </div>
   );

@@ -1,0 +1,83 @@
+/* Agent cards + autopilot status pill. */
+/* Agent cards */
+.agent-card {
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 16px;
+  display: grid;
+  grid-template-columns: 32px 1fr auto;
+  gap: 14px;
+  align-items: start;
+}
+.agent-card .agent-mark {
+  width: 32px; height: 32px;
+  border-radius: 8px;
+  background: var(--ink);
+  color: var(--accent);
+  display: grid; place-items: center;
+  font-family: var(--mono); font-size: 14px;
+  font-weight: 600;
+}
+.agent-meta {
+  font-family: var(--mono); font-size: 11px;
+  color: var(--ink-3); text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 4px;
+  display: flex; align-items: center; gap: 8px;
+}
+.agent-title { font-size: var(--fs-sm); font-weight: 600; margin-bottom: 4px; letter-spacing: -0.005em; }
+.agent-body { font-size: var(--fs-sm); color: var(--ink-2); line-height: 1.55; }
+
+/* ===================================================================
+   Autopilot status pill — replaces the old Co-pilot/Agent mode switch
+   =================================================================== */
+.autopilot-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 12px 0 10px;
+  border-radius: 999px;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: var(--fs-xs);
+  line-height: 1;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+@media (hover: hover) and (pointer: fine) { .autopilot-pill:hover { border-color: var(--line-2); } }
+.autopilot-pill .status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-3);
+  flex-shrink: 0;
+  position: relative;
+}
+.autopilot-pill .status-dot.live { background: var(--ok); }
+.autopilot-pill-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.autopilot-pill .kicker {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
+}
+.autopilot-pill .state {
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--ink);
+}
+.autopilot-pill.off .state { color: var(--ink-3); }
+.autopilot-pill.on { border-color: color-mix(in oklch, var(--ok) 35%, var(--surface)); background: var(--ok-soft); }
+
+@media (max-width: 900px) {
+  /* Autopilot pill: drop the prefix label, keep dot + state. */
+  .autopilot-pill .kicker { display: none; }
+  .autopilot-pill { padding: 0 10px; height: 32px; }
+}

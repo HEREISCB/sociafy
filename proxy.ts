@@ -2,7 +2,14 @@ import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
 import type { NextFetchEvent, NextRequest } from 'next/server';
 
-const isProtected = createRouteMatcher(['/dashboard(.*)', '/onboarding(.*)']);
+const isProtected = createRouteMatcher([
+  '/dashboard(.*)',
+  '/compose(.*)',
+  '/calendar(.*)',
+  '/autopilot(.*)',
+  '/settings(.*)',
+  '/onboarding(.*)',
+]);
 const isCron = createRouteMatcher(['/api/cron/(.*)']);
 // Machine-to-machine traffic, routed around Clerk in `middleware` below.
 // /api/v1 authenticates with a Bearer API key (lib/api-key.ts); the provider
@@ -20,7 +27,10 @@ const clerk = clerkMiddleware(async (auth, req) => {
       return NextResponse.redirect(url);
     }
   }
-  if (isProtected(req)) {
+  // Same dev-only gate as SKIP_AUTH_DEV in lib/api.ts: lets local screenshots
+  // render app pages as dev-user-local. NODE_ENV is 'production' on the box.
+  const devBypass = process.env.SKIP_AUTH_DEV === 'true' && process.env.NODE_ENV === 'development';
+  if (isProtected(req) && !devBypass) {
     await auth.protect();
   }
 });

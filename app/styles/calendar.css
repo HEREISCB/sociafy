@@ -1,0 +1,214 @@
+/* Calendar: week grid + mobile month grid. */
+/* Calendar */
+.calendar {
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  overflow: hidden;
+}
+.cal-head {
+  display: grid;
+  grid-template-columns: 64px repeat(7, 1fr);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+.cal-head .cell {
+  padding: 12px 10px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+  font-weight: 500;
+  border-right: 1px solid var(--line);
+}
+.cal-head .cell:last-child { border-right: 0; }
+.cal-head .cell .day {
+  font-size: 18px;
+  color: var(--ink);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  display: block;
+  margin-top: 2px;
+  font-family: var(--mono);
+}
+.cal-head .cell.today .day { color: var(--accent); }
+.cal-grid {
+  display: grid;
+  grid-template-columns: 64px repeat(7, 1fr);
+  overflow-y: auto;
+  max-height: calc(100vh - 320px);
+}
+.cal-hour-col {
+  display: flex; flex-direction: column;
+}
+.cal-hour-cell {
+  height: 48px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-4);
+  padding: 4px 8px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px dashed var(--line);
+  flex-shrink: 0;
+}
+.cal-day-col {
+  border-right: 1px solid var(--line);
+  position: relative;
+}
+.cal-day-col:last-child { border-right: 0; }
+.cal-slot {
+  height: 48px;
+  border-bottom: 1px dashed var(--line);
+  position: relative;
+}
+@media (hover: hover) and (pointer: fine) { .cal-slot:hover { background: var(--bg-sunk); } }
+.cal-event {
+  position: absolute;
+  left: 4px; right: 4px;
+  border-radius: 5px;
+  padding: 4px 6px;
+  font-size: 11px;
+  line-height: 1.3;
+  border: 1px solid transparent;
+  overflow: hidden;
+  cursor: pointer;
+  z-index: 1;
+}
+.cal-event .ev-time {
+  font-family: var(--mono);
+  font-size: 10px;
+  opacity: 0.7;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.cal-event .ev-title {
+  font-weight: 500;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.cal-event.scheduled { background: var(--bg-elev); border-color: var(--line-2); color: var(--ink); }
+.cal-event.draft     { background: var(--bg-sunk); border-color: var(--line-2); color: var(--ink-2); border-style: dashed; }
+.cal-event.ai        { background: var(--accent-soft); border-color: oklch(0.86 0.08 70); color: var(--accent-ink); }
+.cal-event.posted    { background: var(--ok-soft); border-color: color-mix(in oklch, var(--ok) 35%, var(--surface)); color: var(--ok-ink); }
+.cal-now {
+  position: absolute; left: 0; right: 0;
+  height: 1px; background: var(--accent);
+  z-index: 2;
+  pointer-events: none;
+}
+.cal-now::before {
+  content: ""; position: absolute;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent);
+  left: -4px; top: -4px;
+}
+
+/* Mobile month grid (CalendarMobileMonth) — fit-to-width square day cells. */
+.cal-month {
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  overflow: hidden;
+}
+.cal-month-dow {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+.cal-month-dow > div {
+  padding: 8px 0;
+  text-align: center;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-4);
+}
+.cal-month-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+}
+.cal-month-cell {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 3px;
+  padding: 6px 0 0;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-elev);
+  cursor: pointer;
+  color: var(--ink);
+  font: inherit;
+}
+.cal-month-cell:nth-child(7n) { border-right: 0; }
+.cal-month-cell .dnum {
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  line-height: 1;
+}
+.cal-month-cell.out { background: var(--bg-sunk); }
+.cal-month-cell.out .dnum { color: var(--ink-4); }
+.cal-month-cell.today .dnum { color: var(--accent-ink); font-weight: 600; }
+.cal-month-cell.sel .dnum { background: var(--ink); color: var(--bg); font-weight: 600; }
+.cal-month-cell.sel.today .dnum { background: var(--accent); color: white; }
+.cal-month-cell .dots {
+  display: flex;
+  gap: 2px;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: 80%;
+}
+.cal-month-cell .dots .dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+.cal-month-day {
+  margin-top: 16px;
+}
+.cal-month-day-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.cal-month-event {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--bg-elev);
+  cursor: pointer;
+  text-align: left;
+  color: var(--ink);
+  font: inherit;
+}
+.cal-month-event:active { background: var(--bg-sunk); }
+
+@media (max-width: 900px) {
+  /* Calendar week grid: hide (calendar component forces list view on mobile,
+     this is a safety net for stale state or any callers that still render it). */
+  .calendar .cal-head,
+  .calendar .cal-grid {
+    grid-template-columns: 44px repeat(7, minmax(64px, 1fr));
+  }
+  /* Allow horizontal scroll so the week grid doesn't break the layout. */
+  .calendar {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}

@@ -1,9 +1,10 @@
-import { and, eq, desc, gte, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, eq, desc, gte, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
 import { db } from '../db';
 import {
   agentSettings,
   trends,
   drafts,
+  scheduledPosts,
   connectedAccounts,
   activityLog,
   type Platform,
@@ -11,13 +12,14 @@ import {
   type Niche,
   type VoiceTemplate,
 } from '../db/schema';
-import { draftFromTrends } from '../ai/agent';
+import { draftFromTrends, type AgentDraft } from '../ai/agent';
 import { renderBrandBlock } from '../ai/brand-context';
 import { charge, getBalance } from '../credits/ledger';
 import { CREDIT_PRICES } from '../credits/pricing';
 import { draftCost } from '../credits/estimator';
 import { postKind, supportsKind, type PostKind } from '../platforms/capabilities';
-import { loadWeek, nextDraftDue, kindQueue, affordableKind, weeklyTarget } from './status';
+import { loadWeek, kindQueue, affordableKind, weeklyTarget } from './status';
+import { planSlots } from '../schedule/slots';
 import { generateAgentImage, submitAgentVideo } from './media';
 import { publishOrHold } from './publish';
 
@@ -30,17 +32,42 @@ export type AgentRunResult = {
   draftIds?: string[];
 };
 
+type Settings = typeof agentSettings.$inferSelect;
+type Ctx = { userId: string; settings: Settings; platforms: Platform[]; brandBlock: string };
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** Posts the cron adds per user per tick. Small, so one user's 30-day top-up can't hold the tick for everyone after them. */
+const CRON_BATCH = 3;
+/** Posts per model call — one call writing 30 posts with per-platform copy would be one slow, fragile reply. */
+const CHUNK = 4;
+/** How long a plan run holds its lease without a heartbeat. */
+const LEASE_MS = 15 * 60_000;
+
+/**
+ * Autopilot's entry point (cron, the enable-kick, the manual button).
+ * Unforced, it keeps the user's plan filled to their horizon, a few posts per
+ * call. `force` (the manual "Auto-draft from trends" button) drafts two text
+ * posts now, unplanned, regardless of plan, pacing and credit cap — but a
+ * paused agent still never schedules a live post (publishOrHold checks).
+ */
 export async function runAgentForUser(userId: string, opts?: { force?: boolean }): Promise<AgentRunResult> {
   const [settings] = await db().select().from(agentSettings).where(eq(agentSettings.userId, userId)).limit(1);
-  if (!settings) return { userId, drafted: 0, published: 0, held: 0, reason: 'no_settings' };
+  if (!settings) return none(userId, 'no_settings');
+  if (!settings.enabled && !opts?.force) return none(userId, 'disabled');
+  if (!opts?.force) return planPeriod(userId, { max: CRON_BATCH });
 
-  // Autopilot paused = the agent does nothing on its own. `force` (the manual
-  // "Auto-draft from trends" button) may still draft, but a paused agent never
-  // schedules a live post — publishOrHold checks `enabled` itself.
-  if (!settings.enabled && !opts?.force) {
-    return { userId, drafted: 0, published: 0, held: 0, reason: 'disabled' };
-  }
+  const ctx = await context(userId, settings);
+  if (!('brandBlock' in ctx)) return ctx;
+  if ((await getBalance(userId)) < draftCost('text') * 2) return blocked(userId, 'insufficient_credits', 'no_credits');
+  const out = await draftBatch(ctx, ['text', 'text'], [null, null]);
+  await db().update(agentSettings).set({ lastRunAt: new Date() }).where(eq(agentSettings.userId, userId));
+  return out;
+}
 
+const none = (userId: string, reason: string): AgentRunResult => ({ userId, drafted: 0, published: 0, held: 0, reason });
+
+/** Who and where autopilot posts for — or what the user has to fix first. */
+async function context(userId: string, settings: Settings): Promise<Ctx | AgentRunResult> {
   const accounts = await db()
     .select()
     .from(connectedAccounts)
@@ -55,57 +82,8 @@ export async function runAgentForUser(userId: string, opts?: { force?: boolean }
   // posted to every connected account of every user who never finished
   // onboarding. Per-platform weekly caps are enforced in publishOrHold.
   const allowList = (settings.enabledPlatforms ?? []) as Platform[];
-  const allowedPlatforms = connectedPlatforms.filter((p) => allowList.includes(p));
-  if (allowedPlatforms.length === 0) return blocked(userId, 'no_allowed_platforms', 'no_platforms');
-
-  // The manual button (`force`) is the user asking for drafts right now: it
-  // skips pacing and the weekly cap, and stays text-only so one click can never
-  // spend a video's worth of credits.
-  let kind: PostKind = 'text';
-  const balance = await getBalance(userId);
-  if (opts?.force) {
-    if (balance < draftCost('text') * 2) return blocked(userId, 'insufficient_credits', 'no_credits');
-  } else {
-    const week = await loadWeek(userId);
-    const target = weeklyTarget(settings);
-    const due = nextDraftDue(target, week.draftTimes);
-    if (!due || due > new Date()) {
-      const spent = week.draftTimes.length >= target;
-      return { userId, drafted: 0, published: 0, held: 0, reason: spent ? 'budget_met' : 'not_due' };
-    }
-    const mix = settings.postsPerWeekByContentType ?? { text: target, image: 0, video: 0 };
-    const next = affordableKind(kindQueue(mix, week.done, allowedPlatforms), balance, settings.weeklyCreditCap, week.creditsThisWeek);
-    if ('blocked' in next) {
-      return blocked(userId, next.blocked === 'no_credits' ? 'insufficient_credits' : next.blocked, next.blocked);
-    }
-    kind = next.kind;
-  }
-
-  const newTrends = await db()
-    .select()
-    .from(trends)
-    .where(and(eq(trends.userId, userId), eq(trends.status, 'new')))
-    .orderBy(desc(trends.score), desc(trends.capturedAt))
-    .limit(8);
-  if (newTrends.length === 0) {
-    return { userId, drafted: 0, published: 0, held: 0, reason: 'no_trends' };
-  }
-
-  // Claim this run before the slow part (LLM + image can take 90s). Without it
-  // two runs that overlap — the enable-kick and a cron tick, or a doubled cron —
-  // both see "due", both draft, and the user pays twice. Whoever updates the
-  // row first wins; the manual button is the user's own choice and skips this.
-  if (!opts?.force) {
-    const claimed = await db()
-      .update(agentSettings)
-      .set({ lastRunAt: new Date() })
-      .where(and(
-        eq(agentSettings.userId, userId),
-        or(isNull(agentSettings.lastRunAt), lt(agentSettings.lastRunAt, new Date(Date.now() - 15 * 60_000))),
-      ))
-      .returning({ userId: agentSettings.userId });
-    if (claimed.length === 0) return { userId, drafted: 0, published: 0, held: 0, reason: 'already_running' };
-  }
+  const platforms = connectedPlatforms.filter((p) => allowList.includes(p));
+  if (platforms.length === 0) return blocked(userId, 'no_allowed_platforms', 'no_platforms');
 
   // Who the brand is. Built from the row already in hand; voice, style guide,
   // niches and safety are blanked because the agent prompt states them itself.
@@ -122,100 +100,243 @@ export async function runAgentForUser(userId: string, opts?: { force?: boolean }
     },
     'text',
   );
+  return { userId, settings, platforms, brandBlock };
+}
+
+export type PreparedPlan = { ctx: Ctx; kinds: PostKind[]; slots: Date[] };
+
+/**
+ * Fill the user's plan for [now, now + horizon) up to their weekly target ×
+ * weeks: decide how many posts are missing, what kind each is (content mix,
+ * balance, credit cap scaled to the horizon), and which slot each takes.
+ * Holds the plan lease on success — the caller must run fillPlan, which
+ * releases it. `max` bounds one call (the cron tops up a few at a time).
+ */
+export async function preparePlan(userId: string, opts: { horizonDays?: number; max?: number } = {}): Promise<PreparedPlan | AgentRunResult> {
+  const [settings] = await db().select().from(agentSettings).where(eq(agentSettings.userId, userId)).limit(1);
+  if (!settings) return none(userId, 'no_settings');
+  const ctx = await context(userId, settings);
+  if (!('brandBlock' in ctx)) return ctx;
+
+  // Claim first, read after: a run that finishes between our read and our
+  // claim would otherwise leave us drafting against stale counts.
+  const now = new Date();
+  const claimed = await db()
+    .update(agentSettings)
+    .set({ planRunningUntil: new Date(now.getTime() + LEASE_MS) })
+    .where(and(eq(agentSettings.userId, userId), or(isNull(agentSettings.planRunningUntil), lt(agentSettings.planRunningUntil, now))))
+    .returning({ userId: agentSettings.userId });
+  if (claimed.length === 0) return none(userId, 'already_running');
+
+  try {
+    const plan = await sizePlan(ctx, opts.horizonDays ?? settings.planHorizonDays ?? 7, opts.max ?? Infinity, now);
+    if (!('ctx' in plan)) await releaseLease(userId);
+    return plan;
+  } catch (e) {
+    await releaseLease(userId);
+    throw e;
+  }
+}
+
+async function sizePlan(ctx: Ctx, horizonDays: number, max: number, now: Date): Promise<PreparedPlan | AgentRunResult> {
+  const { userId, settings, platforms } = ctx;
+  const end = new Date(now.getTime() + horizonDays * DAY_MS);
+  const [planned, pending, balance, spent] = await Promise.all([
+    // Every unreviewed planned draft counts, overdue ones too: they get a new
+    // slot on approve. A user who never comes back gets one horizon of drafts,
+    // not a new batch every week.
+    db()
+      .select({ plannedAt: drafts.plannedAt, media: drafts.media, videoJobId: drafts.videoJobId })
+      .from(drafts)
+      .where(and(eq(drafts.userId, userId), eq(drafts.status, 'draft'), isNotNull(drafts.plannedAt))),
+    db()
+      .select({ draftId: scheduledPosts.draftId, scheduledAt: scheduledPosts.scheduledAt, media: scheduledPosts.media })
+      .from(scheduledPosts)
+      .where(and(eq(scheduledPosts.userId, userId), eq(scheduledPosts.status, 'pending'), gte(scheduledPosts.scheduledAt, now))),
+    getBalance(userId),
+    loadWeek(userId, now, horizonDays).then((w) => w.creditsThisWeek),
+  ]);
+
+  // What already fills the window: planned drafts + posts already queued in it (one per draft, not per platform).
+  const done: Record<PostKind, number> = { text: 0, image: 0, video: 0 };
+  for (const d of planned) done[d.videoJobId ? 'video' : postKind(d.media)]++;
+  const queued = new Map<string, DraftMedia[] | null>();
+  for (const p of pending) if (new Date(p.scheduledAt) < end) queued.set(p.draftId, p.media);
+  for (const m of queued.values()) done[postKind(m)]++;
+
+  const weeks = horizonDays / 7;
+  const need = Math.min(Math.ceil(weeklyTarget(settings) * weeks) - planned.length - queued.size, max);
+  if (need <= 0) return none(userId, 'plan_full');
+
+  // The content mix and the credit cap are per week; a 30-day plan gets 30/7 of each.
+  const mix = settings.postsPerWeekByContentType ?? { text: weeklyTarget(settings), image: 0, video: 0 };
+  const scaled = { text: mix.text * weeks, image: mix.image * weeks, video: mix.video * weeks };
+  const cap = typeof settings.weeklyCreditCap === 'number' ? settings.weeklyCreditCap * weeks : null;
+  const kinds: PostKind[] = [];
+  let left = balance;
+  let used = spent;
+  for (let i = 0; i < need; i++) {
+    const next = affordableKind(kindQueue(scaled, done, platforms), left, cap, used);
+    if ('blocked' in next) {
+      if (kinds.length) break;
+      return blocked(userId, next.blocked === 'no_credits' ? 'insufficient_credits' : next.blocked, next.blocked);
+    }
+    kinds.push(next.kind);
+    done[next.kind]++;
+    left -= draftCost(next.kind);
+    used += draftCost(next.kind);
+  }
+
+  const taken = [...planned.map((d) => d.plannedAt!), ...pending.map((p) => p.scheduledAt)].map((d) => new Date(d));
+  const slots = planSlots({ from: now, horizonDays, count: kinds.length, quiet: settings.quietHours, taken });
+  if (slots.length === 0) return none(userId, 'plan_full');
+  // Videos take the latest slots: their render needs the head start.
+  kinds.length = slots.length;
+  kinds.sort((a, b) => Number(a === 'video') - Number(b === 'video'));
+  return { ctx, kinds, slots };
+}
+
+/** Draft the prepared posts, a chunk per model call, then release the lease. */
+export async function fillPlan(plan: PreparedPlan): Promise<AgentRunResult> {
+  const { userId } = plan.ctx;
+  const out: AgentRunResult = { userId, drafted: 0, published: 0, held: 0, draftIds: [] };
+  try {
+    for (let i = 0; i < plan.kinds.length; i += CHUNK) {
+      const r = await draftBatch(plan.ctx, plan.kinds.slice(i, i + CHUNK), plan.slots.slice(i, i + CHUNK));
+      out.drafted += r.drafted;
+      out.published += r.published;
+      out.held += r.held;
+      out.draftIds!.push(...(r.draftIds ?? []));
+      if (r.reason) { out.reason = r.reason; break; }
+      // Heartbeat: a long run (images take a minute each) keeps its lease.
+      await db().update(agentSettings).set({ planRunningUntil: new Date(Date.now() + LEASE_MS) }).where(eq(agentSettings.userId, userId));
+    }
+  } finally {
+    await releaseLease(userId);
+  }
+  return out;
+}
+
+/** Fill the user's plan up to the horizon. Cron, enable-kick and "Generate" all come through here. */
+export async function planPeriod(userId: string, opts: { horizonDays?: number; max?: number } = {}): Promise<AgentRunResult> {
+  const plan = await preparePlan(userId, opts);
+  return 'ctx' in plan ? fillPlan(plan) : plan;
+}
+
+const releaseLease = (userId: string) =>
+  db().update(agentSettings).set({ planRunningUntil: null, lastRunAt: new Date() }).where(eq(agentSettings.userId, userId));
+
+/**
+ * Write one model call's worth of posts: kinds[i] is what post i becomes,
+ * slots[i] its planned time (null = unplanned, the manual button).
+ */
+async function draftBatch(ctx: Ctx, kinds: PostKind[], slots: (Date | null)[]): Promise<AgentRunResult> {
+  const { userId, settings, platforms, brandBlock } = ctx;
+  const newTrends = await db()
+    .select()
+    .from(trends)
+    .where(and(eq(trends.userId, userId), eq(trends.status, 'new')))
+    .orderBy(desc(trends.score), desc(trends.capturedAt))
+    .limit(Math.max(8, kinds.length));
+  if (newTrends.length === 0) return none(userId, 'no_trends');
+
   const drafted = await draftFromTrends({
     userId,
     instructions: settings.instructions,
     voiceTemplate: (settings.voiceTemplate ?? 'me') as VoiceTemplate,
     niches: (settings.niches ?? []) as Niche[],
-    platforms: allowedPlatforms,
+    platforms,
     brandSafetyStrict: settings.brandSafetyStrict,
     brandBlock,
     trends: newTrends.map((t) => ({ id: t.id, niche: t.niche, title: t.title, summary: t.summary, sourceUrl: t.sourceUrl })),
-    // One per cron tick: nextDraftDue spreads the week's drafts out.
-    count: opts?.force ? 2 : 1,
+    count: kinds.length,
   });
 
-  let publishedCount = 0;
-  let heldCount = 0;
-  const draftIds: string[] = [];
+  const out: AgentRunResult = { userId, drafted: drafted.length, published: 0, held: 0, draftIds: [] };
+  for (const [i, d] of drafted.slice(0, kinds.length).entries()) {
+    const r = await draftPost(ctx, d, kinds[i], slots[i] ?? null);
+    out.draftIds!.push(r.draftId);
+    if (r.published) out.published++;
+    else out.held++;
+  }
+  return out;
+}
 
-  for (const d of drafted) {
-    // Media first, so the draft row is written complete. A failed image or a
-    // render that won't start has already been refunded — the post carries on
-    // as text rather than being thrown away.
-    let media: DraftMedia[] = [];
-    let videoJobId: string | null = null;
-    try {
-      const post = { userId, title: d.title, body: d.body, brandBlock };
-      if (kind === 'image') media = [await generateAgentImage(post)].filter((m): m is DraftMedia => !!m);
-      if (kind === 'video') videoJobId = await submitAgentVideo(post);
-    } catch (e) {
-      console.warn(`[agent.run] ${kind} generation failed:`, e instanceof Error ? e.message : e);
-    }
-
-    const [draftRow] = await db()
-      .insert(drafts)
-      .values({
-        userId,
-        title: d.title,
-        body: d.body,
-        variants: [{ label: 'A', text: d.body, score: d.score, rationale: d.rationale }],
-        selectedVariantLabel: 'A',
-        media,
-        videoJobId,
-        // Only platforms that can publish what this turned out to be — a failed
-        // image leaves a text post, which Instagram would reject.
-        targetPlatforms: allowedPlatforms.filter((p) => supportsKind(p, videoJobId ? 'video' : postKind(media))),
-        perPlatformText: d.perPlatform,
-        source: 'agent',
-      })
-      .returning();
-    draftIds.push(draftRow.id);
-
-    // Best-effort — if the charge fails (db hiccup), we don't block the user
-    // from getting their draft. `via`, not `source`: meta.source is uniquely
-    // indexed per user for idempotency, so tagging every draft with the same
-    // source charged the first one and silently failed every one after it.
-    try {
-      await charge({
-        userId,
-        action: 'agent_draft',
-        credits: CREDIT_PRICES.agent_draft,
-        meta: { draftId: draftRow.id, via: 'autopilot' },
-      });
-    } catch (e) {
-      console.warn('[agent.run] charge agent_draft failed:', e instanceof Error ? e.message : e);
-    }
-
-    if (d.trendId) {
-      await db()
-        .update(trends)
-        .set({ status: 'used', usedInDraftId: draftRow.id })
-        .where(eq(trends.id, d.trendId));
-    }
-
-    // A video post waits for its render; attachFinishedVideos makes the
-    // schedule-or-hold call when the clip lands.
-    if (videoJobId) {
-      await db().insert(activityLog).values({
-        userId,
-        kind: 'agent_drafted',
-        title: `Agent drafted: ${d.title}`,
-        body: 'Rendering the video now — usually a few minutes. ' + d.body.slice(0, 200),
-        meta: { draftId: draftRow.id, score: d.score, videoJobId },
-      });
-      heldCount++;
-    } else {
-      // Re-read: the image took a minute, and "pause" or "ask me first" clicked
-      // in that minute must win over the snapshot this run started with.
-      const [fresh] = await db().select().from(agentSettings).where(eq(agentSettings.userId, userId)).limit(1);
-      if (await publishOrHold(fresh ?? settings, draftRow, d.score)) publishedCount++;
-      else heldCount++;
-    }
+/** One post: media, the draft row (with its planned slot), the charge, then schedule-or-hold. */
+async function draftPost(ctx: Ctx, d: AgentDraft, kind: PostKind, plannedAt: Date | null): Promise<{ draftId: string; published: boolean }> {
+  const { userId, settings, platforms, brandBlock } = ctx;
+  // Media first, so the draft row is written complete. A failed image or a
+  // render that won't start has already been refunded — the post carries on
+  // as text rather than being thrown away. A render can take many minutes
+  // (and wait on provider capacity); attachFinishedVideos picks it up.
+  let media: DraftMedia[] = [];
+  let videoJobId: string | null = null;
+  try {
+    const post = { userId, title: d.title, body: d.body, brandBlock };
+    if (kind === 'image') media = [await generateAgentImage(post)].filter((m): m is DraftMedia => !!m);
+    if (kind === 'video') videoJobId = await submitAgentVideo(post);
+  } catch (e) {
+    console.warn(`[agent.run] ${kind} generation failed:`, e instanceof Error ? e.message : e);
   }
 
-  await db().update(agentSettings).set({ lastRunAt: new Date() }).where(eq(agentSettings.userId, userId));
-  return { userId, drafted: drafted.length, published: publishedCount, held: heldCount, draftIds };
+  const [draftRow] = await db()
+    .insert(drafts)
+    .values({
+      userId,
+      title: d.title,
+      body: d.body,
+      // perPlatform snapshot: lets postText tell the model's copy from the user's.
+      variants: [{ label: 'A', text: d.body, score: d.score, rationale: d.rationale, perPlatform: d.perPlatform }],
+      selectedVariantLabel: 'A',
+      media,
+      videoJobId,
+      plannedAt,
+      // Only platforms that can publish what this turned out to be — a failed
+      // image leaves a text post, which Instagram would reject.
+      targetPlatforms: platforms.filter((p) => supportsKind(p, videoJobId ? 'video' : postKind(media))),
+      perPlatformText: d.perPlatform,
+      source: 'agent',
+    })
+    .returning();
+
+  // Best-effort — if the charge fails (db hiccup), we don't block the user
+  // from getting their draft. `via`, not `source`: meta.source is uniquely
+  // indexed per user for idempotency, so tagging every draft with the same
+  // source charged the first one and silently failed every one after it.
+  try {
+    await charge({
+      userId,
+      action: 'agent_draft',
+      credits: CREDIT_PRICES.agent_draft,
+      meta: { draftId: draftRow.id, via: 'autopilot' },
+    });
+  } catch (e) {
+    console.warn('[agent.run] charge agent_draft failed:', e instanceof Error ? e.message : e);
+  }
+
+  if (d.trendId) {
+    await db()
+      .update(trends)
+      .set({ status: 'used', usedInDraftId: draftRow.id })
+      .where(eq(trends.id, d.trendId));
+  }
+
+  // A video post waits for its render; attachFinishedVideos makes the
+  // schedule-or-hold call when the clip lands.
+  if (videoJobId) {
+    await db().insert(activityLog).values({
+      userId,
+      kind: 'agent_drafted',
+      title: `Agent drafted: ${d.title}`,
+      body: 'Rendering the video now — usually a few minutes. ' + d.body.slice(0, 200),
+      meta: { draftId: draftRow.id, score: d.score, videoJobId },
+    });
+    return { draftId: draftRow.id, published: false };
+  }
+  // Re-read: the image took a minute, and "pause" or "ask me first" clicked
+  // in that minute must win over the snapshot this run started with.
+  const [fresh] = await db().select().from(agentSettings).where(eq(agentSettings.userId, userId)).limit(1);
+  return { draftId: draftRow.id, published: await publishOrHold(fresh ?? settings, draftRow, d.score) };
 }
 
 // What the user has to do before autopilot can draft. Shown in the bell and

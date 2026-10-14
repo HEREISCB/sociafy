@@ -965,7 +965,7 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
               <Icon name="bolt" size={14} />
               Credit budget
             </h3>
-            <Link href="/usage" className="meta" style={{ textDecoration: 'underline' }}>Usage →</Link>
+            <Link href="/settings/plan" className="meta" style={{ textDecoration: 'underline' }}>Usage →</Link>
           </div>
           <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
@@ -1003,7 +1003,7 @@ const AgentPage: React.FC<AgentPageProps> = ({ onEditDraft }) => {
                 );
               })}
             </div>
-            <Link href="/billing" className="btn ghost" style={{ justifyContent: 'center', fontSize: 11.5 }}>
+            <Link href="/settings/plan" className="btn ghost" style={{ justifyContent: 'center', fontSize: 11.5 }}>
               <Icon name="bolt" size={11} /> Top up or upgrade plan
             </Link>
           </div>

@@ -5,7 +5,7 @@ import { rateLimit } from '../../../../lib/rate-limit';
 import { InsufficientCreditsError } from '../../../../lib/credits/ledger';
 import { priceForVideo } from '../../../../lib/credits/pricing';
 import {
-  DEFAULT_VIDEO_MODEL,
+  API_DEFAULT_VIDEO_MODEL,
   VIDEO_MODEL_IDS,
   VIDEO_MODELS,
   validateAgainstModel,
@@ -46,7 +46,7 @@ const bodySchema = z
     /** Which of our models renders this. GET /api/v1/models lists them with
      *  their envelopes; each model's own limits are enforced below, so the
      *  ranges here are the union and never the whole story. */
-    model: z.enum(VIDEO_MODEL_IDS).default(DEFAULT_VIDEO_MODEL),
+    model: z.enum(VIDEO_MODEL_IDS).default(API_DEFAULT_VIDEO_MODEL),
     duration_sec: z.number().int().min(4).max(30).default(8),
     quality: z.enum(['480p', '720p', '1080p']).default('720p'),
     aspect: z.enum(['9:16', '1:1', '16:9']).default('9:16'),
