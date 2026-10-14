@@ -1,5 +1,6 @@
 import type { Platform } from '../db/schema';
 import { env } from '../env';
+import { GRAPH } from './meta';
 
 /**
  * Best-effort: tell the platform to invalidate the access/refresh tokens
@@ -30,8 +31,14 @@ export async function revokeAtPlatform(
         await revokeLinkedIn(tokens.accessToken);
         return;
       case 'facebook':
+        await revokeFacebook(tokens.accessToken);
+        return;
       case 'instagram':
-        await revokeMeta(tokens.accessToken);
+        // Instagram API with Instagram Login documents no revoke / DELETE
+        // permissions endpoint on graph.instagram.com (the FB-style DELETE
+        // returns "Unsupported delete request"). Users revoke from Instagram
+        // settings; the long-lived token lapses at its 60-day expiry.
+        console.warn('[revoke] instagram: no revoke endpoint for Instagram Login tokens; skipped');
         return;
     }
   } catch (e) {
@@ -83,11 +90,27 @@ async function revokeLinkedIn(token: string) {
   });
 }
 
-async function revokeMeta(token: string) {
-  // Meta's "revoke" is a DELETE on /me/permissions which invalidates all
-  // permissions our app holds for the user.
-  await fetch(`https://graph.facebook.com/v19.0/me/permissions`, {
+/**
+ * Facebook: we store a PAGE token, so DELETE /me/permissions (which needs a
+ * user token) resolved to the Page and did nothing. Instead, recover the
+ * granting user's id via /debug_token and DELETE /{user-id}/permissions with
+ * the app access token, which Meta accepts for the current app:
+ * https://developers.facebook.com/docs/graph-api/reference/user/permissions/
+ * https://developers.facebook.com/docs/graph-api/reference/debug_token/
+ * Still best-effort: if debug_token has no user_id we warn and stop.
+ */
+async function revokeFacebook(pageToken: string) {
+  const { appId, appSecret } = env.platforms.meta;
+  if (!appId || !appSecret) return;
+  const appToken = `${appId}|${appSecret}`;
+  const dbg = await fetch(
+    `${GRAPH}/debug_token?input_token=${encodeURIComponent(pageToken)}&access_token=${encodeURIComponent(appToken)}`,
+  );
+  if (!dbg.ok) throw new Error(`debug_token ${dbg.status}: ${await dbg.text()}`);
+  const userId = ((await dbg.json()) as { data?: { user_id?: string } }).data?.user_id;
+  if (!userId) throw new Error('debug_token returned no user_id; permissions not revoked');
+  const resp = await fetch(`${GRAPH}/${userId}/permissions?access_token=${encodeURIComponent(appToken)}`, {
     method: 'DELETE',
-    headers: { Authorization: `Bearer ${token}` },
   });
+  if (!resp.ok) throw new Error(`DELETE permissions ${resp.status}: ${await resp.text()}`);
 }

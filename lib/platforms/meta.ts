@@ -11,14 +11,15 @@ import type {
 } from './types';
 import { PlatformError } from './types';
 import { stubProfile, stubPublish } from './stub';
+import sharp from 'sharp';
+import { uploadBuffer } from '../storage/r2';
 
-const GRAPH = 'https://graph.facebook.com/v19.0';
-// Dashboard read endpoints (page + posts insights) use a newer Graph version
-// than the publish/auth flow. They were pinned independently before this
-// adapter existed; keeping them split avoids re-validating every read field
-// against a different version at the same time as the OAuth refactor.
-const GRAPH_READ = 'https://graph.facebook.com/v23.0';
-const AUTH_URL = 'https://www.facebook.com/v19.0/dialog/oauth';
+// One Graph version for every Meta call (auth, publish, reads, revoke).
+// v25.0 is supported until 2028-07-29:
+// https://developers.facebook.com/docs/graph-api/changelog
+export const META_GRAPH_VERSION = 'v25.0';
+export const GRAPH = `https://graph.facebook.com/${META_GRAPH_VERSION}`;
+const AUTH_URL = `https://www.facebook.com/${META_GRAPH_VERSION}/dialog/oauth`;
 
 // Facebook adapter only handles Facebook Pages now. Instagram is on its own
 // flow via the Instagram Login product (instagramAdapter below), so we no
@@ -82,6 +83,30 @@ async function exchangeMetaCode(code: string, redirectUri: string) {
   return (await resp.json()) as { access_token: string; expires_in?: number; token_type?: string };
 }
 
+/**
+ * Swap the code-exchange user token for a long-lived (~60d) one. Page tokens
+ * fetched from /me/accounts with a long-lived user token have no expiry;
+ * fetched with a short-lived one they die with it (~1h). Exchanging a token
+ * that is already long-lived just returns a long-lived token, so this is safe
+ * either way. On failure we keep the original token (old behavior).
+ * https://developers.facebook.com/docs/facebook-login/guides/access-tokens/get-long-lived
+ */
+async function toLongLivedUserToken(token: string): Promise<string> {
+  const params = new URLSearchParams({
+    grant_type: 'fb_exchange_token',
+    client_id: env.platforms.meta.appId!,
+    client_secret: env.platforms.meta.appSecret!,
+    fb_exchange_token: token,
+  });
+  const resp = await fetch(`${GRAPH}/oauth/access_token?${params.toString()}`);
+  if (!resp.ok) {
+    console.warn('[facebook] long-lived token exchange failed', resp.status, await resp.text());
+    return token;
+  }
+  const json = (await resp.json()) as { access_token?: string };
+  return json.access_token || token;
+}
+
 async function fetchMe(token: string) {
   const resp = await fetch(`${GRAPH}/me?fields=id,name,picture&access_token=${token}`);
   if (!resp.ok) throw new PlatformError('meta_me_failed', resp.status, await resp.text());
@@ -115,7 +140,7 @@ export const facebookAdapter: PlatformAdapter = {
   async exchangeCode({ code, redirectUri }) {
     if (!metaConfigured()) return stubProfile('facebook', 'unknown');
     const t = await exchangeMetaCode(code, redirectUri);
-    const userToken = t.access_token;
+    const userToken = await toLongLivedUserToken(t.access_token);
 
     // Fail loud at connect time if the user skipped a required permission in
     // the OAuth dialog. Without this we'd happily save a token that can't
@@ -147,7 +172,7 @@ export const facebookAdapter: PlatformAdapter = {
     }
     return {
       tokens: {
-        accessToken: page.access_token, // page tokens are long-lived
+        accessToken: page.access_token, // from a long-lived user token: no expiry
         refreshToken: null,
         expiresAt: null,
         scope: FB_SCOPES.join(','),
@@ -155,6 +180,9 @@ export const facebookAdapter: PlatformAdapter = {
           userId: me.id,
           pageId: page.id,
           pageName: page.name,
+          // ponytail: we still connect pages.data[0]; this list (no tokens)
+          // is for a future page picker.
+          pages: pages.data.map((p) => ({ id: p.id, name: p.name })),
         },
       },
       profile: {
@@ -228,8 +256,8 @@ export const facebookAdapter: PlatformAdapter = {
     // Authorization header keeps the token out of proxy/CDN access logs.
     const authHeaders = { Authorization: `Bearer ${token}` };
     const [pageRes, postsRes] = await Promise.all([
-      fetch(`${GRAPH_READ}/${pageId}?fields=id,name,username,fan_count,followers_count,picture.type(large),link,about,category`, { headers: authHeaders }),
-      fetch(`${GRAPH_READ}/${pageId}/posts?fields=id,message,created_time,permalink_url,full_picture,reactions.summary(true),comments.summary(true),shares&limit=5`, { headers: authHeaders }),
+      fetch(`${GRAPH}/${pageId}?fields=id,name,username,fan_count,followers_count,picture.type(large),link,about,category`, { headers: authHeaders }),
+      fetch(`${GRAPH}/${pageId}/posts?fields=id,message,created_time,permalink_url,full_picture,reactions.summary(true),comments.summary(true),shares&limit=5`, { headers: authHeaders }),
     ]);
 
     if (!pageRes.ok) {
@@ -290,7 +318,7 @@ export const facebookAdapter: PlatformAdapter = {
     if (!metaConfigured() || account.accessToken === 'stub') {
       return { likes: 0, comments: 0, shares: 0 };
     }
-    const url = `${GRAPH_READ}/${platformPostId}?fields=reactions.summary(true),comments.summary(true),shares`;
+    const url = `${GRAPH}/${platformPostId}?fields=reactions.summary(true),comments.summary(true),shares`;
     const resp = await fetch(url, { headers: { Authorization: `Bearer ${account.accessToken}` } });
     if (!resp.ok) {
       throw new PlatformError('facebook_engagement_failed', resp.status, await resp.text());
@@ -321,7 +349,7 @@ export const facebookAdapter: PlatformAdapter = {
 
 const IG_OAUTH_AUTHORIZE = 'https://www.instagram.com/oauth/authorize';
 const IG_OAUTH_TOKEN = 'https://api.instagram.com/oauth/access_token';
-const IG_GRAPH = 'https://graph.instagram.com/v22.0';
+const IG_GRAPH = `https://graph.instagram.com/${META_GRAPH_VERSION}`;
 const IG_GRAPH_NOVERSION = 'https://graph.instagram.com';
 
 const IG_SCOPES = [
@@ -335,6 +363,41 @@ const IG_SCOPES = [
 
 function instagramConfigured() {
   return !!env.platforms.instagram.appId && !!env.platforms.instagram.appSecret;
+}
+
+/** Instagram only accepts JPEG images; convert anything else and host it on
+ *  R2 so Meta can fetch it by URL. */
+async function ensureJpegUrl(m: { url: string; mimeType: string }, accountId: string): Promise<string> {
+  if (/^image\/jpe?g$/i.test(m.mimeType)) return m.url;
+  const resp = await fetch(m.url);
+  if (!resp.ok) throw new PlatformError('instagram_image_fetch_failed', resp.status, await resp.text());
+  const jpeg = await sharp(Buffer.from(await resp.arrayBuffer()))
+    .flatten({ background: '#ffffff' }) // transparent PNG/WebP would otherwise go black
+    .jpeg({ quality: 90 })
+    .toBuffer();
+  const key = `instagram/${accountId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+  return (await uploadBuffer({ key, body: jpeg, contentType: 'image/jpeg' })).url;
+}
+
+async function createIgContainer(igUserId: string, token: string, params: Record<string, string>): Promise<string> {
+  const resp = await fetch(`${IG_GRAPH}/${igUserId}/media`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ ...params, access_token: token }),
+  });
+  if (!resp.ok) throw new PlatformError('instagram_container_failed', resp.status, await resp.text());
+  return ((await resp.json()) as { id: string }).id;
+}
+
+async function waitIgContainer(id: string, account: AdapterAccount): Promise<void> {
+  const ready = await instagramAdapter.waitForPublish!({ publishId: id, account });
+  if (!ready.ok) {
+    throw new PlatformError(
+      'instagram_container_not_ready',
+      408,
+      `Container ${id} stuck in ${ready.lastStatus ?? 'unknown'} after ${ready.attempts} polls. ${ready.error ?? ''}`,
+    );
+  }
 }
 
 export const instagramAdapter: PlatformAdapter = {
@@ -405,7 +468,7 @@ export const instagramAdapter: PlatformAdapter = {
     // and account_type (BUSINESS or MEDIA_CREATOR). PERSONAL would have failed
     // at the OAuth step.
     const meResp = await fetch(
-      `${IG_GRAPH}/me?fields=user_id,username,name,profile_picture_url,account_type&access_token=${long.access_token}`,
+      `${IG_GRAPH}/me?fields=id,user_id,username,name,profile_picture_url,account_type&access_token=${long.access_token}`,
     );
     if (!meResp.ok) {
       throw new PlatformError('ig_me_failed', meResp.status, await meResp.text());
@@ -430,6 +493,9 @@ export const instagramAdapter: PlatformAdapter = {
         scope: IG_SCOPES.join(','),
         meta: {
           igUserId,
+          // App-scoped id (/me `id`). Deauth / data-deletion signed_requests
+          // may carry this instead of the professional-account user_id.
+          igScopedId: me.id ? String(me.id) : null,
           accountType: me.account_type ?? 'BUSINESS',
         },
       },
@@ -467,46 +533,48 @@ export const instagramAdapter: PlatformAdapter = {
         'Instagram requires an image or video. Attach media before scheduling.',
       );
     }
+    if (input.media.length > 10) {
+      throw new PlatformError(
+        'instagram_too_many_media',
+        400,
+        'Instagram carousels hold at most 10 images or videos. Remove some media and try again.',
+      );
+    }
     const igUserId = input.account.platformUserId;
     const token = input.account.accessToken;
-    const m = input.media[0];
-    const isVideo = m.mimeType.startsWith('video/');
+    const isCarousel = input.media.length > 1;
 
-    // Step 1: create the container.
-    const containerBody = new URLSearchParams({
-      [isVideo ? 'video_url' : 'image_url']: m.url,
-      caption: input.text,
-      access_token: token,
-      ...(isVideo ? { media_type: 'REELS' } : {}),
-    });
-    const containerResp = await fetch(`${IG_GRAPH}/${igUserId}/media`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: containerBody,
-    });
-    if (!containerResp.ok) {
-      throw new PlatformError('instagram_container_failed', containerResp.status, await containerResp.text());
+    // Step 1: create the container — one per item, plus a CAROUSEL parent
+    // for multi-media. Images must be JPEG, so others are converted first.
+    // https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/content-publishing
+    const childIds: string[] = [];
+    for (const m of input.media) {
+      const isVideo = m.mimeType.startsWith('video/');
+      const url = isVideo ? m.url : await ensureJpegUrl(m, input.account.id);
+      const id = await createIgContainer(igUserId, token, {
+        [isVideo ? 'video_url' : 'image_url']: url,
+        ...(isCarousel
+          ? { is_carousel_item: 'true', ...(isVideo ? { media_type: 'VIDEO' } : {}) }
+          : { caption: input.text, ...(isVideo ? { media_type: 'REELS' } : {}) }),
+      });
+      if (isCarousel) await waitIgContainer(id, input.account);
+      childIds.push(id);
     }
-    const container = (await containerResp.json()) as { id: string };
+    const creationId = isCarousel
+      ? await createIgContainer(igUserId, token, { media_type: 'CAROUSEL', children: childIds.join(','), caption: input.text })
+      : childIds[0];
 
     // Step 2: Instagram processes containers asynchronously. Publishing
     // before status_code=FINISHED yields "Media ID is not available" (#9007,
     // subcode 2207027). Reels can take 10–60s; we poll up to 90s via the
     // adapter's waitForPublish method so tests can stub it.
-    const ready = await instagramAdapter.waitForPublish!({ publishId: container.id, account: input.account });
-    if (!ready.ok) {
-      throw new PlatformError(
-        'instagram_container_not_ready',
-        408,
-        `Container ${container.id} stuck in ${ready.lastStatus ?? 'unknown'} after ${ready.attempts} polls. ${ready.error ?? ''}`,
-      );
-    }
+    await waitIgContainer(creationId, input.account);
 
     // Step 3: publish the now-FINISHED container.
     const publishResp = await fetch(`${IG_GRAPH}/${igUserId}/media_publish`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ creation_id: container.id, access_token: token }),
+      body: new URLSearchParams({ creation_id: creationId, access_token: token }),
     });
     if (!publishResp.ok) {
       throw new PlatformError('instagram_publish_failed', publishResp.status, await publishResp.text());
