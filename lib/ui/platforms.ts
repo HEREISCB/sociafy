@@ -45,6 +45,7 @@ export const PLATFORM_LABELS: Record<string, string> = {
 // Shared by Connections and onboarding so a raw machine code never reaches the
 // user. Unknown codes fall back to a generic line.
 const IG_SIGNIN = "Instagram didn't accept the sign-in. Make sure the account is Professional (Business or Creator), then try again.";
+const HANDSHAKE = (p: string) => `We couldn't complete the handshake with ${p}. Please try connecting again.`;
 const OAUTH_ERROR_COPY: Record<string, (p: string) => string> = {
   access_denied: (p) => `You cancelled on ${p}'s screen. Connect again whenever you're ready.`,
   oauth_state: () => 'That connect link expired — try again.',
@@ -67,6 +68,18 @@ const OAUTH_ERROR_COPY: Record<string, (p: string) => string> = {
   meta_token_failed: () => "Facebook didn't complete the sign-in. Please try connecting again.",
   meta_me_failed: () => "We couldn't read your Facebook profile. Please try connecting again.",
   meta_pages_failed: () => "We couldn't read your Facebook Pages. Please try connecting again.",
+  youtube_no_channel: () => 'Your Google account has no YouTube channel. Create one at youtube.com, then reconnect.',
+  youtube_token_failed: () => HANDSHAKE('YouTube'),
+  youtube_channel_failed: () => "We couldn't read your YouTube channel. Please try connecting again.",
+  linkedin_token_failed: () => HANDSHAKE('LinkedIn'),
+  linkedin_me_failed: () => "We couldn't read your LinkedIn profile. Please try connecting again.",
+  x_token_exchange_failed: () => HANDSHAKE('X'),
+  x_me_failed: () => "We couldn't read your X profile. Please try connecting again.",
+  x_missing_code_verifier: () => 'That connect link expired — try again.',
+  tiktok_token_failed: () => HANDSHAKE('TikTok'),
+  reddit_token_exchange_failed: () => HANDSHAKE('Reddit'),
+  reddit_me_failed: () => "We couldn't read your Reddit profile. Please try connecting again.",
+  save_failed: (p) => `${p} signed you in, but we couldn't save the connection. Please try again.`,
 };
 
 export function oauthErrorCopy(code: string, platform: string): string {
@@ -76,5 +89,5 @@ export function oauthErrorCopy(code: string, platform: string): string {
 
 /** Retrying can't fix these, so don't offer a Retry button. */
 export function oauthErrorRetryable(code: string): boolean {
-  return code !== 'platform_not_configured';
+  return code !== 'platform_not_configured' && code !== 'youtube_no_channel';
 }
