@@ -264,3 +264,31 @@ describe('isPermanent', () => {
     expect(isPermanent(new TypeError('fetch failed'))).toBe(false);
   });
 });
+
+describe('runPublish — time budget and warnings', () => {
+  beforeEach(() => seed());
+
+  it('releases claimed rows untried once the time budget is spent', async () => {
+    let called = false;
+    publish = async () => { called = true; return { platformPostId: '1', url: null }; };
+    // Run start reads 0; every later check reads 7 minutes in.
+    const now = vi.spyOn(Date, 'now').mockReturnValueOnce(0).mockReturnValue(7 * 60_000);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await runPublish();
+    } finally {
+      now.mockRestore();
+    }
+    expect(called).toBe(false);
+    expect(row.status).toBe('pending');
+    expect(row.attempts).toBe(0); // the claim's bump is undone
+  });
+
+  it('logs a publish_warning when TikTok is still processing', async () => {
+    seed({ platform: 'tiktok' });
+    publish = async () => ({ platformPostId: 'p1', url: null, raw: { status: 'pending', privacyLevel: 'SELF_ONLY' } });
+    await runPublish();
+    expect(row.status).toBe('published');
+    expect(activity.map((a) => a.kind)).toEqual(['manual_publish', 'publish_warning']);
+  });
+});

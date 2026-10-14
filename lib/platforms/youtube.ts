@@ -81,7 +81,8 @@ export const youtubeAdapter: PlatformAdapter = {
       tokens,
       profile: {
         platformUserId: item.id,
-        handle: item.snippet.customUrl ?? item.snippet.title,
+        // customUrl is '@chan'; store handles bare like every other platform.
+        handle: item.snippet.customUrl?.replace(/^@/, '') ?? item.snippet.title,
         displayName: item.snippet.title,
         avatarUrl: item.snippet.thumbnails?.default?.url ?? null,
       },
@@ -98,6 +99,7 @@ export const youtubeAdapter: PlatformAdapter = {
         grant_type: 'refresh_token',
         refresh_token: refreshToken,
       }),
+      signal: AbortSignal.timeout(15_000),
     });
     if (!resp.ok) throw new PlatformError('youtube_refresh_failed', resp.status, await resp.text());
     const t = (await resp.json()) as {

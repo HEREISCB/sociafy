@@ -1,4 +1,6 @@
-import type { Platform } from '../db/schema';
+import { and, inArray, ne, sql } from 'drizzle-orm';
+import { db } from '../db';
+import { connectedAccounts, type Platform } from '../db/schema';
 import { env } from '../env';
 import { GRAPH } from './meta';
 
@@ -15,6 +17,9 @@ import { GRAPH } from './meta';
 export async function revokeAtPlatform(
   platform: Platform,
   tokens: { accessToken: string; refreshToken: string | null },
+  /** The connected_accounts row being disconnected (excluded from the
+   *  shared-grant check in revokeFacebook). */
+  accountId: string,
 ): Promise<void> {
   try {
     switch (platform) {
@@ -31,7 +36,7 @@ export async function revokeAtPlatform(
         await revokeLinkedIn(tokens.accessToken);
         return;
       case 'facebook':
-        await revokeFacebook(tokens.accessToken);
+        await revokeFacebook(tokens.accessToken, accountId);
         return;
       case 'instagram':
         // Instagram API with Instagram Login documents no revoke / DELETE
@@ -98,8 +103,12 @@ async function revokeLinkedIn(token: string) {
  * https://developers.facebook.com/docs/graph-api/reference/user/permissions/
  * https://developers.facebook.com/docs/graph-api/reference/debug_token/
  * Still best-effort: if debug_token has no user_id we warn and stop.
+ *
+ * DELETE /{user-id}/permissions drops EVERY grant that FB user gave this app,
+ * so skip it while any other connected account (any Sociafy user) still
+ * rides on the same FB user — revoking would silently break those.
  */
-async function revokeFacebook(pageToken: string) {
+async function revokeFacebook(pageToken: string, accountId: string) {
   const { appId, appSecret } = env.platforms.meta;
   if (!appId || !appSecret) return;
   const appToken = `${appId}|${appSecret}`;
@@ -109,6 +118,19 @@ async function revokeFacebook(pageToken: string) {
   if (!dbg.ok) throw new Error(`debug_token ${dbg.status}: ${await dbg.text()}`);
   const userId = ((await dbg.json()) as { data?: { user_id?: string } }).data?.user_id;
   if (!userId) throw new Error('debug_token returned no user_id; permissions not revoked');
+  const [shared] = await db()
+    .select({ id: connectedAccounts.id })
+    .from(connectedAccounts)
+    .where(and(
+      inArray(connectedAccounts.platform, ['facebook', 'instagram']),
+      sql`${connectedAccounts.meta}->>'userId' = ${userId}`,
+      ne(connectedAccounts.id, accountId),
+    ))
+    .limit(1);
+  if (shared) {
+    console.warn(`[revoke] facebook: FB user ${userId} still backs connected account ${shared.id}; permissions not revoked`);
+    return;
+  }
   const resp = await fetch(`${GRAPH}/${userId}/permissions?access_token=${encodeURIComponent(appToken)}`, {
     method: 'DELETE',
   });

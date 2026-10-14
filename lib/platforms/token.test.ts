@@ -20,6 +20,7 @@ const state = vi.hoisted(() => ({
 vi.mock('../db', () => ({
   db: () => ({
     transaction(fn: (tx: unknown) => unknown) { return fn(this); },
+    execute: () => Promise.resolve(),
     select: () => ({
       from: () => ({ where: () => ({ for: () => Promise.resolve(state.locked ? [state.locked] : []) }) }),
     }),

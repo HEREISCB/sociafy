@@ -11,7 +11,7 @@ import {
   type Platform,
 } from '../../../lib/db/schema';
 import { getAdapter } from '../../../lib/platforms/registry';
-import { PlatformError } from '../../../lib/platforms/types';
+import { PlatformError, publishWarning } from '../../../lib/platforms/types';
 import { ensureFreshToken } from '../../../lib/platforms/token';
 import { rateLimit } from '../../../lib/rate-limit';
 import { publishSchema, parseBody } from '../../../lib/validation';
@@ -131,6 +131,16 @@ export async function POST(req: NextRequest) {
           })
           .returning();
         rows.push(sp);
+        // A still-pending scheduled row for this draft+platform would post it
+        // a second time when the cron reaches it.
+        await tx
+          .update(scheduledPosts)
+          .set({ status: 'canceled', error: 'superseded_by_post_now', updatedAt: now })
+          .where(and(
+            eq(scheduledPosts.draftId, draft.id),
+            eq(scheduledPosts.platform, platform),
+            eq(scheduledPosts.status, 'pending'),
+          ));
       }
       return rows;
     });
@@ -265,6 +275,21 @@ export async function POST(req: NextRequest) {
         });
       } catch (e) {
         console.error(`[publish] activity log failed for published post ${sp.id}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+
+      const warning = publishWarning(platform, out);
+      if (warning) {
+        try {
+          await db().insert(activityLog).values({
+            userId: user.id,
+            kind: 'publish_warning',
+            title: warning,
+            body: text.slice(0, 280),
+            meta: { scheduledPostId: sp.id, platform, url: out.url, immediate: true },
+          });
+        } catch (e) {
+          console.error(`[publish] activity log failed for publish warning ${sp.id}: ${e instanceof Error ? e.message : String(e)}`);
+        }
       }
 
       results.push({

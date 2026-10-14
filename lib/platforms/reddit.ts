@@ -106,6 +106,7 @@ export const redditAdapter: PlatformAdapter = {
         'User-Agent': UA,
       },
       body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken }),
+      signal: AbortSignal.timeout(15_000),
     });
     if (!resp.ok) throw new PlatformError('reddit_refresh_failed', resp.status, await resp.text());
     const t = (await resp.json()) as {

@@ -7,7 +7,7 @@ import {
   drafts,
 } from '../db/schema';
 import { getAdapter } from '../platforms/registry';
-import { PlatformError } from '../platforms/types';
+import { PlatformError, publishWarning } from '../platforms/types';
 import { ensureFreshToken } from '../platforms/token';
 
 export type PublishResult = {
@@ -25,7 +25,13 @@ export type PublishResult = {
 const MAX_ATTEMPTS = 3;
 
 /** Max rows claimed per run. */
-const BATCH_LIMIT = 50;
+const BATCH_LIMIT = 20;
+
+/** Stop starting new posts after this long; the rest go back to 'pending'.
+ *  Well under the 10m `timeout` on the publish line in etc/cron.d/sociafy, so
+ *  a slow batch is never killed mid-publish (which strands rows as
+ *  publish_timeout_unknown). */
+const TIME_BUDGET_MS = 6 * 60 * 1000;
 
 /** A row 'publishing' longer than this was orphaned by a dead process. Must
  *  exceed the `timeout` on the publish line in etc/cron.d/sociafy. */
@@ -45,6 +51,7 @@ const STALE_PUBLISHING_MS = 15 * 60 * 1000;
  */
 export async function runPublish(): Promise<{ ran: number; results: PublishResult[] }> {
   const now = new Date();
+  const startedAt = Date.now();
 
   // Surface rows stranded in 'publishing' (a killed invocation, a crashed
   // "Post now" request). Terminal, never requeued: the post may have gone live
@@ -104,7 +111,25 @@ export async function runPublish(): Promise<{ ran: number; results: PublishResul
 
   const results: PublishResult[] = [];
 
-  for (const sp of batch) {
+  for (const [i, sp] of batch.entries()) {
+    if (Date.now() - startedAt > TIME_BUDGET_MS) {
+      // Out of time: hand the untouched rows back to the next tick, undoing
+      // the claim's attempts bump — they were never tried.
+      for (const rest of batch.slice(i)) {
+        try {
+          await db()
+            .update(scheduledPosts)
+            .set({ status: 'pending', attempts: rest.attempts - 1, updatedAt: new Date() })
+            .where(and(eq(scheduledPosts.id, rest.id), eq(scheduledPosts.status, 'publishing')));
+        } catch (e) {
+          // Left 'publishing' it gets swept as publish_timeout_unknown later.
+          console.error(`[cron.publish] could not release ${rest.id}: ${errMsg(e)}`);
+        }
+      }
+      console.warn(`[cron.publish] time budget spent; released ${batch.length - i} unattempted post(s)`);
+      break;
+    }
+
     // Every failure path goes through here so the retry/terminal decision
     // lives in exactly one place.
     const fail = async (msg: string, permanent: boolean) => {
@@ -237,6 +262,21 @@ export async function runPublish(): Promise<{ ran: number; results: PublishResul
       });
     } catch (e) {
       console.error(`[cron.publish] activity log failed for published post ${sp.id}: ${errMsg(e)}`);
+    }
+
+    const warning = publishWarning(sp.platform, out);
+    if (warning) {
+      try {
+        await db().insert(activityLog).values({
+          userId: sp.userId,
+          kind: 'publish_warning',
+          title: warning,
+          body: sp.text.slice(0, 280),
+          meta: { scheduledPostId: sp.id, platform: sp.platform, url: out.url },
+        });
+      } catch (e) {
+        console.error(`[cron.publish] activity log failed for publish warning ${sp.id}: ${errMsg(e)}`);
+      }
     }
 
     results.push({ id: sp.id, platform: sp.platform, ok: true, postId: out.platformPostId });

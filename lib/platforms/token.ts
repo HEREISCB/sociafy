@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { db } from '../db';
 import { connectedAccounts, activityLog, type Platform } from '../db/schema';
 import { getAdapter } from './registry';
@@ -99,6 +99,8 @@ export async function ensureFreshToken(acct: AccountRow): Promise<AccountRow> {
     // dead until the user reconnects. Lock the row, re-read it, and only call
     // the provider if nobody refreshed it while we waited for the lock.
     return await db().transaction(async (tx) => {
+      // Don't queue forever behind a refresh wedged on a slow provider.
+      await tx.execute(sql`SET LOCAL lock_timeout = '20s'`);
       const [locked] = await tx
         .select()
         .from(connectedAccounts)

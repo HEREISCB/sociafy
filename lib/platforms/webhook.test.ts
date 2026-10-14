@@ -14,8 +14,10 @@ vi.mock('../env', () => ({
 vi.mock('../storage/r2', () => ({ uploadBuffer: vi.fn() }));
 vi.mock('../rate-limit', () => ({ rateLimit: () => ({ ok: true }), requestIp: () => 'ip' }));
 // Status lookups find no activity_log row — exercises the HMAC path.
+// `rows` doubles as the revoke shared-grant lookup.
+const dbRows = vi.hoisted(() => ({ rows: [] as unknown[] }));
 vi.mock('../db', () => ({
-  db: () => ({ select: () => ({ from: () => ({ where: () => ({ limit: () => Promise.resolve([]) }) }) }) }),
+  db: () => ({ select: () => ({ from: () => ({ where: () => ({ limit: () => Promise.resolve(dbRows.rows) }) }) }) }),
 }));
 
 import {
@@ -82,7 +84,7 @@ describe('revokeAtPlatform(facebook)', () => {
       calls.push({ url, method: init?.method ?? 'GET' });
       return new Response(JSON.stringify(url.includes('debug_token') ? { data: { user_id: 'u1' } } : { success: true }));
     }));
-    await revokeAtPlatform('facebook', { accessToken: 'PAGE', refreshToken: null });
+    await revokeAtPlatform('facebook', { accessToken: 'PAGE', refreshToken: null }, 'acct-1');
     expect(calls[0].url).toContain('/debug_token?input_token=PAGE');
     expect(calls[1]).toEqual({
       url: `https://graph.facebook.com/v25.0/u1/permissions?access_token=${encodeURIComponent('fbapp|fbsecret')}`,
@@ -93,7 +95,24 @@ describe('revokeAtPlatform(facebook)', () => {
   it('warns instead of swallowing failures', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.stubGlobal('fetch', vi.fn(async () => new Response('bad', { status: 400 })));
-    await revokeAtPlatform('facebook', { accessToken: 'PAGE', refreshToken: null });
+    await revokeAtPlatform('facebook', { accessToken: 'PAGE', refreshToken: null }, 'acct-1');
     expect(warn).toHaveBeenCalled();
+  });
+
+  it('skips the revoke while another connected account shares the FB user', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      calls.push(url);
+      return new Response(JSON.stringify({ data: { user_id: 'u1' } }));
+    }));
+    dbRows.rows = [{ id: 'acct-2' }];
+    try {
+      await revokeAtPlatform('facebook', { accessToken: 'PAGE', refreshToken: null }, 'acct-1');
+    } finally {
+      dbRows.rows = [];
+    }
+    expect(calls).toHaveLength(1); // debug_token only — no DELETE
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('acct-2'));
   });
 });

@@ -41,6 +41,21 @@ export type PublishResult = {
   stub?: true;
 };
 
+/** A publish that went through but not the way the user expects — worth an
+ *  activity_log 'publish_warning' row. Null when nothing needs flagging. */
+export function publishWarning(platform: Platform, out: PublishResult): string | null {
+  const raw = out.raw as { forcedPrivate?: boolean; status?: string; privacyLevel?: string } | null | undefined;
+  if (platform === 'youtube' && raw?.forcedPrivate) {
+    return "YouTube made this video private — your Google project isn't verified yet";
+  }
+  if (platform === 'tiktok' && raw?.status === 'pending') {
+    return raw.privacyLevel === 'SELF_ONLY'
+      ? 'TikTok is still processing this post (it will be visible only to you until the app is audited)'
+      : 'TikTok is still processing this post';
+  }
+  return null;
+}
+
 /** Outcome of polling a deferred publish (Instagram container, TikTok
  *  publish_id, etc.) until terminal state. */
 export type WaitForPublishResult = {

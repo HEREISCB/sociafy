@@ -371,10 +371,20 @@ async function ensureJpegUrl(m: { url: string; mimeType: string }, accountId: st
   if (/^image\/jpe?g$/i.test(m.mimeType)) return m.url;
   const resp = await fetch(m.url);
   if (!resp.ok) throw new PlatformError('instagram_image_fetch_failed', resp.status, await resp.text());
-  const jpeg = await sharp(Buffer.from(await resp.arrayBuffer()))
-    .flatten({ background: '#ffffff' }) // transparent PNG/WebP would otherwise go black
-    .jpeg({ quality: 90 })
-    .toBuffer();
+  const src = Buffer.from(await resp.arrayBuffer());
+  let jpeg: Buffer;
+  try {
+    jpeg = await sharp(src)
+      .flatten({ background: '#ffffff' }) // transparent PNG/WebP would otherwise go black
+      .jpeg({ quality: 90 })
+      .toBuffer();
+  } catch (e) {
+    throw new PlatformError(
+      'instagram_image_unsupported',
+      400,
+      `Couldn't convert ${m.mimeType} to JPEG for Instagram: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
   const key = `instagram/${accountId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
   return (await uploadBuffer({ key, body: jpeg, contentType: 'image/jpeg' })).url;
 }
@@ -512,7 +522,7 @@ export const instagramAdapter: PlatformAdapter = {
     const url = new URL(`${IG_GRAPH_NOVERSION}/refresh_access_token`);
     url.searchParams.set('grant_type', 'ig_refresh_token');
     url.searchParams.set('access_token', refreshToken);
-    const resp = await fetch(url);
+    const resp = await fetch(url, { signal: AbortSignal.timeout(15_000) });
     if (!resp.ok) {
       throw new PlatformError('ig_refresh_failed', resp.status, await resp.text());
     }
@@ -557,9 +567,11 @@ export const instagramAdapter: PlatformAdapter = {
           ? { is_carousel_item: 'true', ...(isVideo ? { media_type: 'VIDEO' } : {}) }
           : { caption: input.text, ...(isVideo ? { media_type: 'REELS' } : {}) }),
       });
-      if (isCarousel) await waitIgContainer(id, input.account);
       childIds.push(id);
     }
+    // Children process in parallel on Meta's side, so poll them together —
+    // serial create+poll stacked one ~90s wait per item.
+    if (isCarousel) await Promise.all(childIds.map((id) => waitIgContainer(id, input.account)));
     const creationId = isCarousel
       ? await createIgContainer(igUserId, token, { media_type: 'CAROUSEL', children: childIds.join(','), caption: input.text })
       : childIds[0];

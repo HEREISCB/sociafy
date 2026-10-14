@@ -88,6 +88,9 @@ vi.mock('../../../lib/platforms/token', () => ({
   },
 }));
 
+// Many POSTs per file would trip the real in-memory limiter.
+vi.mock('../../../lib/rate-limit', () => ({ rateLimit: () => ({ ok: true }) }));
+
 import { POST } from './route';
 
 const DRAFT = {
@@ -235,5 +238,22 @@ describe('POST /api/publish — claim + per-platform isolation', () => {
     expect(byPlatform.x.ok).toBe(true);
     expect(byPlatform.linkedin.ok).toBe(false);
     expect(String(byPlatform.linkedin.error)).toMatch(/^token_refresh_failed/);
+  });
+});
+
+describe('POST /api/publish — scheduled rows and warnings', () => {
+  it('cancels a pending scheduled row for the same draft+platform', async () => {
+    const res = await post();
+    expect(res.status).toBe(200);
+    expect(state.updates).toContainEqual(expect.objectContaining({ status: 'canceled', error: 'superseded_by_post_now' }));
+  });
+
+  it('logs a publish_warning when YouTube forces the upload private', async () => {
+    state.selects = [[DRAFT], [{ ...ACCOUNT, platform: 'youtube' }]];
+    publish = async () => ({ platformPostId: 'v1', url: 'https://www.youtube.com/watch?v=v1', raw: { forcedPrivate: true } });
+
+    const res = await POST({ json: async () => ({ draftId: DRAFT.id, platforms: ['youtube'] }) } as unknown as NextRequest);
+    expect(res.status).toBe(200);
+    expect(state.inserts.find((i) => i.kind === 'publish_warning')?.title).toMatch(/YouTube made this video private/);
   });
 });

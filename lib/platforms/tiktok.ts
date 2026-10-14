@@ -1,5 +1,5 @@
 import { env } from '../env';
-import type { AdapterAccount, PlatformAdapter, PublishInput, PublishResult, WaitForPublishResult } from './types';
+import type { PlatformAdapter, PublishInput, PublishResult } from './types';
 import { PlatformError } from './types';
 import { stubProfile, stubPublish } from './stub';
 
@@ -8,7 +8,6 @@ const TOKEN_URL = 'https://open.tiktokapis.com/v2/oauth/token/';
 const ME_URL = 'https://open.tiktokapis.com/v2/user/info/';
 const CREATOR_INFO_URL = 'https://open.tiktokapis.com/v2/post/publish/creator_info/query/';
 const INIT_URL = 'https://open.tiktokapis.com/v2/post/publish/video/init/';
-const STATUS_URL = 'https://open.tiktokapis.com/v2/post/publish/status/fetch/';
 
 /** TikTok answers 200 with `error: { code, message, log_id }`; only code 'ok' is success. */
 type TikTokError = { code?: string; message?: string; log_id?: string };
@@ -88,6 +87,7 @@ export const tiktokAdapter: PlatformAdapter = {
         grant_type: 'refresh_token',
         refresh_token: refreshToken,
       }),
+      signal: AbortSignal.timeout(15_000),
     });
     if (!resp.ok) throw new PlatformError('tiktok_refresh_failed', resp.status, await resp.text());
     const t = (await resp.json()) as {
@@ -112,8 +112,10 @@ export const tiktokAdapter: PlatformAdapter = {
         'TikTok posts require a video. Attach a video before scheduling.',
       );
     }
-    // Unaudited clients may only post SELF_ONLY, and privacy_level must be
-    // one of creator_info's privacy_level_options or init fails with
+    // Unaudited clients may only post SELF_ONLY (anything else 403s with
+    // unaudited_client_can_only_post_to_private_accounts), yet creator_info
+    // offers PUBLIC_TO_EVERYONE for any public account. privacy_level must
+    // also be one of creator_info's options or init fails with
     // privacy_level_option_mismatch.
     const token = input.account.accessToken;
     const infoResp = await fetch(CREATOR_INFO_URL, {
@@ -126,9 +128,10 @@ export const tiktokAdapter: PlatformAdapter = {
     if (!infoResp.ok || info?.error?.code !== 'ok') {
       throw new PlatformError('tiktok_creator_info_failed', infoResp.ok ? 400 : infoResp.status, info?.error ?? info);
     }
-    const privacyLevel = info.data?.privacy_level_options?.includes('PUBLIC_TO_EVERYONE')
-      ? 'PUBLIC_TO_EVERYONE'
-      : 'SELF_ONLY';
+    const privacyLevel =
+      env.platforms.tiktok.audited && info.data?.privacy_level_options?.includes('PUBLIC_TO_EVERYONE')
+        ? 'PUBLIC_TO_EVERYONE'
+        : 'SELF_ONLY';
 
     // PULL_FROM_URL: TikTok downloads the video from our (verified) media domain.
     const m = input.media[0];
@@ -155,47 +158,13 @@ export const tiktokAdapter: PlatformAdapter = {
     const publishId = data.data?.publish_id;
     if (!publishId) throw new PlatformError('tiktok_publish_init_failed', 502, 'init returned no publish_id');
 
-    const done = await tiktokAdapter.waitForPublish!({ publishId, account: input.account });
-    if (!done.ok && done.error !== 'timeout') {
-      throw new PlatformError('tiktok_publish_failed', 502, `TikTok publish ${done.lastStatus ?? 'FAILED'}: ${done.error ?? ''}`);
-    }
-    // Timeout = TikTok accepted it and is still processing/moderating (can
-    // take hours). The publish_id is real, so report success flagged pending.
+    // No status polling here: TikTok downloads + moderates asynchronously and
+    // that can take hours — far past the request/cron budget. The publish_id
+    // is real, so report success flagged pending.
     return {
       platformPostId: publishId,
       url: null,
-      raw: { ...data, privacyLevel, status: done.ok ? done.lastStatus : 'pending' },
+      raw: { ...data, privacyLevel, status: 'pending' },
     };
-  },
-  /**
-   * Poll /v2/post/publish/status/fetch/ until PUBLISH_COMPLETE or FAILED.
-   * Rate limit is 30 req/min per token, so we poll every ~3-5s for up to 90s.
-   */
-  async waitForPublish({ publishId, account }: { publishId: string; account: AdapterAccount }): Promise<WaitForPublishResult> {
-    const start = Date.now();
-    let interval = 3_000;
-    let attempts = 0;
-    let lastStatus: string | undefined;
-    while (Date.now() - start < 90_000) {
-      await new Promise((r) => setTimeout(r, interval));
-      interval = Math.min(interval + 500, 5_000);
-      attempts++;
-      try {
-        const resp = await fetch(STATUS_URL, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${account.accessToken}`, 'Content-Type': 'application/json; charset=UTF-8' },
-          body: JSON.stringify({ publish_id: publishId }),
-        });
-        if (!resp.ok) continue;
-        const j = (await resp.json()) as { data?: { status?: string; fail_reason?: string }; error?: TikTokError };
-        if (j.error?.code && j.error.code !== 'ok') continue;
-        lastStatus = j.data?.status ?? lastStatus;
-        if (lastStatus === 'PUBLISH_COMPLETE') return { ok: true, attempts, lastStatus };
-        if (lastStatus === 'FAILED') return { ok: false, attempts, lastStatus, error: j.data?.fail_reason };
-      } catch (e) {
-        lastStatus = e instanceof Error ? e.message : String(e);
-      }
-    }
-    return { ok: false, attempts, lastStatus, error: 'timeout' };
   },
 };

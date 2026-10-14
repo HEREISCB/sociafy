@@ -13,15 +13,17 @@ import type { NextRequest } from 'next/server';
 
 const state = vi.hoisted(() => ({
   row: null as Record<string, unknown> | null,
+  /** The user's connected accounts — the only select with a column list. */
+  accounts: [] as Record<string, unknown>[],
   patches: [] as Record<string, unknown>[],
 }));
 
 vi.mock('../../../lib/db', () => ({
   db: () => ({
-    select: () => ({
+    select: (cols?: unknown) => ({
       from: () => ({
         where: () => {
-          const rows = state.row ? [state.row] : [];
+          const rows = cols ? state.accounts : state.row ? [state.row] : [];
           return Object.assign(Promise.resolve(rows), { limit: () => Promise.resolve(rows) });
         },
       }),
@@ -51,7 +53,8 @@ const patch = (body: Record<string, unknown>) =>
   PATCH({ json: async () => body } as unknown as NextRequest, { params: Promise.resolve({ id: 'sp1' }) });
 
 beforeEach(() => {
-  state.row = { id: 'sp1', userId: 'u1', status: 'failed', attempts: 3, error: 'youtube_text_unsupported' };
+  state.row = { id: 'sp1', userId: 'u1', accountId: 'a1', platform: 'x', status: 'failed', attempts: 3, error: 'youtube_text_unsupported' };
+  state.accounts = [];
   state.patches = [];
 });
 
@@ -97,6 +100,22 @@ describe('PATCH /api/schedule/[id]', () => {
     state.row!.status = 'publishing';
     const res = await patch({ scheduledAt: soon() });
     expect(res.status).toBe(400);
+    expect(state.patches).toEqual([]);
+  });
+
+  it('relinks a canceled post whose account was disconnected', async () => {
+    state.row = { ...state.row, status: 'canceled', accountId: null };
+    state.accounts = [{ id: 'a2' }];
+    const res = await patch({ scheduledAt: soon() });
+    expect(res.status).toBe(200);
+    expect(state.patches[0]).toMatchObject({ status: 'pending', accountId: 'a2' });
+  });
+
+  it('refuses to requeue when no account is connected for the platform', async () => {
+    state.row = { ...state.row, status: 'canceled', accountId: null };
+    const res = await patch({ scheduledAt: soon() });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe('account_disconnected');
     expect(state.patches).toEqual([]);
   });
 });

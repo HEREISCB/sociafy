@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+const tiktokEnv = vi.hoisted(() => ({ clientKey: 'k', clientSecret: 's', audited: false }));
+
 vi.mock('../env', () => ({
   env: {
     platforms: {
-      tiktok: { clientKey: 'k', clientSecret: 's' },
+      tiktok: tiktokEnv,
       google: { clientId: 'g', clientSecret: 's' },
       reddit: { clientId: 'r', clientSecret: 's' },
     },
@@ -50,48 +52,46 @@ describe('capabilities', () => {
 });
 
 describe('tiktok publish', () => {
-  it('uses PUBLIC_TO_EVERYONE when allowed and polls to PUBLISH_COMPLETE', async () => {
-    vi.useFakeTimers();
+  it('uses SELF_ONLY even when PUBLIC_TO_EVERYONE is offered (unaudited app)', async () => {
     const calls = routeFetch({
       creator_info: [{ data: { privacy_level_options: ['PUBLIC_TO_EVERYONE', 'SELF_ONLY'] }, error: ok }],
       'video/init': [{ data: { publish_id: 'p_1' }, error: ok }],
-      'status/fetch': [
-        { data: { status: 'PROCESSING_DOWNLOAD' }, error: ok },
-        { data: { status: 'PUBLISH_COMPLETE' }, error: ok },
-      ],
     });
-    const p = tiktokAdapter.publishText({ text: 'hi', media: [video], account });
-    await vi.runAllTimersAsync();
-    const r = await p;
+    const r = await tiktokAdapter.publishText({ text: 'hi', media: [video], account });
     expect(r.platformPostId).toBe('p_1');
-    expect(r.raw).toMatchObject({ privacyLevel: 'PUBLIC_TO_EVERYONE', status: 'PUBLISH_COMPLETE' });
-    expect(JSON.parse(calls.find((c) => c.url.includes('video/init'))!.body!).post_info.privacy_level).toBe('PUBLIC_TO_EVERYONE');
-  });
-
-  it('falls back to SELF_ONLY and returns pending on poll timeout', async () => {
-    vi.useFakeTimers();
-    routeFetch({
-      creator_info: [{ data: { privacy_level_options: ['SELF_ONLY'] }, error: ok }],
-      'video/init': [{ data: { publish_id: 'p_2' }, error: ok }],
-      'status/fetch': [{ data: { status: 'PROCESSING_UPLOAD' }, error: ok }],
-    });
-    const p = tiktokAdapter.publishText({ text: 'hi', media: [video], account });
-    await vi.runAllTimersAsync();
-    const r = await p;
+    // Returns right after init — no status polling inside the request.
     expect(r.raw).toMatchObject({ privacyLevel: 'SELF_ONLY', status: 'pending' });
+    expect(calls.some((c) => c.url.includes('status/fetch'))).toBe(false);
+    expect(JSON.parse(calls.find((c) => c.url.includes('video/init'))!.body!).post_info.privacy_level).toBe('SELF_ONLY');
   });
 
-  it('throws on FAILED status', async () => {
-    vi.useFakeTimers();
-    routeFetch({
-      creator_info: [{ data: { privacy_level_options: ['SELF_ONLY'] }, error: ok }],
-      'video/init': [{ data: { publish_id: 'p_3' }, error: ok }],
-      'status/fetch': [{ data: { status: 'FAILED', fail_reason: 'file_format_check_failed' }, error: ok }],
-    });
-    const p = tiktokAdapter.publishText({ text: 'hi', media: [video], account });
-    const assertion = expect(p).rejects.toThrow('tiktok_publish_failed');
-    await vi.runAllTimersAsync();
-    await assertion;
+  it('uses PUBLIC_TO_EVERYONE when TIKTOK_AUDITED and offered', async () => {
+    tiktokEnv.audited = true;
+    try {
+      const calls = routeFetch({
+        creator_info: [{ data: { privacy_level_options: ['PUBLIC_TO_EVERYONE', 'SELF_ONLY'] }, error: ok }],
+        'video/init': [{ data: { publish_id: 'p_2' }, error: ok }],
+      });
+      const r = await tiktokAdapter.publishText({ text: 'hi', media: [video], account });
+      expect(r.raw).toMatchObject({ privacyLevel: 'PUBLIC_TO_EVERYONE', status: 'pending' });
+      expect(JSON.parse(calls.find((c) => c.url.includes('video/init'))!.body!).post_info.privacy_level).toBe('PUBLIC_TO_EVERYONE');
+    } finally {
+      tiktokEnv.audited = false;
+    }
+  });
+
+  it('stays SELF_ONLY when audited but PUBLIC_TO_EVERYONE is not offered', async () => {
+    tiktokEnv.audited = true;
+    try {
+      routeFetch({
+        creator_info: [{ data: { privacy_level_options: ['SELF_ONLY'] }, error: ok }],
+        'video/init': [{ data: { publish_id: 'p_3' }, error: ok }],
+      });
+      const r = await tiktokAdapter.publishText({ text: 'hi', media: [video], account });
+      expect(r.raw).toMatchObject({ privacyLevel: 'SELF_ONLY' });
+    } finally {
+      tiktokEnv.audited = false;
+    }
   });
 
   it('throws on a 200 init response carrying an error code', async () => {
@@ -152,7 +152,7 @@ describe('youtube', () => {
       'youtube/v3/channels': [{ items: [{ id: 'UC1', snippet: { title: 'Chan', customUrl: '@chan' } }] }],
     });
     const { profile } = await youtubeAdapter.exchangeCode({ code: 'c', redirectUri: 'https://x/cb' });
-    expect(profile).toMatchObject({ platformUserId: 'UC1', handle: '@chan', displayName: 'Chan' });
+    expect(profile).toMatchObject({ platformUserId: 'UC1', handle: 'chan', displayName: 'Chan' });
   });
 });
 

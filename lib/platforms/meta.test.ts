@@ -135,6 +135,16 @@ describe('instagramAdapter', () => {
     expect(calls[0].url).toContain('graph.instagram.com/v25.0');
   });
 
+  it('maps an undecodable image to instagram_image_unsupported (400)', async () => {
+    route = (c) => {
+      if (c.url === 'https://src/a.heic') return new Response('not an image');
+      throw new Error(`unexpected ${c.url}`);
+    };
+    await expect(
+      instagramAdapter.publishText({ text: 'x', media: [{ url: 'https://src/a.heic', mimeType: 'image/heic' }], account }),
+    ).rejects.toMatchObject({ message: 'instagram_image_unsupported', status: 400 });
+  });
+
   it('rejects more than 10 media items', async () => {
     const media = Array.from({ length: 11 }, (_, i) => ({ url: `https://src/${i}.jpg`, mimeType: 'image/jpeg' }));
     await expect(instagramAdapter.publishText({ text: 'x', media, account })).rejects.toMatchObject({ message: 'instagram_too_many_media' });

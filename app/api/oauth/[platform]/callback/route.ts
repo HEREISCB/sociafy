@@ -37,15 +37,17 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ platform: s
     return res;
   };
 
+  // platform is validated against PLATFORMS above, so it's safe in the URL.
+  const stateFail = `${STATE_FAIL}&platform=${platform}`;
   const state = stateParam ? verifyState(stateParam) : null;
-  if (!state || state.platform !== platform) return redirect(STATE_FAIL);
+  if (!state || state.platform !== platform) return redirect(stateFail);
   // The state must have been started in this browser (cookie nonce) by the
   // user who is signed in now — otherwise a victim opening an attacker's
   // callback link would attach the attacker's account (or vice versa).
   const binding = checkOAuthCookie(req.cookies.get(OAUTH_COOKIE)?.value, state.n);
-  if (!binding) return redirect(STATE_FAIL);
+  if (!binding) return redirect(stateFail);
   const user = await authedUser();
-  if (!user || user.id !== state.uid) return redirect(STATE_FAIL);
+  if (!user || user.id !== state.uid) return redirect(stateFail);
 
   const adapter = getAdapter(platform as Platform);
   const redirectUri = absoluteUrl(req, `/api/oauth/${platform}/callback`);
@@ -97,27 +99,33 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ platform: s
     meta: (result.tokens.meta ?? {}) as Record<string, unknown>,
     isStub: wantsStub,
   };
-  await db()
-    .insert(connectedAccounts)
-    .values({ userId: state.uid, platform: platform as Platform, ...fields })
-    .onConflictDoUpdate({
-      target: [connectedAccounts.userId, connectedAccounts.platform],
-      set: {
-        ...fields,
-        // A successful reconnect clears the refresh failure. Without this the
-        // red "Reconnect needed" banner survived reconnecting, forever.
-        lastRefreshError: null,
-        lastRefreshErrorAt: null,
-        updatedAt: new Date(),
-      },
-    });
+  // Every exit must clear the oauth cookie, including a failed save.
+  try {
+    await db()
+      .insert(connectedAccounts)
+      .values({ userId: state.uid, platform: platform as Platform, ...fields })
+      .onConflictDoUpdate({
+        target: [connectedAccounts.userId, connectedAccounts.platform],
+        set: {
+          ...fields,
+          // A successful reconnect clears the refresh failure. Without this the
+          // red "Reconnect needed" banner survived reconnecting, forever.
+          lastRefreshError: null,
+          lastRefreshErrorAt: null,
+          updatedAt: new Date(),
+        },
+      });
 
-  await db().insert(activityLog).values({
-    userId: state.uid,
-    kind: 'platform_connected',
-    title: `Connected ${platform}${result.profile.handle ? ` (@${result.profile.handle})` : ''}`,
-    meta: { platform, handle: result.profile.handle, stub: wantsStub },
-  });
+    await db().insert(activityLog).values({
+      userId: state.uid,
+      kind: 'platform_connected',
+      title: `Connected ${platform}${result.profile.handle ? ` (@${result.profile.handle})` : ''}`,
+      meta: { platform, handle: result.profile.handle, stub: wantsStub },
+    });
+  } catch (e) {
+    console.error(`[oauth:${platform}] save failed`, e instanceof Error ? e.message : String(e));
+    return redirect(`${back}${backSep}oauth_error=save_failed&platform=${platform}`);
+  }
 
   const handle = result.profile.handle ? encodeURIComponent(result.profile.handle) : '';
   return redirect(`${back}${backSep}connected=${platform}${handle ? `&handle=${handle}` : ''}`);

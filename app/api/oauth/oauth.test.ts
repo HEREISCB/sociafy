@@ -5,6 +5,7 @@ import { signState, OAUTH_COOKIE } from '../../../lib/oauth/state';
 const state = {
   user: { id: 'u1' } as { id: string } | null,
   upserts: [] as { values: Record<string, unknown>; conflict: { set: Record<string, unknown> } }[],
+  failSave: false,
   configured: true,
   exchangeCode: vi.fn<(a: { codeVerifier?: string }) => Promise<unknown>>(async () => ({
     tokens: { accessToken: 'real' },
@@ -28,7 +29,7 @@ vi.mock('../../../lib/db', () => ({
         Object.assign(Promise.resolve(), {
           onConflictDoUpdate: (conflict: { set: Record<string, unknown> }) => {
             state.upserts.push({ values, conflict });
-            return Promise.resolve();
+            return state.failSave ? Promise.reject(new Error('db down')) : Promise.resolve();
           },
         }),
     }),
@@ -52,6 +53,7 @@ describe('oauth callback', () => {
     state.user = { id: 'u1' };
     state.upserts = [];
     state.configured = true;
+    state.failSave = false;
     state.exchangeCode.mockClear();
   });
 
@@ -61,7 +63,7 @@ describe('oauth callback', () => {
   it('rejects a state minted for another user (account hijack)', async () => {
     state.user = { id: 'victim' };
     const res = await cb('x', good({ code: 'c' }), 'nonce1.ver');
-    expect(loc(res).pathname + loc(res).search).toBe('/dashboard?tab=connections&oauth_error=oauth_state');
+    expect(loc(res).pathname + loc(res).search).toBe('/dashboard?tab=connections&oauth_error=oauth_state&platform=x');
     expect(state.upserts).toHaveLength(0);
   });
 
@@ -91,6 +93,15 @@ describe('oauth callback', () => {
     expect(res.headers.get('set-cookie')).toMatch(new RegExp(`${OAUTH_COOKIE}=;.*Path=/api/oauth`));
     expect(state.upserts[0].values).toMatchObject({ userId: 'u1', platform: 'x', isStub: false });
     expect(state.upserts[0].conflict.set).toMatchObject({ lastRefreshError: null, isStub: false });
+  });
+
+  it('a failed save still clears the cookie and reports save_failed', async () => {
+    state.failSave = true;
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const res = await cb('x', good({ code: 'c' }), 'nonce1.ver');
+    expect(loc(res).searchParams.get('oauth_error')).toBe('save_failed');
+    expect(loc(res).searchParams.get('platform')).toBe('x');
+    expect(res.headers.get('set-cookie')).toMatch(new RegExp(`${OAUTH_COOKIE}=;`));
   });
 
   it('dev: a missing code mints a stub flagged isStub with the plain stub token', async () => {

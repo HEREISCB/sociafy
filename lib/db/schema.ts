@@ -378,6 +378,7 @@ export type ActivityKind =
   | 'manual_publish'
   | 'auto_publish'
   | 'publish_failed'
+  | 'publish_warning'
   | 'agent_drafted'
   | 'agent_held'
   | 'agent_skipped'

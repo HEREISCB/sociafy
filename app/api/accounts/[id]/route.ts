@@ -28,7 +28,7 @@ export async function DELETE(
         accessToken: decryptToken(row.accessToken) ?? row.accessToken,
         refreshToken: row.refreshToken ? decryptToken(row.refreshToken) : null,
       };
-      void revokeAtPlatform(row.platform, tokens);
+      void revokeAtPlatform(row.platform, tokens, row.id);
     }
 
     // Published history survives the delete (account_id is ON DELETE SET

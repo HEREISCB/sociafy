@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { and, eq, inArray } from 'drizzle-orm';
 import { withUser, jsonError } from '../../../../lib/api';
 import { db } from '../../../../lib/db';
-import { scheduledPosts, type ScheduledStatus } from '../../../../lib/db/schema';
+import { connectedAccounts, scheduledPosts, type ScheduledStatus } from '../../../../lib/db/schema';
 import { scheduleUpdateSchema, parseBody } from '../../../../lib/validation';
 
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -36,6 +36,17 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
         patch.status = 'pending';
         patch.attempts = 0;
         patch.error = null;
+        // Disconnecting an account nulls account_id on its rows; requeued
+        // as-is the cron would fail it straight away with no_account.
+        if (!existing.accountId) {
+          const [acct] = await db()
+            .select({ id: connectedAccounts.id })
+            .from(connectedAccounts)
+            .where(and(eq(connectedAccounts.userId, user.id), eq(connectedAccounts.platform, existing.platform)))
+            .limit(1);
+          if (!acct) return jsonError('account_disconnected', 409);
+          patch.accountId = acct.id;
+        }
       }
     }
     if (body.text !== undefined) patch.text = body.text;

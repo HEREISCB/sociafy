@@ -68,6 +68,9 @@ export const env = {
     tiktok: {
       clientKey: required('TIKTOK_CLIENT_KEY'),
       clientSecret: required('TIKTOK_CLIENT_SECRET'),
+      /** Set TIKTOK_AUDITED=1 once TikTok has audited the app; until then
+       *  Direct Post only accepts SELF_ONLY. */
+      audited: process.env.TIKTOK_AUDITED === '1',
     },
     google: {
       clientId: required('GOOGLE_CLIENT_ID'),

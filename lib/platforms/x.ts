@@ -100,6 +100,7 @@ export const xAdapter: PlatformAdapter = {
       method: 'POST',
       headers: { Authorization: `Basic ${basic}`, 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken }),
+      signal: AbortSignal.timeout(15_000),
     });
     if (!resp.ok) throw new PlatformError('x_refresh_failed', resp.status, await resp.text());
     const t = (await resp.json()) as { access_token: string; refresh_token?: string; expires_in?: number };
