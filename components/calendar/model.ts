@@ -125,17 +125,15 @@ export function moveToDay(i: CalItem, day: Date): Date {
   return d;
 }
 
-/** Header status line, from the plan for the horizon. Legacy drafts with no time
- *  are counted on their own instead of inflating "planned". */
-export function planStatus(plan: Pick<PlanView, 'counts' | 'review' | 'to'>): string {
-  const to = new Date(plan.to).getTime();
+/** Header status line, from the plan for the horizon. Leads with everything open for
+ *  review (what "Approve all" acts on), then how many of those still need a time. */
+export function planStatus(plan: Pick<PlanView, 'counts' | 'review'>): string {
   const open = plan.review.filter((r) => !r.approved);
-  const inPeriod = open.filter((r) => r.plannedAt && new Date(r.plannedAt).getTime() < to).length;
   const untimed = open.filter((r) => !r.plannedAt).length;
-  const waiting = plan.review.filter((r) => r.approved).length;
-  const parts = [`${plan.counts.scheduled} scheduled`];
-  if (inPeriod) parts.push(`${inPeriod} to review`);
-  if (untimed) parts.push(`${untimed} need${untimed === 1 ? 's' : ''} a time`);
+  const waiting = plan.review.length - open.length;
+  const parts: string[] = [];
+  if (open.length) parts.push(`${open.length} to review${untimed ? ` (${untimed} need${untimed === 1 ? 's' : ''} a time)` : ''}`);
+  parts.push(`${plan.counts.scheduled} scheduled`);
   if (waiting) parts.push(`${waiting} waiting on video`);
   if (plan.counts.target) parts.push(`target ${plan.counts.target}`);
   return parts.join(' · ');

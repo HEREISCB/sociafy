@@ -2,7 +2,7 @@
    (components/calendar/*). Status: review = accent outline, scheduled = neutral,
    posted = muted + check, failed = error. */
 
-.cal-glyphs { display: inline-flex; gap: 2px; flex: 0 0 auto; }
+.cal-glyphs { display: inline-flex; flex-wrap: wrap; gap: 2px; flex: 0 0 auto; max-width: 100%; }
 
 /* ---------- Thumbnail ---------- */
 .hc-thumb {
@@ -34,7 +34,6 @@
 .hw__day { display: flex; flex-direction: column; min-height: 420px; border-right: 1px solid var(--line); min-width: 0; }
 .hw__day:last-child { border-right: 0; }
 .hw__day.is-past { background: color-mix(in srgb, var(--subtle) 40%, transparent); }
-.hw__day.is-over { background: var(--accent-soft); }
 .hw__head {
   display: flex; align-items: baseline; gap: var(--s-2);
   padding: var(--s-2) var(--s-3);
@@ -44,7 +43,7 @@
 .hw__date { font-size: var(--fs-md); font-weight: 500; color: var(--text); }
 .hw__day.is-today .hw__head { box-shadow: inset 0 2px 0 var(--accent); }
 .hw__day.is-today .hw__date { color: var(--accent-ink); font-weight: 600; }
-.hw__items { display: flex; flex-direction: column; gap: var(--s-2); padding: var(--s-2); flex: 1; }
+.hw__items { display: flex; flex-direction: column; gap: var(--s-2); padding: var(--s-2); flex: 1; min-width: 0; }
 
 /* Card */
 .hc {
@@ -60,11 +59,9 @@
   text-align: left;
   cursor: pointer;
 }
-.hc[draggable="true"] { cursor: grab; }
 @media (hover: hover) and (pointer: fine) { .hc:hover { border-color: var(--line-strong); } }
 .hc__meta { display: flex; align-items: center; gap: var(--s-1); padding: 0 2px; color: var(--text-2); min-width: 0; }
-.hc__meta .cal-glyphs { margin-left: auto; }
-.hc__meta .pglyph { transform: scale(0.85); }
+.hc > .cal-glyphs { padding: 0 2px; }
 .hc__title {
   padding: 0 2px;
   font-weight: 500;
@@ -103,8 +100,9 @@
   font-size: var(--fs-xs);
   text-decoration: none;
 }
-.hw__items .hc-add { margin-top: auto; opacity: 0; }
-.hw__items .hc-add:only-child { opacity: 1; border-color: var(--line); }
+/* Week: a quiet row right under the last card; on hover (or alone in an empty day) it shows. */
+.hw__items .hc-add { opacity: 0; transition: opacity var(--dur-1) var(--ease-out); }
+.hw__items .hc-add:only-child { opacity: 0.7; }
 .hw__day:hover .hc-add,
 .hc-add:focus-visible { opacity: 1; }
 @media (hover: hover) and (pointer: fine) { .hc-add:hover { color: var(--text); border-color: var(--line-strong); } }
@@ -236,3 +234,59 @@
 }
 .hc__meta .tnum { white-space: nowrap; }
 .cal-panel__media .hc-thumb { place-items: stretch; }
+
+/* ---------- Drag & drop ----------
+   Grip + grab cursor say "draggable"; while one is in flight every open day shows a
+   dashed drop zone, past days go flat, and the day under the pointer lights up. */
+.grip { flex: 0 0 auto; fill: currentColor; color: var(--text-3); }
+.hc[draggable="true"],
+.hm-chip[draggable="true"],
+.tray-card[draggable="true"] { cursor: grab; }
+@media (hover: hover) and (pointer: fine) {
+  .hc[draggable="true"]:hover .grip,
+  .tray-card[draggable="true"]:hover .grip { color: var(--text); }
+}
+/* Pressed = picked up: the browser snapshots this lifted look as the drag ghost. */
+.hc[draggable="true"]:active,
+.tray-card[draggable="true"]:active {
+  cursor: grabbing;
+  scale: 1.02;
+  box-shadow: var(--shadow-pop);
+}
+.tray-card { transition: opacity var(--dur-1) var(--ease-out), scale var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out); }
+.is-dragged { opacity: 0.35; }
+@media (hover: none) { .grip, .tray-card__grip { display: none; } }
+
+.hw__drop {
+  display: grid; place-items: center;
+  flex: 1; min-height: 64px;
+  border: 1.5px dashed var(--accent);
+  border-radius: var(--r-sm);
+  color: var(--accent-ink);
+  font-size: var(--fs-xs); font-weight: 500;
+  pointer-events: none;
+}
+.hw__day.is-target .hw__head { color: var(--accent-ink); }
+.hw__day.is-closed { cursor: not-allowed; }
+.hw__day.is-closed > * { opacity: 0.45; }
+.hw__day.is-over { background: color-mix(in srgb, var(--accent) 16%, var(--surface)); }
+.hw__day.is-over .hw__drop { border-style: solid; background: var(--surface); }
+.hm__day.is-target { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
+.hm__day.is-closed { cursor: not-allowed; opacity: 0.55; }
+.hm__day.is-over { background: color-mix(in srgb, var(--accent) 16%, var(--surface)); box-shadow: inset 0 0 0 2px var(--accent); }
+
+/* A card that just moved: arrives in its new day, then a brief accent ring. */
+.hc {
+  @starting-style { opacity: 0; translate: 0 6px; }
+}
+.hc { transition: opacity var(--dur-2) var(--ease-out), translate var(--dur-2) var(--ease-out), scale var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out); }
+.hc.is-landed { animation: hc-landed 1.4s var(--ease-out); }
+@keyframes hc-landed {
+  0%, 40% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 55%, transparent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hc { transition: opacity var(--dur-1) linear; translate: none; }
+  .hc[draggable="true"]:active, .tray-card[draggable="true"]:active { scale: none; }
+  .hc.is-landed { animation-duration: 0.01s; outline: 2px solid var(--accent); }
+}

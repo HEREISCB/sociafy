@@ -7,7 +7,7 @@ import { PLATFORM_LABELS } from '../../lib/ui/platforms';
 import type { Platform } from '../../lib/db/schema';
 import { Glyphs } from '../calendar/glyphs';
 import { firstLine, type CalItem } from '../calendar/model';
-import { dragProps, Thumb } from '../calendar/views';
+import { Grip, Thumb, useDragProps } from '../calendar/views';
 
 export type Skipped = { reason: string; reasons?: Record<string, string>; platforms?: Platform[] };
 export type Approved = { scheduledAt: string | null; rendering?: true };
@@ -32,6 +32,7 @@ export function TrayCard({ item, onOpen, onDone }: { item: Extract<CalItem, { ki
   const d = item.draft;
   const [busy, setBusy] = useState<'approve' | 'skip' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const drag = useDragProps(item);
 
   const run = async (kind: 'approve' | 'skip', fn: () => Promise<string>) => {
     setBusy(kind);
@@ -53,7 +54,8 @@ export function TrayCard({ item, onOpen, onDone }: { item: Extract<CalItem, { ki
   const skip = () => run('skip', async () => { await apiPost('/api/plan/skip', { draftId: d.id }); return 'Skipped.'; });
 
   return (
-    <article className="tray-card" {...dragProps(item)}>
+    <article className={`tray-card${drag.dragged ? ' is-dragged' : ''}`} {...drag.props}>
+      {'draggable' in drag.props && <span className="tray-card__grip" title="Drag onto a day"><Grip /></span>}
       <button type="button" className="tray-card__open" onClick={onOpen}>
         <Thumb item={item} />
         <span className="tray-card__main">
@@ -67,9 +69,9 @@ export function TrayCard({ item, onOpen, onDone }: { item: Extract<CalItem, { ki
         <p className="tray-card__note">Approved. Posts when the video is ready.</p>
       ) : (
         <div className="row tray-card__actions">
-          <button type="button" className="btn sm" onClick={approve} disabled={!!busy || d.tooLong.length > 0}>{busy === 'approve' ? 'Approving…' : 'Approve'}</button>
-          <button type="button" className="btn sm ghost" onClick={skip} disabled={!!busy}>{busy === 'skip' ? 'Skipping…' : 'Skip'}</button>
-          <button type="button" className="btn sm ghost" onClick={onOpen} disabled={!!busy}>Pick time</button>
+          <button type="button" className="btn sm primary" onClick={approve} disabled={!!busy || d.tooLong.length > 0}>{busy === 'approve' ? 'Approving…' : 'Approve'}</button>
+          <button type="button" className="btn sm ghost tray-card__quiet" onClick={skip} disabled={!!busy}>{busy === 'skip' ? 'Skipping…' : 'Skip'}</button>
+          <button type="button" className="btn sm ghost tray-card__quiet" onClick={onOpen} disabled={!!busy}>Pick time</button>
         </div>
       )}
     </article>

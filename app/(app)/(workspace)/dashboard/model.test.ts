@@ -43,13 +43,12 @@ describe('home calendar model', () => {
     expect(toneOf(items[1])).toBe('review');
   });
 
-  it('counts untimed legacy drafts apart from planned ones', () => {
+  it('leads with everything to review, untimed ones called out', () => {
     const s = planStatus({
-      to: '2026-11-08T00:00:00.000Z',
       counts: { scheduled: 2, target: 5 } as never,
       review: [draft({ id: 'a', plannedAt: '2026-11-02T10:00:00.000Z' }), draft({ id: 'b' }), draft({ id: 'c' })],
     });
-    expect(s).toBe('2 scheduled · 1 to review · 2 need a time · target 5');
+    expect(s).toBe('3 to review (2 need a time) · 2 scheduled · target 5');
   });
 
   it('moves to another day keeping the time of day; untimed lands at 10 AM', () => {

@@ -41,25 +41,58 @@ export function Thumb({ item, controls }: { item: CalItem; controls?: boolean })
 type Open = (i: CalItem) => void;
 type Move = (key: string, day: Date) => void;
 
-export function dragProps(i: CalItem) {
-  return movable(i)
-    ? { draggable: true, onDragStart: (e: React.DragEvent) => { e.dataTransfer.setData('text/x-cal', i.key); e.dataTransfer.effectAllowed = 'move'; } }
-    : {};
+/** Drag state shared by the cards (dim the one in flight) and the days (show drop zones). */
+type Drag = { dragging: string | null; setDragging: (k: string | null) => void; landed: string | null };
+export const DragCtx = React.createContext<Drag>({ dragging: null, setDragging: () => {}, landed: null });
+
+export function useDragProps(i: CalItem) {
+  const { dragging, setDragging } = React.useContext(DragCtx);
+  if (!movable(i)) return { dragged: false, props: {} };
+  return {
+    dragged: dragging === i.key,
+    props: {
+      draggable: true,
+      onDragStart: (e: React.DragEvent) => {
+        e.dataTransfer.setData('text/x-cal', i.key);
+        e.dataTransfer.effectAllowed = 'move';
+        // After the browser snapshots the drag image, so the ghost isn't dimmed and the
+        // drop zones appearing don't reflow the source mid-dragstart (Chrome cancels).
+        setTimeout(() => setDragging(i.key));
+      },
+      onDragEnd: () => setDragging(null),
+    },
+  };
 }
 
-/** Week card: thumbnail, time + platforms, title, status. */
+/** The six-dot handle that says "you can drag this". Hidden on touch-only devices. */
+export function Grip() {
+  return (
+    <svg className="grip" width="8" height="12" viewBox="0 0 8 12" aria-hidden="true">
+      {[2, 6, 10].flatMap((y) => [<circle key={`a${y}`} cx="2" cy={y} r="1.1" />, <circle key={`b${y}`} cx="6" cy={y} r="1.1" />])}
+    </svg>
+  );
+}
+
+/** A post's draft id, stable across a move (a scheduled group's key includes its time). */
+const draftIdOf = (i: CalItem) => (i.kind === 'draft' ? i.draft.id : i.group.rows[0]?.draftId);
+
+/** Week card: thumbnail, time, platforms, title, each on its own line so a narrow day never overflows. */
 export function Card({ item, onOpen }: { item: CalItem; onOpen: Open }) {
   const badge = badgeFor(item);
   const tone = toneOf(item);
+  const drag = useDragProps(item);
+  const { landed } = React.useContext(DragCtx);
+  const cls = `hc hc--${tone}${drag.dragged ? ' is-dragged' : ''}${landed && landed === draftIdOf(item) ? ' is-landed' : ''}`;
   return (
-    <button type="button" className={`hc hc--${tone}`} onClick={() => onOpen(item)} {...dragProps(item)}>
+    <button type="button" className={cls} onClick={() => onOpen(item)} {...drag.props}>
       <Thumb item={item} />
       {badge && <span className={`hc__badge hc__badge--${tone}`}>{badge}</span>}
       <span className="hc__meta">
+        {movable(item) && <Grip />}
         <span className="tnum">{item.at ? format(item.at, 'h:mm a') : 'No time'}</span>
         {tone === 'published' && <Icon name="check" size={11} aria-label="Posted" />}
-        <Glyphs platforms={itemPlatforms(item)} />
       </span>
+      <Glyphs platforms={itemPlatforms(item)} />
       <span className="hc__title">{itemTitle(item)}</span>
     </button>
   );
@@ -74,12 +107,16 @@ function slotFor(day: Date, now: number) {
 function useDrop(day: Date, now: number, onMove: Move) {
   const open = now > 0 && addDays(startOfDay(day), 1).getTime() > now;
   const [over, setOver] = React.useState(false);
-  if (!open) return { over: false, props: {} };
+  const { dragging } = React.useContext(DragCtx);
+  const target = dragging ? (open ? ' is-target' : ' is-closed') : '';
+  if (!open) return { over: false, target, props: {} };
   return {
     over,
+    target,
     props: {
-      onDragOver: (e: React.DragEvent) => { if (e.dataTransfer.types.includes('text/x-cal')) { e.preventDefault(); setOver(true); } },
-      onDragLeave: () => setOver(false),
+      onDragOver: (e: React.DragEvent) => { if (e.dataTransfer.types.includes('text/x-cal')) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setOver(true); } },
+      // Moving onto a child card fires dragleave on the column; only a real exit counts.
+      onDragLeave: (e: React.DragEvent) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOver(false); },
       onDrop: (e: React.DragEvent) => { e.preventDefault(); setOver(false); const k = e.dataTransfer.getData('text/x-cal'); if (k) onMove(k, day); },
     },
   };
@@ -110,14 +147,16 @@ function WeekDay({ day, items, now, onOpen, onMove }: { day: Date; items: CalIte
   const past = now > 0 && addDays(startOfDay(day), 1).getTime() <= now;
   const drop = useDrop(day, now, onMove);
   return (
-    <section role="gridcell" className={`hw__day${today ? ' is-today' : ''}${past ? ' is-past' : ''}${drop.over ? ' is-over' : ''}`} {...drop.props}>
+    <section role="gridcell" className={`hw__day${today ? ' is-today' : ''}${past ? ' is-past' : ''}${drop.target}${drop.over ? ' is-over' : ''}`} {...drop.props}>
       <header className="hw__head">
         <span>{format(day, 'EEE')}</span>
         <span className="hw__date tnum">{format(day, 'd')}</span>
       </header>
       <div className="hw__items">
         {items.map((i) => <Card key={i.key} item={i} onOpen={onOpen} />)}
-        <AddLink day={day} now={now} label={items.length === 0} />
+        {drop.target === ' is-target'
+          ? <span className="hw__drop" aria-hidden="true">Drop here</span>
+          : <AddLink day={day} now={now} label />}
       </div>
     </section>
   );
@@ -147,19 +186,24 @@ function MonthDay({ day, out, items, now, onOpen, onMove, onMore }: {
   const drop = useDrop(day, now, onMove);
   const extra = items.length - MAX_CHIPS;
   return (
-    <div role="gridcell" className={`hm__day${out ? ' is-out' : ''}${today ? ' is-today' : ''}${drop.over ? ' is-over' : ''}`} {...drop.props}>
+    <div role="gridcell" className={`hm__day${out ? ' is-out' : ''}${today ? ' is-today' : ''}${drop.target}${drop.over ? ' is-over' : ''}`} {...drop.props}>
       <div className="hm__top">
         <span className="hm__date tnum">{format(day, 'd')}</span>
         {items.length === 0 && <AddLink day={day} now={now} />}
       </div>
-      {items.slice(0, extra > 0 ? MAX_CHIPS - 1 : MAX_CHIPS).map((i) => (
-        <button key={i.key} type="button" className={`hm-chip hm-chip--${toneOf(i)}`} onClick={() => onOpen(i)} {...dragProps(i)}>
-          <span className="tnum">{i.at && format(i.at, 'h:mma').toLowerCase()}</span>
-          <span className="hm-chip__title">{itemTitle(i)}</span>
-        </button>
-      ))}
+      {items.slice(0, extra > 0 ? MAX_CHIPS - 1 : MAX_CHIPS).map((i) => <Chip key={i.key} item={i} onOpen={onOpen} />)}
       {extra > 0 && <button type="button" className="hm-more" onClick={() => onMore(day)}>+{extra + 1} more</button>}
     </div>
+  );
+}
+
+function Chip({ item: i, onOpen }: { item: CalItem; onOpen: Open }) {
+  const drag = useDragProps(i);
+  return (
+    <button type="button" className={`hm-chip hm-chip--${toneOf(i)}${drag.dragged ? ' is-dragged' : ''}`} onClick={() => onOpen(i)} {...drag.props}>
+      <span className="tnum">{i.at && format(i.at, 'h:mma').toLowerCase()}</span>
+      <span className="hm-chip__title">{itemTitle(i)}</span>
+    </button>
   );
 }
 

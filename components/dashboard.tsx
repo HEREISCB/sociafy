@@ -12,7 +12,7 @@ import { healthFor, type HealthAccount } from '../lib/ui/health';
 import type { PlanView } from '../lib/agent/plan';
 import type { Platform } from '../lib/db/schema';
 import { byDay, calendarItems, groupRows, moveToDay, planStatus, type CalItem, type ScheduledRow } from './calendar/model';
-import { AgendaView, MonthView, WeekView } from './calendar/views';
+import { AgendaView, DragCtx, MonthView, WeekView } from './calendar/views';
 import { PostPanel } from './calendar/panel';
 import { TrayCard, fmtSlot, skipMessage } from './plan/review-card';
 
@@ -111,13 +111,19 @@ export default function Dashboard() {
   const [busy, setBusy] = useState(false);
   const [drafting, setDrafting] = useState<number | null>(null);
   const [blocked, setBlocked] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [failure, setFailure] = useState<string | null>(null);
+  const [toast, setToast] = useState<Toast | null>(null);
+  const setNotice = (text: string) => setToast({ text, id: Date.now() });
+  const setFailure = (text: string) => setToast({ text, error: true, id: Date.now() });
+  const [dragging, setDragging] = useState<string | null>(null);
+  /** Draft id of the post that just moved, so its card can flash in its new spot. */
+  const [landed, setLanded] = useState<string | null>(null);
+  const drag = useMemo(() => ({ dragging, setDragging, landed }), [dragging, landed]);
   useEffect(() => {
-    if (!notice) return;
-    const id = setTimeout(() => setNotice(null), 5000);
-    return () => clearTimeout(id);
-  }, [notice]);
+    if (!landed) return;
+    const t = setTimeout(() => setLanded(null), 2500);
+    return () => clearTimeout(t);
+  }, [landed]);
+  const closeToast = useCallback(() => setToast(null), []);
   const [selected, setSelected] = useState<CalItem | null>(null);
 
   const unhealthy = now ? (accounts ?? []).filter((a) => !a.isStub && healthFor(a, now).tone === 'bad') : [];
@@ -140,7 +146,7 @@ export default function Dashboard() {
 
   const act = async (fn: () => Promise<void>) => {
     setBusy(true);
-    setFailure(null);
+    setToast(null);
     try {
       await fn();
       refresh();
@@ -176,12 +182,22 @@ export default function Dashboard() {
     const it = [...items, ...tray].find((i) => i.key === key);
     if (!it) return;
     const at = moveToDay(it, day);
-    if (at.getTime() < Date.now() + SOON_MS) return setNotice('That time has passed. Pick a later day, or open the post to set a time.');
+    if (at.getTime() < Date.now() + SOON_MS) return setFailure('That time has passed. Pick a later day, or open the post to set a time.');
     if (it.at && at.getTime() === it.at.getTime()) return;
+    const put = (when: Date | null) =>
+      it.kind === 'draft'
+        ? apiPatch(`/api/drafts/${it.draft.id}`, { plannedAt: when?.toISOString() ?? null })
+        : Promise.all(it.group.rows.map((r) => apiPatch(`/api/schedule/${r.id}`, { scheduledAt: when!.toISOString() })));
+    const from = it.at;
+    const id = it.kind === 'draft' ? it.draft.id : it.group.rows[0].draftId;
     act(async () => {
-      if (it.kind === 'draft') await apiPatch(`/api/drafts/${it.draft.id}`, { plannedAt: at.toISOString() });
-      else await Promise.all(it.group.rows.map((r) => apiPatch(`/api/schedule/${r.id}`, { scheduledAt: at.toISOString() })));
-      setNotice(`Moved to ${fmtSlot(at.toISOString())}.`);
+      await put(at);
+      setLanded(id);
+      setToast({
+        text: `Moved to ${fmtSlot(at.toISOString())}.`,
+        id: Date.now(),
+        undo: () => act(async () => { await put(from); setLanded(id); setNotice('Moved back.'); }),
+      });
     });
   };
 
@@ -256,10 +272,10 @@ export default function Dashboard() {
       {schedApi.error && (
         <p className="home__alert" role="alert">Couldn’t load scheduled posts. <button type="button" className="btn sm ghost" onClick={refresh}>Try again</button></p>
       )}
-      {failure && <p className="home__alert" role="alert">{failure}</p>}
-      <p className="home__notice" role="status">{notice}</p>
+      {!phone && <CoachTip />}
 
-      <div className={`home__body${tray.length ? ' has-tray' : ''}`}>
+      <DragCtx.Provider value={drag}>
+      <div className={`home__body${tray.length ? ' has-tray' : ''}${dragging ? ' is-dragging' : ''}`}>
         {range && (
           <div className="home__cal">
             {phone ? (
@@ -276,7 +292,7 @@ export default function Dashboard() {
             <h2 id="tray-h" className="home__tray-head">
               Needs a time <span className="tnum">{tray.length}</span>
             </h2>
-            <p className="home__tray-sub">Approve to take the next free slot, or drag onto a day.</p>
+            <p className="home__tray-sub">{phone ? 'Approve to take the next free slot, or pick a time' : 'Drag a post onto a day to schedule it'}</p>
             <div className="home__tray-list">
               {tray.map((t) => (
                 <TrayCard key={t.key} item={t} onOpen={() => setSelected(t)} onDone={(msg) => { setNotice(msg); refresh(); }} />
@@ -285,6 +301,7 @@ export default function Dashboard() {
           </aside>
         )}
       </div>
+      </DragCtx.Provider>
 
       {open && plan && (
         <PostPanel
@@ -296,6 +313,42 @@ export default function Dashboard() {
           onDone={(msg) => { setSelected(null); setNotice(msg); refresh(); }}
         />
       )}
+      {toast && <ToastBar key={toast.id} toast={toast} onClose={closeToast} />}
     </div>
+  );
+}
+
+type Toast = { text: string; id: number; error?: boolean; undo?: () => void };
+
+/** Bottom-centre toast: results of a move/approve, with Undo for a move. Errors linger longer. */
+function ToastBar({ toast, onClose }: { toast: Toast; onClose: () => void }) {
+  useEffect(() => {
+    const t = setTimeout(onClose, toast.error ? 8000 : 4000);
+    return () => clearTimeout(t);
+  }, [toast, onClose]);
+  return (
+    <div className={`home-toast${toast.error ? ' is-error' : ''}`} role={toast.error ? 'alert' : 'status'}>
+      <span>{toast.text}</span>
+      {toast.undo && <button type="button" className="home-toast__btn" onClick={() => { onClose(); toast.undo!(); }}>Undo</button>}
+      <button type="button" className="home-toast__x" aria-label="Dismiss" onClick={onClose}><Icon name="x" size={12} /></button>
+    </div>
+  );
+}
+
+const TIP_KEY = 'sociafy.tip.drag';
+const subscribeNone = () => () => {};
+
+/** First-run hint that cards drag; dismissed for good via localStorage. */
+function CoachTip() {
+  const stored = useSyncExternalStore(subscribeNone, () => localStorage.getItem(TIP_KEY), () => '1');
+  const [hidden, setHidden] = useState(false);
+  if (stored || hidden) return null;
+  return (
+    <p className="home__tip">
+      <span><strong>Tip:</strong> drag posts between days to reschedule</span>
+      <button type="button" className="icon-btn" aria-label="Dismiss tip" onClick={() => { localStorage.setItem(TIP_KEY, '1'); setHidden(true); }}>
+        <Icon name="x" size={12} />
+      </button>
+    </p>
   );
 }

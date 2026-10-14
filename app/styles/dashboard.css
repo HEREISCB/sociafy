@@ -24,27 +24,75 @@
 .home__alert a { text-decoration: underline; }
 .home__note { margin: 0 0 var(--s-3); font-size: var(--fs-sm); color: var(--text-2); }
 .home__note a { color: var(--text); font-weight: 500; text-decoration: underline; text-underline-offset: 2px; }
-.home__notice { min-height: 20px; margin: 0 0 var(--s-2); font-size: var(--fs-sm); color: var(--text-2); }
+.home__tip {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--s-2);
+  margin: 0 0 var(--s-3);
+  padding: var(--s-1) var(--s-1) var(--s-1) var(--s-3);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: var(--fs-sm);
+}
+.home__tip strong { font-weight: 600; }
+@media (hover: none) { .home__tip { display: none; } }
+
+/* Result of a move/approve; Undo for a move. Bottom-centre, above everything. */
+.home-toast {
+  position: fixed; left: 50%; bottom: var(--s-6); z-index: 60;
+  translate: -50% 0;
+  display: flex; align-items: center; gap: var(--s-3);
+  max-width: min(520px, calc(100vw - 2 * var(--s-4)));
+  padding: var(--s-2) var(--s-2) var(--s-2) var(--s-4);
+  border-radius: var(--r);
+  background: var(--ink);
+  color: var(--bg);
+  box-shadow: var(--shadow-pop);
+  font-size: var(--fs-sm);
+  transition: opacity var(--dur-2) var(--ease-out), translate var(--dur-2) var(--ease-out);
+  @starting-style { opacity: 0; translate: -50% 8px; }
+}
+.home-toast.is-error { background: var(--err-soft); color: var(--err-ink); border: 1px solid var(--err); }
+.home-toast__btn {
+  padding: 4px 10px; border: 0; border-radius: var(--r-sm);
+  background: color-mix(in srgb, currentColor 14%, transparent); color: inherit;
+  font: inherit; font-weight: 600; cursor: pointer;
+}
+.home-toast__x {
+  display: grid; place-items: center; width: 24px; height: 24px;
+  border: 0; border-radius: var(--r-sm); background: none; color: inherit; opacity: 0.7; cursor: pointer;
+}
+@media (hover: hover) and (pointer: fine) {
+  .home-toast__btn:hover { background: color-mix(in srgb, currentColor 22%, transparent); }
+  .home-toast__x:hover { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .home-toast { transition: opacity var(--dur-1) linear; @starting-style { translate: -50% 0; } }
+}
 
 .home__body { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-6); align-items: start; }
 .home__body.has-tray { grid-template-columns: minmax(0, 1fr) 280px; }
 .home__cal { min-width: 0; }
 
 /* "Needs a time": drafts with no slot. */
-.home__tray { position: sticky; top: var(--s-4); display: flex; flex-direction: column; gap: var(--s-2); max-height: calc(100dvh - 120px); }
+.home__tray { position: sticky; top: var(--s-4); display: flex; flex-direction: column; gap: var(--s-2); max-height: calc(100dvh - 120px); min-height: 0; }
 .home__tray-head { margin: 0; display: flex; align-items: baseline; gap: var(--s-2); font-size: var(--fs-sm); font-weight: 600; }
 .home__tray-head .tnum { color: var(--text-3); font-weight: 500; }
 .home__tray-sub { margin: 0; font-size: var(--fs-xs); color: var(--text-2); }
-.home__tray-list { display: flex; flex-direction: column; gap: var(--s-2); overflow-y: auto; padding: 2px 2px var(--s-2); margin: 0 -2px; }
+.home__tray-list { display: flex; flex-direction: column; gap: var(--s-2); overflow-y: auto; overscroll-behavior: contain; min-height: 0; padding: 4px 4px var(--s-2); margin: 0 -4px; }
 
 .tray-card {
+  position: relative;
   display: flex; flex-direction: column; gap: var(--s-2);
   padding: var(--s-2);
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r);
 }
-.tray-card[draggable="true"] { cursor: grab; }
+.tray-card[draggable="true"] { padding-left: 22px; }
+.tray-card__grip { position: absolute; left: 7px; top: 26px; display: flex; }
+@media (hover: none) { .tray-card[draggable="true"] { padding-left: var(--s-2); } }
+.tray-card__quiet { color: var(--text-2); }
 .tray-card__open {
   display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: var(--s-3); align-items: start;
   padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
