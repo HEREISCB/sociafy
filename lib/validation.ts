@@ -55,7 +55,6 @@ export const scheduleCreateSchema = z.object({
   draftId: uuid,
   platforms: z.array(platform).min(1).max(6).optional(),
   scheduledAt: z.string().datetime(),
-  text: z.string().max(20_000).optional(),
 });
 
 export const scheduleUpdateSchema = z.object({

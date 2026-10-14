@@ -28,10 +28,12 @@ const thenable = <T>(value: T, extra: Record<string, unknown> = {}) =>
 
 vi.mock('../../../lib/db', () => ({
   db: () => ({
+    // The publish claim runs in a transaction; the stand-in just runs it inline.
+    transaction(fn: (tx: unknown) => unknown) { return fn(this); },
     select: () => ({
       from: () => {
         const rows = state.selects.shift() ?? [];
-        return { where: () => thenable(rows, { limit: () => Promise.resolve(rows) }) };
+        return { where: () => thenable(rows, { limit: () => Promise.resolve(rows), for: () => Promise.resolve(rows) }) };
       },
     }),
     update: () => ({

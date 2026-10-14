@@ -46,6 +46,12 @@ vi.mock('../db', () => ({
               delete patch.attempts;
               if (row.status !== 'pending') return (applied = []);
               row.attempts += 1;
+            } else if (row.status !== 'publishing') {
+              // Every non-claim cron write is guarded on status = 'publishing'
+              // (rows here are never stale, so the sweep never matches).
+              return (applied = []);
+            } else if (patch.error === 'publish_timeout_unknown') {
+              return (applied = []);
             }
             Object.assign(row, patch);
             return (applied = [row]);

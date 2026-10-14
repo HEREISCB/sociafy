@@ -1,4 +1,4 @@
-import { and, eq, lte, inArray, sql } from 'drizzle-orm';
+import { and, eq, lt, inArray, sql } from 'drizzle-orm';
 import { db } from '../db';
 import {
   scheduledPosts,
@@ -24,6 +24,13 @@ export type PublishResult = {
  *  every 5 min (vercel.json), so that's the backoff — no sleep, no queue. */
 const MAX_ATTEMPTS = 3;
 
+/** Max rows claimed per run. */
+const BATCH_LIMIT = 50;
+
+/** A row 'publishing' longer than this was orphaned by a dead process. Must
+ *  exceed the `timeout` on the publish line in etc/cron.d/sociafy. */
+const STALE_PUBLISHING_MS = 15 * 60 * 1000;
+
 /**
  * Publish all scheduled_posts whose scheduledAt has passed.
  *
@@ -39,43 +46,56 @@ const MAX_ATTEMPTS = 3;
 export async function runPublish(): Promise<{ ran: number; results: PublishResult[] }> {
   const now = new Date();
 
-  // Atomic claim. Posts that are still 'pending' and overdue get flipped to
-  // 'publishing' and returned in one round-trip. Two concurrent crons cannot
-  // each grab the same row — Postgres serializes the UPDATE.
-  //
-  // ponytail: a row stranded in 'publishing' by a killed invocation is never
-  // reclaimed. Reclaiming on a staleness window would risk double-posting a
-  // row that succeeded just before the crash; add it only with a platform
-  // idempotency key.
-  const due = await db()
+  // Surface rows stranded in 'publishing' (a killed invocation, a crashed
+  // "Post now" request). Terminal, never requeued: the post may have gone live
+  // before the crash and no adapter sends an idempotency key, so the user has
+  // to check the platform. The cron line's `timeout` is shorter than this
+  // window, so no live invocation can still own one of these rows.
+  const stale = await db()
+    .update(scheduledPosts)
+    .set({ status: 'failed', error: 'publish_timeout_unknown', updatedAt: now })
+    .where(and(
+      eq(scheduledPosts.status, 'publishing'),
+      lt(scheduledPosts.updatedAt, new Date(now.getTime() - STALE_PUBLISHING_MS)),
+    ))
+    .returning();
+  for (const sp of stale) {
+    try {
+      await db().insert(activityLog).values({
+        userId: sp.userId,
+        kind: 'publish_failed',
+        title: `Publish status unknown: ${sp.platform}`,
+        body: `publish_timeout_unknown — the post may or may not be live. Check ${sp.platform} before rescheduling.`,
+        meta: { scheduledPostId: sp.id, platform: sp.platform, attempts: sp.attempts },
+      });
+    } catch (e) {
+      console.error(`[cron.publish] activity log failed for stale post ${sp.id}: ${errMsg(e)}`);
+    }
+  }
+
+  // Atomic claim of at most BATCH_LIMIT due rows. SKIP LOCKED lets two
+  // overlapping invocations split the queue instead of both grabbing (or
+  // blocking on) the same rows; anything past the limit stays 'pending' for
+  // the next tick without burning an attempt.
+  const batch = await db()
     .update(scheduledPosts)
     .set({
       status: 'publishing',
       attempts: sql`${scheduledPosts.attempts} + 1`,
       updatedAt: now,
     })
-    .where(and(eq(scheduledPosts.status, 'pending'), lte(scheduledPosts.scheduledAt, now)))
+    .where(sql`${scheduledPosts.id} IN (
+      SELECT id FROM scheduled_posts
+      WHERE status = 'pending' AND scheduled_at <= ${now}
+      ORDER BY scheduled_at
+      LIMIT ${BATCH_LIMIT}
+      FOR UPDATE SKIP LOCKED
+    )`)
     .returning();
 
-  if (due.length === 0) return { ran: 0, results: [] };
+  if (batch.length === 0) return { ran: 0, results: [] };
 
-  // Cap per-run batch size after the claim so we don't run forever. Re-queue
-  // the overflow back to 'pending' so the next tick picks them up.
-  const BATCH_LIMIT = 50;
-  let batch = due;
-  if (due.length > BATCH_LIMIT) {
-    batch = due.slice(0, BATCH_LIMIT);
-    const overflow = due.slice(BATCH_LIMIT).map((p) => p.id);
-    // Give the attempt back: the claim already incremented it, but these rows
-    // never reached a platform. Without this they burn MAX_ATTEMPTS on ticks
-    // that never tried to publish them.
-    await db()
-      .update(scheduledPosts)
-      .set({ status: 'pending', attempts: sql`${scheduledPosts.attempts} - 1`, updatedAt: now })
-      .where(inArray(scheduledPosts.id, overflow));
-  }
-
-  const accountIds = Array.from(new Set(batch.map((d) => d.accountId)));
+  const accountIds = Array.from(new Set(batch.flatMap((d) => (d.accountId ? [d.accountId] : []))));
   const accounts = await db()
     .select()
     .from(connectedAccounts)
@@ -95,7 +115,7 @@ export async function runPublish(): Promise<{ ran: number; results: PublishResul
         await db()
           .update(scheduledPosts)
           .set({ status: 'pending', error: `retrying (${sp.attempts}/${MAX_ATTEMPTS}): ${msg}`, updatedAt: new Date() })
-          .where(eq(scheduledPosts.id, sp.id));
+          .where(and(eq(scheduledPosts.id, sp.id), eq(scheduledPosts.status, 'publishing')));
       } else {
         await markFailed(sp.id, msg);
         // Only log the terminal verdict — logging every retry spams the feed.
@@ -115,7 +135,7 @@ export async function runPublish(): Promise<{ ran: number; results: PublishResul
       results.push({ id: sp.id, platform: sp.platform, ok: false, error: msg, willRetry });
     };
 
-    const initialAcct = accountById.get(sp.accountId);
+    const initialAcct = sp.accountId ? accountById.get(sp.accountId) : undefined;
     if (!initialAcct) {
       await fail('no_account', true);
       continue;
@@ -124,6 +144,10 @@ export async function runPublish(): Promise<{ ran: number; results: PublishResul
     let acct;
     try {
       acct = await ensureFreshToken(initialAcct);
+      // Later posts for the same account in this batch must reuse the
+      // refreshed row — refreshing again from the stale copy would present an
+      // already-rotated (single-use) refresh token.
+      accountById.set(acct.id, acct);
     } catch (e) {
       // ensureFreshToken swallows provider refresh failures (it stamps the row
       // and returns the stale token), so a throw here is our own infra —
@@ -181,11 +205,11 @@ export async function runPublish(): Promise<{ ran: number; results: PublishResul
     }
 
     // ── Past this line the post IS LIVE. Bookkeeping only: every failure is
-    // swallowed and logged loudly. A row stuck in 'publishing' (never
-    // reclaimed) or a missing activity-log line is strictly better than
-    // posting to the customer's account a second time.
+    // swallowed and logged loudly. A row left in 'publishing' (later surfaced
+    // as publish_timeout_unknown) or a missing activity-log line is strictly
+    // better than posting to the customer's account a second time.
     try {
-      await db()
+      const recorded = await db()
         .update(scheduledPosts)
         .set({
           status: 'published',
@@ -194,7 +218,9 @@ export async function runPublish(): Promise<{ ran: number; results: PublishResul
           platformPostUrl: out.url ?? null,
           updatedAt: new Date(),
         })
-        .where(eq(scheduledPosts.id, sp.id));
+        .where(and(eq(scheduledPosts.id, sp.id), eq(scheduledPosts.status, 'publishing')))
+        .returning({ id: scheduledPosts.id });
+      if (recorded.length === 0) throw new Error('row is no longer publishing');
     } catch (e) {
       console.error(
         `[cron.publish] PUBLISHED BUT NOT RECORDED — scheduled_post=${sp.id} platform=${sp.platform} platformPostId=${out.platformPostId} url=${out.url ?? ''}: ${errMsg(e)}`,
@@ -266,5 +292,5 @@ async function markFailed(id: string, error: string) {
   await db()
     .update(scheduledPosts)
     .set({ status: 'failed', error, updatedAt: new Date() })
-    .where(eq(scheduledPosts.id, id));
+    .where(and(eq(scheduledPosts.id, id), eq(scheduledPosts.status, 'publishing')));
 }

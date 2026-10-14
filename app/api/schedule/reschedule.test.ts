@@ -78,6 +78,21 @@ describe('PATCH /api/schedule/[id]', () => {
     expect(state.patches).toEqual([]);
   });
 
+  it('requeues a canceled post', async () => {
+    state.row!.status = 'canceled';
+    await patch({ scheduledAt: soon() });
+    expect(state.patches[0]).toMatchObject({ status: 'pending', attempts: 0, error: null });
+  });
+
+  it('refuses to cancel a post that is mid-publish or live', async () => {
+    for (const status of ['publishing', 'published']) {
+      state.row!.status = status;
+      const res = await patch({ status: 'canceled' });
+      expect(res.status).toBe(409);
+    }
+    expect(state.patches).toEqual([]);
+  });
+
   it('refuses to move a post that is mid-publish', async () => {
     state.row!.status = 'publishing';
     const res = await patch({ scheduledAt: soon() });

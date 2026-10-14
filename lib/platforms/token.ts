@@ -94,28 +94,47 @@ export async function ensureFreshToken(acct: AccountRow): Promise<AccountRow> {
   }
 
   try {
-    const tokens = await adapter.refresh(plain.refreshToken);
-    const next = {
-      accessToken: tokens.accessToken,
-      refreshToken: tokens.refreshToken ?? plain.refreshToken,
-      tokenExpiresAt: tokens.expiresAt ?? null,
-      scope: tokens.scope ?? plain.scope,
-      updatedAt: new Date(),
-    };
-    await db()
-      .update(connectedAccounts)
-      .set({
-        accessToken: encryptToken(next.accessToken),
-        refreshToken: encryptToken(next.refreshToken),
-        tokenExpiresAt: next.tokenExpiresAt,
-        scope: next.scope,
-        lastRefreshAt: new Date(),
-        lastRefreshError: null,
-        lastRefreshErrorAt: null,
-        updatedAt: next.updatedAt,
-      })
-      .where(eq(connectedAccounts.id, plain.id));
-    return { ...plain, ...next, lastRefreshAt: new Date(), lastRefreshError: null, lastRefreshErrorAt: null };
+    // X refresh tokens are single-use: two processes refreshing the same row
+    // at once means the loser presents a burned token and the account is
+    // dead until the user reconnects. Lock the row, re-read it, and only call
+    // the provider if nobody refreshed it while we waited for the lock.
+    return await db().transaction(async (tx) => {
+      const [locked] = await tx
+        .select()
+        .from(connectedAccounts)
+        .where(eq(connectedAccounts.id, plain.id))
+        .for('update');
+      if (!locked) return plain;
+      const cur = decryptAccount(locked);
+      const curRemaining = cur.tokenExpiresAt ? new Date(cur.tokenExpiresAt).getTime() - Date.now() : Infinity;
+      const stillNeeds = adapter.shouldRefresh
+        ? adapter.shouldRefresh(curRemaining)
+        : curRemaining <= DEFAULT_REFRESH_WINDOW_MS;
+      if (!stillNeeds || !cur.refreshToken) return cur;
+
+      const tokens = await adapter.refresh!(cur.refreshToken);
+      const next = {
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken ?? cur.refreshToken,
+        tokenExpiresAt: tokens.expiresAt ?? null,
+        scope: tokens.scope ?? cur.scope,
+        updatedAt: new Date(),
+      };
+      await tx
+        .update(connectedAccounts)
+        .set({
+          accessToken: encryptToken(next.accessToken),
+          refreshToken: encryptToken(next.refreshToken),
+          tokenExpiresAt: next.tokenExpiresAt,
+          scope: next.scope,
+          lastRefreshAt: new Date(),
+          lastRefreshError: null,
+          lastRefreshErrorAt: null,
+          updatedAt: next.updatedAt,
+        })
+        .where(eq(connectedAccounts.id, plain.id));
+      return { ...cur, ...next, lastRefreshAt: new Date(), lastRefreshError: null, lastRefreshErrorAt: null };
+    });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     const truncated = msg.slice(0, 500);
@@ -159,8 +178,8 @@ export async function ensureFreshToken(acct: AccountRow): Promise<AccountRow> {
  * Stamp an account that cannot refresh as needing a manual reconnect, and drop
  * one activity_log row so it shows up on the dashboard feed.
  *
- * Idempotent: both the cron and every /api/accounts load call through here, so
- * the write only happens on the transition into the reconnect state. Clearing
+ * Idempotent: the cron and every publish call through here, so the write only
+ * happens on the transition into the reconnect state. Clearing
  * lastRefreshError (a successful reconnect does that) re-arms it.
  */
 async function markReconnectRequired(acct: AccountRow): Promise<AccountRow> {

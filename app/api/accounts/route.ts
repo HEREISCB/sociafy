@@ -5,7 +5,6 @@ import { db } from '../../../lib/db';
 import { connectedAccounts, type Platform } from '../../../lib/db/schema';
 import { encryptToken } from '../../../lib/crypto/tokens';
 import { stubAccountCreateSchema, parseBody } from '../../../lib/validation';
-import { ensureFreshToken } from '../../../lib/platforms/token';
 import { getAdapter } from '../../../lib/platforms/registry';
 
 // Strip access/refresh tokens from API responses — the client never needs them.
@@ -27,22 +26,17 @@ const PUBLIC_COLUMNS = {
 
 export async function GET(req: NextRequest) {
   return withUser(async (user) => {
-    // Read the full row server-side so we can opportunistically refresh
-    // expiring tokens. We strip access/refresh fields from the response.
+    // Read-only. Token refresh belongs to the refresh-tokens cron and the
+    // publish paths — refreshing every account on each page load raced them
+    // for X's single-use refresh tokens. Access/refresh fields are stripped
+    // from the response below.
     const rows = await db()
       .select()
       .from(connectedAccounts)
       .where(eq(connectedAccounts.userId, user.id))
       .orderBy(desc(connectedAccounts.createdAt));
 
-    // Opportunistic refresh: every time the Connections page loads we run
-    // each row through ensureFreshToken. Each adapter's shouldRefresh()
-    // decides whether to actually swap the token, so this is cheap for
-    // tokens that don't need it. Net effect: even without an external cron
-    // scheduler, tokens get refreshed when the user opens the dashboard.
-    const refreshed = await Promise.all(rows.map((r) => ensureFreshToken(r).catch(() => r)));
-
-    return refreshed.map((row) => {
+    return rows.map((row) => {
       const adapter = getAdapter(row.platform as Platform);
       const autoRefresh = !!adapter.refresh && row.refreshToken !== null && !row.isStub;
       return {

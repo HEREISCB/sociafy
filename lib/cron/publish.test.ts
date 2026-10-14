@@ -14,6 +14,8 @@ type Row = {
   attempts: number;
   error: string | null;
   platformPostUrl: string | null;
+  /** 'publishing' for longer than the stale window. */
+  stale?: boolean;
 };
 
 let row: Row;
@@ -47,6 +49,12 @@ vi.mock('../db', () => ({
               delete patch.attempts;
               if (row.status !== 'pending') return (applied = []);
               row.attempts += 1;
+            } else if (patch.error === 'publish_timeout_unknown') {
+              // The stale-'publishing' sweep: only rows idle past the window.
+              if (row.status !== 'publishing' || !row.stale) return (applied = []);
+            } else if (row.status !== 'publishing') {
+              // Every other cron write is guarded on status = 'publishing'.
+              return (applied = []);
             }
             Object.assign(row, patch);
             return (applied = [row]);
@@ -211,6 +219,35 @@ describe('runPublish — retry state machine', () => {
     publish = async () => { throw new Error('should not be called'); };
     const out = await runPublish();
     expect(out.ran).toBe(0);
+  });
+
+  it('does not resurrect a row canceled while it was publishing', async () => {
+    publish = async () => {
+      row.status = 'canceled'; // user canceled mid-flight
+      throw new PlatformError('x_publish_failed', 503, 'upstream down');
+    };
+    await runPublish();
+    expect(row.status).toBe('canceled');
+  });
+});
+
+describe('runPublish — rows stranded in publishing', () => {
+  it('marks a stale publishing row failed and never republishes it', async () => {
+    seed({ status: 'publishing', stale: true, attempts: 1 });
+    publish = async () => { throw new Error('should not be called'); };
+
+    const out = await runPublish();
+
+    expect(out.ran).toBe(0);
+    expect(row.status).toBe('failed');
+    expect(row.error).toBe('publish_timeout_unknown');
+    expect(activity.filter((a) => a.kind === 'publish_failed')).toHaveLength(1);
+  });
+
+  it('leaves a fresh publishing row alone', async () => {
+    seed({ status: 'publishing', attempts: 1 });
+    await runPublish();
+    expect(row.status).toBe('publishing');
   });
 });
 

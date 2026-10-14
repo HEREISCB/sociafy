@@ -220,7 +220,7 @@ export const connectedAccounts = pgTable(
   },
   (t) => [
     index('connected_accounts_user_idx').on(t.userId),
-    index('connected_accounts_user_platform_idx').on(t.userId, t.platform),
+    uniqueIndex('connected_accounts_user_platform_uniq').on(t.userId, t.platform),
   ],
 );
 
@@ -285,9 +285,8 @@ export const scheduledPosts = pgTable(
     draftId: uuid('draft_id')
       .notNull()
       .references(() => drafts.id, { onDelete: 'cascade' }),
-    accountId: uuid('account_id')
-      .notNull()
-      .references(() => connectedAccounts.id, { onDelete: 'cascade' }),
+    // Nullable: disconnecting an account keeps its published history (SET NULL).
+    accountId: uuid('account_id').references(() => connectedAccounts.id, { onDelete: 'set null' }),
     platform: text('platform').notNull().$type<Platform>(),
     scheduledAt: timestamp('scheduled_at', { withTimezone: true }).notNull(),
     status: text('status').notNull().$type<ScheduledStatus>().default('pending'),
