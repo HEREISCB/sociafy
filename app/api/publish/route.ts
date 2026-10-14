@@ -188,6 +188,21 @@ export async function POST(req: NextRequest) {
             .set({ status: 'failed', error: friendly.slice(0, 2000), updatedAt: new Date() })
             .where(eq(scheduledPosts.id, sp.id));
 
+          // Definitely not live → give back the scheduled post we superseded.
+          // If the outcome is unknown, leave it canceled rather than risk a
+          // double post.
+          if (notPosted || status) {
+            await db()
+              .update(scheduledPosts)
+              .set({ status: 'pending', error: null, updatedAt: new Date() })
+              .where(and(
+                eq(scheduledPosts.draftId, sp.draftId),
+                eq(scheduledPosts.platform, platform),
+                eq(scheduledPosts.status, 'canceled'),
+                eq(scheduledPosts.error, 'superseded_by_post_now'),
+              ));
+          }
+
           await db().insert(activityLog).values({
             userId: user.id,
             kind: 'publish_failed',
