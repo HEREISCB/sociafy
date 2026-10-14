@@ -27,20 +27,22 @@
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
+SOCIAFY_USER=sociafy
 SOCIAFY_DIR=/opt/sociafy-app
 NODE_BIN=/usr/bin/node
 LOG_DIR=/var/log/sociafy
 
-# The user column is NOT variable-expanded by cron, so it is spelled out.
+# $SOCIAFY_USER in the user column is substituted by scripts/install-cron.sh
+# (cron itself never expands it).
 # flock -n: skip a tick if the previous run of the same job is still going.
 # timeout: kill a hung run. publish MUST stay under 15m — runPublish marks
 # rows stuck in 'publishing' longer than that as publish_timeout_unknown.
 #
-# m    h   dom mon dow user     command
-*/5    *   *   *   *   sociafy  cd $SOCIAFY_DIR && flock -n /tmp/sociafy-publish.lock timeout -k 30s 10m $NODE_BIN --import tsx scripts/cron-run.mjs publish             >> $LOG_DIR/cron-publish.log             2>&1
-*/5    *   *   *   *   sociafy  cd $SOCIAFY_DIR && flock -n /tmp/sociafy-finalize-video-jobs.lock timeout -k 30s 10m $NODE_BIN --import tsx scripts/cron-run.mjs finalize-video-jobs >> $LOG_DIR/cron-finalize-video-jobs.log 2>&1
-*/15   *   *   *   *   sociafy  cd $SOCIAFY_DIR && flock -n /tmp/sociafy-shield-monitor.lock timeout -k 30s 14m $NODE_BIN --import tsx scripts/cron-run.mjs shield-monitor      >> $LOG_DIR/cron-shield-monitor.log      2>&1
-0      */6 *   *   *   sociafy  cd $SOCIAFY_DIR && flock -n /tmp/sociafy-refresh-tokens.lock timeout -k 30s 30m $NODE_BIN --import tsx scripts/cron-run.mjs refresh-tokens      >> $LOG_DIR/cron-refresh-tokens.log      2>&1
-0      *   *   *   *   sociafy  cd $SOCIAFY_DIR && flock -n /tmp/sociafy-trends.lock timeout -k 30s 50m $NODE_BIN --import tsx scripts/cron-run.mjs trends              >> $LOG_DIR/cron-trends.log              2>&1
-0      */2 *   *   *   sociafy  cd $SOCIAFY_DIR && flock -n /tmp/sociafy-agent.lock timeout -k 30s 110m $NODE_BIN --import tsx scripts/cron-run.mjs agent               >> $LOG_DIR/cron-agent.log               2>&1
-30     *   *   *   *   sociafy  cd $SOCIAFY_DIR && flock -n /tmp/sociafy-reissue-invoices.lock timeout -k 30s 50m $NODE_BIN --import tsx scripts/cron-run.mjs reissue-invoices    >> $LOG_DIR/cron-reissue-invoices.log    2>&1
+# m    h   dom mon dow user           command
+*/5    *   *   *   *   $SOCIAFY_USER  cd $SOCIAFY_DIR && flock -n /tmp/sociafy-publish.lock timeout -k 30s 10m $NODE_BIN --import tsx scripts/cron-run.mjs publish             >> $LOG_DIR/cron-publish.log             2>&1
+*/5    *   *   *   *   $SOCIAFY_USER  cd $SOCIAFY_DIR && flock -n /tmp/sociafy-finalize-video-jobs.lock timeout -k 30s 10m $NODE_BIN --import tsx scripts/cron-run.mjs finalize-video-jobs >> $LOG_DIR/cron-finalize-video-jobs.log 2>&1
+*/15   *   *   *   *   $SOCIAFY_USER  cd $SOCIAFY_DIR && flock -n /tmp/sociafy-shield-monitor.lock timeout -k 30s 14m $NODE_BIN --import tsx scripts/cron-run.mjs shield-monitor      >> $LOG_DIR/cron-shield-monitor.log      2>&1
+0      */6 *   *   *   $SOCIAFY_USER  cd $SOCIAFY_DIR && flock -n /tmp/sociafy-refresh-tokens.lock timeout -k 30s 30m $NODE_BIN --import tsx scripts/cron-run.mjs refresh-tokens      >> $LOG_DIR/cron-refresh-tokens.log      2>&1
+0      *   *   *   *   $SOCIAFY_USER  cd $SOCIAFY_DIR && flock -n /tmp/sociafy-trends.lock timeout -k 30s 50m $NODE_BIN --import tsx scripts/cron-run.mjs trends              >> $LOG_DIR/cron-trends.log              2>&1
+0      */2 *   *   *   $SOCIAFY_USER  cd $SOCIAFY_DIR && flock -n /tmp/sociafy-agent.lock timeout -k 30s 110m $NODE_BIN --import tsx scripts/cron-run.mjs agent               >> $LOG_DIR/cron-agent.log               2>&1
+30     *   *   *   *   $SOCIAFY_USER  cd $SOCIAFY_DIR && flock -n /tmp/sociafy-reissue-invoices.lock timeout -k 30s 50m $NODE_BIN --import tsx scripts/cron-run.mjs reissue-invoices    >> $LOG_DIR/cron-reissue-invoices.log    2>&1
