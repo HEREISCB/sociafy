@@ -1,6 +1,6 @@
 'use client';
 
-import React, { Fragment, useEffect, useMemo, useState } from 'react';
+import React, { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Icon, Pglyph } from './icons';
 import { apiPatch, useApi } from '../lib/ui/fetcher';
@@ -168,15 +168,15 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
     if (settings?.weeklyCreditCap != null) setPlanCreditCap(String(settings.weeklyCreditCap));
   }, [settings]);
 
-  // First time we have connected accounts, pre-check them for autopilot.
-  // Only re-run on accounts change so we don't overwrite the user's
-  // selection if they uncheck something after the initial seed.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // Seed the Plan step from connected accounts exactly once, and only when
+  // there's no saved plan to respect: wait for settings so a slow settings
+  // fetch can't be clobbered (or clobber us), and never re-seed on refetch.
+  const seededPlatforms = useRef(false);
   useEffect(() => {
-    if (accounts && accounts.length > 0 && !planPlatforms.some((p) => accounts.some((a) => a.platform === p))) {
-      setPlanPlatforms(accounts.map((a) => a.platform));
-    }
-  }, [accounts]);
+    if (seededPlatforms.current || !settings || !accounts?.length) return;
+    seededPlatforms.current = true;
+    if (!settings.enabledPlatforms?.length) setPlanPlatforms(accounts.map((a) => a.platform));
+  }, [settings, accounts]);
 
   // Saved platforms that are no longer connected can't be posted to — drop
   // them everywhere (estimate, save, Ready screen) once accounts have loaded.
@@ -415,7 +415,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
                     <div className="connect-tile-meta">
                       <div className="connect-tile-name">{p.name}</div>
                       <div className="connect-tile-handle">
-                        {isConnected ? (acct?.handle ? `@${acct.handle}` : 'Connected') : 'Not connected'}
+                        {isConnected ? (acct?.handle ? `@${acct.handle.replace(/^@/, '')}` : 'Connected') : 'Not connected'}
                         {acct?.isStub && <span className="chip ghost mono" style={{ marginLeft: 6 }}>Demo</span>}
                       </div>
                     </div>
@@ -805,7 +805,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
             <button
               type="button"
               className="btn ghost sm"
-              onClick={onDone}
+              onClick={() => { window.sessionStorage.removeItem(STEP_KEY); onDone(); }}
               style={{ color: 'var(--ink-3)' }}
             >
               {step < 5 ? 'Skip setup' : 'Continue without autopilot'} <Icon name="arrow_right" size={11} />

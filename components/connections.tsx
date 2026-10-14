@@ -162,30 +162,32 @@ const ConnectionsPage: React.FC = () => {
     return () => clearInterval(id);
   }, []);
 
-  // Read OAuth callback query params once on mount. Stable referential to
-  // satisfy react-hooks/set-state-in-effect: we batch the URL parse + state
-  // set + history rewrite into a single mount-time microtask.
+  // Read OAuth callback query params once on mount — synchronously. The
+  // dashboard's [page] effect runs right after ours in the same commit (on a
+  // cold /dashboard?tab=connections load this component mounts in the same
+  // commit that flips `page`) and rewrites the URL to `?tab=connections`, so
+  // a deferred read would find the params already gone. Only the setState is
+  // deferred, to satisfy react-hooks/set-state-in-effect.
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const connected = params.get('connected');
+    const errorDetail = params.get('oauth_error');
+    const platform = params.get('platform') ?? connected ?? 'platform';
+    const handle = params.get('handle');
+    if (!connected && !errorDetail) return;
+    params.delete('connected');
+    params.delete('handle');
+    params.delete('oauth_error');
+    params.delete('platform');
+    const qs = params.toString();
+    window.history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : ''));
     queueMicrotask(() => {
-      const params = new URLSearchParams(window.location.search);
-      const connected = params.get('connected');
-      const errorDetail = params.get('oauth_error');
-      const platform = params.get('platform') ?? connected;
       if (connected) {
-        setFlash({ kind: 'success', platform: connected, handle: params.get('handle') });
+        setFlash({ kind: 'success', platform: connected, handle });
         void mutate();
-      } else if (errorDetail && platform) {
+      } else if (errorDetail) {
         setFlash({ kind: 'error', platform, detail: errorDetail });
-      }
-      if (connected || errorDetail) {
-        params.delete('connected');
-        params.delete('handle');
-        params.delete('oauth_error');
-        params.delete('platform');
-        const qs = params.toString();
-        const url = window.location.pathname + (qs ? `?${qs}` : '');
-        window.history.replaceState(null, '', url);
       }
     });
   }, [mutate]);

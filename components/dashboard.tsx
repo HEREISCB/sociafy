@@ -549,7 +549,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onCompose, onEditDraft }) => {
                         {a.displayName || a.meta?.pageName || a.handle || a.platform}
                       </div>
                       <div className="mono" style={{ fontSize: 11, color: 'var(--ink-3)' }}>
-                        {a.handle ? `@${a.handle}` : a.platform}
+                        {a.handle ? `@${a.handle.replace(/^@/, '')}` : a.platform}
                         {a.isStub && <> · stub</>}
                         {health.tone === 'bad' && <> · {health.detail}</>}
                       </div>

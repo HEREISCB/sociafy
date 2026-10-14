@@ -18,6 +18,7 @@ const META: Record<string, { label: string; tone: ActivityTone }> = {
   manual_publish: { label: 'Published', tone: 'accent' },
   auto_publish: { label: 'Auto-scheduled', tone: 'accent' },
   publish_failed: { label: 'Failed', tone: 'warn' },
+  publish_warning: { label: 'Warning', tone: 'warn' },
   agent_drafted: { label: 'Agent draft', tone: '' },
   agent_held: { label: 'Held', tone: 'warn' },
   agent_skipped: { label: 'Skipped', tone: 'warn' },
