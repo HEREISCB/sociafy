@@ -84,10 +84,20 @@ describe('PATCH /api/schedule/[id]', () => {
     expect(state.patches).toEqual([]);
   });
 
-  it('requeues a canceled post', async () => {
-    state.row!.status = 'canceled';
+  it('requeues a post the user canceled', async () => {
+    state.row = { ...state.row, status: 'canceled', error: 'user_canceled' };
     await patch({ scheduledAt: soon() });
     expect(state.patches[0]).toMatchObject({ status: 'pending', attempts: 0, error: null });
+  });
+
+  it('refuses to requeue a post canceled by Post now or a disconnect (double post)', async () => {
+    for (const error of ['superseded_by_post_now', 'account_disconnected', null]) {
+      state.row = { ...state.row, status: 'canceled', error };
+      const res = await patch({ scheduledAt: soon() });
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toBe('not_restorable');
+    }
+    expect(state.patches).toEqual([]);
   });
 
   it('refuses to cancel a post that is mid-publish or live', async () => {
@@ -107,7 +117,7 @@ describe('PATCH /api/schedule/[id]', () => {
   });
 
   it('relinks a canceled post whose account was disconnected', async () => {
-    state.row = { ...state.row, status: 'canceled', accountId: null };
+    state.row = { ...state.row, status: 'canceled', error: 'user_canceled', accountId: null };
     state.accounts = [{ id: 'a2' }];
     const res = await patch({ scheduledAt: soon() });
     expect(res.status).toBe(200);
@@ -115,7 +125,7 @@ describe('PATCH /api/schedule/[id]', () => {
   });
 
   it('refuses to requeue when no account is connected for the platform', async () => {
-    state.row = { ...state.row, status: 'canceled', accountId: null };
+    state.row = { ...state.row, status: 'canceled', error: 'user_canceled', accountId: null };
     const res = await patch({ scheduledAt: soon() });
     expect(res.status).toBe(409);
     expect((await res.json()).error).toBe('account_disconnected');
@@ -128,7 +138,7 @@ describe('DELETE /api/schedule/[id] (soft cancel)', () => {
     state.row!.status = 'pending';
     const res = await del();
     expect(res.status).toBe(200);
-    expect(state.patches[0]).toMatchObject({ status: 'canceled' });
+    expect(state.patches[0]).toMatchObject({ status: 'canceled', error: 'user_canceled' });
     expect((await res.json()).status).toBe('canceled');
   });
 

@@ -11,7 +11,8 @@ export type PostKind = 'text' | 'image' | 'video';
  * `*_publish_failed` hours later, so this is enforced at POST /api/schedule
  * and mirrored in the composer's platform pills.
  *
- * Keep in sync with PLATFORM_LIST in components/compose.tsx.
+ * The composer reads this directly via supportsKind(); platform names and
+ * order live in PLATFORMS in lib/ui/platforms.ts.
  */
 export const PLATFORM_SUPPORTS: Record<Platform, Record<PostKind, boolean>> = {
   // X video needs chunked upload, which x.ts doesn't implement (x_video_unsupported).

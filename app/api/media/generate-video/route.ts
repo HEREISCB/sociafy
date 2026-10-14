@@ -115,7 +115,12 @@ function mapToSeedanceInput(args: {
  */
 function resolveModel(d: z.infer<typeof bodySchema>): { model: VideoModelId } | { field: string; message: string } {
   const req = { durationSec: d.durationSec, quality: d.quality, aspect: d.aspect, genMode: d.genMode, fast: d.fast };
-  if (!d.model) return { model: validateAgainstModel(DEFAULT_VIDEO_MODEL, req) ? 'sociafy-motion-1' : DEFAULT_VIDEO_MODEL };
+  if (!d.model) {
+    if (!validateAgainstModel(DEFAULT_VIDEO_MODEL, req)) return { model: DEFAULT_VIDEO_MODEL };
+    // Falling back to Motion: hold the request to Motion's envelope too, or
+    // e.g. 1080p at 20s would be submitted to a model that can't render it.
+    return validateAgainstModel('sociafy-motion-1', req) ?? { model: 'sociafy-motion-1' };
+  }
   return validateAgainstModel(d.model, req) ?? { model: d.model };
 }
 

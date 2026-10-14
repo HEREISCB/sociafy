@@ -122,7 +122,7 @@ export default function Dashboard() {
     } else if (plan.generating) {
       action = <span className="session__progress" role="status">Drafting {drafting ?? plan.counts.missing} posts…</span>;
     } else if (plan.counts.missing > 0) {
-      action = <button className="btn accent" onClick={generate} disabled={busy}>{busy ? 'Starting…' : `Plan next ${period}`}</button>;
+      action = <button className="btn accent" onClick={generate} disabled={busy}>{busy ? 'Starting…' : `Plan next ${period}${plan.estimatedCredits ? ` · ≈${plan.estimatedCredits} credits` : ''}`}</button>;
     } else if (ready.length && !reviewing) {
       action = <button className="btn accent" onClick={startReview}>Review {ready.length} post{ready.length === 1 ? '' : 's'}</button>;
     } else if (approvable.length) {

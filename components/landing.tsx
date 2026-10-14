@@ -49,6 +49,30 @@ const Hero = ({ currency }: { currency: Currency }) => (
   </section>
 );
 
+/** Odometer: each digit sits on a 0–9 strip (drawn by CSS) and rolls to its
+ *  value. Under html.reveal-ready the strips rest at 0 until the enclosing
+ *  [data-reveal] is shown (motion.css), then roll up; a currency switch rolls
+ *  from the old digits. Screen readers and copy/paste get the plain value. */
+const RollingNumber = ({ value }: { value: string }) => {
+  let order = 0;
+  return (
+    <span className="odo">
+      <span className="sr-only">{value}</span>
+      <span className="odo-word" aria-hidden="true">
+        {value.split('').map((ch, i) => {
+          const key = value.length - i; // keyed from the right so columns persist across values
+          if (!/\d/.test(ch)) return <span key={`c${key}`} className="odo-char" data-char={ch} />;
+          return (
+            <span key={`d${key}`} className="odo-col">
+              <span className="odo-strip" style={{ transform: `translateY(${-Number(ch) * 1.15}em)`, '--i': order++ } as React.CSSProperties} />
+            </span>
+          );
+        })}
+      </span>
+    </span>
+  );
+};
+
 const STEPS: [string, string][] = [
   ['Connect', 'Link your accounts and your website. Sociafy learns your voice from what you already wrote.'],
   ['Review your plan', 'Once a week or once a month, read the drafts, change what you like, approve the rest.'],
@@ -57,10 +81,10 @@ const STEPS: [string, string][] = [
 
 const HowItWorks = () => (
   <section className="lp lp-section" aria-labelledby="how">
-    <h2 id="how">How it works</h2>
+    <h2 id="how" data-reveal>How it works</h2>
     <ol className="steps">
       {STEPS.map(([t, d], i) => (
-        <li key={t}>
+        <li key={t} data-reveal={i ? i + 1 : ''}>
           <span className="step-num">{i + 1}</span>
           <h3>{t}</h3>
           <p>{d}</p>
@@ -112,7 +136,7 @@ const Pricing = ({ currency, setCurrency, credits }: { currency: Currency; setCu
   const [busy, setBusy] = React.useState<Tier | null>(null);
   return (
     <section className="lp lp-section" id="pricing" aria-labelledby="pricing-h">
-      <div className="section-head">
+      <div className="section-head" data-reveal>
         <h2 id="pricing-h">Pricing</h2>
         <div className="mode-switch" role="group" aria-label="Currency">
           {(['INR', 'USD'] as Currency[]).map((c) => (
@@ -123,16 +147,16 @@ const Pricing = ({ currency, setCurrency, credits }: { currency: Currency; setCu
         </div>
       </div>
       <div className="pricing">
-        {TIERS.map(({ tier, name, bullets }) => {
+        {TIERS.map(({ tier, name, bullets }, i) => {
           const v = tierPriceView(currency, tier);
           const n = credits[tier];
           return (
-            <div className={`price-card${tier === 'pro' ? ' featured' : ''}`} key={tier}>
+            <div className={`price-card${tier === 'pro' ? ' featured' : ''}`} key={tier} data-reveal={i ? i + 1 : ''}>
               <div className="price-name">
                 {name}
                 {tier === 'pro' && <span className="badge badge--accent">Most picked</span>}
               </div>
-              <div className="price-amt">{v.display}<small> /mo</small></div>
+              <div className="price-amt"><RollingNumber value={v.display} /><small> /mo</small></div>
               {v.approximate && <div className="price-note">Billed as {v.charge} /mo</div>}
               <ul className="price-list">
                 <li>
@@ -153,7 +177,7 @@ const Pricing = ({ currency, setCurrency, credits }: { currency: Currency; setCu
           );
         })}
       </div>
-      <p className="pricing-foot">
+      <p className="pricing-foot" data-reveal>
         Text post {CREDIT_PRICES.text_post} credit · image {CREDIT_PRICES.image_medium_1024} · 720p reel {CREDIT_PRICES.video_8s_720p_quality}.
         Top up anytime at {topupLabel(currency)}.
         {currency === 'INR' ? ' Billed in ₹ with a GST invoice.' : ' Dollar figures are approximate; every plan is charged in ₹.'}
@@ -172,10 +196,10 @@ const FAQ = ({ currency, credits }: { currency: Currency; credits: Credits }) =>
   ];
   return (
     <section className="lp lp-section" id="faq" aria-labelledby="faq-h">
-      <h2 id="faq-h">Questions</h2>
+      <h2 id="faq-h" data-reveal>Questions</h2>
       <dl className="faq">
         {items.map(([q, a]) => (
-          <div className="faq-item" key={q}>
+          <div className="faq-item" key={q} data-reveal>
             <dt>{q}</dt>
             <dd>{a}</dd>
           </div>

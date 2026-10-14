@@ -88,10 +88,10 @@ export function ToolPageShell({ path, jsonLd, h1, lede, children, steps, faq }: 
       </section>
 
       <section className="lp lp-section" aria-labelledby="how">
-        <h2 id="how">How it works</h2>
+        <h2 id="how" data-reveal>How it works</h2>
         <ol className="steps">
           {steps.map(([t, d], i) => (
-            <li key={t}>
+            <li key={t} data-reveal={i ? i + 1 : ''}>
               <span className="step-num">{i + 1}</span>
               <h3>{t}</h3>
               <p>{d}</p>
@@ -101,10 +101,10 @@ export function ToolPageShell({ path, jsonLd, h1, lede, children, steps, faq }: 
       </section>
 
       <section className="lp lp-section" id="faq" aria-labelledby="faq-h">
-        <h2 id="faq-h">Questions</h2>
+        <h2 id="faq-h" data-reveal>Questions</h2>
         <dl className="faq">
           {faq.map(([q, a]) => (
-            <div className="faq-item" key={q}>
+            <div className="faq-item" key={q} data-reveal>
               <dt>{q}</dt>
               <dd>{a}</dd>
             </div>
@@ -113,7 +113,7 @@ export function ToolPageShell({ path, jsonLd, h1, lede, children, steps, faq }: 
       </section>
 
       <section className="lp lp-section" aria-labelledby="more">
-        <div className="section-head">
+        <div className="section-head" data-reveal>
           <h2 id="more">More free tools</h2>
           <Link href="/free-tools">See all</Link>
         </div>

@@ -1,5 +1,5 @@
-import ShieldDashboard from '../../../../../components/shield/ShieldDashboard';
+import BrandKit from '../../../../../components/brand-kit/BrandKit';
 
 export default function SettingsBrand() {
-  return <ShieldDashboard />;
+  return <BrandKit />;
 }

@@ -40,7 +40,9 @@ const VIDEO_FAIL_COPY: Record<string, string> = {
 const videoFailCopy = (code: string) => VIDEO_FAIL_COPY[code] ?? 'The clip failed to render. Credits were refunded.';
 
 type Account = { platform: Platform; handle: string | null; displayName: string | null; avatarUrl: string | null; isStub: boolean; lastRefreshError: string | null };
-type Variant = { label: string; text: string; score?: number; rationale?: string };
+// perPlatform/approved ride along from a loaded autopilot draft: dropping them
+// on save loses its per-platform copy and a mid-render approval.
+type Variant = { label: string; text: string; score?: number; rationale?: string; perPlatform?: Partial<Record<Platform, string>>; approved?: boolean };
 type PublishRow = { platform: Platform; ok: boolean; url?: string | null; error?: string };
 type Result =
   | { kind: 'scheduled'; platforms: string[]; at: Date; skipped: string[] }
@@ -89,6 +91,8 @@ export default function Compose({ draftId, onDone, initial }: {
   const [attached, setAttached] = useState<MediaItem[]>([]);
   const [when, setWhen] = useState(() => toLocalInput(future(initial?.slot) ?? nextHour()));
   const whenSet = useRef(Boolean(future(initial?.slot)));
+  // Picker floor, fixed at mount; schedule() still rejects past times at submit.
+  const [minWhen] = useState(() => toLocalInput(new Date(Date.now() + 60_000)));
   const [preset, setPreset] = useState('announcement');
   const [research, setResearch] = useState(false);
   const [savedId, setSavedId] = useState<string | null>(null);
@@ -214,7 +218,7 @@ export default function Compose({ draftId, onDone, initial }: {
     const payload = {
       prompt,
       body,
-      variants: variants.map(({ label: l, text, score, rationale }) => ({ label: l, text, score, rationale })),
+      variants: variants.map(({ label: l, text, score, rationale, perPlatform, approved }) => ({ label: l, text, score, rationale, perPlatform, approved })),
       selectedVariantLabel: chosen,
       targetPlatforms: targets,
       perPlatformText: Object.fromEntries(targets.filter((p) => custom[p] && custom[p] !== body).map((p) => [p, custom[p]!])),
@@ -338,7 +342,7 @@ export default function Compose({ draftId, onDone, initial }: {
             <span className="compose-label">
               {label(p)} version · <span className={textFor(p).length > LIMIT[p] ? 'compose-error' : undefined}>{textFor(p).length}/{LIMIT[p]}</span>
             </span>
-            <textarea className="input" rows={3} value={custom[p]} onChange={(e) => setCustom((c) => ({ ...c, [p]: e.target.value }))} />
+            <textarea className="input" rows={3} aria-label={`${label(p)} version`} value={custom[p]} onChange={(e) => setCustom((c) => ({ ...c, [p]: e.target.value }))} />
             <button type="button" className="btn ghost sm compose-self-start" onClick={() => setCustom((c) => { const n = { ...c }; delete n[p]; return n; })}>
               Use the main text
             </button>
@@ -404,7 +408,7 @@ export default function Compose({ draftId, onDone, initial }: {
                 type="datetime-local"
                 className="input"
                 value={when}
-                min={toLocalInput(new Date(Date.now() + 60_000))}
+                min={minWhen}
                 onChange={(e) => { whenSet.current = true; setWhen(e.target.value); }}
               />
             </label>

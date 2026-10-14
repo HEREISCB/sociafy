@@ -174,6 +174,13 @@ describe('POST /api/media/generate-video — model default', () => {
     expect(state.calls).toEqual(['insert', 'charge', 'submit']);
   });
 
+  it('rejects what neither model can serve (1080p at 20s), before charging', async () => {
+    const res = await raw({ prompt: 'a coffee pour', quality: '1080p', durationSec: 20 });
+    expect(res.status).toBe(400);
+    expect(state.cinema).toHaveLength(0);
+    expect(state.calls).toEqual([]);
+  });
+
   it('rejects an explicit model outside its envelope, before charging', async () => {
     const res = (await raw({ prompt: 'a coffee pour', model: 'sociafy-cinema-1', quality: '1080p' })) as unknown as Record<string, unknown>;
     expect(res.status).toBe(400);

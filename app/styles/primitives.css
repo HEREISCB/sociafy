@@ -1,6 +1,6 @@
 /* Primitives: the small set of building blocks pages compose from.
-   Legacy modifier names (.btn.primary, .card-head, .page-head, .chip.live …)
-   are kept alongside the BEM names so existing markup keeps working. */
+   Markup uses the short modifier names (.btn.primary, .card-head, .chip.live …);
+   the unused BEM aliases were dropped. */
 
 /* ---------- Layout helpers ---------- */
 .stack { display: flex; flex-direction: column; gap: var(--s-3); }
@@ -24,28 +24,28 @@
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
 /* Primary = the one dark action per view. */
-.btn.primary, .btn--primary {
+.btn.primary {
   background: var(--text);
   color: var(--bg);
   border-color: var(--text);
 }
 @media (hover: hover) and (pointer: fine) {
-  .btn.primary:hover, .btn--primary:hover { background: var(--ink-2); }
+  .btn.primary:hover { background: var(--ink-2); }
 }
 /* Accent = rare brand-orange call to action. */
-.btn.accent, .btn--accent {
+.btn.accent {
   background: var(--accent);
   color: white;
   border-color: var(--accent);
 }
 @media (hover: hover) and (pointer: fine) {
-  .btn.accent:hover, .btn--accent:hover { filter: brightness(0.96); }
+  .btn.accent:hover { filter: brightness(0.96); }
 }
-.btn.ghost, .btn--ghost { border-color: transparent; background: transparent; }
+.btn.ghost { border-color: transparent; background: transparent; }
 @media (hover: hover) and (pointer: fine) {
-  .btn.ghost:hover, .btn--ghost:hover { background: var(--subtle); }
+  .btn.ghost:hover { background: var(--subtle); }
 }
-.btn.sm, .btn--sm { padding: 4px 8px; font-size: var(--fs-xs); }
+.btn.sm { padding: 4px 8px; font-size: var(--fs-xs); }
 
 .icon-btn {
   width: 26px; height: 26px;
@@ -85,27 +85,23 @@ select.input {
 textarea.input { resize: vertical; min-height: 72px; }
 
 /* ---------- Page header ---------- */
-.page-header,
-.page-head {
+.page-header {
   display: flex; align-items: flex-end; justify-content: space-between;
   gap: var(--s-6);
   margin-bottom: var(--s-6);
 }
-.page-header h1,
-.page-head h1 {
+.page-header h1 {
   margin: 0 0 var(--s-1);
   font-size: var(--fs-xl);
   font-weight: 600;
   letter-spacing: -0.02em;
   line-height: 1.15;
 }
-.page-header__sub,
-.page-head .sub {
+.page-header__sub {
   font-size: var(--fs-sm);
   color: var(--text-2);
 }
-.page-header__actions,
-.page-head-actions { display: flex; gap: var(--s-2); align-items: center; margin-left: auto; }
+.page-header__actions { display: flex; gap: var(--s-2); align-items: center; margin-left: auto; }
 
 /* ---------- Card ---------- */
 .card {
@@ -114,14 +110,12 @@ textarea.input { resize: vertical; min-height: 72px; }
   border-radius: var(--r);
   overflow: hidden;
 }
-.card__head,
 .card-head {
   display: flex; align-items: center; justify-content: space-between;
   gap: var(--s-3);
   padding: 14px var(--s-4);
   border-bottom: 1px solid var(--line);
 }
-.card__head h3,
 .card-head h3 {
   margin: 0;
   font-size: var(--fs-sm);
@@ -133,9 +127,7 @@ textarea.input { resize: vertical; min-height: 72px; }
   color: var(--text-2);
   font-family: var(--mono);
 }
-.card__body,
 .card-body { padding: var(--s-4); }
-.card-body.flush { padding: 0; }
 
 /* ---------- Badge / chip ---------- */
 .badge {
@@ -208,6 +200,9 @@ textarea.input { resize: vertical; min-height: 72px; }
 .pglyph.li { background: var(--li); }
 .pglyph.tt { background: #000; }
 .pglyph.yt { background: var(--yt); }
+.pglyph.rd { background: var(--rd); }
+/* Near-black marks (X, TikTok, Threads) vanish on a selected (ink) chip: ring them in the chip's text colour. */
+[aria-pressed="true"] .pglyph { box-shadow: 0 0 0 1px var(--bg); }
 .pglyph.lg { width: 28px; height: 28px; border-radius: 6px; font-size: var(--fs-sm); flex: 0 0 28px; }
 .pglyph.xl {
   width: 44px; height: 44px;
@@ -217,27 +212,6 @@ textarea.input { resize: vertical; min-height: 72px; }
 }
 
 /* ---------- Segmented controls ---------- */
-.media-tabs {
-  display: inline-flex;
-  background: var(--subtle);
-  border-radius: var(--r-sm);
-  padding: 2px;
-  gap: 2px;
-}
-.media-tabs .opt {
-  padding: 4px 10px;
-  font-size: 11px;
-  border-radius: 4px;
-  cursor: pointer;
-  color: var(--text-2);
-  display: inline-flex; align-items: center; gap: 4px;
-}
-.media-tabs .opt.active {
-  background: var(--surface);
-  color: var(--text);
-  box-shadow: var(--shadow-1);
-}
-
 .mode-switch {
   display: inline-flex;
   border: 1px solid var(--line);
@@ -293,21 +267,17 @@ textarea.input { resize: vertical; min-height: 72px; }
 }
 
 @media (max-width: 900px) {
-  .page-header,
-  .page-head {
+  .page-header {
     flex-direction: column;
     align-items: stretch;
     gap: var(--s-3);
     margin-bottom: var(--s-4);
   }
-  .page-header h1,
-  .page-head h1 { font-size: 22px; }
-  .page-header__actions,
-  .page-head-actions { flex-wrap: wrap; margin-left: 0; }
+  .page-header h1 { font-size: 22px; }
+  .page-header__actions { flex-wrap: wrap; margin-left: 0; }
 
   /* Card headers wrap so tab groups / actions drop to a second line instead
      of being clipped by the card's overflow:hidden. */
-  .card__head,
   .card-head {
     flex-wrap: wrap;
     gap: var(--s-2);
@@ -328,5 +298,5 @@ textarea.input { resize: vertical; min-height: 72px; }
   .icon-btn { width: 36px; height: 36px; }
   /* Comfortable tap targets on touch devices (44px guideline). */
   .btn { min-height: 44px; }
-  .btn.sm, .btn--sm { min-height: 38px; }
+  .btn.sm { min-height: 38px; }
 }

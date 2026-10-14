@@ -8,7 +8,7 @@ import { Icon } from '../icons';
 import { useApi } from '../../lib/ui/fetcher';
 import { Glyphs } from './glyphs';
 import { firstLine, groupRows, needsAttention, type PostGroup, type ReviewItem, type ScheduledRow } from './model';
-import { PostPanel, STATUS_LABEL } from './panel';
+import { PostPanel, statusLabel } from './panel';
 import { WeekGrid } from './week';
 
 /** Ticking "now" in epoch ms; 0 until mounted so server and client first paints agree. */
@@ -188,7 +188,7 @@ function ListView({ groups, review, now, loading, onSelect }: {
 const dayLabel = (d: Date) => (isToday(d) ? 'Today' : isTomorrow(d) ? 'Tomorrow' : format(d, 'EEEE, MMM d'));
 
 function PostRow({ g, onSelect, showDate }: { g: PostGroup; onSelect: (g: PostGroup) => void; showDate?: boolean }) {
-  const tag = g.accountGone ? 'Account disconnected' : g.status === 'pending' ? null : STATUS_LABEL[g.status];
+  const tag = g.accountGone ? 'Account disconnected' : g.status === 'pending' ? null : statusLabel(g);
   return (
     <li>
       <button type="button" className={`cal-row cal-row--${g.status}`} onClick={() => onSelect(g)}>

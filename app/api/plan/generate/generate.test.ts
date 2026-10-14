@@ -18,6 +18,7 @@ vi.mock('../../../../lib/api', () => ({
 }));
 
 import { POST } from './route';
+import { draftCost } from '../../../../lib/credits/estimator';
 
 const call = (body: unknown) => POST(new Request('https://sociafy.app/api/plan/generate', { method: 'POST', body: JSON.stringify(body) }) as never);
 
@@ -28,7 +29,7 @@ describe('POST /api/plan/generate', () => {
     preparePlan.mockResolvedValue({ ctx: {}, kinds: ['text'], slots: [new Date('2026-03-03T09:00:00Z')] });
     const res = await call({ horizonDays: 30 });
     expect(res.status).toBe(202);
-    expect(await res.json()).toEqual({ status: 'started', planned: 1, slots: [{ at: '2026-03-03T09:00:00.000Z', kind: 'text' }] });
+    expect(await res.json()).toEqual({ status: 'started', planned: 1, credits: draftCost('text'), slots: [{ at: '2026-03-03T09:00:00.000Z', kind: 'text' }] });
     expect(preparePlan).toHaveBeenCalledWith('user_abc', { horizonDays: 30 });
     expect(updates).toEqual([expect.objectContaining({ planHorizonDays: 30 })]);
     expect(fillPlan).not.toHaveBeenCalled();

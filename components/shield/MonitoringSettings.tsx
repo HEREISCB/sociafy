@@ -50,7 +50,7 @@ function useShieldSettings() {
   return { s, setS, save, busy, msg };
 }
 
-/** Brand + scheduled scans, with a manual scan. Top of /settings/brand. */
+/** Brand + scheduled scans, with a manual scan. Top of /settings/mentions. */
 const MonitoringSettings: React.FC<{ onScan: (brand: string) => void; scanning: boolean }> = ({ onScan, scanning }) => {
   const { s, setS, save, busy, msg } = useShieldSettings();
   const brand = s.autoFetchBrand.trim();

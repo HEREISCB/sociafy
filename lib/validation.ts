@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { PLATFORMS, VOICE_TEMPLATES } from './db/schema';
 import { GST_STATES, isValidGstin } from './billing/gst';
+import { GOOGLE_FONTS, MUSIC_MOODS, VIDEO_STYLES } from './brand/kit';
 
 /**
  * Shared schemas for request body validation.
@@ -28,6 +29,10 @@ export const draftCreateSchema = z.object({
     text: z.string().max(20_000),
     score: z.number().optional(),
     rationale: z.string().max(2_000).optional(),
+    // Autopilot's per-platform copy and a mid-render approval (DraftVariant):
+    // stripping them on save loses both.
+    perPlatform: z.partialRecord(platform, z.string().max(20_000)).optional(),
+    approved: z.boolean().optional(),
   })).max(20).optional(),
   selectedVariantLabel: z.string().max(80).nullable().optional(),
   media: z.array(z.object({
@@ -129,6 +134,53 @@ export const agentSettingsUpdateSchema = z.object({
   // null clears the cap.
   weeklyCreditCap: z.number().int().min(0).max(1_000_000).nullable().optional(),
   planHorizonDays: horizonDays.optional(),
+});
+
+// Brand kit ------------------------------------------------------------
+// Every section optional; PATCH replaces whole top-level sections. Asset refs
+// carry the mime so each slot can only hold its kind of file — the route
+// re-reads id/url/mime from media_assets (ownership) and parses again.
+const assetRef = (mime: RegExp) => z.object({
+  id: uuid,
+  url: z.string().url().max(2_000),
+  mime: z.string().regex(mime),
+  name: z.string().max(200).optional(),
+});
+const logoRef = assetRef(/^image\/(svg\+xml|png|webp|jpeg)$/);
+const hex = z.string().regex(/^#[0-9a-f]{6}$/i);
+const short = (max: number) => z.string().trim().min(1).max(max);
+const fontChoice = z.discriminatedUnion('source', [
+  z.object({ source: z.literal('google'), family: z.enum(GOOGLE_FONTS) }),
+  z.object({
+    source: z.literal('upload'),
+    family: short(60),
+    asset: assetRef(/^font\/(woff2|ttf|otf)$/),
+    // The user's word that they may use this font in rendered videos.
+    licensed: z.literal(true),
+  }),
+]);
+export const brandKitSchema = z.object({
+  tagline: z.string().trim().max(60).optional(),
+  logo: z.object({ primary: logoRef, icon: logoRef, reversed: logoRef, mono: logoRef }).partial().optional(),
+  colors: z.object({ primary: hex, secondary: hex, background: hex, text: hex, accent: hex }).partial().optional(),
+  fonts: z.object({ display: fontChoice, body: fontChoice }).partial().optional(),
+  voice: z.object({
+    tone: z.array(short(30)).max(8),
+    do: z.array(short(120)).max(10),
+    dont: z.array(short(120)).max(10),
+  }).partial().optional(),
+  guidePdf: assetRef(/^application\/pdf$/).optional(),
+  screenshots: z.array(assetRef(/^image\/(png|webp|jpeg)$/)).max(8).optional(),
+  facts: z.array(short(140)).max(6).optional(),
+  music: z.object({ mood: z.enum(MUSIC_MOODS), banned: z.string().trim().max(300) }).partial().optional(),
+  video: z.object({ style: z.enum(VIDEO_STYLES), endCardCta: z.string().trim().max(40) }).partial().optional(),
+  narratorVoiceId: uuid.optional(),
+});
+// PATCH body: sections replace stored ones; null clears the two scalar slots
+// (arrays/objects/strings clear by sending them empty).
+export const brandKitPatchSchema = brandKitSchema.extend({
+  guidePdf: brandKitSchema.shape.guidePdf.nullable(),
+  narratorVoiceId: uuid.nullable().optional(),
 });
 
 // Accounts -------------------------------------------------------------

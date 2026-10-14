@@ -40,6 +40,8 @@ export const metadata: Metadata = {
   },
 };
 
+const REVEAL_READY = `try{if(!matchMedia('(prefers-reduced-motion: reduce)').matches){var d=document.documentElement;d.classList.add('reveal-ready');setTimeout(function(){if(!window.__revealBooted)d.classList.remove('reveal-ready')},4000)}}catch(e){}`;
+
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
@@ -59,6 +61,14 @@ export default function RootLayout({
   // (React #418) and blanks the page for those users.
   return (
     <html lang="en" suppressHydrationWarning className={`${geistSans.variable} ${geistMono.variable}`}>
+      {/* Plain inline script, not next/script: it must run before first paint.
+          Scroll reveals only hide content under html.reveal-ready, so with JS
+          off or reduced motion nothing is ever hidden. If the observer
+          (components/reveal-observer.tsx) hasn't booted within 4s, drop the
+          class so content can never stay stuck invisible. */}
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: REVEAL_READY }} />
+      </head>
       <body suppressHydrationWarning>{children}</body>
     </html>
   );

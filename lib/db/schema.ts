@@ -11,6 +11,7 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
+import type { BrandKit } from '../brand/kit';
 
 export const PLATFORMS = ['x', 'linkedin', 'instagram', 'facebook', 'tiktok', 'youtube', 'reddit'] as const;
 export type Platform = (typeof PLATFORMS)[number];
@@ -236,6 +237,8 @@ export type DraftVariant = {
   /** Autopilot only: the per-platform copy as the model wrote it, so an edited
    *  body can tell machine copy from the user's own (lib/agent/publish.ts postText). */
   perPlatform?: Partial<Record<Platform, string>>;
+  /** Variant A only: approved while its video was still rendering (lib/agent/plan.ts). */
+  approved?: boolean;
 };
 
 export type DraftMedia = {
@@ -374,6 +377,16 @@ export const agentSettings = pgTable('agent_settings', {
   planHorizonDays: integer('plan_horizon_days').notNull().default(7),
   // Lease on an in-flight plan run (lib/agent/plan.ts). Null or past = free.
   planRunningUntil: timestamp('plan_running_until', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// Brand kit (drizzle/0019) — logo, colors, fonts, voice, facts… one jsonb per
+// user, shape in lib/brand/kit.ts. Own table so it can't break agent_settings
+// reads before the migration lands. Name/bio/website stay on agent_settings.
+export const brandKits = pgTable('brand_kits', {
+  userId: text('user_id').primaryKey(),
+  kit: jsonb('kit').$type<BrandKit>().notNull().default({}),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });

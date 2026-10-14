@@ -32,6 +32,11 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       patch.scheduledAt = d;
       // The cron only claims status='pending', so a failed or canceled row
       // given a new time used to show the new time and never publish. Requeue it.
+      // Only a row the user canceled may come back: one superseded by Post now
+      // (or canceled by an account disconnect) would publish a second time.
+      if (existing.status === 'canceled' && existing.error !== USER_CANCELED) {
+        return jsonError('not_restorable', 409);
+      }
       if (existing.status === 'failed' || existing.status === 'canceled') {
         patch.status = 'pending';
         patch.attempts = 0;
@@ -53,6 +58,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     if (body.status === 'canceled') {
       if (!CANCELABLE.includes(existing.status)) return jsonError('not_cancelable', 409);
       patch.status = 'canceled';
+      patch.error = USER_CANCELED;
     }
     // Conditional on the status we validated against: the cron may have
     // claimed the row since we read it, and a write landing on a
@@ -74,6 +80,8 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
 // What cancel (DELETE, or PATCH status:'canceled') may touch. A 'publishing'
 // row is in flight and a 'published' one is history.
 const CANCELABLE: ScheduledStatus[] = ['pending', 'failed'];
+// Marks a cancel the user made — the only kind of canceled row PATCH may requeue.
+const USER_CANCELED = 'user_canceled';
 
 // Soft cancel: the row stays as 'canceled' so the calendar can Restore it
 // (a PATCH with a new scheduledAt requeues it as 'pending').
@@ -91,7 +99,7 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: stri
     // the read and this write.
     const [row] = await db()
       .update(scheduledPosts)
-      .set({ status: 'canceled', updatedAt: new Date() })
+      .set({ status: 'canceled', error: USER_CANCELED, updatedAt: new Date() })
       .where(and(
         eq(scheduledPosts.id, id),
         eq(scheduledPosts.userId, user.id),

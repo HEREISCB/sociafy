@@ -177,13 +177,7 @@ export const Pglyph: React.FC<PglyphProps> = ({ p, size, className }) => {
   const key = size ?? 'sm';
   const render = PLATFORM_LOGOS[p];
   return (
-    // globals.css carries a .pglyph.<p> background for every platform it knew
-    // about; Reddit arrived later, so it brings its own rather than rendering
-    // white-on-transparent.
-    <span
-      className={`pglyph ${p}${size ? ' ' + size : ''}${className ? ' ' + className : ''}`}
-      style={p === 'rd' ? { background: REDDIT_ORANGE } : undefined}
-    >
+    <span className={`pglyph ${p}${size ? ' ' + size : ''}${className ? ' ' + className : ''}`}>
       {render ? render(ICON_PX[key]) : null}
     </span>
   );

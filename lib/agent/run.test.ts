@@ -19,6 +19,8 @@ const state = vi.hoisted(() => ({
   recentSched: [] as Record<string, unknown>[],
   activity: [] as Record<string, unknown>[],
   claimFails: false,
+  /** Heartbeats find the lease gone (it expired and another run took it). */
+  leaseLost: false,
   inserts: {} as Record<string, Record<string, unknown>[]>,
   updates: [] as { table: string; values: Record<string, unknown> }[],
 }));
@@ -38,6 +40,7 @@ vi.mock('../db', async () => {
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const chain = (rows: any) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const p: any = Promise.resolve(rows);
     p.limit = () => Promise.resolve(rows);
     p.orderBy = () => p;
@@ -59,9 +62,11 @@ vi.mock('../db', async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       update: (t: any) => ({
         set: (v: Record<string, unknown>) => {
+          const heartbeat = !!v.planRunningUntil && state.updates.some((u) => u.values.planRunningUntil);
           state.updates.push({ table: getTableName(t), values: v });
-          // `.returning()` answers the run claim: one row = we own this run.
-          return { where: () => Object.assign(Promise.resolve([]), { returning: () => Promise.resolve(state.claimFails ? [] : [{ userId: 'u1' }]) }) };
+          // `.returning()` answers the run claim and heartbeats: one row = we own this run.
+          const owned = !state.claimFails && !(heartbeat && state.leaseLost);
+          return { where: () => Object.assign(Promise.resolve([]), { returning: () => Promise.resolve(owned ? [{ userId: 'u1' }] : []) }) };
         },
       }),
     }),
@@ -80,6 +85,7 @@ vi.mock('../credits/ledger', () => ({
 
 import { runAgentForUser, planPeriod } from './run';
 import { draftCost } from '../credits/estimator';
+import { PLAN_MAX } from './plan';
 
 const SETTINGS = {
   userId: 'u1',
@@ -110,6 +116,7 @@ beforeEach(() => {
   state.recentSched = [];
   state.activity = [];
   state.claimFails = false;
+  state.leaseLost = false;
   state.inserts = {};
   state.updates = [];
   generateAgentImage.mockReset();
@@ -313,6 +320,25 @@ describe('the plan', () => {
       { draftId: 'd1', platform: 'linkedin', scheduledAt: new Date(Date.now() + DAY), media: [] },
     ];
     expect((await planPeriod('u1')).drafted).toBe(3); // 5 − 1 overdue − 1 queued post
+  });
+
+  it('one Generate drafts at most PLAN_MAX posts, however big the target', async () => {
+    state.settings = settingsWith({ enabledPlatforms: ['x'], postsPerWeekByContentType: { text: 50, image: 0, video: 0 } } as never);
+    expect((await planPeriod('u1', { horizonDays: 30 })).drafted).toBe(PLAN_MAX);
+  });
+
+  it('counts unplanned agent drafts from before planning existed', async () => {
+    state.settings = settingsWith({ enabledPlatforms: ['x'], postsPerWeekByContentType: { text: 3, image: 0, video: 0 } } as never);
+    state.recentDrafts = [{ plannedAt: null, media: [] }, { plannedAt: null, media: [] }];
+    expect((await planPeriod('u1')).drafted).toBe(1);
+  });
+
+  it('stops drafting when another run took its lease over', async () => {
+    state.settings = settingsWith({ enabledPlatforms: ['x'], postsPerWeekByContentType: { text: 7, image: 0, video: 0 } } as never);
+    state.leaseLost = true;
+    const res = await planPeriod('u1', { horizonDays: 30 });
+    expect(res.reason).toBe('lease_lost');
+    expect(draftFromTrends).toHaveBeenCalledTimes(1);
   });
 
   it('scales the weekly credit cap to the horizon', async () => {

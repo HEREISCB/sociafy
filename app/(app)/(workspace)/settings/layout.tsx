@@ -6,10 +6,11 @@ import { usePathname } from 'next/navigation';
 
 const SECTIONS = [
   { href: '/settings/connections', label: 'Connections' },
+  { href: '/settings/brand', label: 'Brand kit' },
   { href: '/settings/plan', label: 'Plan & usage' },
   { href: '/settings/voice', label: 'Voice' },
   { href: '/settings/api', label: 'API keys' },
-  { href: '/settings/brand', label: 'Brand monitoring' },
+  { href: '/settings/mentions', label: 'Mentions' },
 ];
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {

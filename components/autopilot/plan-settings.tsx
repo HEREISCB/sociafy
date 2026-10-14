@@ -129,33 +129,6 @@ function NichePicker({ value, disabled, onChange }: { value: string[]; disabled?
   );
 }
 
-/** Text field that saves on blur when it changed. */
-function SavedField({ label, value, multiline, placeholder, disabled, onSave }: {
-  label: string;
-  value: string;
-  multiline?: boolean;
-  placeholder?: string;
-  disabled?: boolean;
-  onSave: (v: string) => void;
-}) {
-  const [v, setV] = useState(value);
-  useEffect(() => setV(value), [value]);
-  const props = {
-    className: 'input',
-    value: v,
-    placeholder,
-    disabled,
-    onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setV(e.target.value),
-    onBlur: () => v.trim() !== value.trim() && onSave(v.trim()),
-  };
-  return (
-    <label className="ap-field">
-      <span className="ap-label">{label}</span>
-      {multiline ? <textarea rows={4} {...props} /> : <input {...props} />}
-    </label>
-  );
-}
-
 export default function PlanSettings() {
   const { data: settings, error: settingsError, mutate: refetchSettings, unauth } = useApi<Settings>('/api/agent/settings');
   const { data: accounts } = useApi<{ platform: Platform }[]>('/api/accounts');
@@ -376,17 +349,9 @@ export default function PlanSettings() {
       <details className="ap-section ap-advanced" id="ap-advanced">
         <summary className="ap-title">Advanced</summary>
         <div className="stack ap-advanced__body">
-          <SavedField
-            label="Instructions"
-            multiline
-            value={settings?.instructions ?? ''}
-            placeholder="How should posts sound? What should they avoid?"
-            disabled={locked}
-            onSave={(v) => persist({ instructions: v })}
-          />
-          <SavedField label="Brand name" value={settings?.companyName ?? ''} disabled={locked} onSave={(v) => persist({ companyName: v })} />
-          <SavedField label="What you do" multiline value={settings?.brandBio ?? ''} disabled={locked} onSave={(v) => persist({ brandBio: v })} />
-          <SavedField label="Website" value={settings?.website ?? ''} placeholder="https://" disabled={locked} onSave={(v) => persist({ website: v && !/^https?:\/\//i.test(v) ? `https://${v}` : v })} />
+          <p className="ap-sub">
+            Brand name, website, voice and style guide live in your brand kit. <Link href="/settings/brand">Edit in Brand kit</Link>
+          </p>
           <div className="ap-field">
             <span className="ap-label">Quiet hours</span>
             <div className="row">

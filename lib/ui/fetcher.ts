@@ -65,6 +65,7 @@ export async function apiPost<T = unknown>(
 const ERROR_COPY: Record<string, string> = {
   account_disconnected: 'The account for this post is disconnected. Reconnect it, then try again.',
   not_cancelable: 'This post is already publishing or live, so it can\u2019t be canceled.',
+  not_restorable: 'This post was already sent with Post now or its account was removed, so it can\u2019t be restored.',
   already_published: 'This post is already publishing or live, so it can\u2019t be moved.',
   scheduledAt_in_past: 'That time has passed. Pick a later time.',
   conflict: 'This post changed while you were looking at it. Refresh and try again.',

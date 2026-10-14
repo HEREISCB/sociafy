@@ -61,6 +61,7 @@
   --li: #0A66C2;
   --tt: #FE2C55;
   --yt: #FF0000;
+  --rd: #FF4500;
   --th: #0A0A0A;
 
   /* ---- Legacy aliases ---- */
@@ -81,4 +82,16 @@
   /* Referenced by inline styles but never defined before. */
   --border: var(--line);
   --muted: var(--text-2);
+}
+
+/* Motion. One set of curves and durations for the whole product; rules live
+   in motion.css. --dur-1 is press/hover feedback, --dur-2 app UI entrances,
+   --dur-3 marketing reveals. */
+:root {
+  --ease-out: cubic-bezier(.22, 1, .36, 1);
+  --ease-in-out: cubic-bezier(.65, 0, .35, 1);
+  --ease-reveal: cubic-bezier(.2, .7, .2, 1);
+  --dur-1: 120ms;
+  --dur-2: 220ms;
+  --dur-3: 700ms;
 }

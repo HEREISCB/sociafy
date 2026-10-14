@@ -17,19 +17,18 @@
 .icon-btn:active,
 .prompt-chip:active,
 .topbar-menu-btn:active,
-.autopilot-pill:active,
 .mode-switch .opt:active {
-  transform: scale(0.97);
+  transform: scale(0.98);
 }
 .btn,
 .icon-btn,
 .prompt-chip,
 .topbar-menu-btn,
-.autopilot-pill,
 .mode-switch .opt {
   /* Fast enough to feel like a response rather than an animation. The
-     press itself is instant; this only smooths the release. */
-  transition: transform 100ms ease-out, background 0.12s, border-color 0.12s;
+     press itself is instant; this only smooths the release. Hover is
+     colour-only. */
+  transition: transform var(--dur-1) var(--ease-out), background-color 160ms, border-color 160ms, color 160ms;
 }
 .btn:active:disabled,
 .icon-btn:active:disabled { transform: none; }
@@ -37,18 +36,114 @@
 /* Larger surfaces darken instead of scaling: a 300px tile scaling down
    reads as the page shifting, and several of these host absolutely
    positioned children. */
-.billing-tier-card:active,
-.connect-tile:active,
-.queue-item:active,
-.trend-item:active,
-.plan-platform:active,
-.plan-radio:active,
-.topic:active,
 .cal-slot:active {
   background: var(--bg-sunk);
 }
 
+/* ===================================================================
+   Public site (landing, free tools)
+   =================================================================== */
+
+/* Hero: badge, headline, lede, CTA rise out of a soft blur, staggered.
+   `backwards` (not `both`) so once it ends the press scale still works. */
+@keyframes hero-rise {
+  from { opacity: 0; transform: translateY(12px); filter: blur(4px); }
+}
+.hero > div > *,
+.hero > figure,
+.tool-hero > * {
+  animation: hero-rise 800ms var(--ease-out) backwards;
+}
+.hero > div > :nth-child(2), .tool-hero > :nth-child(2) { animation-delay: 80ms; }
+.hero > div > :nth-child(3), .tool-hero > :nth-child(3) { animation-delay: 160ms; }
+.hero > div > :nth-child(n+4), .tool-hero > :nth-child(n+4) { animation-delay: 240ms; }
+.hero > figure { animation-delay: 320ms; }
+
+/* Scroll reveal (components/reveal-observer.tsx). Hidden only under
+   html.reveal-ready, which the head script sets when motion is allowed,
+   so without JS everything is simply there. */
+[data-reveal] {
+  transition:
+    opacity var(--dur-3) var(--ease-reveal),
+    transform var(--dur-3) var(--ease-reveal),
+    filter var(--dur-3) var(--ease-reveal);
+}
+[data-reveal="2"] { transition-delay: 100ms; }
+[data-reveal="3"] { transition-delay: 200ms; }
+.reveal-ready [data-reveal]:not([data-shown]) {
+  opacity: 0;
+  transform: translateY(16px);
+  filter: blur(4px);
+}
+
+/* Odometer prices (RollingNumber in landing.tsx). */
+.odo-word { display: inline-flex; vertical-align: top; white-space: nowrap; }
+.odo-char, .odo-col { display: block; height: 1.15em; line-height: 1.15em; }
+.odo-char::before { content: attr(data-char); }
+.odo-col { width: 1ch; overflow: hidden; }
+.odo-strip {
+  display: block;
+  transition: transform 900ms var(--ease-out) calc(150ms + var(--i, 0) * 60ms);
+}
+.odo-strip::before { content: "0\A 1\A 2\A 3\A 4\A 5\A 6\A 7\A 8\A 9"; display: block; white-space: pre; text-align: center; }
+/* Beats the inline transform: rest at 0 until the card is revealed. */
+@media (prefers-reduced-motion: no-preference) {
+  .reveal-ready [data-reveal]:not([data-shown]) .odo-strip { transform: none !important; }
+}
+[data-reveal="2"] .odo-strip { transition-delay: calc(250ms + var(--i, 0) * 60ms); }
+[data-reveal="3"] .odo-strip { transition-delay: calc(350ms + var(--i, 0) * 60ms); }
+
+/* ===================================================================
+   App: small, fast entrances. @starting-style fires only when an element
+   is inserted (or its display flips), never on a re-render of a node that
+   is already there, so SWR revalidations don't replay it.
+   =================================================================== */
+.plan-card,
+.cal-rows > li,
+.conn-row,
+.plan-row,
+.sched__row {
+  transition: opacity var(--dur-2) var(--ease-out), translate var(--dur-2) var(--ease-out);
+  @starting-style { opacity: 0; translate: 0 6px; }
+}
+/* Banners and popovers: fade-slide down from where they hang. */
+.session__alert,
+.conn-banner,
+.ap-alert,
+.insufficient-credits-banner,
+.shell-pop,
+.credit-popover {
+  transition: opacity 180ms var(--ease-out), translate 180ms var(--ease-out);
+  @starting-style { opacity: 0; translate: 0 -4px; }
+}
+/* Calendar side panel (a modal <dialog>): slides in from its edge. */
+.cal-panel[open] {
+  transition: translate var(--dur-2) var(--ease-out), opacity var(--dur-2) var(--ease-out);
+  @starting-style { translate: 24px 0; opacity: 0; }
+}
+.cal-panel[open]::backdrop {
+  transition: opacity var(--dur-2) var(--ease-out);
+  @starting-style { opacity: 0; }
+}
+@media (max-width: 900px) {
+  .cal-panel[open] { @starting-style { translate: 0 24px; } }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  /* Marketing: everything is just there. */
+  .hero > div > *, .hero > figure, .tool-hero > * { animation: none; }
+  [data-reveal], .reveal-ready [data-reveal]:not([data-shown]) {
+    opacity: 1; transform: none; filter: none; transition: none;
+  }
+  .odo-strip { transition: none; }
+  /* App: entrances become a short cross-fade, no movement. */
+  .plan-card, .cal-rows > li, .conn-row, .plan-row, .sched__row,
+  .session__alert, .conn-banner, .ap-alert, .insufficient-credits-banner,
+  .shell-pop, .credit-popover, .cal-panel[open] {
+    transition: opacity var(--dur-1) linear;
+    translate: none;
+  }
+
   /* The only looping animation left is the render progress sweep. */
   .render-bar::after { animation: none !important; }
   /* Entrances become cross-fades — the information still arrives, the
@@ -62,8 +157,7 @@
   .icon-btn:active,
   .prompt-chip:active,
   .topbar-menu-btn:active,
-  .autopilot-pill:active,
-  .mode-switch .opt:active { transform: none; }
+    .mode-switch .opt:active { transform: none; }
 }
 
 /* Continues the block above, but has to be width-scoped: `.sidebar` is a real

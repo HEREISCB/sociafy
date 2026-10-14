@@ -64,4 +64,8 @@ const isGone = (r: ScheduledRow) => !r.accountId && (r.status === 'pending' || r
 
 export const firstLine = (text: string) => text.trim().split('\n')[0] || '(empty)';
 
+/** Only a post the user canceled may be restored: one Post now already sent,
+ *  or one canceled by an account disconnect, would publish twice (the API 409s). */
+export const restorable = (g: PostGroup) => g.status === 'canceled' && g.error === 'user_canceled';
+
 export const needsAttention = (g: PostGroup) => g.status === 'failed' || g.accountGone;

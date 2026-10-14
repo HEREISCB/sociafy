@@ -1,8 +1,9 @@
 import { NextRequest } from 'next/server';
-import { and, desc, eq, lt } from 'drizzle-orm';
+import { and, desc, eq, lt, notInArray } from 'drizzle-orm';
 import { withUser } from '../../../lib/api';
 import { db } from '../../../lib/db';
 import { mediaAssets } from '../../../lib/db/schema';
+import { BRAND_ONLY_MIMES } from '../../../lib/brand/assets';
 
 export const runtime = 'nodejs';
 
@@ -33,7 +34,8 @@ export async function GET(req: NextRequest) {
     const limit = Math.min(Math.max(Number.isFinite(limitRaw) ? limitRaw : 40, 1), 100);
     const beforeRaw = url.searchParams.get('before');
     const before = beforeRaw ? new Date(beforeRaw) : null;
-    const scope = eq(mediaAssets.userId, user.id);
+    // Brand-kit-only files (SVG, fonts, PDF) can't be posted; keep them out of the library.
+    const scope = and(eq(mediaAssets.userId, user.id), notInArray(mediaAssets.mimeType, BRAND_ONLY_MIMES));
     const rows = await db()
       .select()
       .from(mediaAssets)

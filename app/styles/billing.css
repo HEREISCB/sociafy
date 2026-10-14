@@ -94,8 +94,6 @@
   line-height: 1.6;
   overflow-x: auto;
 }
-/* Sits over the code, so it needs its own opaque background. */
-.code-block .code-copy { position: absolute; top: 7px; right: 7px; background: var(--bg-elev); }
 
 .dev-table { width: 100%; border-collapse: collapse; font-size: var(--fs-xs); margin-top: 10px; }
 .dev-table th, .dev-table td {
@@ -114,21 +112,6 @@
   font-weight: 600;
 }
 .dev-table td:first-child { white-space: nowrap; }
-
-.dev-endpoint { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
-.dev-endpoint-head { font-size: var(--fs-sm); font-weight: 600; margin-bottom: 4px; }
-.dev-method { color: var(--ink-3); }
-.dev-method.post { color: var(--accent-ink); }
-
-.dev-steps { margin: 10px 0 0; padding-left: 20px; font-size: var(--fs-sm); line-height: 1.7; color: var(--ink-2); }
-.dev-cost-label {
-  margin-top: 16px;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--ink-2);
-}
-.dev-cost-label span { text-transform: none; letter-spacing: 0; color: var(--ink-3); }
 
 /* /developers/reference. The page renders parsed markdown now; its
    typography lives in a local <style> block there, not here. */

@@ -84,14 +84,15 @@ const nextConfig: NextConfig = {
       tab('calendar', '/calendar'),
       tab('agent', '/autopilot'),
       tab('connections', '/settings/connections'),
-      tab('shield', '/settings/brand'),
+      tab('shield', '/settings/mentions'),
       tab('onboarding', '/onboarding'),
       moved('/agent', '/autopilot'),
       moved('/connections', '/settings/connections'),
       moved('/billing', '/settings/plan'),
       moved('/usage', '/settings/plan'),
-      // Exact match: /developers/reference stays a real page.
-      moved('/developers', '/settings/api'),
+      // Exact match: /developers/reference stays a real page. The public
+      // reference, not /settings/api — that sends signed-out readers to login.
+      moved('/developers', '/developers/reference'),
       moved('/studio/voice', '/settings/voice'),
     ];
   },

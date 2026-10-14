@@ -5,13 +5,14 @@ import { db } from '../../../../lib/db';
 import { agentSettings } from '../../../../lib/db/schema';
 import { planGenerateSchema, parseBody } from '../../../../lib/validation';
 import { preparePlan, fillPlan } from '../../../../lib/agent/run';
+import { draftCost } from '../../../../lib/credits/estimator';
 
 // POST /api/plan/generate { horizonDays?: 7 | 30 }
 // Fill the plan for the horizon (and remember it, so the cron keeps topping up
 // to it). Sizing and the run lease are taken synchronously; the drafting
 // itself — a model call per 4 posts plus about a minute per image — runs after
 // the response. Poll GET /api/plan (`generating`) for progress.
-//   202 { status: 'started', planned, slots }     drafting in the background
+//   202 { status: 'started', planned, slots, credits }  drafting in the background (≤ PLAN_MAX posts; credits ≈ cost)
 //   200 { status: 'full' }                        nothing missing
 //   409 { status: 'running' }                     a plan run already holds the lease
 //   409 { status: 'blocked', reason }             no niches / platforms / credits / cap
@@ -38,7 +39,7 @@ export async function POST(req: NextRequest) {
       }
     });
     return Response.json(
-      { status: 'started', planned: plan.kinds.length, slots: plan.slots.map((d, i) => ({ at: d.toISOString(), kind: plan.kinds[i] })) },
+      { status: 'started', planned: plan.kinds.length, credits: plan.kinds.reduce((n, k) => n + draftCost(k), 0), slots: plan.slots.map((d, i) => ({ at: d.toISOString(), kind: plan.kinds[i] })) },
       { status: 202 },
     );
   }, req);

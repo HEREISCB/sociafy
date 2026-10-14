@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { RevealObserver } from './reveal-observer';
 
 // Static site header/footer shared by every public page (landing, free tools,
 // legal, 404). Server component on purpose: keeps these pages off the landing
@@ -76,5 +77,6 @@ export const SiteShell = ({ children, className }: { children: React.ReactNode; 
     <LPNav />
     <main id="main" className={className}>{children}</main>
     <Footer />
+    <RevealObserver />
   </>
 );

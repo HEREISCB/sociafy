@@ -73,18 +73,3 @@ a { color: inherit; text-decoration: none; }
   outline-offset: 2px;
   border-radius: 4px;
 }
-
-@media (max-width: 900px) {
-  /* Generic responsive grid utilities for inline-styled grids elsewhere.
-     m-stack → single column; m-2col → two columns. */
-  .m-stack { grid-template-columns: 1fr !important; }
-  .m-2col { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
-
-  /* Hide non-essential inline content on mobile (e.g. secondary button text). */
-  .hide-mobile { display: none !important; }
-}
-
-/* On very narrow phones, let the composer's option grids stack fully. */
-@media (max-width: 430px) {
-  .m-2col { grid-template-columns: 1fr !important; }
-}

@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { addDays, differenceInCalendarDays, format, isSameDay, setHours, startOfDay } from 'date-fns';
 import { Glyphs } from './glyphs';
 import { firstLine, type PostGroup, type ReviewItem } from './model';
-import { STATUS_LABEL } from './panel';
+import { statusLabel } from './panel';
 
 const SLOT_H = 48;
 const HOURS = Array.from({ length: 24 }, (_, h) => h);
@@ -36,7 +36,7 @@ export function WeekGrid({ weekStart, groups, review, now, onSelect }: {
         at: g.at,
         node: (style) => (
           <button type="button" key={g.key} style={style} className={`cal-ev cal-ev--${g.accountGone ? 'failed' : g.status}`} onClick={() => onSelect(g)}>
-            <span className="cal-ev__time">{format(g.at, 'p')}{g.accountGone ? ' · Account disconnected' : g.status !== 'pending' && ` · ${STATUS_LABEL[g.status]}`}</span>
+            <span className="cal-ev__time">{format(g.at, 'p')}{g.accountGone ? ' · Account disconnected' : g.status !== 'pending' && ` · ${statusLabel(g)}`}</span>
             <span className="cal-ev__title">{firstLine(g.text)}</span>
             <Glyphs platforms={g.platforms} />
           </button>

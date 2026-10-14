@@ -13,7 +13,7 @@ import {
   type VoiceTemplate,
 } from '../db/schema';
 import { draftFromTrends, type AgentDraft } from '../ai/agent';
-import { renderBrandBlock } from '../ai/brand-context';
+import { loadBrandKit, renderBrandBlock } from '../ai/brand-context';
 import { charge, getBalance } from '../credits/ledger';
 import { CREDIT_PRICES } from '../credits/pricing';
 import { draftCost } from '../credits/estimator';
@@ -22,6 +22,7 @@ import { loadWeek, kindQueue, affordableKind, weeklyTarget } from './status';
 import { planSlots } from '../schedule/slots';
 import { generateAgentImage, submitAgentVideo } from './media';
 import { publishOrHold } from './publish';
+import { PLAN_MAX } from './plan';
 
 export type AgentRunResult = {
   userId: string;
@@ -97,13 +98,15 @@ async function context(userId: string, settings: Settings): Promise<Ctx | AgentR
       voiceTemplate: null,
       instructions: null,
       brandSafetyStrict: false,
+      kit: await loadBrandKit(userId),
     },
     'text',
   );
   return { userId, settings, platforms, brandBlock };
 }
 
-export type PreparedPlan = { ctx: Ctx; kinds: PostKind[]; slots: Date[] };
+/** `lease` is the planRunningUntil this run wrote — its ownership token. */
+export type PreparedPlan = { ctx: Ctx; kinds: PostKind[]; slots: Date[]; lease: Date };
 
 /**
  * Fill the user's plan for [now, now + horizon) up to their weekly target ×
@@ -121,34 +124,40 @@ export async function preparePlan(userId: string, opts: { horizonDays?: number; 
   // Claim first, read after: a run that finishes between our read and our
   // claim would otherwise leave us drafting against stale counts.
   const now = new Date();
+  const lease = new Date(now.getTime() + LEASE_MS);
   const claimed = await db()
     .update(agentSettings)
-    .set({ planRunningUntil: new Date(now.getTime() + LEASE_MS) })
+    .set({ planRunningUntil: lease })
     .where(and(eq(agentSettings.userId, userId), or(isNull(agentSettings.planRunningUntil), lt(agentSettings.planRunningUntil, now))))
     .returning({ userId: agentSettings.userId });
   if (claimed.length === 0) return none(userId, 'already_running');
 
   try {
-    const plan = await sizePlan(ctx, opts.horizonDays ?? settings.planHorizonDays ?? 7, opts.max ?? Infinity, now);
-    if (!('ctx' in plan)) await releaseLease(userId);
-    return plan;
+    const max = Math.min(opts.max ?? PLAN_MAX, PLAN_MAX);
+    const plan = await sizePlan(ctx, opts.horizonDays ?? settings.planHorizonDays ?? 7, max, now);
+    if (!('ctx' in plan)) await releaseLease(userId, lease);
+    return 'ctx' in plan ? { ...plan, lease } : plan;
   } catch (e) {
-    await releaseLease(userId);
+    await releaseLease(userId, lease);
     throw e;
   }
 }
 
-async function sizePlan(ctx: Ctx, horizonDays: number, max: number, now: Date): Promise<PreparedPlan | AgentRunResult> {
+async function sizePlan(ctx: Ctx, horizonDays: number, max: number, now: Date): Promise<Omit<PreparedPlan, 'lease'> | AgentRunResult> {
   const { userId, settings, platforms } = ctx;
   const end = new Date(now.getTime() + horizonDays * DAY_MS);
   const [planned, pending, balance, spent] = await Promise.all([
     // Every unreviewed planned draft counts, overdue ones too: they get a new
     // slot on approve. A user who never comes back gets one horizon of drafts,
-    // not a new batch every week.
+    // not a new batch every week. Recent unplanned agent drafts count too:
+    // autopilot drafts from before planning existed have no planned_at.
     db()
       .select({ plannedAt: drafts.plannedAt, media: drafts.media, videoJobId: drafts.videoJobId })
       .from(drafts)
-      .where(and(eq(drafts.userId, userId), eq(drafts.status, 'draft'), isNotNull(drafts.plannedAt))),
+      .where(and(eq(drafts.userId, userId), eq(drafts.status, 'draft'), or(
+        isNotNull(drafts.plannedAt),
+        and(eq(drafts.source, 'agent'), gte(drafts.createdAt, new Date(now.getTime() - horizonDays * DAY_MS))),
+      ))),
     db()
       .select({ draftId: scheduledPosts.draftId, scheduledAt: scheduledPosts.scheduledAt, media: scheduledPosts.media })
       .from(scheduledPosts)
@@ -187,7 +196,7 @@ async function sizePlan(ctx: Ctx, horizonDays: number, max: number, now: Date): 
     used += draftCost(next.kind);
   }
 
-  const taken = [...planned.map((d) => d.plannedAt!), ...pending.map((p) => p.scheduledAt)].map((d) => new Date(d));
+  const taken = [...planned.flatMap((d) => (d.plannedAt ? [d.plannedAt] : [])), ...pending.map((p) => p.scheduledAt)].map((d) => new Date(d));
   const slots = planSlots({ from: now, horizonDays, count: kinds.length, quiet: settings.quietHours, taken });
   if (slots.length === 0) return none(userId, 'plan_full');
   // Videos take the latest slots: their render needs the head start.
@@ -200,6 +209,7 @@ async function sizePlan(ctx: Ctx, horizonDays: number, max: number, now: Date): 
 export async function fillPlan(plan: PreparedPlan): Promise<AgentRunResult> {
   const { userId } = plan.ctx;
   const out: AgentRunResult = { userId, drafted: 0, published: 0, held: 0, draftIds: [] };
+  let lease = plan.lease;
   try {
     for (let i = 0; i < plan.kinds.length; i += CHUNK) {
       const r = await draftBatch(plan.ctx, plan.kinds.slice(i, i + CHUNK), plan.slots.slice(i, i + CHUNK));
@@ -208,11 +218,20 @@ export async function fillPlan(plan: PreparedPlan): Promise<AgentRunResult> {
       out.held += r.held;
       out.draftIds!.push(...(r.draftIds ?? []));
       if (r.reason) { out.reason = r.reason; break; }
-      // Heartbeat: a long run (images take a minute each) keeps its lease.
-      await db().update(agentSettings).set({ planRunningUntil: new Date(Date.now() + LEASE_MS) }).where(eq(agentSettings.userId, userId));
+      // Heartbeat: a long run (images take a minute each) keeps its lease —
+      // only while it still owns it. Lost (it expired and another run claimed
+      // it): stop, or two runs draft the same horizon.
+      const next = new Date(Date.now() + LEASE_MS);
+      const kept = await db()
+        .update(agentSettings)
+        .set({ planRunningUntil: next })
+        .where(and(eq(agentSettings.userId, userId), eq(agentSettings.planRunningUntil, lease)))
+        .returning({ userId: agentSettings.userId });
+      if (kept.length === 0) { out.reason = 'lease_lost'; return out; }
+      lease = next;
     }
   } finally {
-    await releaseLease(userId);
+    await releaseLease(userId, lease);
   }
   return out;
 }
@@ -223,8 +242,12 @@ export async function planPeriod(userId: string, opts: { horizonDays?: number; m
   return 'ctx' in plan ? fillPlan(plan) : plan;
 }
 
-const releaseLease = (userId: string) =>
-  db().update(agentSettings).set({ planRunningUntil: null, lastRunAt: new Date() }).where(eq(agentSettings.userId, userId));
+/** Release only our own lease: an expired run must not free another run's. */
+const releaseLease = (userId: string, lease: Date) =>
+  db()
+    .update(agentSettings)
+    .set({ planRunningUntil: null, lastRunAt: new Date() })
+    .where(and(eq(agentSettings.userId, userId), eq(agentSettings.planRunningUntil, lease)));
 
 /**
  * Write one model call's worth of posts: kinds[i] is what post i becomes,

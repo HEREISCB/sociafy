@@ -15,6 +15,10 @@ const state = vi.hoisted(() => ({
   inserts: {} as Record<string, Record<string, unknown>[]>,
   wheres: [] as { table: string; params: unknown[] }[],
   sets: [] as Record<string, unknown>[],
+  /** Queued answers for successive drafts selects (then falls back to `drafts`). */
+  draftReads: [] as Record<string, unknown>[][],
+  /** An update whose where names this video job matches no row (the clip landed). */
+  landedJob: null as string | null,
 }));
 
 vi.mock('../db', async () => {
@@ -25,7 +29,7 @@ vi.mock('../db', async () => {
   const record = (t: any, w: any) => state.wheres.push({ table: getTableName(t), params: w ? dialect.sqlToQuery(w).params : [] });
   const rowsFor = (name: string) =>
     name === 'agent_settings' ? (state.settings ? [state.settings] : [])
-    : name === 'drafts' ? state.drafts
+    : name === 'drafts' ? (state.draftReads.shift() ?? state.drafts)
     : name === 'scheduled_posts' ? state.pending
     : name === 'connected_accounts' ? state.accounts
     : [];
@@ -54,6 +58,7 @@ vi.mock('../db', async () => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           where: (w: any) => {
             record(t, w);
+            if (state.landedJob && dialect.sqlToQuery(w).params.includes(state.landedJob)) return { returning: () => Promise.resolve([]) };
             const id = dialect.sqlToQuery(w).params.find((p) => typeof p === 'string' && p.startsWith('d-')) as string;
             const hit = !state.claimed.has(id);
             state.claimed.add(id);
@@ -65,7 +70,8 @@ vi.mock('../db', async () => {
   };
 });
 
-import { approveDrafts, skipDraft, getPlan, queueApprovedRender, isApproved } from './plan';
+import { approveDrafts, skipDraft, getPlan, queueApprovedRender, isApproved, PLAN_MAX } from './plan';
+import { draftCost } from '../credits/estimator';
 
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = new Date('2026-03-02T06:00:00Z'); // Monday
@@ -85,6 +91,8 @@ beforeEach(() => {
   state.inserts = {};
   state.wheres = [];
   state.sets = [];
+  state.draftReads = [];
+  state.landedJob = null;
 });
 
 describe('approve', () => {
@@ -127,6 +135,17 @@ describe('approve', () => {
     expect(res.approved).toEqual([{ draftId: 'd-1', scheduledAt: at.toISOString(), platforms: ['x'], reslotted: false, rendering: true }]);
     expect(posts()).toEqual([]);
     expect(isApproved({ variants: state.sets[0].variants as never })).toBe(true);
+  });
+
+  it('queues the post now when its clip landed between the read and the approve', async () => {
+    const at = new Date(NOW.getTime() + DAY);
+    const rendering = draft('d-1', { videoJobId: 'job', plannedAt: at, targetPlatforms: ['linkedin'] });
+    const landed = draft('d-1', { plannedAt: at, targetPlatforms: ['linkedin'], media: [{ id: 'm', url: 'https://x/v.mp4', mimeType: 'video/mp4' }] });
+    state.draftReads = [[rendering], [rendering], [landed]]; // rows, reserved, re-read
+    state.landedJob = 'job';
+    const res = await approveDrafts('u1', { all: true }, NOW);
+    expect(res.approved).toEqual([{ draftId: 'd-1', scheduledAt: at.toISOString(), platforms: ['linkedin'], reslotted: false }]);
+    expect(posts()).toHaveLength(1);
   });
 
   it('skips a draft whose text is over a platform limit, naming the platforms', async () => {
@@ -222,6 +241,19 @@ describe('the plan view', () => {
     expect(v.review[1]).toMatchObject({ id: 'd-2', rendering: true });
     expect(new Date(v.nextEmptySlot).getTime()).toBeGreaterThan(NOW.getTime());
     expect(v.mode).toBe('review');
+  });
+
+  it('counts recent unplanned agent drafts (pre-planning ones) toward the target', async () => {
+    state.drafts = [draft('d-1'), draft('d-2'), draft('d-3', { createdAt: new Date(NOW.getTime() - 30 * DAY) })];
+    const v = await getPlan('u1', NOW);
+    expect(v.counts).toMatchObject({ target: 3, missing: 1 });
+  });
+
+  it('estimates what the next Generate costs, capped at PLAN_MAX posts', async () => {
+    const v = await getPlan('u1', NOW);
+    expect(v.estimatedCredits).toBe(3 * draftCost('text'));
+    state.settings = { ...state.settings, postsPerWeekByContentType: { text: 100, image: 0, video: 0 } };
+    expect((await getPlan('u1', NOW, 30)).estimatedCredits).toBe(PLAN_MAX * draftCost('text'));
   });
 
   it('a render approved ahead of its clip no longer counts as needing review', async () => {

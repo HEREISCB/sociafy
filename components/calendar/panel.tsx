@@ -7,7 +7,7 @@ import { Icon } from '../icons';
 import { apiDelete, apiPatch, friendlyApiError } from '../../lib/ui/fetcher';
 import { PLATFORM_LABELS } from '../../lib/ui/platforms';
 import { Glyphs } from './glyphs';
-import type { PostGroup } from './model';
+import { restorable, type PostGroup } from './model';
 
 const toInput = (d: Date) => format(d, "yyyy-MM-dd'T'HH:mm");
 
@@ -25,8 +25,8 @@ export function PostPanel({ group, onClose, onDone, refresh }: {
   useEffect(() => { ref.current?.showModal(); }, []);
 
   // A past time can't be reused: seed the next whole hour instead.
-  const seed = group.at.getTime() > Date.now() ? group.at : startOfHour(addHours(new Date(), 1));
-  const [when, setWhen] = useState(() => toInput(seed));
+  const [when, setWhen] = useState(() =>
+    toInput(group.at.getTime() > Date.now() ? group.at : startOfHour(addHours(new Date(), 1))));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [disconnected, setDisconnected] = useState(group.accountGone);
@@ -52,7 +52,7 @@ export function PostPanel({ group, onClose, onDone, refresh }: {
   const picked = new Date(when);
   const pickedValid = !Number.isNaN(picked.getTime());
   const unchanged = when === toInput(group.at);
-  const editable = group.status === 'pending' || group.status === 'failed' || group.status === 'canceled';
+  const editable = group.status === 'pending' || group.status === 'failed' || restorable(group);
 
   return (
     <dialog
@@ -74,7 +74,7 @@ export function PostPanel({ group, onClose, onDone, refresh }: {
         </header>
 
         <p className="cal-panel__meta">
-          {STATUS_LABEL[group.status]} · {group.platforms.map((p) => PLATFORM_LABELS[p] ?? p).join(', ')}
+          {statusLabel(group)} · {group.platforms.map((p) => PLATFORM_LABELS[p] ?? p).join(', ')}
         </p>
 
         <p className="cal-panel__text">{group.text}</p>
@@ -126,7 +126,7 @@ export function PostPanel({ group, onClose, onDone, refresh }: {
               <button type="button" className="btn ghost" disabled={busy} onClick={cancel}>Cancel post</button>
             </>
           )}
-          {group.status === 'canceled' && (
+          {restorable(group) && (
             <button type="button" className="btn primary" disabled={busy || !pickedValid} onClick={() => moveTo(picked, 'Restored.')}>
               Restore
             </button>
@@ -149,3 +149,12 @@ export const STATUS_LABEL: Record<PostGroup['status'], string> = {
   failed: 'Failed',
   canceled: 'Canceled',
 };
+
+/** Canceled rows the user didn't cancel say why instead. */
+const CANCEL_REASON: Record<string, string> = {
+  superseded_by_post_now: 'Posted via Post now',
+  account_disconnected: 'Account disconnected',
+};
+
+export const statusLabel = (g: PostGroup) =>
+  (g.status === 'canceled' && g.error && CANCEL_REASON[g.error]) || STATUS_LABEL[g.status];

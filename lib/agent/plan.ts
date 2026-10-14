@@ -14,6 +14,8 @@ type QuietHours = (typeof agentSettings.$inferSelect)['quietHours'];
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** A planned time closer than this is treated as passed: re-slot rather than post the instant it's approved. */
 const SOON_MS = 5 * 60_000;
+/** Most posts one plan run (e.g. one "Generate") drafts — bounds its credit spend. */
+export const PLAN_MAX = 30;
 
 /** Drafts that belong in the review list: autopilot's, plus any draft the user gave a planned slot. */
 const inReview = (userId: string) =>
@@ -32,9 +34,8 @@ export function tooLong(d: Pick<Draft, 'body' | 'perPlatformText' | 'variants' |
  * for it): attachFinishedVideos sees it and schedules the post when the clip
  * lands instead of putting it back up for review.
  */
-type ApprovedVariant = DraftVariant & { approved?: boolean };
-export const isApproved = (d: Pick<Draft, 'variants'>) => !!(d.variants?.[0] as ApprovedVariant | undefined)?.approved;
-const markApproved = (d: Draft): ApprovedVariant[] => {
+export const isApproved = (d: Pick<Draft, 'variants'>) => !!d.variants?.[0]?.approved;
+const markApproved = (d: Draft): DraftVariant[] => {
   const [a, ...rest] = d.variants?.length ? d.variants : [{ label: 'A', text: d.body }];
   return [{ ...a, approved: true }, ...rest];
 };
@@ -63,8 +64,18 @@ export async function getPlan(userId: string, now = new Date(), days?: 7 | 30) {
 
   const target = s ? Math.ceil(weeklyTarget(s) * horizonDays / 7) : 0;
   const scheduledDrafts = new Set(scheduled.map((p) => p.draftId)).size;
-  const planned = review.filter((d) => d.plannedAt).length;
+  // Same count as lib/agent/run.ts sizePlan: planned drafts plus recent
+  // unplanned agent drafts (from before planning existed).
+  const since = now.getTime() - horizonDays * DAY_MS;
+  const planned = review.filter((d) => d.plannedAt || (d.source === 'agent' && new Date(d.createdAt).getTime() >= since)).length;
   const missing = Math.max(0, target - planned - scheduledDrafts);
+  // What one Generate would cost (≈): capped posts × the content mix's average draft cost.
+  const mix = s?.postsPerWeekByContentType ?? { text: 1, image: 0, video: 0 };
+  const mixTotal = mix.text + mix.image + mix.video;
+  const avgCost = mixTotal > 0
+    ? (mix.text * draftCost('text') + mix.image * draftCost('image') + mix.video * draftCost('video')) / mixTotal
+    : draftCost('text');
+  const estimatedCredits = Math.ceil(Math.min(missing, PLAN_MAX) * avgCost);
   // Why a plan run would refuse right now (same checks as lib/agent/run.ts,
   // without its side effects). Accounts are the UI's to check: it has them.
   const blocked = !s ? 'no_settings'
@@ -123,6 +134,8 @@ export async function getPlan(userId: string, now = new Date(), days?: 7 | 30) {
       /** Still to be drafted to reach the target. */
       missing,
     },
+    /** ≈ credits the next Generate would spend (at most PLAN_MAX posts). */
+    estimatedCredits,
     /** no_settings | no_niches | insufficient_credits — the plan can't be filled until fixed. */
     blocked,
     nextEmptySlot: nextFreeSlot(now, s?.quietHours, taken).toISOString(),
@@ -174,17 +187,26 @@ export async function approveDrafts(
   // undated ones go last.
   const ordered = rows.sort((a, b) => (wanted(a)?.getTime() ?? Infinity) - (wanted(b)?.getTime() ?? Infinity));
 
-  for (const d of ordered) {
+  for (let d of ordered) {
     const long = tooLong(d);
     if (long.length) { out.skipped.push({ draftId: d.id, reason: 'too_long', platforms: long }); continue; }
     if (d.videoJobId) {
       const when = wanted(d);
-      await db()
+      // Conditional on the job we read: if the clip landed in between,
+      // attachFinishedVideos already cleared it and saw no approval — 0 rows,
+      // so queue it now like any other draft.
+      const [marked] = await db()
         .update(drafts)
         .set({ variants: markApproved(d), plannedAt: when, updatedAt: new Date() })
-        .where(and(eq(drafts.id, d.id), eq(drafts.userId, userId), eq(drafts.status, 'draft')));
-      out.approved.push({ draftId: d.id, scheduledAt: when?.toISOString() ?? null, platforms: d.targetPlatforms as Platform[], reslotted: false, rendering: true });
-      continue;
+        .where(and(eq(drafts.id, d.id), eq(drafts.userId, userId), eq(drafts.status, 'draft'), eq(drafts.videoJobId, d.videoJobId)))
+        .returning({ id: drafts.id });
+      if (marked) {
+        out.approved.push({ draftId: d.id, scheduledAt: when?.toISOString() ?? null, platforms: d.targetPlatforms as Platform[], reslotted: false, rendering: true });
+        continue;
+      }
+      const [fresh] = await db().select().from(drafts).where(and(eq(drafts.id, d.id), eq(drafts.userId, userId), eq(drafts.status, 'draft'))).limit(1);
+      if (!fresh) { out.skipped.push({ draftId: d.id, reason: 'not_found' }); continue; }
+      d = fresh;
     }
     let at = wanted(d);
     const reslotted = !at || at.getTime() < now.getTime() + SOON_MS;
