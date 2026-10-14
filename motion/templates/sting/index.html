@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en" data-composition-variables='[
+  {"id":"brandName","type":"string","label":"Brand name","default":""},
+  {"id":"tagline","type":"string","label":"Tagline","default":""},
+  {"id":"cta","type":"string","label":"Call to action","default":""},
+  {"id":"hook","type":"string","label":"Hook line (*word* = highlight)","default":""},
+  {"id":"logoUrl","type":"image","label":"Logo","default":""},
+  {"id":"logoReverseUrl","type":"image","label":"Logo (reverse)","default":""},
+  {"id":"fontDisplayUrl","type":"string","label":"Display font woff2 URL","default":""},
+  {"id":"fontBodyUrl","type":"string","label":"Body font woff2 URL","default":""},
+  {"id":"musicUrl","type":"string","label":"Music URL","default":""},
+  {"id":"style","type":"enum","label":"Style","default":"soft","options":[{"value":"soft","label":"Soft"},{"value":"bold","label":"Bold"}]},
+  {"id":"musicMood","type":"enum","label":"Music mood","default":"none","options":[{"value":"calm","label":"Calm"},{"value":"upbeat","label":"Upbeat"},{"value":"cinematic","label":"Cinematic"},{"value":"none","label":"None"}]}
+]'>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <link rel="stylesheet" href="kit.css" />
+    <script src="gsap.min.js"></script>
+    <script src="kit.js"></script>
+    <style>
+      #sting { gap: 0; }
+      #glow { position: absolute; left: 50%; top: 50%; width: 1200px; height: 1200px; margin: -600px 0 0 -600px; border-radius: 50%; background: radial-gradient(circle, var(--p) 0%, transparent 62%); opacity: 0; }
+      #lockup { position: relative; display: flex; align-items: center; justify-content: center; }
+      #lockup img { max-width: 860px; max-height: 420px; width: auto; height: auto; display: block; object-fit: contain; }
+      .h #lockup img { max-width: 1000px; max-height: 340px; }
+      #lockup .tile { padding: 36px 52px; border-radius: 48px; }
+      #word { font-size: 150px; line-height: 1.1; white-space: nowrap; text-align: center; }
+      #rule { width: 120px; height: 4px; border-radius: 2px; background: var(--grad); margin: 64px 0 52px; }
+      .h #rule { margin: 48px 0 40px; }
+      #tag { width: 900px; text-align: center; font-size: 64px; line-height: 1.16; }
+      .h #tag { width: 1400px; }
+      #sting #cta { margin-top: 64px; }
+      .h #sting #cta { margin-top: 48px; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="7" data-width="1080" data-height="1920"></div>
+    <script>
+      MK.boot({}, (k) => {
+        const { v, V, tl, el, words, fit, ROOT, logo, logoTile, DUR } = k;
+        const s = el("div", { className: "scene", id: "sting" }, ROOT);
+        const glow = el("div", { id: "glow" }, s);
+        const lock = el("div", { id: "lockup" }, s);
+        let wordEls = null;
+        if (logo) {
+          const host = logoTile ? el("div", { className: "tile" }, lock) : lock;
+          el("img", { src: logo.src, alt: "" }, host);
+        } else {
+          const w = el("div", { id: "word", className: "disp" }, lock);
+          w.style.width = (V ? 920 : 1600) + "px";
+
+          w.textContent = "";
+          // one mask, letters rise inside it (per-letter masks would break kerning)
+          const m = el("span", { className: "w" }, w);
+          [...v.brandName].forEach((ch) => el("span", { textContent: ch === " " ? "\u00a0" : ch }, m));
+          fit(w, V ? 170 : 190, 420, 40);
+          wordEls = m.children;
+        }
+        const rule = el("div", { id: "rule" }, s);
+        const tag = el("div", { id: "tag", className: "disp grad" }, s);
+        const tw = words(tag, v.tagline);
+        fit(tag, V ? 68 : 64, V ? 250 : 170, 28);
+        const cta = el("div", { id: "cta" }, s);
+        el("span", { id: "ctaTxt", textContent: k.plain(v.cta) }, cta);
+        cta.insertAdjacentHTML("beforeend", k.ARROW);
+        fit(cta.firstChild, V ? 42 : 38, 136, 22);
+
+        // the lockup starts alone at true centre, then makes room for tagline + CTA
+        const lift = k.H / 2 - (lock.offsetTop + lock.offsetHeight / 2);
+        k.show(s, 0);
+        tl.fromTo(glow, { opacity: 0, scale: 0.4 }, { opacity: 0.38, scale: 1, duration: 2.2, ease: "expo.out" }, 0.1);
+        tl.to(glow, { opacity: 0.22, scale: 1.12, duration: DUR - 2.3, ease: "sine.inOut" }, 2.3);
+        tl.set(lock, { y: lift }, 0);
+        if (wordEls) k.rise(wordEls, 0.3, 0.035, 1.1);
+        else tl.fromTo(lock, { opacity: 0, scale: 1.1, filter: "blur(24px)", clipPath: "inset(0% 50% 0% 50%)" },
+          { opacity: 1, scale: 1, filter: "blur(0px)", clipPath: "inset(0% 0% 0% 0%)", duration: 1.5, ease: "expo.out" }, 0.3);
+        tl.to(lock, { y: 0, duration: 1.1, ease: "expo.inOut" }, 2.0);
+        tl.fromTo(rule, { scaleX: 0, opacity: 0 }, { scaleX: 1, opacity: 1, duration: 0.9, ease: "expo.out" }, 2.65);
+        k.rise(tw, 2.75, 0.06, 0.95);
+        tl.fromTo(cta, { opacity: 0, y: 36, scale: 0.94 }, { opacity: 1, y: 0, scale: 1, duration: 0.9, ease: "expo.out" }, 3.5);
+        tl.to(cta, { scale: 0.965, duration: 0.14, ease: "power2.in" }, 4.7).to(cta, { scale: 1, duration: 0.6, ease: "back.out(2.2)" }, 4.84);
+        tl.fromTo(s, { scale: 1.04 }, { scale: 1, duration: DUR, ease: "power2.out" }, 0);
+      }).then(({ tl }) => {
+        window.__timelines["main"] = tl;
+        if (window.__hfForceTimelineRebind) window.__hfForceTimelineRebind();
+        tl.seek(0);
+      });
+    </script>
+  </body>
+</html>

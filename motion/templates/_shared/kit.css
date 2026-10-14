@@ -1,0 +1,59 @@
+/* Shared look for all Sociafy motion templates. Colors arrive as CSS vars set by kit.js. */
+@font-face { font-family: "MDisplay"; src: url("fonts/poppins-500.woff2") format("woff2"); font-weight: 500; }
+@font-face { font-family: "MDisplay"; src: url("fonts/poppins-600.woff2") format("woff2"); font-weight: 600; }
+@font-face { font-family: "MDisplay"; src: url("fonts/poppins-700.woff2") format("woff2"); font-weight: 700; }
+@font-face { font-family: "MBody"; src: url("fonts/inter-400.woff2") format("woff2"); font-weight: 400; }
+@font-face { font-family: "MBody"; src: url("fonts/inter-500.woff2") format("woff2"); font-weight: 500; }
+@font-face { font-family: "MBody"; src: url("fonts/inter-600.woff2") format("woff2"); font-weight: 600; }
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+#root {
+  position: relative; width: 100%; height: 100%; overflow: hidden;
+  background: var(--bg); color: var(--fg);
+  font-family: var(--fb), "MBody", ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased; text-rendering: geometricPrecision;
+}
+.disp { font-family: var(--fd), "MDisplay", "MBody", ui-sans-serif, system-ui, sans-serif; font-weight: 600; letter-spacing: -0.03em; }
+.bold .disp { font-weight: 700; letter-spacing: -0.04em; }
+
+/* ambient field */
+#bg { position: absolute; inset: 0; overflow: hidden; }
+.blob { position: absolute; border-radius: 50%; filter: blur(140px); }
+#blobA { width: 1000px; height: 1000px; left: -360px; top: -420px; background: var(--p); opacity: var(--blobO); }
+#blobB { width: 900px; height: 900px; right: -320px; bottom: -380px; background: var(--s); opacity: var(--blobO); }
+#veil { position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 45%, var(--bg) 0%, transparent 70%); opacity: 0.55; }
+
+.scene { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; opacity: 0; }
+
+/* word masks for staggered rises */
+.w { display: inline-block; overflow: hidden; vertical-align: top; padding: 0 0.04em 0.14em; margin-bottom: -0.14em; }
+.w > span { display: inline-block; }
+.kw { color: var(--hl); }
+.grad .kw, .gtext { background: var(--grad); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; color: var(--hl); }
+
+/* top-left brand chip */
+#chip { position: absolute; left: 72px; top: 72px; display: flex; align-items: center; gap: 16px; height: 80px; opacity: 0; }
+.h #chip { left: 84px; top: 64px; }
+#chip img { height: 64px; width: auto; max-width: 320px; object-fit: contain; display: block; }
+#chip .name { font-size: 30px; font-weight: 600; white-space: nowrap; max-width: 520px; overflow: hidden; text-overflow: ellipsis; }
+.tile { background: #fff; border-radius: 16px; padding: 8px 14px; display: flex; align-items: center; }
+
+/* end card */
+#end { gap: 56px; padding: 0 90px; }
+.h #end { gap: 48px; }
+#endLogo { display: flex; align-items: center; justify-content: center; }
+#endLogo img { max-width: 800px; max-height: 340px; width: auto; height: auto; display: block; object-fit: contain; }
+.h #endLogo img { max-width: 760px; max-height: 260px; }
+#endLogo .tile { padding: 28px 40px; border-radius: 40px; }
+#endName { font-size: 130px; line-height: 1.1; white-space: nowrap; text-align: center; }
+#endTag { width: 880px; text-align: center; font-size: 52px; line-height: 1.2; color: var(--mute); }
+.h #endTag { width: 1300px; }
+#cta {
+  display: flex; align-items: center; gap: 18px; height: 124px; padding: 0 64px; border-radius: 999px;
+  background: var(--ctaBg); color: var(--ctaFg); font-size: 42px; font-weight: 600; white-space: nowrap; max-width: 920px;
+  box-shadow: 0 28px 60px -30px var(--shadow);
+}
+.bold #cta { border-radius: 20px; }
+#cta svg { width: 34px; height: 34px; flex: none; }
+#ctaTxt { overflow: hidden; text-overflow: ellipsis; }

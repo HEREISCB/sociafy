@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en" data-composition-variables='[
+  {"id":"brandName","type":"string","label":"Brand name","default":""},
+  {"id":"tagline","type":"string","label":"Tagline","default":""},
+  {"id":"cta","type":"string","label":"Call to action","default":""},
+  {"id":"hook","type":"string","label":"Hook line (*word* = highlight)","default":""},
+  {"id":"logoUrl","type":"image","label":"Logo","default":""},
+  {"id":"logoReverseUrl","type":"image","label":"Logo (reverse)","default":""},
+  {"id":"fontDisplayUrl","type":"string","label":"Display font woff2 URL","default":""},
+  {"id":"fontBodyUrl","type":"string","label":"Body font woff2 URL","default":""},
+  {"id":"musicUrl","type":"string","label":"Music URL","default":""},
+  {"id":"style","type":"enum","label":"Style","default":"soft","options":[{"value":"soft","label":"Soft"},{"value":"bold","label":"Bold"}]},
+  {"id":"musicMood","type":"enum","label":"Music mood","default":"none","options":[{"value":"calm","label":"Calm"},{"value":"upbeat","label":"Upbeat"},{"value":"cinematic","label":"Cinematic"},{"value":"none","label":"None"}]}
+]'>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <link rel="stylesheet" href="kit.css" />
+    <script src="gsap.min.js"></script>
+    <script src="kit.js"></script>
+    <style>
+      #hookTxt, #kickTxt { text-align: center; line-height: 1.08; width: 900px; }
+      .h #hookTxt, .h #kickTxt { width: 1500px; }
+      #facts { gap: 0; padding: 0 90px; }
+      .h #facts { flex-direction: row; align-items: stretch; justify-content: center; padding: 0 110px; }
+      .fact { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; width: 900px; padding: 64px 0; }
+      .h .fact { width: auto; flex: 1; padding: 0 40px; }
+      .num { line-height: 1.04; white-space: nowrap; font-variant-numeric: tabular-nums; width: 100%; }
+      .stmt { line-height: 1.1; width: 100%; color: var(--fg); }
+      .lab { margin-top: 18px; font-size: 46px; line-height: 1.25; color: var(--mute); font-weight: 500; width: 100%; }
+      .h .lab { font-size: 38px; }
+      .rule { position: absolute; left: 120px; right: 120px; top: 0; height: 2px; background: var(--line); transform-origin: 50% 50%; }
+      .h .rule { left: 0; right: auto; top: 18%; bottom: 18%; width: 2px; height: auto; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="15" data-width="1080" data-height="1920"></div>
+    <script>
+      MK.boot(
+        {
+          hook: "Numbers that *speak* for themselves",
+          facts: ["3x faster replies", "40% less churn", "10,000+ teams"],
+          lines: [],
+        },
+        (k) => {
+          const { v, V, tl, el, words, fit, ROOT } = k;
+
+          // ---- hook 0 → 3.1 ----
+          const sHook = el("div", { className: "scene", id: "hook" }, ROOT);
+          const hk = el("div", { id: "hookTxt", className: "disp grad" }, sHook);
+          const hw = words(hk, v.hook);
+          fit(hk, V ? 112 : 120, V ? 760 : 560, 40);
+          k.show(sHook, 0, 3.2);
+          k.rise(hw, 0.3, 0.08, 1.0);
+          tl.fromTo(hk, { scale: 1.04 }, { scale: 1, duration: 3, ease: "power2.out" }, 0.3);
+          k.sink(hw, 2.75);
+
+          // ---- facts 3.3 → 10.7 ----
+          const F = v.facts.slice(0, 3).map(k.parseFact), n = F.length;
+          const sF = el("div", { className: "scene", id: "facts" }, ROOT);
+          const numSize = V ? [260, 230, 200][n - 1] : [250, 190, 160][n - 1];
+          const boxW = V ? 900 : (1700 - 80 * n) / n;
+          const items = F.map((f, i) => {
+            const box = el("div", { className: "fact" }, sF);
+            if (i) el("div", { className: "rule" }, box);
+            let big, num = null;
+            if (f.tok) {
+              big = el("div", { className: "num disp" }, box);
+              // size against the final string so the count-up never overflows
+              big.textContent = f.tok; fit(big, numSize, numSize * 1.3, 48);
+              const w = el("span", { className: "w" }); const s = el("span", { textContent: f.tok, className: "gtext" }, w);
+              big.textContent = ""; big.appendChild(w); num = s;
+            } else {
+              big = el("div", { className: "stmt disp" }, box);
+            }
+            const lab = el("div", { className: f.tok ? "lab" : "stmt disp" }, box);
+            const lw = words(lab, f.label || "");
+            if (f.tok) fit(lab, V ? 46 : 38, V ? 120 : 160, 22);
+            else { big.remove(); fit(lab, Math.round(numSize * 0.42), V ? 260 : 300, 30); }
+            return { f, box, num, lw, rule: box.querySelector(".rule"), w: boxW };
+          });
+          k.show(sF, 3.25, 10.75);
+          const gap = Math.min(2.1, 5.6 / n);
+          items.forEach((it, i) => {
+            const at = 3.35 + i * gap;
+            if (it.rule) tl.fromTo(it.rule, V ? { scaleX: 0 } : { scaleY: 0 }, V ? { scaleX: 1, duration: 1, ease: "expo.out" } : { scaleY: 1, duration: 1, ease: "expo.out" }, at - 0.1);
+            if (it.num) {
+              k.rise([it.num], at, 0, 1.0);
+              const f = it.f, o = { v: 0 };
+              tl.fromTo(o, { v: 0 }, { v: f.n, duration: 1.5, ease: "power3.out", onUpdate: () => (it.num.textContent = f.pre + k.fmtNum(o.v, f) + f.suf) }, at);
+            }
+            k.rise(it.lw, at + (it.num ? 0.18 : 0), 0.05, 0.9);
+            // earlier facts step back so the newest one leads
+            items.slice(0, i).forEach((p) => tl.to(p.box, { opacity: 0.42, duration: 0.6, ease: "power2.out" }, at));
+          });
+          if (n > 1) tl.to(items.map((it) => it.box), { opacity: 1, duration: 0.7, ease: "power2.out", stagger: 0.06 }, 3.35 + n * gap + 0.1);
+          tl.to(sF, { y: V ? -40 : -24, duration: 7.4, ease: "sine.inOut" }, 3.3);
+          tl.to(items.map((it) => it.box), { opacity: 0, y: -30, filter: "blur(10px)", duration: 0.45, ease: "power3.in", stagger: 0.05 }, 10.25);
+
+          // ---- kicker (lines[0]) then end card ----
+          let endAt = 11.0;
+          if (v.lines[0]) {
+            const sK = el("div", { className: "scene", id: "kick" }, ROOT);
+            const kt = el("div", { id: "kickTxt", className: "disp grad" }, sK);
+            const kw = words(kt, v.lines[0]);
+            fit(kt, V ? 104 : 112, V ? 700 : 520, 40);
+            k.show(sK, 10.85, 13.0);
+            k.rise(kw, 10.95, 0.07, 1.0);
+            k.sink(kw, 12.55);
+            endAt = 12.9;
+          }
+          k.chip(0.6, endAt - 0.45);
+          k.endCard(endAt, { tagline: true });
+        }
+      ).then(({ tl }) => {
+        window.__timelines["main"] = tl;
+        if (window.__hfForceTimelineRebind) window.__hfForceTimelineRebind();
+        tl.seek(0);
+      });
+    </script>
+  </body>
+</html>
