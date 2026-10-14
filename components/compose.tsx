@@ -746,6 +746,8 @@ type Account = {
   handle: string | null;
   displayName: string | null;
   avatarUrl: string | null;
+  isStub: boolean;
+  lastRefreshError: string | null;
 };
 
 interface ComposeProps {
@@ -2373,7 +2375,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
         platforms: fullPlatforms,
       });
       if (!r.scheduled?.length) {
-        setToast('No connected accounts for the selected platforms — connect on Onboarding.');
+        setToast('No connected accounts for the selected platforms — connect in Connections.');
       } else {
         setToast(`Scheduled to ${r.scheduled.map((s) => s.platform).join(', ')}.`);
         setTimeout(() => onDone?.(), 800);
@@ -2756,6 +2758,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
           <div className="card-body distribution-row" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             {PLATFORM_LIST.map((p) => {
               const isConnected = connectedShorts.includes(p.id);
+              const acct = accounts?.find((a) => PLATFORM_TO_SHORT[a.platform] === p.id);
               const isSelected = platforms.includes(p.id);
               const supportsMode = p.supports[mode];
               // Selected chips always read as "on". Unsupported-for-this-mode
@@ -2763,9 +2766,13 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
               const opacity = isSelected ? 1 : supportsMode ? (isConnected ? 1 : 0.6) : 0.35;
               const title = !supportsMode
                 ? (p.hint[mode] ?? `${p.label} doesn't accept ${mode} posts.`)
-                : isConnected
-                  ? 'Connected'
-                  : 'Not connected — connect in Onboarding to actually post';
+                : acct?.isStub
+                  ? "Demo account — posts here won't go anywhere. Connect the real account in Connections."
+                  : acct?.lastRefreshError
+                    ? "Reconnect needed — the token refresh failed, so posts here won't publish. Reconnect in Connections."
+                    : isConnected
+                      ? 'Connected'
+                      : 'Not connected — connect in Connections to actually post';
               return (
                 <button
                   key={p.id}
@@ -2787,6 +2794,11 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                       aria-label="not connected"
                     >
                       ·
+                    </span>
+                  )}
+                  {(acct?.isStub || acct?.lastRefreshError) && supportsMode && (
+                    <span style={{ fontSize: 9.5, fontFamily: 'var(--mono)', color: 'var(--warn)', marginLeft: 4 }}>
+                      {acct.isStub ? 'demo' : 'reconnect'}
                     </span>
                   )}
                 </button>
@@ -3227,7 +3239,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                       const recoveryHint = isMetaNoPage
                         ? 'You didn\'t pick a Page on the "Select business assets" screen. Reconnect Facebook and choose your Page from the Page dropdown.'
                         : isMetaPermission
-                        ? 'Reconnect Facebook from Onboarding and approve every page-publishing permission.'
+                        ? 'Reconnect Facebook in Connections and approve every page-publishing permission.'
                         : isAuthExpired
                           ? 'Reconnect this platform — the access token expired or was revoked.'
                           : isRateLimit
@@ -3266,7 +3278,7 @@ const Compose: React.FC<ComposeProps> = ({ draftId, onDone }) => {
                                 <span>{recoveryHint}</span>
                                 {(isMetaPermission || isMetaNoPage || isAuthExpired) && (
                                   <a
-                                    href="/onboarding"
+                                    href="/dashboard?tab=connections"
                                     style={{ marginLeft: 'auto', color: 'var(--accent)', fontWeight: 600, textDecoration: 'underline' }}
                                   >
                                     Reconnect →

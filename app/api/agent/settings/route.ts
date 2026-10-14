@@ -102,18 +102,22 @@ export async function PATCH(req: NextRequest) {
       });
     }
 
-    // Mark profile as onboarded on first save only (idempotent). Gates the
-    // /onboarding redirect — once set, /onboarding sends them to /dashboard.
-    await db()
-      .update(profiles)
-      .set({ onboardedAt: new Date() })
-      .where(and(eq(profiles.id, user.id), isNull(profiles.onboardedAt)));
-    // Cover the rare case where the profile row doesn't exist yet (Clerk
-    // webhook usually creates it on signup but it could lag).
-    await db()
-      .insert(profiles)
-      .values({ id: user.id, onboardedAt: new Date() })
-      .onConflictDoNothing({ target: profiles.id });
+    // Mark profile as onboarded once autopilot is switched on — the last step
+    // of onboarding ("Enter Sociafy"). Stamping it on the first save (the
+    // Niches step) bounced anyone who reloaded or came back from OAuth
+    // mid-setup to /dashboard, so autopilot never got enabled. Idempotent.
+    if (body.enabled === true) {
+      await db()
+        .update(profiles)
+        .set({ onboardedAt: new Date() })
+        .where(and(eq(profiles.id, user.id), isNull(profiles.onboardedAt)));
+      // Cover the rare case where the profile row doesn't exist yet (Clerk
+      // webhook usually creates it on signup but it could lag).
+      await db()
+        .insert(profiles)
+        .values({ id: user.id, onboardedAt: new Date() })
+        .onConflictDoNothing({ target: profiles.id });
+    }
 
     // Read the website into a brand brief after the response — a slow or dead
     // site must never slow down or fail the save. Stale = the URL changed since

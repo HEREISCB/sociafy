@@ -3,6 +3,7 @@
 import { SignIn, ClerkLoading, ClerkLoaded } from '@clerk/nextjs';
 import Link from 'next/link';
 import { AuthLoading } from '../../../../components/auth-loading';
+import { safeNextPath } from '../../../../lib/safe-next';
 
 /**
  * Free-try visitors sign up to unlock a blurred result; send them back to it
@@ -14,6 +15,12 @@ function tryReturn(): string | null {
   if (typeof window === 'undefined') return null;
   const next = new URLSearchParams(window.location.search).get('redirect_url');
   return next && /^\/(try-(image|video)|free-[a-z0-9-]{3,60})(\?id=[0-9a-f-]{36}(&download=1)?)?$/.test(next) ? next : null;
+}
+
+/** In-app "Sign in" links pass ?next=<path> (e.g. /onboarding); honour it, same-site only. */
+function nextReturn(): string {
+  if (typeof window === 'undefined') return '/dashboard';
+  return safeNextPath(new URLSearchParams(window.location.search).get('next'), '/dashboard');
 }
 
 export default function Page() {
@@ -49,7 +56,7 @@ export default function Page() {
               },
             }}
             signUpUrl="/sign-up"
-            forceRedirectUrl={tryReturn() ?? '/dashboard'}
+            forceRedirectUrl={tryReturn() ?? nextReturn()}
           />
         </ClerkLoaded>
       </div>

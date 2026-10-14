@@ -4,7 +4,7 @@ import React, { Fragment, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Icon, Pglyph } from './icons';
 import { apiPatch, useApi } from '../lib/ui/fetcher';
-import { PLATFORM_TO_SHORT, SHORT_TO_PLATFORM } from '../lib/ui/platforms';
+import { PLATFORM_LABELS, PLATFORM_TO_SHORT, SHORT_TO_PLATFORM, oauthErrorCopy } from '../lib/ui/platforms';
 import type { Platform } from '../lib/db/schema';
 import { estimateWeeklyBurn, weeksOfRunway, type ContentMixWeekly } from '../lib/credits/estimator';
 import { recommendPlan } from '../lib/agent/recommend';
@@ -48,7 +48,11 @@ type Account = {
   platform: Platform;
   handle: string | null;
   isStub: boolean;
+  lastRefreshError: string | null;
 };
+
+// Survives the OAuth round-trip and reloads, so nobody restarts at step 1.
+const STEP_KEY = 'sociafy:onboardingStep';
 
 const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
   const [step, setStep] = useState(0);
@@ -62,19 +66,30 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
   // save attempt. When a PATCH rejects we keep the user on the current step
   // instead of silently advancing past an unsaved change.
   const [saveError, setSaveError] = useState<string | null>(null);
-  // The OAuth callback reports failures as ?oauth_error=…&platform=… — surface
-  // them instead of silently landing back on "Not connected".
+  // The OAuth callback reports back as ?oauth_error=…&platform=… or
+  // ?connected=…&handle=… — surface either instead of silently landing back
+  // on the Connect step.
   const [oauthError, setOauthError] = useState<{ platform: string; detail: string } | null>(null);
+  const [connectedNotice, setConnectedNotice] = useState<{ platform: string; handle: string | null } | null>(null);
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const detail = params.get('oauth_error');
-    if (!detail) return;
-    queueMicrotask(() => setOauthError({ platform: params.get('platform') ?? 'platform', detail }));
-    params.delete('oauth_error');
-    params.delete('platform');
+    const connected = params.get('connected');
+    const saved = Number(window.sessionStorage.getItem(STEP_KEY));
+    queueMicrotask(() => {
+      if (detail) setOauthError({ platform: params.get('platform') ?? 'platform', detail });
+      if (connected) setConnectedNotice({ platform: connected, handle: params.get('handle') });
+      // Back from OAuth → the Connect step; a plain reload → where they were.
+      if (!detail && !connected && saved > 0 && saved <= 5) setStep(saved);
+    });
+    if (!detail && !connected) return;
+    for (const k of ['oauth_error', 'platform', 'connected', 'handle']) params.delete(k);
     const qs = params.toString();
     window.history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : ''));
   }, []);
+  useEffect(() => {
+    window.sessionStorage.setItem(STEP_KEY, String(step));
+  }, [step]);
   // Brand profile — flows into every AI surface (image, video, text).
   // The richer these fields are, the more on-brand the output. The same
   // fields are editable later from Auto-pilot → Brand profile.
@@ -142,10 +157,13 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
       setPlanVideoPerWeek(settings.postsPerWeekByContentType.video ?? 0);
     }
     // 101 is also the column default, so it can't tell "chose review" from
-    // "never chose" — only an explicit auto threshold overrides our default.
+    // "never chose" on its own. A saved plan (enabledPlatforms set) means the
+    // Plan step ran, so 101 there was an explicit "ask me first".
     if (typeof settings?.autoPublishThreshold === 'number' && settings.autoPublishThreshold <= 100) {
       setPlanAutoPublish(true);
       setPlanThreshold(Math.min(99, Math.max(70, settings.autoPublishThreshold)));
+    } else if (settings?.enabledPlatforms?.length) {
+      setPlanAutoPublish(false);
     }
     if (settings?.weeklyCreditCap != null) setPlanCreditCap(String(settings.weeklyCreditCap));
   }, [settings]);
@@ -155,27 +173,34 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
   // selection if they uncheck something after the initial seed.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (planPlatforms.length === 0 && accounts && accounts.length > 0) {
+    if (accounts && accounts.length > 0 && !planPlatforms.some((p) => accounts.some((a) => a.platform === p))) {
       setPlanPlatforms(accounts.map((a) => a.platform));
     }
   }, [accounts]);
+
+  // Saved platforms that are no longer connected can't be posted to — drop
+  // them everywhere (estimate, save, Ready screen) once accounts have loaded.
+  const activePlatforms = useMemo(
+    () => (accounts ? planPlatforms.filter((p) => accounts.some((a) => a.platform === p)) : planPlatforms),
+    [accounts, planPlatforms],
+  );
 
   // Company identity for GST invoices. Owns its own fetch/save; the Brand
   // step's Continue button drives it (see saveBrandAndContinue).
   const billing = useBillingDetails();
 
   const estimate = useMemo(() => estimateWeeklyBurn({
-    platforms: planPlatforms,
+    platforms: activePlatforms,
     cadencePerWeek: planTextPerWeek + planImagePerWeek + planVideoPerWeek,
     postsPerWeekByContentType: {
       text: planTextPerWeek,
       image: planImagePerWeek,
       video: planVideoPerWeek,
     },
-  }), [planPlatforms, planTextPerWeek, planImagePerWeek, planVideoPerWeek]);
+  }), [activePlatforms, planTextPerWeek, planImagePerWeek, planVideoPerWeek]);
 
   const totalPerWeek = planTextPerWeek + planImagePerWeek + planVideoPerWeek;
-  const recommended = useMemo(() => recommendPlan(planPlatforms, topics), [planPlatforms, topics]);
+  const recommended = useMemo(() => recommendPlan(activePlatforms, topics), [activePlatforms, topics]);
 
   const runwayWeeks = credits ? weeksOfRunway(estimate.weekly, credits.balance) : -1;
   const tierAllocation = credits?.monthlyAllocation ?? 0;
@@ -256,7 +281,13 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
     }
   };
 
+  const noPlatformsError = 'Pick at least one connected platform — autopilot needs somewhere to post. Go back to Connect to add one.';
+
   const savePlanAndContinue = async () => {
+    if (activePlatforms.length === 0) {
+      setSaveError(noPlatformsError);
+      return;
+    }
     setSavingPlan(true);
     setSaveError(null);
     try {
@@ -265,12 +296,12 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
       // cadence + enabledPlatforms + per-type mix + auto-publish setting.
       const cadence = Math.max(1, totalPerWeek);
       await apiPatch('/api/agent/settings', {
-        enabledPlatforms: planPlatforms,
+        enabledPlatforms: activePlatforms,
         cadencePerWeek: cadence,
         // Each draft fans out to every platform; these caps stop the quieter
         // ones (LinkedIn, YouTube) getting the busiest platform's volume.
         postsPerWeekByPlatform: Object.fromEntries(
-          planPlatforms.map((p) => [p, Math.min(cadence, recommended.perPlatform[p] ?? cadence)]),
+          activePlatforms.map((p) => [p, Math.min(cadence, recommended.perPlatform[p] ?? cadence)]),
         ),
         weeklyCreditCap: planCreditCap.trim() === '' ? null : Math.max(0, parseInt(planCreditCap, 10) || 0),
         postsPerWeekByContentType: {
@@ -292,12 +323,17 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
   };
 
   const finish = async () => {
+    if (activePlatforms.length === 0) {
+      setSaveError(noPlatformsError);
+      return;
+    }
     setEnabling(true);
     setSaveError(null);
     try {
       await apiPatch('/api/agent/settings', { enabled: true });
       // The Auto-pilot page reads this to show the first draft being written.
       window.sessionStorage.setItem('sociafy:autopilotStartedAt', String(Date.now()));
+      window.sessionStorage.removeItem(STEP_KEY);
       onDone();
     } catch (e) {
       // "Enter Sociafy" is the button that turns autopilot ON. Walking the
@@ -348,35 +384,45 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
           <>
             <h1>Connect the channels.<br />I&apos;ll handle the <em>rest</em>.</h1>
             <p className="lede">
-              Sociafy needs publish access so it can schedule on your behalf. You can revoke any time. If a platform isn&apos;t configured yet, we&apos;ll connect a demo-only account (won&apos;t post) so you can keep exploring.
+              Sociafy needs publish access so it can schedule on your behalf. You can revoke any time.
             </p>
             {oauthError && (
               <div role="alert" style={{ padding: 12, background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.25)', borderRadius: 10, fontSize: 13, marginBottom: 18, wordBreak: 'break-word' }}>
-                Couldn&apos;t connect {oauthError.platform}: <span className="mono">{oauthError.detail}</span>
+                Couldn&apos;t connect {PLATFORM_LABELS[oauthError.platform] ?? oauthError.platform}. {oauthErrorCopy(oauthError.detail, oauthError.platform)}
+              </div>
+            )}
+            {connectedNotice && !oauthError && (
+              <div role="status" style={{ padding: 12, background: 'oklch(0.96 0.05 155)', border: '1px solid oklch(0.78 0.14 155 / 0.45)', borderRadius: 10, fontSize: 13, marginBottom: 18 }}>
+                {PLATFORM_LABELS[connectedNotice.platform] ?? connectedNotice.platform} connected{connectedNotice.handle ? ` as @${connectedNotice.handle.replace(/^@/, '')}` : ''}.
               </div>
             )}
             <div className="connect-grid">
               {ONBOARD_PLATFORMS.map((p) => {
                 const isConnected = connectedShorts.includes(p.short);
                 const acct = accounts?.find((a) => a.platform === p.id);
+                // A failed refresh or a demo account can't post: don't dress it up as Connected.
+                const reconnect = !!acct?.lastRefreshError;
+                const healthy = isConnected && !reconnect && !acct?.isStub;
                 return (
                   <button
                     type="button"
                     key={p.id}
-                    className={`connect-tile ${isConnected ? 'connected' : ''}`}
-                    onClick={() => !isConnected && startConnect(p.id)}
-                    disabled={isConnected}
+                    className={`connect-tile ${healthy ? 'connected' : ''}`}
+                    onClick={() => !healthy && startConnect(p.id)}
+                    disabled={healthy}
                   >
                     <Pglyph p={p.short} size="xl" />
                     <div className="connect-tile-meta">
                       <div className="connect-tile-name">{p.name}</div>
                       <div className="connect-tile-handle">
                         {isConnected ? (acct?.handle ? `@${acct.handle}` : 'Connected') : 'Not connected'}
-                        {acct?.isStub && <span className="chip ghost mono" style={{ marginLeft: 6 }}>Demo only</span>}
+                        {acct?.isStub && <span className="chip ghost mono" style={{ marginLeft: 6 }}>Demo</span>}
                       </div>
                     </div>
                     <div className="connect-tile-action">
-                      {isConnected ? <><Icon name="check" size={12} /> Connected</> : <>Connect <Icon name="arrow_right" size={12} /></>}
+                      {reconnect ? <><Icon name="alert" size={12} /> Reconnect needed</>
+                        : healthy ? <><Icon name="check" size={12} /> Connected</>
+                        : <>{isConnected ? 'Reconnect' : 'Connect'} <Icon name="arrow_right" size={12} /></>}
                     </div>
                   </button>
                 );
@@ -538,7 +584,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
                 <div className="plan-platform-grid">
                   {ONBOARD_PLATFORMS.map((p) => {
                     const isConnected = connectedShorts.includes(p.short);
-                    const selected = planPlatforms.includes(p.id);
+                    const selected = activePlatforms.includes(p.id);
                     return (
                       <button
                         type="button"
@@ -546,7 +592,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
                         className={`plan-platform ${selected ? 'on' : ''} ${!isConnected ? 'muted' : ''}`}
                         onClick={() => {
                           if (!isConnected) return;
-                          setPlanPlatforms((prev) => prev.includes(p.id) ? prev.filter((x) => x !== p.id) : [...prev, p.id]);
+                          setPlanPlatforms(selected ? activePlatforms.filter((x) => x !== p.id) : [...activePlatforms, p.id]);
                         }}
                         title={isConnected ? p.name : `Connect ${p.name} first`}
                       >
@@ -588,7 +634,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
                 {recommended.cadencePerWeek > 0 && (
                   <div style={{ fontSize: 12, color: 'var(--ink-2)', marginTop: 12, lineHeight: 1.5, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                     <span style={{ flex: 1, minWidth: 220 }}>
-                      <strong>We recommend {recommended.cadencePerWeek}/week</strong> ({planPlatforms.map((p) => `${ONBOARD_PLATFORMS.find((o) => o.id === p)?.name ?? p} ${recommended.perPlatform[p]}`).join(' · ')}). {recommended.why}
+                      <strong>We recommend {recommended.cadencePerWeek}/week</strong> ({activePlatforms.map((p) => `${ONBOARD_PLATFORMS.find((o) => o.id === p)?.name ?? p} ${recommended.perPlatform[p]}`).join(' · ')}). {recommended.why}
                     </span>
                     <button
                       type="button"
@@ -663,7 +709,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
                 <div className="plan-estimate-num mono">
                   <span className="big">{estimate.weekly.toLocaleString()}</span>
                   <span className="muted"> credits / week</span>
-                  <span className="muted" style={{ fontSize: 11 }}> · across {planPlatforms.length || 0} platform{planPlatforms.length === 1 ? '' : 's'}</span>
+                  <span className="muted" style={{ fontSize: 11 }}> · across {activePlatforms.length} platform{activePlatforms.length === 1 ? '' : 's'}</span>
                 </div>
                 <div className="plan-estimate-meta mono">
                   {credits ? (
@@ -693,18 +739,22 @@ const Onboarding: React.FC<OnboardingProps> = ({ onDone }) => {
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 32 }}>
               {[
-                { label: `✓ Connected ${connectedShorts.length} platforms`, sub: connectedShorts.length ? connectedShorts.map((c) => ONBOARD_PLATFORMS.find((p) => p.short === c)?.name).join(' · ') : 'No accounts connected yet' },
+                activePlatforms.length
+                  ? { label: `✓ Posting to ${activePlatforms.length} platform${activePlatforms.length === 1 ? '' : 's'}`, sub: activePlatforms.map((id) => ONBOARD_PLATFORMS.find((p) => p.id === id)?.name ?? id).join(' · ') }
+                  : { label: 'No platforms to post to', sub: 'Go back to Connect and add at least one account', bad: true },
                 { label: `✓ Watching ${topics.length} niches`, sub: topics.join(' · ') || 'None selected' },
                 { label: `✓ Style: ${VOICES.find((v) => v.id === voice)?.name ?? 'Custom'}`, sub: 'Tunable from the autopilot page' },
                 { label: `✓ Brand: ${companyName || 'Not set'}`, sub: brandBio ? `${brandBio.slice(0, 80)}${brandBio.length > 80 ? '…' : ''}` : 'Add a brand bio anytime in Auto-pilot' },
-                { label: `✓ Plan: ${estimate.totalPosts}/wk · ${planAutoPublish ? `auto ≥ ${planThreshold}` : 'drafts only'}`, sub: `~${estimate.weekly} credits / week · ${planPlatforms.length} platform${planPlatforms.length === 1 ? '' : 's'}` },
-              ].map((row, i) => (
+                { label: `✓ Plan: ${estimate.totalPosts}/wk · ${planAutoPublish ? `auto ≥ ${planThreshold}` : 'drafts only'}`, sub: `~${estimate.weekly} credits / week · ${activePlatforms.length} platform${activePlatforms.length === 1 ? '' : 's'}` },
+              ].map((row: { label: string; sub: string; bad?: boolean }, i) => (
                 <div key={i} style={{ padding: '14px 16px', background: 'var(--bg-elev)', border: '1px solid var(--line)', borderRadius: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
                     <div style={{ fontSize: 13.5, fontWeight: 500, marginBottom: 2 }}>{row.label}</div>
                     <div className="mono" style={{ fontSize: 11, color: 'var(--ink-3)' }}>{row.sub}</div>
                   </div>
-                  <Icon name="check" size={14} style={{ color: 'var(--good)' }} />
+                  {row.bad
+                    ? <Icon name="alert" size={14} style={{ color: 'var(--bad)' }} />
+                    : <Icon name="check" size={14} style={{ color: 'var(--good)' }} />}
                 </div>
               ))}
             </div>

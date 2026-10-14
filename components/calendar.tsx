@@ -80,7 +80,7 @@ interface QuickComposeModalProps {
 }
 
 const QuickComposeModal: React.FC<QuickComposeModalProps> = ({ whenIso, onWhenChange, onClose, onScheduled }) => {
-  const accountsApi = useApi<{ platform: Platform }[]>('/api/accounts');
+  const accountsApi = useApi<{ platform: Platform; isStub: boolean; lastRefreshError: string | null }[]>('/api/accounts');
   const [mode, setMode] = useState<QuickMode>('text');
   const [prompt, setPrompt] = useState('');
   const [busy, setBusy] = useState(false);
@@ -101,13 +101,21 @@ const QuickComposeModal: React.FC<QuickComposeModalProps> = ({ whenIso, onWhenCh
   // Instagram/TikTok/YouTube reject text-only outright — offering them here
   // bought a green "Scheduled." toast and a `failed` row hours later.
   const selectable = useMemo(() => connected.filter((p) => supportsKind(p, 'text')), [connected]);
+  // Demo and refresh-failed accounts can't publish: flag them and leave them
+  // out of the default selection.
+  const issueFor = useMemo(() => new Map(
+    (accountsApi.data ?? [])
+      .filter((a) => a.isStub || a.lastRefreshError)
+      .map((a) => [a.platform, a.isStub ? 'demo' : 'reconnect needed'] as const),
+  ), [accountsApi.data]);
+  const defaults = selectable.filter((p) => !issueFor.has(p)).slice(0, 4);
   const [platformOverride, setPlatformOverride] = useState<Platform[] | null>(null);
-  const platforms = (platformOverride ?? selectable.slice(0, 4)).filter((p) => supportsKind(p, 'text'));
+  const platforms = (platformOverride ?? defaults).filter((p) => supportsKind(p, 'text'));
 
   const togglePlatform = (p: Platform) => {
     if (!supportsKind(p, 'text')) return;
     setPlatformOverride((cur) => {
-      const base = cur ?? selectable.slice(0, 4);
+      const base = cur ?? defaults;
       return base.includes(p) ? base.filter((x) => x !== p) : [...base, p];
     });
   };
@@ -271,19 +279,26 @@ const QuickComposeModal: React.FC<QuickComposeModalProps> = ({ whenIso, onWhenCh
             {connected.map((p) => {
               const on = platforms.includes(p);
               const blocked = unsupportedReason(p, 'text');
+              const issue = issueFor.get(p);
               return (
                 <span
                   key={p}
                   onClick={() => togglePlatform(p)}
                   className={`prompt-chip ${on ? 'active' : ''}`}
-                  title={blocked ? `${blocked} Use "Edit in compose" to attach media.` : undefined}
+                  title={blocked
+                    ? `${blocked} Use "Edit in compose" to attach media.`
+                    : issue === 'demo'
+                      ? "Demo account — posts here won't go anywhere."
+                      : issue
+                        ? "Token refresh failed — reconnect in Connections or this post won't publish."
+                        : undefined}
                   aria-disabled={blocked ? true : undefined}
                   style={{
                     textTransform: 'capitalize',
                     ...(blocked ? { opacity: 0.4, cursor: 'not-allowed', textDecoration: 'line-through' } : null),
                   }}
                 >
-                  {p}
+                  {p}{issue && <span style={{ textTransform: 'none', opacity: 0.7 }}> · {issue}</span>}
                 </span>
               );
             })}
