@@ -116,19 +116,6 @@
   transition: opacity 180ms var(--ease-out), translate 180ms var(--ease-out);
   @starting-style { opacity: 0; translate: 0 -4px; }
 }
-/* Calendar side panel (a modal <dialog>): slides in from its edge. */
-.cal-panel[open] {
-  transition: translate var(--dur-2) var(--ease-out), opacity var(--dur-2) var(--ease-out);
-  @starting-style { translate: 24px 0; opacity: 0; }
-}
-.cal-panel[open]::backdrop {
-  transition: opacity var(--dur-2) var(--ease-out);
-  @starting-style { opacity: 0; }
-}
-@media (max-width: 900px) {
-  .cal-panel[open] { @starting-style { translate: 0 24px; } }
-}
-
 @media (prefers-reduced-motion: reduce) {
   /* Marketing: everything is just there. */
   .hero > div > *, .hero > figure, .tool-hero > * { animation: none; }
@@ -139,7 +126,7 @@
   /* App: entrances become a short cross-fade, no movement. */
   .plan-card, .cal-rows > li, .conn-row, .plan-row, .sched__row,
   .session__alert, .conn-banner, .ap-alert, .insufficient-credits-banner,
-  .shell-pop, .credit-popover, .cal-panel[open] {
+  .shell-pop, .credit-popover {
     transition: opacity var(--dur-1) linear;
     translate: none;
   }

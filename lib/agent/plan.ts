@@ -110,6 +110,8 @@ export async function getPlan(userId: string, now = new Date(), days?: 7 | 30) {
       /** Platforms whose text is over the limit; approve skips the draft with `too_long`. */
       tooLong: tooLong(d),
       score: d.variants?.[0]?.score ?? null,
+      /** Autopilot's reason for this post ("Why this"), when it gave one. */
+      rationale: d.variants?.[0]?.rationale ?? null,
       source: d.source,
       createdAt: new Date(d.createdAt).toISOString(),
     })),
