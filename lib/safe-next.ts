@@ -10,6 +10,9 @@
  *  - Must start with a single forward slash.
  *  - Must NOT start with `//` or `/\` (protocol-relative / backslash tricks).
  *  - Must NOT contain a colon before any slash (e.g. `javascript:`).
+ *  - Must NOT contain control chars or backslashes anywhere: the URL parser
+ *    strips tab/CR/LF and treats `\` as `/`, so `/\t/evil.com` → `//evil.com`.
+ *  - Must resolve to the same origin (final guard against parser tricks).
  *  - Length cap to bound state size.
  */
 export function safeNextPath(input: string | null | undefined, fallback = '/dashboard'): string {
@@ -17,9 +20,14 @@ export function safeNextPath(input: string | null | undefined, fallback = '/dash
   if (input.length > 512) return fallback;
   if (!input.startsWith('/')) return fallback;
   if (input.startsWith('//') || input.startsWith('/\\')) return fallback;
-  // Strip any embedded NUL or CR/LF that could be used for header injection.
-  if (/[\x00\r\n]/.test(input)) return fallback;
+  // Control chars (header injection, parser-stripped whitespace) and backslashes.
+  if (/[\x00-\x1F\x7F\\]/.test(input)) return fallback;
   // Reject scheme-like prefixes after the first slash too.
   if (/^\/[a-z]+:\/\//i.test(input)) return fallback;
+  try {
+    if (new URL(input, 'https://x.invalid').origin !== 'https://x.invalid') return fallback;
+  } catch {
+    return fallback;
+  }
   return input;
 }

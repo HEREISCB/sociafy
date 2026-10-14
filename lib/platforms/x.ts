@@ -4,7 +4,7 @@ import type { PlatformAdapter, PublishInput, PublishResult } from './types';
 import { PlatformError } from './types';
 import { stubProfile, stubPublish } from './stub';
 
-const AUTH_URL = 'https://twitter.com/i/oauth2/authorize';
+const AUTH_URL = 'https://x.com/i/oauth2/authorize';
 const TOKEN_URL = 'https://api.twitter.com/2/oauth2/token';
 const ME_URL = 'https://api.twitter.com/2/users/me?user.fields=username,profile_image_url,name';
 const TWEET_URL = 'https://api.twitter.com/2/tweets';
@@ -25,7 +25,8 @@ export const xAdapter: PlatformAdapter = {
   },
   buildAuthorizeUrl({ redirectUri, state, codeVerifier }) {
     if (!this.isConfigured()) return `/oauth/x/callback?stub=1&state=${state}`;
-    const challenge = codeVerifier ? toS256(codeVerifier) : 'challenge';
+    if (!codeVerifier) throw new Error('x_missing_code_verifier');
+    const challenge = toS256(codeVerifier);
     const params = new URLSearchParams({
       response_type: 'code',
       client_id: env.platforms.x.clientId!,

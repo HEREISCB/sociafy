@@ -4,7 +4,8 @@ import type { OAuthTokens, PlatformProfile, PublishInput, PublishResult } from '
 export function stubProfile(platform: Platform, userId: string): { tokens: OAuthTokens; profile: PlatformProfile } {
   return {
     tokens: {
-      accessToken: `stub-token-${platform}`,
+      // Plain 'stub': every adapter's publish guard checks accessToken === 'stub'.
+      accessToken: 'stub',
       refreshToken: `stub-refresh-${platform}`,
       expiresAt: null,
       scope: 'stub',

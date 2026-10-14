@@ -28,7 +28,7 @@ export type StatePayload = {
   uid: string;
   platform: string;
   next?: string;
-  cv?: string; // PKCE code verifier (X)
+  n: string; // browser-binding nonce, must match the OAUTH_COOKIE value
   ts: number;
 };
 
@@ -57,6 +57,34 @@ export function verifyState(state: string): StatePayload | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Binds a signed state to the browser that started the flow. Value is
+ * `<nonce>` or `<nonce>.<pkceVerifier>` (both base64url, so no dots inside).
+ * The PKCE verifier lives here, not in state: state is signed, not encrypted,
+ * and rides in the authorize URL. Cleared by the callback on every exit.
+ */
+export const OAUTH_COOKIE = 'sociafy_oauth';
+export const OAUTH_COOKIE_OPTS = {
+  httpOnly: true,
+  secure: IS_PROD,
+  sameSite: 'lax' as const,
+  path: '/api/oauth',
+};
+
+export function makeNonce(): string {
+  return crypto.randomBytes(24).toString('base64url');
+}
+
+/** Returns the PKCE verifier ('' if none) when the cookie matches the state nonce, else null. */
+export function checkOAuthCookie(cookie: string | undefined, nonce: string | undefined): { cv: string } | null {
+  if (!cookie || !nonce) return null;
+  const [n, cv = ''] = cookie.split('.');
+  const a = Buffer.from(n);
+  const b = Buffer.from(nonce);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  return { cv };
 }
 
 export function makeCodeVerifier(): string {
