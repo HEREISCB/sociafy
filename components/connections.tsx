@@ -10,6 +10,7 @@ import type { Platform } from '../lib/db/schema';
 // flow at all, e.g. LinkedIn) from a refresh that genuinely failed — and
 // this is the page that shows the user that banner.
 import { healthFor, toneColor, type Health } from '../lib/ui/health';
+import { PLATFORM_LABELS, oauthErrorCopy, oauthErrorRetryable } from '../lib/ui/platforms';
 
 type Account = {
   id: string;
@@ -144,40 +145,13 @@ type Flash =
   | { kind: 'success'; platform: string; handle: string | null }
   | { kind: 'error'; platform: string; detail: string };
 
-// Map known OAuth callback error codes to plain-English copy. Unknown codes
-// fall back to a generic line so we never surface a raw machine string.
-const OAUTH_ERROR_COPY: Record<string, string> = {
-  access_denied: 'You declined the permission request. Sociafy needs publish access to post for you.',
-  invalid_scope: 'The app is missing a required permission. Try connecting again, or contact support if it persists.',
-  invalid_request: 'The connection request was malformed. Please try connecting again.',
-  invalid_grant: 'The authorization expired before we could finish. Please try connecting again.',
-  server_error: 'The platform had a temporary error. Please try connecting again in a moment.',
-  temporarily_unavailable: 'The platform is temporarily unavailable. Please try again shortly.',
-  state_mismatch: 'The connection couldn\'t be verified (session expired). Please try connecting again.',
-  token_exchange_failed: 'We couldn\'t complete the handshake with the platform. Please try connecting again.',
-  missing_code: 'The platform didn\'t return an authorization code. Please try connecting again.',
-};
-
-function oauthErrorCopy(detail: string): string {
-  return OAUTH_ERROR_COPY[detail] ?? 'Something went wrong while connecting. Please try again.';
-}
-
-const PLATFORM_LABELS: Record<string, string> = {
-  facebook: 'Facebook',
-  instagram: 'Instagram',
-  x: 'X',
-  linkedin: 'LinkedIn',
-  tiktok: 'TikTok',
-  youtube: 'YouTube',
-  reddit: 'Reddit',
-};
-
 const ConnectionsPage: React.FC = () => {
   const { data: accounts, mutate, unauth } = useApi<Account[]>('/api/accounts');
   const { data: scheduled } = useApi<ScheduledPost[]>('/api/schedule');
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [flash, setFlash] = useState<Flash | null>(null);
+  const [disconnectError, setDisconnectError] = useState<string | null>(null);
   // A monotonically-ticking "now" so token-expiry math is pure during render.
   // Refreshes once a minute — enough granularity for the "expires in Xh Ym"
   // labels and avoids the React-19 purity warning on Date.now() in render.
@@ -233,16 +207,20 @@ const ConnectionsPage: React.FC = () => {
 
   const disconnect = async (id: string) => {
     setBusy(id);
+    setDisconnectError(null);
     try {
       await apiDelete(`/api/accounts/${id}`);
       await mutate();
       setConfirmId(null);
+    } catch (e) {
+      const p = accounts?.find((a) => a.id === id)?.platform;
+      setDisconnectError(`Couldn't disconnect ${p ? PLATFORM_LABELS[p] ?? p : 'that account'}${e instanceof Error ? ` (error ${e.message})` : ''}. Please try again.`);
     } finally {
       setBusy(null);
     }
   };
 
-  const { live, stubs, expiring, expired, refreshFailed } = useMemo(() => {
+  const { live, stubs, expiring, expired, refreshFailed, needsAttention } = useMemo(() => {
     const all = accounts ?? [];
     const live = all.filter((a) => !a.isStub);
     const stubs = all.filter((a) => a.isStub);
@@ -256,7 +234,9 @@ const ConnectionsPage: React.FC = () => {
       return new Date(a.tokenExpiresAt).getTime() - now <= 0;
     });
     const refreshFailed = live.filter((a) => !!a.lastRefreshError);
-    return { live, stubs, expiring, expired, refreshFailed };
+    // An expired token whose refresh also failed is one account, not two.
+    const needsAttention = new Set([...expiring, ...expired, ...stubs, ...refreshFailed]).size;
+    return { live, stubs, expiring, expired, refreshFailed, needsAttention };
   }, [accounts, now]);
 
   const publishedByPlatform = new Map<Platform, number>();
@@ -356,7 +336,7 @@ const ConnectionsPage: React.FC = () => {
             <StatCell label="Posts shipped" value={totalPublished} sub="across all channels" />
             <StatCell
               label="Needs attention"
-              value={expiring.length + expired.length + stubs.length + refreshFailed.length}
+              value={needsAttention}
               sub={
                 refreshFailed.length
                   ? `${refreshFailed.length} refresh failed`
@@ -384,6 +364,29 @@ const ConnectionsPage: React.FC = () => {
             connect(p);
           }}
         />
+      )}
+
+      {disconnectError && (
+        <div
+          role="alert"
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 12,
+            padding: '12px 16px',
+            background: 'oklch(0.96 0.045 25)',
+            border: '1px solid var(--bad)',
+            borderRadius: 10,
+            marginBottom: 14,
+            color: 'var(--ink)',
+          }}
+        >
+          <Icon name="alert" size={14} />
+          <div style={{ flex: 1, fontSize: 13, lineHeight: 1.5 }}>{disconnectError}</div>
+          <button className="btn ghost sm" onClick={() => setDisconnectError(null)} aria-label="Dismiss" style={{ padding: '2px 6px' }}>
+            <Icon name="x" size={12} />
+          </button>
+        </div>
       )}
 
       {refreshFailed.length > 0 && (
@@ -552,6 +555,8 @@ const ConnectionsPage: React.FC = () => {
                   <button
                     className="btn ghost sm"
                     title="Disconnect"
+                    aria-label={`Disconnect ${p.name}`}
+                    aria-expanded={confirmId === acct.id}
                     onClick={() => setConfirmId(confirmId === acct.id ? null : acct.id)}
                     style={{
                       padding: '4px 6px',
@@ -914,10 +919,10 @@ const FlashBanner: React.FC<{ flash: Flash; onDismiss: () => void; onRetry: () =
             ? flash.handle
               ? `Signed in as @${flash.handle.replace(/^@/, '')} · tokens stored, ready to post`
               : 'Tokens stored, ready to post'
-            : oauthErrorCopy(flash.detail)}
+            : oauthErrorCopy(flash.detail, flash.platform)}
         </div>
       </div>
-      {!isSuccess && (
+      {!isSuccess && oauthErrorRetryable(flash.detail) && (
         <button
           onClick={onRetry}
           className="btn sm"

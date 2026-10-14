@@ -15,17 +15,19 @@ import OnboardingClient from './client';
  * at step 2 of 6 — so a user who bailed halfway (or clicked through the niche
  * step without picking one) got bounced straight back to the dashboard, where
  * every "Finish setup →" link led here and immediately redirected away again.
- * No niches, no way to pick any.
+ * No niches, no way to pick any. onboardedAt is now only stamped when
+ * autopilot is switched on at the end, and an OAuth round-trip back here
+ * (?connected= / ?oauth_error=) always lands on the page, never the redirect.
  */
 export default async function OnboardingPage({
   searchParams,
 }: {
-  searchParams: Promise<{ force?: string }>;
+  searchParams: Promise<{ force?: string; connected?: string; oauth_error?: string }>;
 }) {
   const { userId } = await auth();
   if (userId) {
     const params = await searchParams;
-    if (!params.force) {
+    if (!params.force && !params.connected && !params.oauth_error) {
       const [profile] = await db()
         .select({ onboardedAt: profiles.onboardedAt, niches: agentSettings.niches })
         .from(profiles)
