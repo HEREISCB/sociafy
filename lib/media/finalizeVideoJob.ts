@@ -3,6 +3,7 @@ import { db } from '../db';
 import { videoJobs, mediaAssets } from '../db/schema';
 import { getSeedanceTask } from '../ai/piapi';
 import { CueError, deleteCueRender, downloadCueRender, getCueRender } from '../ai/cue';
+import { getMotionResult, motionConfigured } from '../ai/motion';
 import { makeMediaKey, publicUrlFor, uploadBuffer } from '../storage/r2';
 import { downloadToBuffer } from './finalize';
 import { refund } from '../credits/ledger';
@@ -56,6 +57,7 @@ export async function finalizeVideoJob(job: VideoJob): Promise<FinalizeVideoResu
   // of "we have bytes" is genuinely shared, everything upstream genuinely is
   // not.
   if (job.provider === 'cue-h3') return finalizeCinemaJob(job);
+  if (job.provider === 'motion-hf') return finalizeMotionJob(job);
 
   const apiKey = process.env.PIAPI_API_KEY;
   if (!apiKey) return { status: 'pending', pollError: 'video_provider_not_configured' };
@@ -151,7 +153,11 @@ async function storeAndClaim(
     console.error('[finalize-video] upload failed:', msg.slice(0, 300));
     return failAndRefund(job, `store_failed: ${msg.slice(0, 200)}`);
   }
+  return claimAsset(job, key, contentType, sizeBytes);
+}
 
+/** The claim half of storeAndClaim, for bytes already in R2 at `key`. */
+async function claimAsset(job: VideoJob, key: string, contentType: string, sizeBytes: number | null): Promise<FinalizeVideoResult> {
   const asset = await db().transaction(async (tx) => {
     const claimed = await tx
       .update(videoJobs)
@@ -250,6 +256,41 @@ async function finalizeCinemaJob(job: VideoJob): Promise<FinalizeVideoResult> {
   // the only copy if the transaction then lost its race and returned pending.
   if (result.status === 'completed') void deleteCueRender(job.providerTaskId);
   return result;
+}
+
+/**
+ * Reconcile one motion-graphics render. The engine uploads straight to the
+ * R2 key we chose at submit (inside the user's prefix) and echoes it back, so
+ * there are no bytes to move — only the claim.
+ */
+async function finalizeMotionJob(job: VideoJob): Promise<FinalizeVideoResult> {
+  if (!motionConfigured()) return { status: 'pending', pollError: 'video_provider_not_configured' };
+  const ageMs = Date.now() - job.createdAt.getTime();
+
+  if (!job.providerTaskId) {
+    if (ageMs > SUBMIT_GRACE_MS) return failAndRefund(job, 'submit_unconfirmed');
+    return { status: 'pending', providerStatus: 'submitting' };
+  }
+
+  let r;
+  try {
+    r = await getMotionResult(job.providerTaskId);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('[finalize-video] motion poll failed:', msg.slice(0, 400));
+    if (ageMs > MAX_AGE_MS) return failAndRefund(job, 'provider_stuck');
+    return { status: 'pending', pollError: msg.slice(0, 200) };
+  }
+
+  if (r.status === 'pending') {
+    if (ageMs > MAX_AGE_MS) return failAndRefund(job, 'provider_stuck');
+    await db().update(videoJobs).set({ updatedAt: new Date() }).where(eq(videoJobs.id, job.id));
+    return { status: 'pending', providerStatus: 'processing' };
+  }
+  if (r.status === 'failed') return failAndRefund(job, `motion_failed: ${r.error ?? 'unknown'}`);
+  // Only a key inside this user's prefix — never let a result point the asset elsewhere.
+  if (!r.videoKey?.startsWith(`users/${job.userId}/`)) return failAndRefund(job, 'store_failed: bad_motion_key');
+  return claimAsset(job, r.videoKey, 'video/mp4', r.sizeBytes ?? null);
 }
 
 async function loadAsset(id: string): Promise<MediaAsset | undefined> {

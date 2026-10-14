@@ -7,6 +7,7 @@ import type { Niche, Platform } from '../../lib/db/schema';
 import type { AgentStatus } from '../../lib/agent/status';
 import { estimateWeeklyBurn } from '../../lib/credits/estimator';
 import { mixFor, platformCaps, presetOf, type MixPreset } from '../../lib/agent/recommend';
+import { motionReady, type AutopilotVideoStyle, type BrandKit, type BrandProfile } from '../../lib/brand/kit';
 
 type Mix = { text: number; image: number; video: number };
 
@@ -63,6 +64,14 @@ const PRESETS: { id: MixPreset; label: string }[] = [
   { id: 'mixed', label: 'Mixed' },
   { id: 'video', label: 'Video-first' },
 ];
+
+const VIDEO_STYLES: { id: AutopilotVideoStyle; label: string }[] = [
+  { id: 'cinema', label: 'Cinema' },
+  { id: 'motion', label: 'Motion graphics' },
+  { id: 'mix', label: 'Mix' },
+];
+
+type BrandPayload = { kit: BrandKit; profile: BrandProfile; motion?: boolean };
 
 const when = (iso: string) =>
   new Date(iso).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' });
@@ -137,6 +146,7 @@ function NichePicker({ value, disabled, onChange }: { value: string[]; disabled?
 export default function PlanSettings() {
   const { data: settings, error: settingsError, mutate: refetchSettings, unauth } = useApi<Settings>('/api/agent/settings');
   const { data: accounts } = useApi<{ platform: Platform }[]>('/api/accounts');
+  const { data: brand, mutate: refetchBrand } = useApi<BrandPayload>('/api/brand-kit');
 
   // After switching on, the server starts filling the plan in the background.
   // `watchFrom` is the planned count at that moment: poll fast until it moves
@@ -223,6 +233,16 @@ export default function PlanSettings() {
     const next = prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p];
     setPlatforms(next);
     if (!(await savePlan({ platforms: next }))) setPlatforms(prev);
+  };
+
+  /** Lives in the brand kit (kit.video.autopilot) — agent_settings has no column for it. */
+  const saveVideoStyle = async (autopilot: AutopilotVideoStyle) => {
+    setSaveError(null);
+    try {
+      await refetchBrand(await apiPatch<BrandPayload>('/api/brand-kit', { video: { ...brand?.kit.video, autopilot } }), { revalidate: false });
+    } catch (e) {
+      setSaveError(friendlyApiError(e));
+    }
   };
 
   const blocked = enabled && status?.blocked ? BLOCKED[status.blocked] : null;
@@ -376,6 +396,15 @@ export default function PlanSettings() {
               ))}
             </div>
           </div>
+          {brand?.motion && (
+            <div className="ap-field">
+              <span className="ap-label">Video style</span>
+              <Choice label="Video style" value={brand.kit.video?.autopilot ?? 'cinema'} options={VIDEO_STYLES} disabled={locked} onChange={saveVideoStyle} />
+              {!motionReady(brand.kit, brand.profile) && (
+                <span className="ap-hint">Motion graphics need your brand name, logo and main color — until then video posts use Cinema. <Link href="/settings/brand">Brand kit</Link></span>
+              )}
+            </div>
+          )}
           <label className="ap-toggle">
             <span>
               Strict brand safety

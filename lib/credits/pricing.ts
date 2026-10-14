@@ -38,6 +38,7 @@ export type CreditAction =
   | 'avatar_video_480p'
   | 'avatar_video_720p'
   | 'video_cinema'
+  | 'video_motion_graphics'
   | 'text_chat';
 
 /** Single source-of-truth credit cost per action. */
@@ -97,6 +98,13 @@ export const CREDIT_PRICES: Record<CreditAction, number> = {
   // which quotes the backend per request. `charge()` takes credits as an
   // argument, not from this table, so the two never disagree on the bill.
   video_cinema: 33,
+  // Sociafy Motion Graphics: brand-kit templates rendered headless on a CPU
+  // container (2 cores, ~2 GiB). Worst case incl. cold start + idle tail ≈ 200
+  // billed seconds ≈ $0.006, plus ~$0.002 for the copy-writing call. Priced
+  // per started 8s of output (see priceForMotion): 5 cr for a 7s sting, 10 cr
+  // for a 15–16s stat/showcase → $0.06–0.12 @business, >85% margin, and still
+  // an order of magnitude under a generated clip.
+  video_motion_graphics: 5,
   // POST /api/v1/chat/completions. Metered per call from the provider's actual
   // token usage by priceForChat() below; this number is only the per-call floor.
   text_chat: 1,
@@ -233,6 +241,16 @@ export function priceForAvatar(
 }
 
 // =====================================================
+// Motion-graphics price helper
+// =====================================================
+
+/** Flat per render: CREDIT_PRICES.video_motion_graphics per started 8s. */
+export function priceForMotion(durationSec: number): { action: CreditAction; credits: number } {
+  const action: CreditAction = 'video_motion_graphics';
+  return { action, credits: CREDIT_PRICES[action] * Math.max(1, Math.ceil(durationSec / 8)) };
+}
+
+// =====================================================
 // Text-post price helper
 // =====================================================
 
@@ -361,6 +379,7 @@ export const ACTION_LABELS: Record<CreditAction, string> = {
   avatar_video_480p: 'Avatar video · 480p',
   avatar_video_720p: 'Avatar video · 720p',
   video_cinema: 'Video · Cinema (sound-on)',
+  video_motion_graphics: 'Video · Motion graphic',
   text_chat: 'API chat / vision',
 };
 

@@ -54,6 +54,17 @@ async function localize(u) {
     return "";
   }
 }
+// A Google Fonts css2 stylesheet URL (what lib/brand/kit.ts brandVariables emits) → the font file itself:
+// display takes the heaviest face listed, body the lightest. Unresolvable → bundled fallback.
+async function googleFont(u, heaviest) {
+  if (typeof u !== "string" || !/^https:\/\/fonts\.googleapis\.com\/css/.test(u)) return u;
+  try {
+    const urls = [...(await (await fetch(u)).text()).matchAll(/url\((https:[^)]+)\)/g)].map((m) => m[1]);
+    return (heaviest ? urls.at(-1) : urls[0]) ?? "";
+  } catch { return ""; }
+}
+vars.fontDisplayUrl = await googleFont(vars.fontDisplayUrl, true);
+vars.fontBodyUrl = await googleFont(vars.fontBodyUrl, false);
 for (const k of ["logoUrl", "logoReverseUrl", "fontDisplayUrl", "fontBodyUrl", "musicUrl"]) vars[k] = await localize(vars[k]);
 if (Array.isArray(vars.screenshots)) vars.screenshots = (await Promise.all(vars.screenshots.slice(0, 8).map(localize))).filter(Boolean);
 

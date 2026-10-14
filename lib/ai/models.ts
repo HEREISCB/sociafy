@@ -17,7 +17,7 @@
 import type { VideoQuality } from '../credits/pricing';
 
 /** Internal backend identifiers. Persisted to videoJobs.provider. Never public. */
-export type VideoBackend = 'piapi-seedance-2' | 'piapi-seedance-2-fast' | 'cue-h3';
+export type VideoBackend = 'piapi-seedance-2' | 'piapi-seedance-2-fast' | 'cue-h3' | 'motion-hf';
 
 export const VIDEO_MODEL_IDS = ['sociafy-motion-1', 'sociafy-cinema-1'] as const;
 export type VideoModelId = (typeof VIDEO_MODEL_IDS)[number];
@@ -109,6 +109,26 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModel> = {
     matchFrameAspect: true,
   },
 };
+
+/**
+ * Brand-kit motion graphics. Deliberately NOT in VIDEO_MODELS: it renders a
+ * fixed template from the brand kit + a topic rather than a prompt, so it has
+ * no place on /v1's model envelope. Only offered when MOTION_ENGINE_URL is set.
+ */
+export const MOTION_GRAPHICS = { backend: 'motion-hf', name: 'Sociafy Motion Graphics' } as const satisfies {
+  backend: VideoBackend;
+  name: string;
+};
+
+/** Templates and their fixed lengths (motion/README.md). 9:16 and 16:9 only. */
+export const MOTION_TEMPLATES = {
+  stat: { label: 'Stat', durationSec: 15 },
+  showcase: { label: 'Showcase', durationSec: 16 },
+  sting: { label: 'Logo sting', durationSec: 7 },
+} as const;
+export type MotionTemplate = keyof typeof MOTION_TEMPLATES;
+export const MOTION_TEMPLATE_IDS = Object.keys(MOTION_TEMPLATES) as MotionTemplate[];
+export const MOTION_ASPECTS = ['9:16', '16:9'] as const;
 
 /** Which backend serves a public model id at these settings. */
 export function backendFor(model: VideoModelId, fast: boolean): VideoBackend {

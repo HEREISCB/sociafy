@@ -29,6 +29,9 @@ export const GOOGLE_FONTS = [
 ] as const;
 export const MUSIC_MOODS = ['calm', 'upbeat', 'cinematic', 'none'] as const;
 export const VIDEO_STYLES = ['soft', 'bold'] as const;
+/** What autopilot video slots render as (brand_kits.kit.video.autopilot; unset = cinema). */
+export const AUTOPILOT_VIDEO_STYLES = ['cinema', 'motion', 'mix'] as const;
+export type AutopilotVideoStyle = (typeof AUTOPILOT_VIDEO_STYLES)[number];
 export const COLOR_ROLES = ['primary', 'secondary', 'background', 'text', 'accent'] as const;
 export type ColorRole = (typeof COLOR_ROLES)[number];
 
@@ -185,5 +188,31 @@ export function brandVariables(
     screenshots: (kit.screenshots ?? []).map((s) => s.url),
     musicMood: kit.music?.mood ?? 'calm',
     style: kit.video?.style ?? 'soft',
+  };
+}
+
+/** Enough of a kit for a motion graphic to look like the brand: name, logo, primary color. */
+export function motionReady(kit: BrandKit, profile: Partial<Pick<BrandProfile, 'companyName'>>): boolean {
+  return !!profile.companyName?.trim() && !!kit.logo?.primary && !!kit.colors?.primary;
+}
+
+/**
+ * brandVariables + generated copy → the motion template variables
+ * (motion/README.md). No font chosen → '' so templates keep their bundled
+ * faces instead of brandVariables' Inter default.
+ */
+export function motionVariables(
+  kit: BrandKit,
+  profile: Partial<Pick<BrandProfile, 'companyName' | 'website'>>,
+  copy: { hook: string; lines: string[]; facts: string[] },
+) {
+  const brand = brandVariables(kit, profile);
+  return {
+    ...brand,
+    fontDisplayUrl: kit.fonts?.display ? brand.fontDisplayUrl : '',
+    fontBodyUrl: kit.fonts?.display || kit.fonts?.body ? brand.fontBodyUrl : '',
+    hook: copy.hook,
+    lines: copy.lines,
+    facts: copy.facts.length ? copy.facts : brand.facts,
   };
 }

@@ -1,7 +1,7 @@
 # Sociafy GPU engines (Modal)
 
 Two serverless GPU services that back Voice Twin (cloning TTS) and Avatar
-(talking-head video). The Next.js app calls them over secret-authed HTTP and
+(talking-head video), plus one CPU service for brand-kit motion graphics. The Next.js app calls them over secret-authed HTTP and
 polls for results; the engines upload artifacts straight to R2.
 
 > The underlying open models are intentionally **not named** in any user-facing
@@ -48,6 +48,34 @@ MODAL_WEBHOOK_SECRET=<same as ENGINE_SECRET>
 Routes share one base URL per engine:
 - voice: `POST /voice/prepare`, `POST /tts/submit`, `GET /tts/result?callId=`
 - avatar: `POST /avatar/submit`, `GET /avatar/result?callId=`
+
+## Motion graphics engine (CPU, `modal/motion_engine.py`)
+
+Renders the `motion/` templates (stat / showcase / sting) with `motion/render.mjs`
+on a 2-core, 2 GiB CPU container. The image bakes in Node 22, ffmpeg, Noto
+fonts, the pinned renderer package and its headless Chrome, plus a copy of
+`motion/`. **Redeploy whenever `motion/` changes** — the templates are baked in.
+
+```bash
+# run from the repo root (the image copies ../motion relative to this file)
+PYTHONIOENCODING=utf-8 PYTHONUTF8=1 modal deploy modal/motion_engine.py
+```
+
+Uses the same `sociafy-engine` and `sociafy-r2` secrets. The app picks the R2
+keys (`users/<id>/…`), the engine uploads the MP4 + a JPEG poster (end card)
+there and echoes the keys back. Then set, in the web app's env:
+
+```
+MOTION_ENGINE_URL=https://<workspace>--sociafy-motion-engine-fastapi-app.modal.run
+```
+
+That variable is the feature flag: unset, every motion-graphics surface is
+hidden (Compose option, autopilot "Video style", the submit route 404s).
+Routes: `POST /motion/submit`, `GET /motion/result?callId=`.
+
+Smoke test after deploy: render one `stat` 9:16 from Compose, check the Modal
+dashboard for wall time/cost (expect ≪ $0.01) and that the clip lands in the
+library. If Linux software-GL renders time out, raise `cpu=` before `timeout=`.
 
 ## Benchmark → lock avatar pricing
 

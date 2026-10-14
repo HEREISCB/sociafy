@@ -1,11 +1,11 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { priceForAvatar, priceForImage, priceForVideo } from '../../lib/credits/pricing';
-import { VIDEO_MODELS, type VideoModelId } from '../../lib/ai/models';
+import { priceForAvatar, priceForImage, priceForMotion, priceForVideo } from '../../lib/credits/pricing';
+import { MOTION_TEMPLATES, VIDEO_MODELS, type MotionTemplate, type VideoModelId } from '../../lib/ai/models';
 import type { MediaItem } from './attachments';
 
-export type VideoMode = 'text' | 'image-to-video' | 'reference' | 'audio-driven' | 'avatar';
+export type VideoMode = 'text' | 'image-to-video' | 'reference' | 'audio-driven' | 'avatar' | 'motion';
 export type Anchor = 'start' | 'end' | 'reference' | 'refVideo' | 'audio' | 'avatarFace';
 
 export const DEFAULT_SETTINGS = {
@@ -32,6 +32,7 @@ export const DEFAULT_SETTINGS = {
   avatarVoiceId: null as string | null,
   avatarScript: '',
   avatarAudioMode: 'voice' as 'voice' | 'audio',
+  motionTemplate: 'stat' as MotionTemplate,
 };
 export type GenSettings = typeof DEFAULT_SETTINGS;
 
@@ -53,6 +54,7 @@ export function genCosts(s: GenSettings, attachedImages: number): { image: numbe
   const image = priceForImage(s.imageSize, s.imageQuality, refs).credits * s.imageCount;
   const avatarQ = s.videoQuality === '1080p' ? '720p' : s.videoQuality;
   if (s.videoMode === 'avatar') return { image, video: priceForAvatar(avatarQ).credits };
+  if (s.videoMode === 'motion') return { image, video: priceForMotion(MOTION_TEMPLATES[s.motionTemplate].durationSec).credits };
   if (videoModel(s) === 'sociafy-cinema-1') return { image, video: null };
   const refSec = s.videoMode === 'reference' ? s.refVideoSec : null;
   const per = priceForVideo({ durationSec: videoDuration(s), quality: s.videoQuality, fast: s.videoFast, inputDurationSec: refSec ?? undefined });
@@ -189,10 +191,15 @@ export function useMediaGen(report: GenReport) {
 
   const generateVideo = async (prompt: string) => {
     const model = videoModel(s);
+    const motion = s.videoMode === 'motion';
+    // Motion graphics render 9:16 or 16:9 only; square falls back to vertical.
+    const motionAspect = s.videoAspect === '16:9' ? '16:9' : '9:16';
     setBusy('video');
     report.notice(null);
     try {
-      const { r, data } = await postJson('/api/media/generate-video', {
+      const { r, data } = motion
+        ? await postJson('/api/media/generate-motion', { topic: prompt, template: s.motionTemplate, aspect: motionAspect })
+        : await postJson('/api/media/generate-video', {
         prompt, model, durationSec: videoDuration(s), quality: s.videoQuality, aspect: s.videoAspect,
         count: s.videoCount, caption: prompt.slice(0, 600), rawPrompt: !s.autoEnhance, fast: s.videoFast,
         genMode: s.videoMode,
@@ -208,7 +215,7 @@ export function useMediaGen(report: GenReport) {
 
       setRender({ startedAt: Date.now(), phases: jobs.map(() => 'queued') });
       const setPhase = (i: number, p: ClipPhase) => setRender((v) => (v ? { ...v, phases: v.phases.map((x, k) => (k === i ? p : x)) } : v));
-      const aspect = s.videoAspect.replace(':', '/');
+      const aspect = (motion ? motionAspect : s.videoAspect).replace(':', '/');
       const settled = await Promise.all(jobs.map(async (j, i) => {
         const out = await pollJob(
           `/api/media/video-job/${j.id}`, 15 * 60_000, [4_000, 500, 8_000],

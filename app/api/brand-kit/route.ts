@@ -5,11 +5,12 @@ import { db } from '../../../lib/db';
 import { agentSettings, brandKits, mediaAssets } from '../../../lib/db/schema';
 import { brandKitPatchSchema, parseBody } from '../../../lib/validation';
 import { brandKitCompleteness, type BrandKit, type BrandProfile } from '../../../lib/brand/kit';
+import { motionConfigured } from '../../../lib/ai/motion';
 
 export const runtime = 'nodejs';
 
 /**
- * GET   /api/brand-kit → { kit, profile, brandKitCompleteness }
+ * GET   /api/brand-kit → { kit, profile, brandKitCompleteness, motion }
  * PATCH /api/brand-kit   body: any subset of BrandKit's top-level sections;
  *                        each one sent replaces the stored section (null clears
  *                        guidePdf / narratorVoiceId). Returns the GET shape.
@@ -34,7 +35,8 @@ async function load(userId: string) {
   ]);
   const kit: BrandKit = k?.kit ?? {};
   const profile: BrandProfile = s ?? { companyName: null, brandBio: null, website: null, instructions: null };
-  return { kit, profile, brandKitCompleteness: brandKitCompleteness(kit, profile) };
+  // `motion`: the motion-graphics feature flag, so client surfaces can hide it.
+  return { kit, profile, brandKitCompleteness: brandKitCompleteness(kit, profile), motion: motionConfigured() };
 }
 
 export async function GET(req: NextRequest) {

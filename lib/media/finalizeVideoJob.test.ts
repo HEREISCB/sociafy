@@ -20,6 +20,8 @@ const state = vi.hoisted(() => ({
   cueDeletes: [] as string[],
   cueDownloadStatus: 0,
   cueRender: { status: 'done' } as { status: string; error?: string },
+  motionConfigured: true,
+  motionResult: { status: 'done', videoKey: 'users/user_1/motion.mp4', sizeBytes: 123 } as Record<string, unknown>,
   task: { status: 'completed', videoUrl: 'https://cdn.piapi/x.mp4' } as
     { status: string; videoUrl?: string; error?: string },
 }));
@@ -107,6 +109,10 @@ vi.mock('../ai/cue', () => {
     deleteCueRender: (id: string) => { state.cueDeletes.push(id); return Promise.resolve(); },
   };
 });
+vi.mock('../ai/motion', () => ({
+  motionConfigured: () => state.motionConfigured,
+  getMotionResult: () => Promise.resolve(state.motionResult),
+}));
 vi.mock('../storage/r2', () => ({
   makeMediaKey: (u: string, n: string) => `users/${u}/${n}`,
   publicUrlFor: (k: string) => `https://cdn.test/${k}`,
@@ -153,6 +159,8 @@ beforeEach(() => {
   process.env.CUE_API_KEY = 'k';
   state.cueStub = false; state.cueDeletes = []; state.cueDownloadStatus = 0;
   state.cueRender = { status: 'done' };
+  state.motionConfigured = true;
+  state.motionResult = { status: 'done', videoKey: 'users/user_1/motion.mp4', sizeBytes: 123 };
 });
 
 describe('finalizeVideoJob', () => {
@@ -340,5 +348,57 @@ describe('finalizeVideoJob · Sociafy Cinema', () => {
     expect(r.status).toBe('pending');
     expect(state.uploads).toBe(0);
     expect(state.refunds).toHaveLength(0);
+  });
+});
+
+describe('finalizeVideoJob — motion graphics', () => {
+  const motionJob = (over: Record<string, unknown> = {}) =>
+    job({ provider: 'motion-hf', providerTaskId: 'fc-1', durationSec: 15, ...over });
+
+  it('claims the asset at the engine-uploaded key without moving any bytes', async () => {
+    const r = await finalizeVideoJob(motionJob());
+    expect(r.status).toBe('completed');
+    expect(state.uploads).toBe(0);
+    expect(state.assets[0]).toMatchObject({ storageKey: 'users/user_1/motion.mp4', sizeBytes: 123, publicUrl: 'https://cdn.test/users/user_1/motion.mp4' });
+    expect(state.job!.mediaAssetId).toBe('asset_1');
+  });
+
+  it('stays pending (no refund) while rendering', async () => {
+    state.motionResult = { status: 'pending' };
+    const r = await finalizeVideoJob(motionJob());
+    expect(r).toEqual({ status: 'pending', providerStatus: 'processing' });
+    expect(state.refunds).toHaveLength(0);
+  });
+
+  it('refunds exactly once on failure, with a non-public error string', async () => {
+    state.motionResult = { status: 'failed', error: 'render_failed: chrome crashed' };
+    const first = motionJob();
+    const snapshot = { ...first } as unknown as typeof first;
+    const [a, b] = await Promise.all([finalizeVideoJob(first), finalizeVideoJob(snapshot)]);
+    expect([a.status, b.status]).toEqual(['failed', 'failed']);
+    expect(state.refunds).toHaveLength(1);
+    expect(state.job!.error).toMatch(/^motion_failed/);
+  });
+
+  it('refuses a result key outside the user prefix, and refunds', async () => {
+    state.motionResult = { status: 'done', videoKey: 'users/someone_else/x.mp4' };
+    const r = await finalizeVideoJob(motionJob());
+    expect(r.status).toBe('failed');
+    expect(state.assets).toHaveLength(0);
+    expect(state.refunds).toHaveLength(1);
+  });
+
+  it('refunds an unconfirmed submit after the grace window', async () => {
+    const r = await finalizeVideoJob(motionJob({ providerTaskId: '', createdAt: new Date(Date.now() - 11 * 60_000) }));
+    expect(r.status).toBe('failed');
+    expect(state.refunds).toHaveLength(1);
+  });
+
+  it('stays pending, touching nothing, when the engine is unconfigured', async () => {
+    state.motionConfigured = false;
+    const r = await finalizeVideoJob(motionJob());
+    expect(r.status).toBe('pending');
+    expect(state.refunds).toHaveLength(0);
+    expect(state.assets).toHaveLength(0);
   });
 });

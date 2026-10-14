@@ -1,12 +1,15 @@
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import { db } from '../db';
 import { agentSettings, drafts, genJobs, videoJobs, mediaAssets, activityLog, type DraftMedia } from '../db/schema';
 import { charge } from '../credits/ledger';
 import { priceForImage } from '../credits/pricing';
 import { AGENT_IMAGE, AGENT_VIDEO } from '../credits/estimator';
 import { rewritePromptForMedia, ensureAudioLine } from '../ai/prompt-rewriter';
-import { DEFAULT_VIDEO_MODEL, backendFor } from '../ai/models';
+import { DEFAULT_VIDEO_MODEL, MOTION_GRAPHICS, backendFor, type MotionTemplate } from '../ai/models';
 import { CUE_CONCURRENCY } from '../ai/cue';
+import { motionConfigured } from '../ai/motion';
+import { motionReady } from '../brand/kit';
+import { autopilotTemplate, loadBrand, submitMotionVideo } from '../media/motionJob';
 // The hardened generation paths live with the public API. Reused rather than
 // copied: row → charge → provider, refund-on-failure and the cron sweepers all
 // already work on these rows. (lib/cron/finalizeJobs.ts imports from here too.)
@@ -73,6 +76,13 @@ const renderAgentVideo = (userId: string, prompt: string) =>
  * five-minute sweep submits it once a slot frees.
  */
 export async function submitAgentVideo(p: Post): Promise<string> {
+  const template = await motionTemplateFor(p.userId);
+  if (template) {
+    const { job } = await submitMotionVideo({
+      userId: p.userId, template, aspect: '9:16', topic: `${p.title}\n\n${p.body}`, via: 'autopilot',
+    });
+    return job.id;
+  }
   const prompt = ensureAudioLine((await mediaPrompt(p, 'cinema')).prompt);
   try {
     return (await renderAgentVideo(p.userId, prompt)).job.id;
@@ -94,6 +104,28 @@ export async function submitAgentVideo(p: Post): Promise<string> {
       .returning();
     return row.id;
   }
+}
+
+/**
+ * Motion graphics instead of Cinema for this slot? Only with the engine
+ * configured and a brand kit that can carry it (name + logo + primary color).
+ * 'mix' alternates against the user's last video render.
+ */
+async function motionTemplateFor(userId: string): Promise<MotionTemplate | null> {
+  if (!motionConfigured()) return null;
+  const { kit, profile } = await loadBrand(userId);
+  const style = kit.video?.autopilot ?? 'cinema';
+  if (style === 'cinema' || !motionReady(kit, profile)) return null;
+  if (style === 'mix') {
+    const [last] = await db()
+      .select({ provider: videoJobs.provider })
+      .from(videoJobs)
+      .where(eq(videoJobs.userId, userId))
+      .orderBy(desc(videoJobs.createdAt))
+      .limit(1);
+    if (last?.provider === MOTION_GRAPHICS.backend) return null;
+  }
+  return autopilotTemplate(kit);
 }
 
 /**

@@ -1,10 +1,13 @@
 'use client';
 
 import React, { useRef } from 'react';
+import Link from 'next/link';
 import { Icon } from '../icons';
 import { VoicePicker } from '../voice-studio';
 import { priceForImage } from '../../lib/credits/pricing';
-import { VIDEO_MODELS } from '../../lib/ai/models';
+import { MOTION_GRAPHICS, MOTION_TEMPLATE_IDS, MOTION_TEMPLATES, VIDEO_MODELS } from '../../lib/ai/models';
+import { motionReady, type BrandKit, type BrandProfile } from '../../lib/brand/kit';
+import { useApi } from '../../lib/ui/fetcher';
 import { videoDuration, videoModel, type Anchor, type MediaGen, type VideoMode } from './generate';
 
 /** The presets /api/compose/variants understands (PRESET_KEYS in its route). */
@@ -23,6 +26,7 @@ const VIDEO_MODES: { id: VideoMode; label: string }[] = [
   { id: 'reference', label: 'From reference images' },
   { id: 'audio-driven', label: 'Synced to audio' },
   { id: 'avatar', label: 'Talking avatar' },
+  { id: 'motion', label: 'Motion graphic (uses your brand kit)' },
 ];
 
 const ACCEPT: Record<Anchor, string> = {
@@ -80,6 +84,10 @@ export function MoreOptions({
   };
   const model = VIDEO_MODELS[videoModel(s)];
   const avatar = s.videoMode === 'avatar';
+  const motion = s.videoMode === 'motion';
+  // `motion` is the server's feature flag; without it the option doesn't exist.
+  const { data: brand } = useApi<{ kit: BrandKit; profile: BrandProfile; motion?: boolean }>('/api/brand-kit');
+  const modes = VIDEO_MODES.filter((m) => m.id !== 'motion' || brand?.motion);
   const refSurcharge = priceForImage(s.imageSize, s.imageQuality, 1).surcharge;
 
   return (
@@ -147,30 +155,33 @@ export function MoreOptions({
         <h3 className="compose-subhead">Video</h3>
         <div className="compose-grid">
           <Field label="Made from">
-            <select className="input" value={s.videoMode} onChange={(e) => set({ videoMode: e.target.value as VideoMode })}>
-              {VIDEO_MODES.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+            <select className="input" value={s.videoMode} onChange={(e) => {
+              const videoMode = e.target.value as VideoMode;
+              set({ videoMode, ...(videoMode === 'motion' && s.videoAspect === '1:1' ? { videoAspect: '9:16' as const } : {}) });
+            }}>
+              {modes.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
             </select>
           </Field>
-          <Field label="Quality">
+          {!motion && <Field label="Quality">
             <select className="input" value={s.videoQuality} onChange={(e) => set({ videoQuality: e.target.value as typeof s.videoQuality })}>
               <option value="480p">480p</option>
               <option value="720p">720p</option>
               {!avatar && <option value="1080p">1080p</option>}
             </select>
-          </Field>
+          </Field>}
           <Field label="Shape">
             <select className="input" value={s.videoAspect} onChange={(e) => set({ videoAspect: e.target.value as typeof s.videoAspect })}>
               <option value="9:16">Vertical 9:16</option>
-              <option value="1:1">Square 1:1</option>
+              {!motion && <option value="1:1">Square 1:1</option>}
               <option value="16:9">Wide 16:9</option>
             </select>
           </Field>
-          {!avatar && (
+          {!avatar && !motion && (
             <Field label={`Length · ${videoDuration(s)}s`}>
               <input type="range" min={model.durationSec.min} max={model.durationSec.max} value={videoDuration(s)} onChange={(e) => set({ videoDuration: Number(e.target.value) })} />
             </Field>
           )}
-          {!avatar && (
+          {!avatar && !motion && (
             <Field label="How many">
               <select className="input" value={s.videoCount} onChange={(e) => set({ videoCount: Number(e.target.value) })}>
                 {[1, 2, 3].map((n) => <option key={n} value={n}>{n}</option>)}
@@ -178,7 +189,24 @@ export function MoreOptions({
             </Field>
           )}
         </div>
-        {!avatar && (
+        {motion && (
+          <div className="stack">
+            <div className="compose-chips" role="group" aria-label="Template">
+              {MOTION_TEMPLATE_IDS.map((t) => (
+                <button key={t} type="button" className={`prompt-chip${s.motionTemplate === t ? ' active' : ''}`} aria-pressed={s.motionTemplate === t} onClick={() => set({ motionTemplate: t })}>
+                  {MOTION_TEMPLATES[t].label} · {MOTION_TEMPLATES[t].durationSec}s
+                </button>
+              ))}
+            </div>
+            {brand && !motionReady(brand.kit, brand.profile) ? (
+              <p className="compose-error">Needs your brand name, logo and main color. <Link href="/settings/brand">Open Brand kit</Link></p>
+            ) : (
+              <p className="compose-note">Renders on {MOTION_GRAPHICS.name} from your brand kit — silent, usually under two minutes.</p>
+            )}
+          </div>
+        )}
+
+        {!avatar && !motion && (
           <>
             <label className="compose-check">
               <input type="checkbox" checked={s.videoFast} onChange={(e) => set({ videoFast: e.target.checked })} />

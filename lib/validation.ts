@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { PLATFORMS, VOICE_TEMPLATES } from './db/schema';
 import { GST_STATES, isValidGstin } from './billing/gst';
-import { GOOGLE_FONTS, MUSIC_MOODS, VIDEO_STYLES } from './brand/kit';
+import { AUTOPILOT_VIDEO_STYLES, GOOGLE_FONTS, MUSIC_MOODS, VIDEO_STYLES } from './brand/kit';
 
 /**
  * Shared schemas for request body validation.
@@ -173,7 +173,7 @@ export const brandKitSchema = z.object({
   screenshots: z.array(assetRef(/^image\/(png|webp|jpeg)$/)).max(8).optional(),
   facts: z.array(short(140)).max(6).optional(),
   music: z.object({ mood: z.enum(MUSIC_MOODS), banned: z.string().trim().max(300) }).partial().optional(),
-  video: z.object({ style: z.enum(VIDEO_STYLES), endCardCta: z.string().trim().max(40) }).partial().optional(),
+  video: z.object({ style: z.enum(VIDEO_STYLES), endCardCta: z.string().trim().max(40), autopilot: z.enum(AUTOPILOT_VIDEO_STYLES) }).partial().optional(),
   narratorVoiceId: uuid.optional(),
 });
 // PATCH body: sections replace stored ones; null clears the two scalar slots
