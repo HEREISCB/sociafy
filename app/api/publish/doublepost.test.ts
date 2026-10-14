@@ -36,10 +36,12 @@ const thenable = <T>(value: T, extra: Rec = {}) => Object.assign(Promise.resolve
 
 vi.mock('../../../lib/db', () => ({
   db: () => ({
+    // The claim runs in a transaction; the stand-in just runs it inline.
+    transaction(fn: (tx: unknown) => unknown) { return fn(this); },
     select: () => ({
       from: () => {
         const rows = state.selects.shift() ?? [];
-        return { where: () => thenable(rows, { limit: () => Promise.resolve(rows) }) };
+        return { where: () => thenable(rows, { limit: () => Promise.resolve(rows), for: () => Promise.resolve(rows) }) };
       },
     }),
     update: () => ({
@@ -80,7 +82,10 @@ vi.mock('../../../lib/platforms/registry', () => ({
   getAdapter: () => ({ publishText: (input: PublishInput) => publish(input) }),
 }));
 vi.mock('../../../lib/platforms/token', () => ({
-  ensureFreshToken: async (a: Rec) => a,
+  ensureFreshToken: async (a: Rec) => {
+    if (a.platform === 'linkedin') throw new Error('connection reset');
+    return a;
+  },
 }));
 
 import { POST } from './route';
@@ -198,5 +203,37 @@ describe('POST /api/publish — a live post is never reported as failed', () => 
     expect(statuses()).toContain('failed');
     expect(statuses()).not.toContain('published');
     expect(JSON.stringify(body)).not.toContain('stub.sociafy.local');
+  });
+});
+
+describe('POST /api/publish — claim + per-platform isolation', () => {
+  it('a second click while the first is publishing posts nothing', async () => {
+    // [draft], [accounts], [draft lock], [in-flight rows for this draft]
+    state.selects = [[DRAFT], [ACCOUNT], [DRAFT], [{ platform: 'x' }]];
+
+    const res = await post();
+    const body = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(String(body.error)).toMatch(/^already_publishing/);
+    expect(sentToPlatform).toEqual([]);
+    expect(state.inserts.some((i) => i.status === 'publishing')).toBe(false);
+  });
+
+  it("one platform's token refresh blowing up does not 500 the others", async () => {
+    const LINKEDIN = { ...ACCOUNT, id: 'a2', platform: 'linkedin' };
+    state.selects = [[DRAFT], [ACCOUNT, LINKEDIN]];
+
+    const res = await POST({
+      json: async () => ({ draftId: DRAFT.id, platforms: ['x', 'linkedin'] }),
+    } as unknown as NextRequest);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(sentToPlatform).toEqual(['ship it']);
+    const byPlatform = Object.fromEntries(body.results.map((r: Rec) => [r.platform, r]));
+    expect(byPlatform.x.ok).toBe(true);
+    expect(byPlatform.linkedin.ok).toBe(false);
+    expect(String(byPlatform.linkedin.error)).toMatch(/^token_refresh_failed/);
   });
 });

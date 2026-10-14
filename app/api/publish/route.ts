@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, gte, inArray, or } from 'drizzle-orm';
 import { withUser, jsonError } from '../../../lib/api';
 import { db } from '../../../lib/db';
 import {
@@ -15,6 +15,10 @@ import { PlatformError } from '../../../lib/platforms/types';
 import { ensureFreshToken } from '../../../lib/platforms/token';
 import { rateLimit } from '../../../lib/rate-limit';
 import { publishSchema, parseBody } from '../../../lib/validation';
+
+/** A draft published to a platform this recently is treated as a duplicate
+ *  click, not a deliberate repost. */
+const DUPLICATE_WINDOW_MS = 10 * 60 * 1000;
 
 // POST /api/publish
 // Body: { draftId, platforms?: Platform[] }
@@ -67,40 +71,78 @@ export async function POST(req: NextRequest) {
       scheduledPostId?: string;
     }> = [];
 
+    const connected: Platform[] = [];
     for (const platform of requested) {
-      const initialAcct = byPlatform.get(platform);
-      if (!initialAcct) {
-        results.push({
-          platform,
-          ok: false,
-          error: `platform_not_connected: no ${platform} account is connected (nothing was posted). Connect ${platform}, then try again.`,
-        });
+      if (byPlatform.has(platform)) {
+        connected.push(platform);
         continue;
       }
-      const acct = await ensureFreshToken(initialAcct);
+      results.push({
+        platform,
+        ok: false,
+        error: `platform_not_connected: no ${platform} account is connected (nothing was posted). Connect ${platform}, then try again.`,
+      });
+    }
 
-      const text = (draft.perPlatformText as Record<string, string> | null)?.[platform] ?? draft.body;
-      const media = (draft.media ?? []) as { id: string; url: string; mimeType: string }[];
+    const media = (draft.media ?? []) as { id: string; url: string; mimeType: string }[];
 
-      // Create a scheduled_post row with status=publishing for audit trail
-      const [sp] = await db()
-        .insert(scheduledPosts)
-        .values({
-          userId: user.id,
-          draftId: draft.id,
-          accountId: acct.id,
-          platform,
-          scheduledAt: now,
-          status: 'publishing',
-          text,
-          media,
-          attempts: 1,
-        })
-        .returning();
+    // Claim before publishing. A double-click (or the cron) racing this
+    // request used to post the same draft twice. Locking the draft row
+    // serializes concurrent claims; the loser sees the winner's 'publishing'
+    // (or just-'published') rows and skips those platforms. Each claimed
+    // platform gets its scheduled_post row (status=publishing) for the audit
+    // trail.
+    const claimed = connected.length === 0 ? [] : await db().transaction(async (tx) => {
+      await tx.select({ id: drafts.id }).from(drafts).where(eq(drafts.id, draft.id)).for('update');
+      const busy = await tx
+        .select({ platform: scheduledPosts.platform })
+        .from(scheduledPosts)
+        .where(and(
+          eq(scheduledPosts.draftId, draft.id),
+          inArray(scheduledPosts.platform, connected),
+          or(
+            eq(scheduledPosts.status, 'publishing'),
+            and(eq(scheduledPosts.status, 'published'), gte(scheduledPosts.publishedAt, new Date(now.getTime() - DUPLICATE_WINDOW_MS))),
+          ),
+        ));
+      const busySet = new Set(busy.map((b) => b.platform));
+      const rows: (typeof scheduledPosts.$inferSelect)[] = [];
+      for (const platform of connected) {
+        if (busySet.has(platform)) {
+          results.push({
+            platform,
+            ok: false,
+            error: `already_publishing: this draft is already being (or was just) posted to ${platform}. Nothing new was posted.`,
+          });
+          continue;
+        }
+        const [sp] = await tx
+          .insert(scheduledPosts)
+          .values({
+            userId: user.id,
+            draftId: draft.id,
+            accountId: byPlatform.get(platform)!.id,
+            platform,
+            scheduledAt: now,
+            status: 'publishing',
+            text: (draft.perPlatformText as Record<string, string> | null)?.[platform] ?? draft.body,
+            media,
+            attempts: 1,
+          })
+          .returning();
+        rows.push(sp);
+      }
+      return rows;
+    });
+
+    for (const sp of claimed) {
+      const platform = sp.platform;
+      const text = sp.text;
 
       // Nothing reached the platform, or the platform answered "no". Only
       // ever called from before/at the publish call — never after a live post.
-      const fail = async (e: unknown) => {
+      // notPosted: the failure happened before the platform call.
+      const fail = async (e: unknown, notPosted = false) => {
         // Unwrap PlatformError so the upstream HTTP status + response body
         // make it back to the UI (and the activity log). Without this the
         // user just sees "x_publish_failed" with no clue what X actually
@@ -121,27 +163,40 @@ export async function POST(req: NextRequest) {
         // account. Say so instead of inviting the retry.
         // ponytail: send a per-post idempotency key where the platform
         // supports one (X, LinkedIn), then this can safely retry.
-        const friendly = platformErr
+        const friendly = platformErr || notPosted
           ? [code, status ? `(${status})` : '', detailText ? `· ${detailText.slice(0, 400)}` : '']
               .filter(Boolean).join(' ')
           : `publish_unconfirmed: ${code} — the post may or may not be live. Check ${platform} before trying again.`;
         console.error(`[publish] ${platform} failed: ${friendly}`);
-
-        await db()
-          .update(scheduledPosts)
-          .set({ status: 'failed', error: friendly.slice(0, 2000), updatedAt: new Date() })
-          .where(eq(scheduledPosts.id, sp.id));
-
-        await db().insert(activityLog).values({
-          userId: user.id,
-          kind: 'publish_failed',
-          title: `Publish failed: ${platform}`,
-          body: friendly.slice(0, 1000),
-          meta: { scheduledPostId: sp.id, platform, status: status ?? null },
-        });
-
         results.push({ platform, ok: false, error: friendly, scheduledPostId: sp.id });
+
+        // Bookkeeping: a DB blip here must not 500 the request after another
+        // platform already went live (the user would click "Post now" again).
+        try {
+          await db()
+            .update(scheduledPosts)
+            .set({ status: 'failed', error: friendly.slice(0, 2000), updatedAt: new Date() })
+            .where(eq(scheduledPosts.id, sp.id));
+
+          await db().insert(activityLog).values({
+            userId: user.id,
+            kind: 'publish_failed',
+            title: `Publish failed: ${platform}`,
+            body: friendly.slice(0, 1000),
+            meta: { scheduledPostId: sp.id, platform, status: status ?? null },
+          });
+        } catch (dbErr) {
+          console.error(`[publish] failure not recorded for ${sp.id}: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`);
+        }
       };
+
+      let acct;
+      try {
+        acct = await ensureFreshToken(byPlatform.get(platform)!);
+      } catch (e) {
+        await fail(new Error(`token_refresh_failed: ${e instanceof Error ? e.message : String(e)}`), true);
+        continue;
+      }
 
       // ── The only window where a failure is safe to report. Everything past
       // this try has either not touched the platform yet, or has already put
@@ -241,6 +296,7 @@ export async function POST(req: NextRequest) {
     // result for a platform that was never connected. `error` carries the
     // per-platform reason verbatim so the client's message stays readable.
     const fixable = results.every((r) => r.error?.startsWith('platform_not_connected'));
-    return jsonError(results[0]?.error ?? 'publish_failed', fixable ? 422 : 502, { results });
+    const duplicate = results.every((r) => r.error?.startsWith('already_publishing'));
+    return jsonError(results[0]?.error ?? 'publish_failed', fixable ? 422 : duplicate ? 409 : 502, { results });
   }, req);
 }

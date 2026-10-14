@@ -1,8 +1,8 @@
 import { NextRequest } from 'next/server';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { withUser, jsonError } from '../../../../lib/api';
 import { db } from '../../../../lib/db';
-import { connectedAccounts, activityLog } from '../../../../lib/db/schema';
+import { connectedAccounts, activityLog, scheduledPosts, agentSettings } from '../../../../lib/db/schema';
 import { decryptToken } from '../../../../lib/crypto/tokens';
 import { revokeAtPlatform } from '../../../../lib/platforms/revoke';
 
@@ -31,9 +31,20 @@ export async function DELETE(
       void revokeAtPlatform(row.platform, tokens);
     }
 
-    await db()
-      .delete(connectedAccounts)
-      .where(eq(connectedAccounts.id, row.id));
+    // Published history survives the delete (account_id is ON DELETE SET
+    // NULL). Queued posts can never publish without the account, so cancel
+    // them visibly, and stop autopilot targeting the platform.
+    await db().transaction(async (tx) => {
+      await tx
+        .update(scheduledPosts)
+        .set({ status: 'canceled', error: 'account_disconnected', updatedAt: new Date() })
+        .where(and(eq(scheduledPosts.accountId, row.id), eq(scheduledPosts.status, 'pending')));
+      await tx
+        .update(agentSettings)
+        .set({ enabledPlatforms: sql`${agentSettings.enabledPlatforms} - ${row.platform}::text`, updatedAt: new Date() })
+        .where(eq(agentSettings.userId, user.id));
+      await tx.delete(connectedAccounts).where(eq(connectedAccounts.id, row.id));
+    });
 
     await db().insert(activityLog).values({
       userId: user.id,

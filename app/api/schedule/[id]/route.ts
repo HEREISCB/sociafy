@@ -1,8 +1,8 @@
 import { NextRequest } from 'next/server';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { withUser, jsonError } from '../../../../lib/api';
 import { db } from '../../../../lib/db';
-import { scheduledPosts } from '../../../../lib/db/schema';
+import { scheduledPosts, type ScheduledStatus } from '../../../../lib/db/schema';
 import { scheduleUpdateSchema, parseBody } from '../../../../lib/validation';
 
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -30,34 +30,58 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
         return jsonError('already_published');
       }
       patch.scheduledAt = d;
-      // The cron only claims status='pending', so a failed row given a new
-      // time used to show the new time and never publish. Requeue it.
-      if (existing.status === 'failed') {
+      // The cron only claims status='pending', so a failed or canceled row
+      // given a new time used to show the new time and never publish. Requeue it.
+      if (existing.status === 'failed' || existing.status === 'canceled') {
         patch.status = 'pending';
         patch.attempts = 0;
         patch.error = null;
       }
     }
     if (body.text !== undefined) patch.text = body.text;
-    if (body.status === 'canceled') patch.status = 'canceled';
+    if (body.status === 'canceled') {
+      if (!CANCELABLE.includes(existing.status)) return jsonError('not_cancelable', 409);
+      patch.status = 'canceled';
+    }
+    // Conditional on the status we validated against: the cron may have
+    // claimed the row since we read it, and a write landing on a
+    // 'publishing' row would cancel (or requeue) a post that is going live.
     const [row] = await db()
       .update(scheduledPosts)
       .set(patch)
-      .where(and(eq(scheduledPosts.id, id), eq(scheduledPosts.userId, user.id)))
+      .where(and(
+        eq(scheduledPosts.id, id),
+        eq(scheduledPosts.userId, user.id),
+        eq(scheduledPosts.status, existing.status),
+      ))
       .returning();
-    if (!row) return jsonError('not_found', 404);
+    if (!row) return jsonError('conflict', 409);
     return row;
   }, req);
 }
 
+// What the calendar's "cancel" (DELETE) and status:'canceled' may touch. A
+// 'publishing' row is in flight and a 'published' one is history.
+const CANCELABLE: ScheduledStatus[] = ['pending', 'failed'];
+
 export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
   return withUser(async (user) => {
+    const [existing] = await db()
+      .select({ status: scheduledPosts.status })
+      .from(scheduledPosts)
+      .where(and(eq(scheduledPosts.id, id), eq(scheduledPosts.userId, user.id)))
+      .limit(1);
+    if (!existing) return jsonError('not_found', 404);
     const [row] = await db()
       .delete(scheduledPosts)
-      .where(and(eq(scheduledPosts.id, id), eq(scheduledPosts.userId, user.id)))
+      .where(and(
+        eq(scheduledPosts.id, id),
+        eq(scheduledPosts.userId, user.id),
+        inArray(scheduledPosts.status, [...CANCELABLE, 'canceled']),
+      ))
       .returning();
-    if (!row) return jsonError('not_found', 404);
+    if (!row) return jsonError('not_cancelable', 409);
     return { ok: true };
   }, req);
 }
