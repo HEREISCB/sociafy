@@ -157,12 +157,17 @@ export const redditAdapter: PlatformAdapter = {
       if (!resp.ok) {
         throw new PlatformError('reddit_comment_failed', resp.status, await resp.text());
       }
-      const data = (await resp.json()) as { json?: { data?: { things?: [{ data?: { name?: string; id?: string } }] } } };
+      const data = (await resp.json()) as {
+        json?: { errors?: RedditApiError[]; data?: { things?: [{ data?: { name?: string; permalink?: string } }] } };
+      };
+      throwOnRedditErrors('reddit_comment_failed', data.json?.errors);
       const thing = data?.json?.data?.things?.[0]?.data;
-      const id = thing?.name ?? thing?.id ?? 'unknown';
+      if (!thing?.name) throw new PlatformError('reddit_comment_failed', 502, data);
+      // thing.name is a t1_ fullname — not addressable under /comments/.
+      // The comment's own permalink is the only reliable link.
       return {
-        platformPostId: id,
-        url: `https://www.reddit.com/comments/${id}`,
+        platformPostId: thing.name,
+        url: thing.permalink ? `https://www.reddit.com${thing.permalink}` : null,
         raw: data,
       };
     }
@@ -189,12 +194,27 @@ export const redditAdapter: PlatformAdapter = {
     if (!resp.ok) {
       throw new PlatformError('reddit_submit_failed', resp.status, await resp.text());
     }
-    const data = (await resp.json()) as { json?: { data?: { id?: string; url?: string } } };
-    const id = data?.json?.data?.id ?? 'unknown';
-    const url = data?.json?.data?.url ?? `https://www.reddit.com/`;
+    const data = (await resp.json()) as {
+      json?: { errors?: RedditApiError[]; data?: { id?: string; name?: string; url?: string } };
+    };
+    throwOnRedditErrors('reddit_submit_failed', data.json?.errors);
+    const id = data?.json?.data?.id;
+    if (!id) throw new PlatformError('reddit_submit_failed', 502, data);
+    const url = data.json?.data?.url ?? null;
     return { platformPostId: id, url, raw: data };
   },
 };
+
+/** [code, message, field] — e.g. ['RATELIMIT', 'you are doing that too much…', 'ratelimit']. */
+type RedditApiError = [string, string, string?];
+
+/** Reddit answers api_type=json calls with HTTP 200 and `json.errors`
+ *  (RATELIMIT, SUBREDDIT_NOEXIST, …) — a non-empty list is a failure. */
+function throwOnRedditErrors(message: string, errors: RedditApiError[] | undefined) {
+  if (!errors || errors.length === 0) return;
+  const status = errors.some((e) => e[0] === 'RATELIMIT') ? 429 : 400;
+  throw new PlatformError(message, status, errors.map((e) => `${e[0]}: ${e[1]}`).join('; '));
+}
 
 /** Search Reddit for brand mentions using the OAuth search API.
  *  Returns raw hit objects — caller maps to RawMention shape. */
