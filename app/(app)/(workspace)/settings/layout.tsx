@@ -7,9 +7,7 @@ import { usePathname } from 'next/navigation';
 const SECTIONS = [
   { href: '/settings/connections', label: 'Connections', desc: 'The accounts Sociafy posts to.' },
   { href: '/settings/brand', label: 'Brand kit', desc: 'Everything we use to make posts and videos look and sound like you. Every item is optional.' },
-  { href: '/settings/plan', label: 'Billing & usage', desc: 'Your credits, subscription, credit activity and invoices.' },
   { href: '/settings/voice', label: 'Voice', desc: 'Clone your voice so avatar videos speak like you.' },
-  { href: '/settings/api', label: 'API keys', desc: "Keys call the Sociafy API and spend this account's credits, up to a daily cap per key." },
   { href: '/settings/mentions', label: 'Mentions', desc: 'Watch the web for your brand and reply to coverage that needs it.' },
 ];
 

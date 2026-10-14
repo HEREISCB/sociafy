@@ -115,12 +115,12 @@ const startCheckoutFromLanding = async (tier: Tier, setBusy: (t: Tier | null) =>
     });
     if (r.status === 401) {
       // Not signed in: sign up, then land on the plan page with this tier.
-      window.location.href = `/sign-up?next=${encodeURIComponent(`/settings/plan?tier=${tier}`)}`;
+      window.location.href = `/sign-up?next=${encodeURIComponent(`/account/billing?tier=${tier}`)}`;
       return;
     }
     const data = await r.json().catch(() => ({} as { url?: string }));
     // No checkout URL means billing isn't configured; the plan page explains.
-    window.location.href = data?.url ?? '/settings/plan';
+    window.location.href = data?.url ?? '/account/billing';
   } finally {
     setBusy(null);
   }

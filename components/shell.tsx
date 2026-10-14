@@ -3,10 +3,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { UserButton, useUser } from '@clerk/nextjs';
+import { useClerk, useUser } from '@clerk/nextjs';
 import { Icon } from './icons';
 import { useApi } from '../lib/ui/fetcher';
-import { CreditMeter } from './credits';
+import { CreditMeter, type CreditsPayload } from './credits';
 import type { AgentStatus } from '../lib/agent/status';
 import { createSpring, project, rubberband, type Spring } from '../lib/ui/spring';
 
@@ -233,7 +233,6 @@ function useDrawerDrag(open: boolean, onClose: () => void, onOpen: () => void) {
 
 const NAV = [
   { href: '/dashboard', label: 'Home', icon: 'home' as const },
-  { href: '/calendar', label: 'Calendar', icon: 'calendar' as const },
   { href: '/autopilot', label: 'Autopilot', icon: 'bolt' as const },
 ];
 
@@ -292,32 +291,44 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onMobileCl
 
         <div className="sidebar-foot">
           {navLink('/settings', 'Settings', 'settings')}
-          <UserCard />
+          <UserCard onNavigate={close} />
         </div>
       </aside>
     </>
   );
 };
 
-const UserCard: React.FC = () => {
-  // ALL hooks must run unconditionally on every render — early returns below
-  // must come AFTER every hook call. Previously `useRef` lived after the
-  // isLoaded/isSignedIn early returns, which broke the moment Clerk hydrated
-  // (a hook materialized that wasn't there on the previous render).
+/**
+ * Bottom-left account card. Opens a small menu upward with the account-level
+ * pages (billing, API keys) that sit outside workspace Settings.
+ */
+const UserCard: React.FC<{ onNavigate?: () => void }> = ({ onNavigate }) => {
+  // All hooks run before the early returns below — Clerk hydrating must not
+  // change the hook count (React would throw).
   const { user, isSignedIn, isLoaded } = useUser();
-  const cardRef = useRef<HTMLDivElement>(null);
+  const { signOut } = useClerk();
+  const { data: credits } = useApi<CreditsPayload>(isSignedIn ? '/api/credits' : null);
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
 
-  // Make the WHOLE card open the Clerk account menu (not just the tiny avatar).
-  // We forward the click to the UserButton's trigger so the native menu —
-  // including Sign out — is preserved. Skip if the click already landed on it.
-  const openMenu = useCallback((e: React.SyntheticEvent) => {
-    const target = e.target as HTMLElement;
-    if (target.closest('.cl-userButtonTrigger, .cl-userButtonBox')) return;
-    const trigger =
-      cardRef.current?.querySelector<HTMLElement>('.cl-userButtonTrigger') ??
-      cardRef.current?.querySelector<HTMLElement>('button');
-    trigger?.click();
-  }, []);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      setOpen(false);
+      rootRef.current?.querySelector<HTMLElement>('.user-card')?.focus();
+    };
+    window.addEventListener('pointerdown', onDown);
+    window.addEventListener('keydown', onKey, true);
+    return () => {
+      window.removeEventListener('pointerdown', onDown);
+      window.removeEventListener('keydown', onKey, true);
+    };
+  }, [open]);
 
   // Until Clerk resolves auth on the client, render a stable placeholder that
   // matches the server HTML — otherwise the server ("Sign in") vs client (user
@@ -328,7 +339,6 @@ const UserCard: React.FC = () => {
         <div className="user-avatar">·</div>
         <div className="user-meta">
           <span className="user-name">&nbsp;</span>
-          <span className="user-plan">&nbsp;</span>
         </div>
       </div>
     );
@@ -344,28 +354,60 @@ const UserCard: React.FC = () => {
     );
   }
 
-  const name = user?.fullName || user?.username || user?.primaryEmailAddress?.emailAddress || 'You';
+  const email = user?.primaryEmailAddress?.emailAddress;
+  const name = user?.fullName || user?.username || email || 'You';
+  const go = () => { setOpen(false); onNavigate?.(); };
 
   return (
-    <div
-      className="user-card"
-      ref={cardRef}
-      role="button"
-      tabIndex={0}
-      onClick={openMenu}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openMenu(e); } }}
-      aria-label="Open account menu"
-    >
-      <UserButton
-        appearance={{ elements: { userButtonAvatarBox: { width: 28, height: 28 } } }}
+    <div className="user-menu-anchor" ref={rootRef}>
+      {open && (
+        <div className="user-menu" role="menu" aria-label="Account">
+          <div className="user-menu-who">
+            <div className="user-name">{name}</div>
+            {email && email !== name && <div className="user-menu-email">{email}</div>}
+          </div>
+          <Link href="/account/billing" role="menuitem" className="user-menu-item" onClick={go}>
+            <Icon name="bolt" size={14} />
+            <span>Billing &amp; usage</span>
+            {credits && (
+              <span className="user-menu-aside">
+                <span className="mono">{credits.balance.toLocaleString()}</span> credits
+              </span>
+            )}
+          </Link>
+          <Link href="/account/api" role="menuitem" className="user-menu-item" onClick={go}>
+            <Icon name="lock" size={14} />
+            <span>API keys</span>
+          </Link>
+          <Link href="/settings" role="menuitem" className="user-menu-item" onClick={go}>
+            <Icon name="settings" size={14} />
+            <span>Settings</span>
+          </Link>
+          <div className="user-menu-sep" />
+          <button type="button" role="menuitem" className="user-menu-item" onClick={() => { go(); void signOut({ redirectUrl: '/' }); }}>
+            <Icon name="arrow_right" size={14} />
+            <span>Sign out</span>
+          </button>
+        </div>
+      )}
+      <button
+        type="button"
+        className="user-card"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={`Account menu for ${name}`}
       >
-        <UserButton.MenuItems>
-          <UserButton.Link label="Settings" labelIcon={<Icon name="settings" size={14} />} href="/settings" />
-        </UserButton.MenuItems>
-      </UserButton>
-      <div className="user-meta">
-        <span className="user-name">{name}</span>
-      </div>
+        <div className="user-avatar">
+          {user?.imageUrl
+            ? <img src={user.imageUrl} alt="" width={28} height={28} />
+            : name.slice(0, 1).toUpperCase()}
+        </div>
+        <div className="user-meta">
+          <span className="user-name">{name}</span>
+        </div>
+        <Icon name="more" size={14} className="user-card-more" />
+      </button>
     </div>
   );
 };

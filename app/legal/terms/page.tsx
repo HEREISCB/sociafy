@@ -72,7 +72,7 @@ export default function TermsPage() {
 
       <h2>11. Termination</h2>
       <p>
-        You may cancel your subscription at any time from Settings → Billing &amp; usage. We may suspend or terminate accounts that violate these terms. On termination, your credits expire and your data may be deleted after a reasonable grace period.
+        You may cancel your subscription at any time from Account → Billing &amp; usage. We may suspend or terminate accounts that violate these terms. On termination, your credits expire and your data may be deleted after a reasonable grace period.
       </p>
 
       <h2>12. Governing law</h2>

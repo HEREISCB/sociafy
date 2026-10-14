@@ -18,7 +18,7 @@ function tryReturn(): string | null {
   return next && /^\/(try-(image|video)|free-[a-z0-9-]{3,60})(\?id=[0-9a-f-]{36}(&download=1)?)?$/.test(next) ? next : null;
 }
 
-/** Landing pricing sends ?next=/settings/plan?tier=pro; honour it, same-site only. */
+/** Landing pricing sends ?next=/account/billing?tier=pro; honour it, same-site only. */
 function nextReturn(): string {
   if (typeof window === 'undefined') return '/onboarding';
   return safeNextPath(new URLSearchParams(window.location.search).get('next'), '/onboarding');
@@ -30,7 +30,7 @@ export default function Page() {
   // After mount only: the server render has no query string to read.
   const [plan, setPlan] = useState<string | null>(null);
   useEffect(() => {
-    const tier = nextReturn().match(/^\/settings\/plan\?tier=(\w+)/)?.[1];
+    const tier = nextReturn().match(/^\/account\/billing\?tier=(\w+)/)?.[1];
     if (tier && PLAN_NAMES[tier]) setPlan(PLAN_NAMES[tier]);
   }, []);
 

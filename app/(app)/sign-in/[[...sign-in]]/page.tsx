@@ -30,7 +30,7 @@ export default function Page() {
   // After mount only: the server render has no query string to read.
   const [plan, setPlan] = useState<string | null>(null);
   useEffect(() => {
-    const tier = nextReturn().match(/^\/settings\/plan\?tier=(\w+)/)?.[1];
+    const tier = nextReturn().match(/^\/account\/billing\?tier=(\w+)/)?.[1];
     if (tier && PLAN_NAMES[tier]) setPlan(PLAN_NAMES[tier]);
   }, []);
 

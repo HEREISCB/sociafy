@@ -2,7 +2,7 @@
 /**
  * Mint a developer API key from the command line.
  *
- * Exists because the dashboard panel (/settings/api) needs a reachable
+ * Exists because the dashboard panel (/account/api) needs a reachable
  * database, and there are two situations where you still want a key: the app
  * can't see Postgres yet, or you want a cap the UI won't offer.
  *

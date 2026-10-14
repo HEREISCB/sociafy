@@ -171,14 +171,14 @@ function BillingPageInner() {
       const t2 = setTimeout(() => mutate(), 6000);
       const t3 = setTimeout(() => mutate(), 12000);
       if (typeof window !== 'undefined') {
-        window.history.replaceState(null, '', '/settings/plan');
+        window.history.replaceState(null, '', '/account/billing');
       }
       return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
     }
     if (result === 'canceled') {
       setToast('Checkout canceled — no changes to your plan.');
       if (typeof window !== 'undefined') {
-        window.history.replaceState(null, '', '/settings/plan');
+        window.history.replaceState(null, '', '/account/billing');
       }
     }
   }, [params, mutate]);
@@ -187,7 +187,7 @@ function BillingPageInner() {
   useEffect(() => {
     if (!params.get('topup') || !data) return;
     if (data.billingConfigured) setTopupOpen(true);
-    window.history.replaceState(null, '', '/settings/plan');
+    window.history.replaceState(null, '', '/account/billing');
   }, [params, data]);
 
   const dispatchHandoff = async (handoff: CheckoutHandoff) => {

@@ -81,17 +81,20 @@ const nextConfig: NextConfig = {
     const moved = (source: string, destination: string) => ({ source, destination, permanent: false });
     return [
       tab('compose', '/compose'),
-      tab('calendar', '/calendar'),
       tab('agent', '/autopilot'),
       tab('connections', '/settings/connections'),
       tab('shield', '/settings/mentions'),
       tab('onboarding', '/onboarding'),
       moved('/agent', '/autopilot'),
       moved('/connections', '/settings/connections'),
-      moved('/billing', '/settings/plan'),
-      moved('/usage', '/settings/plan'),
+      moved('/billing', '/account/billing'),
+      moved('/usage', '/account/billing'),
+      moved('/settings/plan', '/account/billing'),
+      moved('/settings/api', '/account/api'),
+      // Home and Calendar merged: the week/month views live on /dashboard.
+      moved('/calendar', '/dashboard'),
       // Exact match: /developers/reference stays a real page. The public
-      // reference, not /settings/api — that sends signed-out readers to login.
+      // reference, not /account/api — that sends signed-out readers to login.
       moved('/developers', '/developers/reference'),
       moved('/studio/voice', '/settings/voice'),
     ];

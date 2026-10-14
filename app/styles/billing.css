@@ -1,8 +1,8 @@
-/* Credits meter/popover, insufficient-credits banner, developers, plan & usage. */
+/* Credits meter, insufficient-credits banner, developers, plan & usage. */
 
 /* ---------- Topbar credit meter ---------- */
 .credit-meter {
-  display: inline-flex; align-items: center; gap: 6px;
+  display: inline-flex; text-decoration: none; align-items: center; gap: 6px;
   height: 30px;
   padding: 0 10px;
   border-radius: var(--r-sm);
@@ -17,24 +17,7 @@
 .credit-meter-low { font-weight: 600; }
 .credit-meter.ghost { opacity: 0.55; cursor: default; }
 
-.credit-popover {
-  position: absolute; top: calc(100% + 8px); right: 0;
-  width: min(280px, calc(100vw - 24px));
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  box-shadow: var(--shadow-pop);
-  padding: var(--s-4);
-  z-index: 60;
-}
-.credit-popover-tier { font-size: var(--fs-xs); color: var(--text-2); }
-.credit-popover-balance { margin: var(--s-1) 0 var(--s-3); font-size: var(--fs-sm); color: var(--text-2); }
-.credit-popover-balance .mono { font-size: var(--fs-lg); font-weight: 600; color: var(--text); }
-.credit-popover-meta { margin-top: var(--s-2); font-size: var(--fs-xs); color: var(--text-3); }
-.credit-popover-actions { display: flex; gap: var(--s-2); margin-top: var(--s-4); }
-.credit-popover-actions .btn { flex: 1; justify-content: center; }
-
-/* Thin progress bar, shared by the popover and the plan page. */
+/* Thin progress bar, used by the plan page. */
 .meter-bar {
   height: 4px;
   border-radius: var(--r-pill);

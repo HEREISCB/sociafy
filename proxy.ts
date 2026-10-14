@@ -8,6 +8,7 @@ const isProtected = createRouteMatcher([
   '/calendar(.*)',
   '/autopilot(.*)',
   '/settings(.*)',
+  '/account(.*)',
   '/onboarding(.*)',
 ]);
 const isCron = createRouteMatcher(['/api/cron/(.*)']);

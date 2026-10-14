@@ -102,8 +102,8 @@ describe('stripeProvider.startSubscription', () => {
       client_reference_id: 'u1',
       metadata: expect.objectContaining({ sociafy_user_id: 'u1', tier: 'pro', kind: 'subscription' }),
       subscription_data: { metadata: { sociafy_user_id: 'u1', tier: 'pro' } },
-      success_url: 'https://app.test/settings/plan?checkout=success',
-      cancel_url: 'https://app.test/settings/plan?checkout=canceled',
+      success_url: 'https://app.test/account/billing?checkout=success',
+      cancel_url: 'https://app.test/account/billing?checkout=canceled',
     }));
     expect(handoff).toEqual({ kind: 'redirect', url: 'https://checkout.stripe.com/c/cs_1' });
   });

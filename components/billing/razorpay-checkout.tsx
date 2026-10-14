@@ -76,7 +76,7 @@ export async function openRazorpayModal(
     notes: handoff.notes,
     handler: () => {
       callbacks.onSuccess?.();
-      window.location.href = '/settings/plan?checkout=success';
+      window.location.href = '/account/billing?checkout=success';
     },
     modal: { ondismiss: () => callbacks.onDismiss?.() },
     theme: { color: '#ff6b35' },

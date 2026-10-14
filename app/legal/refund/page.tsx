@@ -23,7 +23,7 @@ export default function RefundPolicyPage() {
 
       <h2>1. Cancelling your subscription</h2>
       <p>
-        You can cancel your subscription at any time from <a href="/settings/plan">Settings → Billing &amp; usage</a> in your Sociafy account. Cancellation takes effect at the end of your current billing cycle. You retain access to the credits already granted for that cycle until the cycle ends; no further charges are made after that.
+        You can cancel your subscription at any time from <a href="/account/billing">Account → Billing &amp; usage</a> in your Sociafy account. Cancellation takes effect at the end of your current billing cycle. You retain access to the credits already granted for that cycle until the cycle ends; no further charges are made after that.
       </p>
 
       <h2>2. Subscription refunds</h2>
@@ -48,7 +48,7 @@ export default function RefundPolicyPage() {
 
       <h2>6. Failed generations</h2>
       <p>
-        If our AI providers fail to generate the content you requested, the credits deducted for that specific request are automatically refunded to your account balance (see the credit ledger in Settings → Billing &amp; usage).
+        If our AI providers fail to generate the content you requested, the credits deducted for that specific request are automatically refunded to your account balance (see the credit ledger in Account → Billing &amp; usage).
       </p>
 
       <h2>7. Contact</h2>

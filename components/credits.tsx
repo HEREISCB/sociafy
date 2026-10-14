@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React from 'react';
 import Link from 'next/link';
 import { useApi } from '../lib/ui/fetcher';
 import { Icon } from './icons';
@@ -21,31 +21,15 @@ export type CreditsPayload = {
   }>;
 };
 
-const TIER_LABEL: Record<CreditsPayload['tier'], string> = {
-  starter: 'Starter',
-  pro: 'Pro',
-  business: 'Business',
-};
-
 /**
  * Topbar credit balance. Quiet when healthy; turns into a warning chip under
- * 15% of the monthly allocation (red under 5%). Click for a small popover.
+ * 15% of the monthly allocation (red under 5%). Click goes to Billing & usage.
  */
 export const CreditMeter: React.FC = () => {
   const { data } = useApi<CreditsPayload>('/api/credits', {
     refreshInterval: 30_000,
     revalidateOnFocus: true,
   });
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    const onClick = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
-    };
-    window.addEventListener('click', onClick);
-    return () => window.removeEventListener('click', onClick);
-  }, []);
 
   if (!data) {
     return (
@@ -60,20 +44,15 @@ export const CreditMeter: React.FC = () => {
   const state = pct <= 5 ? 'crit' : pct <= 15 ? 'warn' : 'ok';
 
   return (
-    <div ref={ref} className="shell-pop-anchor">
-      <button
-        type="button"
-        className={`credit-meter ${state}`}
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        aria-label={`${data.balance.toLocaleString()} credits left`}
-      >
-        <Icon name="bolt" size={12} />
-        {state !== 'ok' && <span className="credit-meter-low">Low</span>}
-        <span className="mono">{formatBalance(data.balance)}</span>
-      </button>
-      {open && <CreditPopover data={data} onClose={() => setOpen(false)} />}
-    </div>
+    <Link
+      href="/account/billing"
+      className={`credit-meter ${state}`}
+      aria-label={`${data.balance.toLocaleString()} credits left. Billing and usage`}
+    >
+      <Icon name="bolt" size={12} />
+      {state !== 'ok' && <span className="credit-meter-low">Low</span>}
+      <span className="mono">{formatBalance(data.balance)}</span>
+    </Link>
   );
 };
 
@@ -81,34 +60,6 @@ function percentLeft(data: CreditsPayload): number {
   if (!data.monthlyAllocation) return 0;
   return Math.min(100, Math.max(0, Math.round((data.balance / data.monthlyAllocation) * 100)));
 }
-
-const CreditPopover: React.FC<{ data: CreditsPayload; onClose: () => void }> = ({ data, onClose }) => {
-  const pct = percentLeft(data);
-  const cycleStart = data.creditCycleStart ? new Date(data.creditCycleStart) : null;
-  const nextResetEst = cycleStart
-    ? new Date(cycleStart.getTime() + 30 * 24 * 60 * 60 * 1000)
-    : null;
-  return (
-    <div className="credit-popover">
-      <div className="credit-popover-tier">
-        {TIER_LABEL[data.tier]} · {data.monthlyAllocation.toLocaleString()} / month
-      </div>
-      <div className="credit-popover-balance">
-        <span className="mono">{data.balance.toLocaleString()}</span> credits left
-      </div>
-      <div className="meter-bar"><div className="fill" style={{ width: `${pct}%` }} /></div>
-      {nextResetEst && (
-        <div className="credit-popover-meta">
-          Resets {nextResetEst.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-        </div>
-      )}
-      <div className="credit-popover-actions">
-        <Link href="/settings/plan" className="btn ghost sm" onClick={onClose}>Billing &amp; usage</Link>
-        <Link href="/settings/plan?topup=1" className="btn primary sm" onClick={onClose}>Top up</Link>
-      </div>
-    </div>
-  );
-};
 
 function formatBalance(n: number): string {
   if (n >= 100_000) return `${Math.round(n / 1000)}k`;
@@ -137,8 +88,8 @@ export const InsufficientCreditsBanner: React.FC<{
       </span>
     </div>
     <div className="actions">
-      <Link href="/settings/plan" className="btn ghost">View usage</Link>
-      <Link href="/settings/plan?topup=1" className="btn primary">Top up</Link>
+      <Link href="/account/billing" className="btn ghost">View usage</Link>
+      <Link href="/account/billing?topup=1" className="btn primary">Top up</Link>
       {onDismiss && (
         <button className="btn ghost icon-only" onClick={onDismiss} aria-label="Dismiss">
           ✕

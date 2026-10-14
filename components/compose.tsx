@@ -394,7 +394,7 @@ export default function Compose({ draftId, onDone, initial }: {
               </button>
             )}
             {done && onDone && <button type="button" className="btn primary sm" onClick={onDone}>Done</button>}
-            {result.kind === 'scheduled' && done && <Link href="/calendar" className="btn ghost sm">Open calendar</Link>}
+            {result.kind === 'scheduled' && done && <Link href="/dashboard" className="btn ghost sm">Open calendar</Link>}
           </div>
         </section>
       )}

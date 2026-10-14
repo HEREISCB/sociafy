@@ -54,7 +54,7 @@ const PLATFORM_NAMES: Record<Platform, string> = {
 const BLOCKED: Record<NonNullable<AgentStatus['blocked']>, { text: string; href?: string; cta: string }> = {
   no_niches: { text: 'Pick at least one topic.', cta: 'Topics', href: '#ap-topics' },
   no_platforms: { text: 'No connected account is switched on.', cta: 'Connections', href: '/settings/connections' },
-  no_credits: { text: 'Out of credits.', cta: 'Top up', href: '/settings/plan' },
+  no_credits: { text: 'Out of credits.', cta: 'Top up', href: '/account/billing' },
   credit_cap: { text: 'Weekly credit cap reached.', cta: 'Raise the cap', href: '#ap-advanced' },
   no_trends: { text: 'Nothing fresh in your topics yet. It checks again every hour.', cta: 'Edit topics', href: '#ap-topics' },
 };

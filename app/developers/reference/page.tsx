@@ -61,7 +61,7 @@ export default function ApiReferencePage() {
     <main className="doc-page">
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
       <p style={{ marginBottom: 20 }}>
-        <Link href="/settings/api" style={{ color: 'var(--ink-3)', fontSize: 13, textDecoration: 'none' }}>
+        <Link href="/account/api" style={{ color: 'var(--ink-3)', fontSize: 13, textDecoration: 'none' }}>
           &larr; Back to API settings
         </Link>
       </p>

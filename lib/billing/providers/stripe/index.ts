@@ -28,8 +28,8 @@ export function stripeConfigured(): boolean {
   return !isStubMode.stripe() && ORDERED_TIERS.every((t) => !!priceIdFor(t));
 }
 
-const successUrl = () => `${env.appUrl}/settings/plan?checkout=success`;
-const cancelUrl = () => `${env.appUrl}/settings/plan?checkout=canceled`;
+const successUrl = () => `${env.appUrl}/account/billing?checkout=success`;
+const cancelUrl = () => `${env.appUrl}/account/billing?checkout=canceled`;
 
 class StripeBillingProvider implements BillingProvider {
   readonly name = 'stripe' as const;
