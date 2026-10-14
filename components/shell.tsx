@@ -290,6 +290,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onMobileCl
         </nav>
 
         <div className="sidebar-foot">
+          {navLink('/account/billing', 'Billing & usage', 'chart')}
+          {navLink('/account/api', 'API keys', 'lock')}
           {navLink('/settings', 'Settings', 'settings')}
           <UserCard onNavigate={close} />
         </div>
