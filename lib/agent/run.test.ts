@@ -210,7 +210,7 @@ describe('image and video posts', () => {
   });
 
   it('holds a video post until its render lands instead of posting it bare', async () => {
-    state.settings = settingsWith({ enabledPlatforms: ['x'], postsPerWeekByContentType: { text: 0, image: 0, video: 1 } } as never);
+    state.settings = settingsWith({ enabledPlatforms: ['linkedin'], postsPerWeekByContentType: { text: 0, image: 0, video: 1 } } as never);
     submitAgentVideo.mockResolvedValue('job-1');
     const res = await runAgentForUser('u1');
     expect(state.inserts['drafts'][0].videoJobId).toBe('job-1');

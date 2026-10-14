@@ -227,7 +227,7 @@ const PLATFORM_LIST: {
   /** Mode-specific label override — e.g. YouTube becomes "YouTube Shorts" in video mode. */
   labelByMode?: Partial<Record<ComposeMode, string>>;
 }[] = [
-  { id: 'x',  label: 'X',         limit: 280,  full: 'x',         supports: { text: true,  image: true,  video: true  }, hint: {} },
+  { id: 'x',  label: 'X',         limit: 280,  full: 'x',         supports: { text: true,  image: true,  video: false }, hint: { video: 'Posting video to X is not supported yet — images and text only.' } },
   { id: 'li', label: 'LinkedIn',  limit: 3000, full: 'linkedin',  supports: { text: true,  image: true,  video: true  }, hint: {} },
   { id: 'fb', label: 'Facebook',  limit: 5000, full: 'facebook',  supports: { text: true,  image: true,  video: true  }, hint: {}, labelByMode: { video: 'Facebook Reels' } },
   { id: 'ig', label: 'Instagram', limit: 2200, full: 'instagram', supports: { text: false, image: true,  video: true  }, hint: { text: 'Instagram requires an image or video — switch to Image or Video mode.' }, labelByMode: { image: 'Instagram Post', video: 'Instagram Reels' } },

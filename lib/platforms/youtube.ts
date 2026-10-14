@@ -65,16 +65,25 @@ export const youtubeAdapter: PlatformAdapter = {
     });
     if (!channelResp.ok) throw new PlatformError('youtube_channel_failed', channelResp.status, await channelResp.text());
     const ch = (await channelResp.json()) as {
-      items?: Array<{ id: string; snippet: { title: string; thumbnails?: { default?: { url: string } } } }>;
+      items?: Array<{ id: string; snippet: { title: string; customUrl?: string; thumbnails?: { default?: { url: string } } } }>;
     };
     const item = ch.items?.[0];
+    // A Google account without a YouTube channel returns no items. Saving it
+    // as platformUserId 'unknown' only fails later at upload time.
+    if (!item) {
+      throw new PlatformError(
+        'youtube_no_channel',
+        400,
+        'This Google account has no YouTube channel. Create one at youtube.com, then reconnect.',
+      );
+    }
     return {
       tokens,
       profile: {
-        platformUserId: item?.id ?? 'unknown',
-        handle: item?.snippet.title ?? null,
-        displayName: item?.snippet.title ?? null,
-        avatarUrl: item?.snippet.thumbnails?.default?.url ?? null,
+        platformUserId: item.id,
+        handle: item.snippet.customUrl ?? item.snippet.title,
+        displayName: item.snippet.title,
+        avatarUrl: item.snippet.thumbnails?.default?.url ?? null,
       },
     };
   },
@@ -184,14 +193,32 @@ export const youtubeAdapter: PlatformAdapter = {
       throw new PlatformError('youtube_publish_failed', resp.status, errBody);
     }
 
-    const data = (await resp.json()) as { id: string; snippet?: { title?: string } };
+    const data = (await resp.json()) as {
+      id: string;
+      snippet?: { title?: string };
+      status?: { privacyStatus?: string; uploadStatus?: string; rejectionReason?: string; failureReason?: string };
+    };
+    const uploadStatus = data.status?.uploadStatus;
+    if (uploadStatus === 'rejected' || uploadStatus === 'failed') {
+      throw new PlatformError(
+        'youtube_upload_rejected',
+        422,
+        `YouTube ${uploadStatus} the upload: ${data.status?.rejectionReason ?? data.status?.failureReason ?? 'unknown reason'}`,
+      );
+    }
+    // Unaudited API projects (created after 2020-07-28) have every upload
+    // locked to private regardless of what we ask for. The upload still
+    // succeeded, so report it — flagged — rather than fail.
+    const forcedPrivate = metadata.status.privacyStatus === 'public' && data.status?.privacyStatus === 'private';
     // Shorts URL form. YouTube auto-redirects between /shorts/ and /watch?v=
     // depending on the classifier's decision, so either URL works.
-    const url = `https://www.youtube.com/shorts/${data.id}`;
+    const url = forcedPrivate
+      ? `https://www.youtube.com/watch?v=${data.id}`
+      : `https://www.youtube.com/shorts/${data.id}`;
     return {
       platformPostId: data.id,
       url,
-      raw: data,
+      raw: forcedPrivate ? { ...data, forcedPrivate: true } : data,
     };
   },
 };
