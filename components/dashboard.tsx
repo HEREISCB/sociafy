@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { format } from 'date-fns';
 import Link from 'next/link';
 import { Pglyph } from './icons';
 import { apiPost, friendlyApiError, useApi } from '../lib/ui/fetcher';
@@ -24,8 +25,8 @@ const BLOCKED: Record<string, { text: string; href: string; cta: string }> = {
 };
 
 const dayKey = (iso: string | null) =>
-  iso ? new Date(iso).toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' }) : 'No time set';
-const fmtDate = (iso: string) => new Date(iso).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+  iso ? format(new Date(iso), 'EEEE d MMM') : 'No time set';
+const fmtDate = (iso: string) => format(new Date(iso), 'EEE d MMM');
 
 export default function Dashboard() {
   const [horizon, setHorizon] = useState<Horizon | null>(null);
@@ -36,7 +37,7 @@ export default function Dashboard() {
   });
   const { data: accounts } = useApi<Account[]>('/api/accounts');
 
-  const [reviewing, setReviewing] = useState(false);
+  const [open, setOpen] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [drafting, setDrafting] = useState<number | null>(null);
   const [blocked, setBlocked] = useState<string | null>(null);
@@ -101,14 +102,11 @@ export default function Dashboard() {
       const r = await apiPost<{ approved: unknown[]; skipped: { reason: string; platforms?: Platform[] }[] }>('/api/plan/approve', { all: true });
       if (r.skipped.length) setNotice(`${r.skipped.length} not approved. ${skipMessage(r.skipped[0])}`);
     });
-  const startReview = () => {
-    setReviewing(true);
-    document.getElementById('review')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  };
 
-  // The one action, by state.
+  // The one action, by state. Blocked states get a quiet banner, not a button.
   let status = '';
   let action: ReactNode = null;
+  const blockInfo = block ? BLOCKED[block] : undefined;
   if (plan) {
     const planned = plan.counts.target - plan.counts.missing;
     status = plan.counts.target
@@ -116,19 +114,18 @@ export default function Dashboard() {
       : `${plan.counts.scheduled} posts scheduled`;
     if (plan.counts.review) status += ` · ${plan.counts.review} need${plan.counts.review === 1 ? 's' : ''} your review`;
 
-    if (block && BLOCKED[block]) {
-      status = BLOCKED[block].text;
-      action = <Link className="btn accent" href={BLOCKED[block].href}>{BLOCKED[block].cta}</Link>;
-    } else if (plan.generating) {
+    if (plan.generating) {
       action = <span className="session__progress" role="status">Drafting {drafting ?? plan.counts.missing} posts…</span>;
-    } else if (plan.counts.missing > 0) {
-      action = <button className="btn accent" onClick={generate} disabled={busy}>{busy ? 'Starting…' : `Plan next ${period}${plan.estimatedCredits ? ` · ≈${plan.estimatedCredits} credits` : ''}`}</button>;
-    } else if (ready.length && !reviewing) {
-      action = <button className="btn accent" onClick={startReview}>Review {ready.length} post{ready.length === 1 ? '' : 's'}</button>;
     } else if (approvable.length) {
-      action = <button className="btn accent" onClick={approveAll} disabled={busy}>{busy ? 'Approving…' : `Approve all ${approvable.length}`}</button>;
-    } else if (!ready.length) {
-      action = <span className="session__done">You’re set until {fmtDate(plan.to)}</span>;
+      action = <button className="btn primary" onClick={approveAll} disabled={busy}>{busy ? 'Approving…' : `Approve all ${approvable.length}`}</button>;
+    } else if (blockInfo) {
+      // banner below carries it
+    } else if (plan.counts.missing > 0) {
+      action = <button className="btn primary" onClick={generate} disabled={busy}>{busy ? 'Starting…' : `Plan next ${period}${plan.estimatedCredits ? ` · ≈${plan.estimatedCredits} credits` : ''}`}</button>;
+    } else if (ready.length) {
+      action = <span className="session__done">Fix the posts marked too long to approve them.</span>;
+    } else {
+      action = <span className="session__done">You’re set until {fmtDate(plan.to)}.</span>;
     }
   }
 
@@ -158,6 +155,11 @@ export default function Dashboard() {
         </p>
       )}
       {notice && <p className="session__alert" role="alert">{notice}</p>}
+      {plan && blockInfo && !plan.generating && (
+        <p className="session__note">
+          {blockInfo.text} <Link href={blockInfo.href}>{blockInfo.cta} →</Link>
+        </p>
+      )}
 
       {plan && plan.review.length > 0 && (
         <section id="review" className="session__section" aria-label="To review">
@@ -165,7 +167,14 @@ export default function Dashboard() {
             <div key={day} className="stack">
               <h2 className="session__day">{day}</h2>
               {items.map((r) => (
-                <ReviewCard key={r.id} item={r} limits={plan.limits} onChange={() => mutate()} />
+                <ReviewCard
+                  key={r.id}
+                  item={r}
+                  limits={plan.limits}
+                  onChange={() => mutate()}
+                  expanded={open === r.id}
+                  onToggle={() => setOpen(open === r.id ? null : r.id)}
+                />
               ))}
             </div>
           ))}
@@ -189,7 +198,7 @@ export default function Dashboard() {
               ))}
             </ul>
           ) : (
-            <p className="muted">Nothing scheduled for the next {days} days yet.</p>
+            <p className="muted">Nothing scheduled yet. Approved posts land here.</p>
           )}
         </section>
       )}

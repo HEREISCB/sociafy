@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { format } from 'date-fns';
 import { Pglyph } from '../icons';
 import { apiPatch, apiPost, friendlyApiError } from '../../lib/ui/fetcher';
 import { PLATFORM_TO_SHORT } from '../../lib/ui/platforms';
@@ -27,8 +28,19 @@ const toLocalInput = (iso: string) => {
   return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 };
 export const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+/** "Thu 16 Oct · 12:39 AM" */
+export const fmtSlot = (iso: string) => format(new Date(iso), 'EEE d MMM · h:mm a');
 
-export function ReviewCard({ item, limits, onChange }: { item: ReviewItem; limits: Record<Platform, number>; onChange: () => void }) {
+type Props = {
+  item: ReviewItem;
+  limits: Record<Platform, number>;
+  onChange: () => void;
+  /** Read-only until opened; the parent keeps one card open at a time. */
+  expanded: boolean;
+  onToggle: () => void;
+};
+
+export function ReviewCard({ item, limits, onChange, expanded, onToggle }: Props) {
   const [body, setBody] = useState(item.body);
   const [busy, setBusy] = useState<'approve' | 'skip' | 'save' | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -66,52 +78,69 @@ export function ReviewCard({ item, limits, onChange }: { item: ReviewItem; limit
     });
   const skip = () => run('skip', () => apiPost('/api/plan/skip', { draftId: item.id }));
 
+  // Title, else the caption's first line; the excerpt is whatever follows.
+  const lines = body.trim().split('\n').filter(Boolean);
+  const title = item.title?.trim() || lines[0] || 'Untitled post';
+  const excerpt = (item.title?.trim() ? lines : lines.slice(1)).join(' ');
+
   return (
-    <article className={`plan-card${item.rendering || media ? '' : ' plan-card--text'}`}>
-      {(item.rendering || media) && (
-        <div className="plan-card__media">
-          {item.rendering ? (
-            <span className="plan-card__placeholder">Rendering…</span>
-          ) : media.mimeType?.startsWith('video/') ? (
-            <video src={`${media.url}#t=0.1`} preload="metadata" muted playsInline controls aria-label="Post video" />
-          ) : (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={media.url} alt="" loading="lazy" />
-          )}
-        </div>
-      )}
+    <article className={`plan-card${expanded ? ' plan-card--open' : ''}`}>
+      <div className="plan-card__thumb">
+        {item.rendering ? (
+          <span className="plan-card__placeholder">Rendering…</span>
+        ) : !media ? (
+          <span className="plan-card__placeholder">Text</span>
+        ) : media.mimeType?.startsWith('video/') ? (
+          <video src={`${media.url}#t=0.1`} preload="metadata" muted playsInline controls={expanded} aria-label="Post video" />
+        ) : (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={media.url} alt="" loading="lazy" />
+        )}
+      </div>
 
       <div className="plan-card__main">
+        {expanded ? (
+          <>
+            <span className="plan-card__title">{title}</span>
+            <label className="sr-only" htmlFor={`cap-${item.id}`}>Caption</label>
+            <textarea
+              id={`cap-${item.id}`}
+              className="input plan-card__caption"
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              onBlur={save}
+              rows={6}
+              disabled={item.approved}
+              autoFocus
+            />
+            <label className="plan-card__time">
+              <span className="muted">Post time</span>
+              <input
+                key={item.plannedAt ?? 'unset'}
+                type="datetime-local"
+                className="input"
+                defaultValue={item.plannedAt ? toLocalInput(item.plannedAt) : ''}
+                onBlur={(e) => setTime(e.target.value)}
+                disabled={!!busy}
+              />
+            </label>
+          </>
+        ) : (
+          <button type="button" className="plan-card__summary" onClick={onToggle} aria-expanded={false}>
+            <span className="plan-card__title">{title}</span>
+            {excerpt && <span className="plan-card__excerpt">{excerpt}</span>}
+          </button>
+        )}
+
         <div className="plan-card__meta">
-          <span className="row plan-card__glyphs">
+          <span className="row plan-card__glyphs" aria-label={item.targetPlatforms.map((p) => PLATFORM_NAME[p]).join(', ')}>
             {item.targetPlatforms.map((p) => (
               <Pglyph key={p} p={PLATFORM_TO_SHORT[p]} />
             ))}
           </span>
-          <label className="plan-card__time">
-            <span className="sr-only">Post time</span>
-            <input
-              key={item.plannedAt ?? 'unset'}
-              type="datetime-local"
-              className="input"
-              defaultValue={item.plannedAt ? toLocalInput(item.plannedAt) : ''}
-              onBlur={(e) => setTime(e.target.value)}
-              disabled={!!busy}
-            />
-          </label>
+          {!expanded && <span className="tnum">{item.plannedAt ? fmtSlot(item.plannedAt) : 'No time set'}</span>}
           {item.overdue && <span className="badge badge--warn">Time passed, moves to next free slot</span>}
         </div>
-
-        <label className="sr-only" htmlFor={`cap-${item.id}`}>Caption</label>
-        <textarea
-          id={`cap-${item.id}`}
-          className="input plan-card__caption"
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          onBlur={save}
-          rows={4}
-          disabled={item.approved}
-        />
 
         {over.length > 0 && (
           <p className="plan-card__warn" role="status">
@@ -130,6 +159,9 @@ export function ReviewCard({ item, limits, onChange }: { item: ReviewItem; limit
               </button>
               <button className="btn sm ghost" onClick={skip} disabled={!!busy}>
                 {busy === 'skip' ? 'Skipping…' : 'Skip'}
+              </button>
+              <button className="btn sm ghost" onClick={onToggle} aria-expanded={expanded}>
+                {expanded ? 'Done' : 'Edit'}
               </button>
               {busy === 'save' && <span className="muted">Saving…</span>}
             </>

@@ -5,7 +5,7 @@ export default function AutopilotPage() {
     <>
       <div className="page-header">
         <div>
-          <h1>Your plan</h1>
+          <h1>Autopilot</h1>
           <p className="page-header__sub">What autopilot prepares for you between visits.</p>
         </div>
       </div>

@@ -237,8 +237,9 @@
   display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   border-top: 1px solid var(--line);
 }
+.tool-links li { display: flex; }
 .tool-links a {
-  display: block;
+  flex: 1;
   padding: var(--s-3) 0;
   border-bottom: 1px solid var(--line);
   font-size: var(--fs-md);

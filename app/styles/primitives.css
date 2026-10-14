@@ -23,23 +23,26 @@
 .btn .ic { width: 14px; height: 14px; }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
-/* Primary = the one dark action per view. */
-.btn.primary {
+/* Primary = the one ink action per view. Orange is never a button fill: it is
+   reserved for the active nav marker, focus rings, progress and small badges.
+   .btn.accent is kept as an alias so older call sites render ink too. */
+.btn.primary,
+.btn.accent {
   background: var(--text);
   color: var(--bg);
   border-color: var(--text);
 }
 @media (hover: hover) and (pointer: fine) {
-  .btn.primary:hover { background: var(--ink-2); }
+  .btn.primary:not(:disabled):hover,
+  .btn.accent:not(:disabled):hover { background: var(--ink-2); }
 }
-/* Accent = rare brand-orange call to action. */
-.btn.accent {
-  background: var(--accent);
-  color: white;
-  border-color: var(--accent);
-}
-@media (hover: hover) and (pointer: fine) {
-  .btn.accent:hover { filter: brightness(0.96); }
+/* Disabled ink reads as neutral grey, not a washed-out black. */
+.btn.primary:disabled,
+.btn.accent:disabled {
+  opacity: 1;
+  background: var(--line);
+  border-color: var(--line);
+  color: var(--text-3);
 }
 .btn.ghost { border-color: transparent; background: transparent; }
 @media (hover: hover) and (pointer: fine) {
@@ -72,14 +75,15 @@ select.input {
   font: inherit;
   font-size: var(--fs-sm);
   line-height: 1.4;
-  transition: border-color 0.12s, box-shadow 0.12s;
+  transition: border-color 0.12s;
 }
 .input::placeholder { color: var(--text-3); }
-.input:focus,
+/* Same 2px accent ring as buttons (base.css), so focus reads the same everywhere. */
+.input:focus { outline: none; }
 .input:focus-visible {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-color: var(--line-strong);
 }
 .input:disabled { opacity: 0.55; cursor: not-allowed; }
 textarea.input { resize: vertical; min-height: 72px; }

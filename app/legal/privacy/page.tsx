@@ -2,13 +2,12 @@
 // The legal entity name and contact details must remain visible for
 // payment-gateway verification.
 
-import { SiteShell } from '../../../components/site-chrome';
+import { COMPANY, COMPANY_ADDRESS, SiteShell } from '../../../components/site-chrome';
 
 export const metadata = {
   title: 'Privacy Policy · Sociafy',
 };
 
-const COMPANY = 'GNIX SEMICONDUCTORS PRIVATE LIMITED';
 const SUPPORT_EMAIL = 'support@sociafy.app'; // replace with verified support address
 const LAST_UPDATED = '2026-09-24';
 
@@ -75,7 +74,7 @@ export default function PrivacyPolicyPage() {
       <p>
         <strong>{COMPANY}</strong><br />
         Email: <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a><br />
-        Registered office: <em>[registered address pending]</em>
+        Registered office: {COMPANY_ADDRESS}
       </p>
     </SiteShell>
   );

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import { Icon } from './icons';
 import { apiDelete, apiPatch, apiPost, useApi, friendlyApiError } from '../lib/ui/fetcher';
 
@@ -131,7 +132,13 @@ export const ApiKeys: React.FC = () => {
       {error && <p className="set-error api-row">{error}</p>}
 
       {isLoading && <div className="plan-empty">Loading…</div>}
-      {!isLoading && keys.length === 0 && <div className="plan-empty">No keys yet.</div>}
+      {!isLoading && keys.length === 0 && (
+        <div className="empty-state">
+          <h3>No keys yet</h3>
+          {/* The action is the New key form right above; a second button would duplicate it. */}
+          <p>Name a key above and press New key to call Sociafy from your own code.</p>
+        </div>
+      )}
 
       {keys.map((k) => (
         <div key={k.id} className="api-row">
@@ -155,6 +162,11 @@ export const ApiKeys: React.FC = () => {
           <button className="btn ghost sm" onClick={() => revoke(k)}>Revoke</button>
         </div>
       ))}
+
+      <div className="plan-card-foot">
+        <span>New keys get {DEFAULT_CAP.toLocaleString()} credits a day unless you set a cap.</span>
+        <Link href="/developers/reference" className="set-link">API reference</Link>
+      </div>
     </section>
   );
 };

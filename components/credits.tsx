@@ -103,7 +103,7 @@ const CreditPopover: React.FC<{ data: CreditsPayload; onClose: () => void }> = (
         </div>
       )}
       <div className="credit-popover-actions">
-        <Link href="/settings/plan" className="btn ghost sm" onClick={onClose}>Plan &amp; usage</Link>
+        <Link href="/settings/plan" className="btn ghost sm" onClick={onClose}>Billing &amp; usage</Link>
         <Link href="/settings/plan?topup=1" className="btn primary sm" onClick={onClose}>Top up</Link>
       </div>
     </div>

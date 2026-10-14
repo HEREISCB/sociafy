@@ -56,7 +56,7 @@
 .cal-head,
 .cal-grid {
   display: grid;
-  grid-template-columns: 64px repeat(7, minmax(0, 1fr));
+  grid-template-columns: 76px repeat(7, minmax(0, 1fr));
 }
 .cal-head { border-bottom: 1px solid var(--line); }
 .cal-head .cell {
@@ -68,7 +68,7 @@
 .cal-head .cell:last-child { border-right: 0; }
 .cal-head .cell .day { display: block; font-size: var(--fs-md); font-weight: 500; color: var(--text); font-variant-numeric: tabular-nums; }
 .cal-head .cell.today .day { color: var(--accent-ink); }
-.cal-head .cal-tz { overflow-wrap: anywhere; text-align: center; display: flex; align-items: center; justify-content: center; padding: var(--s-2) var(--s-1); }
+.cal-head .cal-tz { white-space: nowrap; text-align: center; display: flex; align-items: center; justify-content: center; padding: var(--s-2) var(--s-1); }
 .cal-grid { overflow-y: auto; max-height: calc(100dvh - 280px); }
 .cal-hour-cell {
   height: 48px;
@@ -88,7 +88,7 @@
   background: transparent;
   cursor: pointer;
 }
-.cal-slot:disabled { cursor: default; background: var(--subtle); }
+.cal-slot:disabled { cursor: default; background: color-mix(in srgb, var(--subtle) 35%, transparent); }
 @media (hover: hover) and (pointer: fine) { .cal-slot:not(:disabled):hover { background: var(--subtle); } }
 
 .cal-ev {
@@ -153,9 +153,12 @@
 .cal-panel__field { gap: var(--s-1); font-size: var(--fs-xs); color: var(--text-2); }
 .cal-panel__actions { flex-wrap: wrap; }
 
+/* Phones get List only (see Calendar's isPhone). */
+@media (max-width: 639px) { .cal-view-switch { display: none; } }
+
 @media (max-width: 900px) {
   .calendar { overflow-x: auto; }
-  .cal-head, .cal-grid { grid-template-columns: 52px repeat(7, minmax(72px, 1fr)); min-width: 560px; }
+  .cal-head, .cal-grid { grid-template-columns: 76px repeat(7, minmax(72px, 1fr)); min-width: 580px; }
   .cal-hour-cell { padding: 2px var(--s-1); }
   /* Rows: time · glyphs · badge on top, the text on its own line. */
   .cal-row { flex-wrap: wrap; row-gap: 2px; }

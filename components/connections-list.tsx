@@ -111,6 +111,15 @@ export default function ConnectionsList({
   const [confirming, setConfirming] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [disconnectError, setDisconnectError] = useState<string | null>(null);
+  // Back from OAuth: refetch, and show that row as "Connecting…" until the
+  // refetch lands, so the list never contradicts the "X connected" banner.
+  const [arriving, setArriving] = useState<string | null>(null);
+  const arrived = flash?.kind === 'success' ? flash.platform : null;
+  useEffect(() => {
+    if (!arrived) return;
+    queueMicrotask(() => setArriving(arrived));
+    mutate().finally(() => setArriving(null));
+  }, [arrived, mutate]);
 
   const connect = (p: Platform) => window.location.assign(`/api/oauth/${p}/start?next=${encodeURIComponent(next)}`);
 
@@ -172,7 +181,9 @@ export default function ConnectionsList({
                   <div className="conn-row__sub">{acct && healthy ? handleOf(acct) : p.tip}</div>
                 </div>
                 <div className="conn-row__actions">
-                  {healthy && !manage ? (
+                  {!healthy && arriving === p.id ? (
+                    <span className="conn-row__done is-pending" role="status">Connecting…</span>
+                  ) : healthy && !manage ? (
                     <span className="conn-row__done"><Icon name="check" size={12} /> Connected</span>
                   ) : !healthy ? (
                     <button type="button" className="btn sm" onClick={() => connect(p.id)} disabled={!!unauth}>

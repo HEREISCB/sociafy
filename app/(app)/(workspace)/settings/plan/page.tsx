@@ -7,6 +7,7 @@ import type { CreditsPayload } from '../../../../../components/credits';
 import { CREDIT_PRICES } from '../../../../../lib/credits/pricing';
 import { apiPost, friendlyApiError, useApi } from '../../../../../lib/ui/fetcher';
 import { openRazorpayModal } from '../../../../../components/billing/razorpay-checkout';
+import { ledgerRowLabel } from '../../../../../lib/ui/ledgerLabel';
 import { topupPriceView } from '../../../../../lib/billing/pricing';
 import { BillingDetailsFields, useBillingDetails } from '../../../../../components/billing/billing-details';
 
@@ -554,19 +555,12 @@ function BillingPageInner() {
 }
 
 const LedgerRow: React.FC<{ row: CreditsPayload['ledger'][number] }> = ({ row }) => {
-  const meta = (row.meta ?? {}) as Record<string, unknown>;
-  const metaLine = [
-    meta.providerTaskId ? `task ${String(meta.providerTaskId).slice(0, 8)}…` : null,
-    meta.draftId ? `draft ${String(meta.draftId).slice(0, 8)}…` : null,
-    meta.reason ? String(meta.reason) : null,
-    row.kind === 'signup_bonus' ? 'welcome bonus' : null,
-    row.kind === 'refund' ? 'refund' : null,
-  ].filter(Boolean).join(' · ');
+  const { title, detail } = ledgerRowLabel(row);
   return (
     <div className="plan-row">
       <div className="plan-row-main">
-        <div>{row.label}</div>
-        {metaLine && <div className="plan-row-meta">{metaLine}</div>}
+        <div>{title}</div>
+        {detail && <div className="plan-row-meta">{detail}</div>}
       </div>
       <span className={`num ${row.credits > 0 ? 'pos' : ''}`}>
         {row.credits > 0 ? '+' : ''}{row.credits.toLocaleString()}

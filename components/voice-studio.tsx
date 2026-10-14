@@ -256,7 +256,7 @@ export function VoicePicker({
   value: string | null;
   onChange: (voiceId: string) => void;
 }) {
-  const { voices, mutate } = useVoices();
+  const { voices, mutate, isLoading } = useVoices();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const ready = voices.filter((v) => v.status === 'ready');
 
@@ -312,7 +312,7 @@ async function pollTts(jobId: string): Promise<string | null> {
 }
 
 export function VoicesManager() {
-  const { voices, mutate } = useVoices();
+  const { voices, mutate, isLoading } = useVoices();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [previewFor, setPreviewFor] = useState<string | null>(null);
   const [previewText, setPreviewText] = useState('Hi! This is my Voice Twin speaking.');
@@ -366,7 +366,14 @@ export function VoicesManager() {
         <button className="btn sm" onClick={() => setDrawerOpen(true)}><Icon name="plus" size={12} /> Create voice</button>
       </div>
 
-      {voices.length === 0 && <div className="plan-empty">No voices yet.</div>}
+      {isLoading && <div className="plan-empty">Loading…</div>}
+      {!isLoading && voices.length === 0 && (
+        <div className="empty-state">
+          <h3>No voices yet</h3>
+          <p>Record or upload 20–40 seconds of you talking and we&apos;ll clone it for your avatar videos.</p>
+          <button className="btn" onClick={() => setDrawerOpen(true)}><Icon name="plus" size={14} /> Create voice</button>
+        </div>
+      )}
 
       <div className="voice-list">
         {voices.map((v) => (

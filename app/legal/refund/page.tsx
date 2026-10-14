@@ -1,13 +1,12 @@
 // Refund & Cancellation Policy — required by Razorpay for verification.
 // Reflects the cancel/refund behavior implemented in the billing flow.
 
-import { SiteShell } from '../../../components/site-chrome';
+import { COMPANY, SiteShell } from '../../../components/site-chrome';
 
 export const metadata = {
   title: 'Refund & Cancellation Policy · Sociafy',
 };
 
-const COMPANY = 'GNIX SEMICONDUCTORS PRIVATE LIMITED';
 const SUPPORT_EMAIL = 'support@sociafy.app';
 const LAST_UPDATED = '2026-05-23';
 
@@ -24,7 +23,7 @@ export default function RefundPolicyPage() {
 
       <h2>1. Cancelling your subscription</h2>
       <p>
-        You can cancel your subscription at any time from the <a href="/settings/plan">Plan settings</a> in your Sociafy account. Cancellation takes effect at the end of your current billing cycle. You retain access to the credits already granted for that cycle until the cycle ends; no further charges are made after that.
+        You can cancel your subscription at any time from <a href="/settings/plan">Settings → Billing &amp; usage</a> in your Sociafy account. Cancellation takes effect at the end of your current billing cycle. You retain access to the credits already granted for that cycle until the cycle ends; no further charges are made after that.
       </p>
 
       <h2>2. Subscription refunds</h2>
@@ -49,7 +48,7 @@ export default function RefundPolicyPage() {
 
       <h2>6. Failed generations</h2>
       <p>
-        If our AI providers fail to generate the content you requested, the credits deducted for that specific request are automatically refunded to your account balance (see the credit ledger on the Billing page).
+        If our AI providers fail to generate the content you requested, the credits deducted for that specific request are automatically refunded to your account balance (see the credit ledger in Settings → Billing &amp; usage).
       </p>
 
       <h2>7. Contact</h2>

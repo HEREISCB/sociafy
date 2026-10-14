@@ -1,9 +1,6 @@
 /* Connections list (shared by onboarding + Settings → Connections) and onboarding. */
 
 /* ---------- Connections list ---------- */
-.conn-head { margin-bottom: var(--s-4); }
-.conn-head h2 { margin: 0 0 var(--s-1); font-size: var(--fs-lg); font-weight: 600; letter-spacing: -0.01em; }
-.conn-head p { margin: 0; font-size: var(--fs-sm); color: var(--text-2); }
 
 .conn-list {
   list-style: none;
@@ -43,6 +40,7 @@
   font-size: var(--fs-xs);
   color: var(--ok-ink);
 }
+.conn-row__done.is-pending { color: var(--text-3); }
 .conn-row__details {
   display: flex;
   flex-direction: column;

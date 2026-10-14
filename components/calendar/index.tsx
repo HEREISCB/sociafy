@@ -24,8 +24,22 @@ function useNow(intervalMs: number): number {
 
 const weekOf = (d: Date) => startOfWeek(d, { weekStartsOn: 1 });
 
+type View = 'list' | 'week';
+/** Week is too cramped below 640px; phones always get List. */
+const isPhone = () => window.matchMedia('(max-width: 639px)').matches;
+
 export default function Calendar() {
-  const [view, setView] = useState<'list' | 'week'>('list');
+  const [view, setViewState] = useState<View>('list');
+  // ?view=week|list — read once on mount (no useSearchParams, so no Suspense boundary needed).
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('view') === 'week' && !isPhone()) setViewState('week');
+  }, []);
+  const setView = (v: View) => {
+    setViewState(v);
+    const url = new URL(window.location.href);
+    url.searchParams.set('view', v);
+    window.history.replaceState(null, '', url);
+  };
   const [weekStart, setWeekStart] = useState(() => weekOf(new Date()));
   const [range] = useState(() => {
     const today = startOfDay(new Date());
@@ -59,7 +73,7 @@ export default function Calendar() {
   return (
     <>
       <div className="cal-toolbar">
-        <div className="mode-switch" aria-label="View">
+        <div className="mode-switch cal-view-switch" aria-label="View">
           {(['list', 'week'] as const).map((v) => (
             <button key={v} type="button" aria-pressed={view === v} className={`opt${view === v ? ' active' : ''}`} onClick={() => setView(v)}>
               {v === 'list' ? 'List' : 'Week'}

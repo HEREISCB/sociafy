@@ -31,8 +31,8 @@ export function toolMetadata(slug: string, title: string, description: string): 
 /** Links to every other free tool; shared by tool pages and the hub. `exclude` is a path. */
 export function ToolLinks({ exclude }: { exclude?: string }) {
   const links = [
-    ...FREE_TOOL_IDS.map((id) => ({ href: FREE_TOOLS[id].slug, title: `Free ${FREE_TOOLS[id].title}` })),
-    ...TRY_PAGES.map((t) => ({ href: t.path, title: `Free ${t.title.replace(/^Free /, '')}` })),
+    ...FREE_TOOL_IDS.map((id) => ({ href: FREE_TOOLS[id].slug, title: FREE_TOOLS[id].title })),
+    ...TRY_PAGES.map((t) => ({ href: t.path, title: t.title.replace(/^Free /, '') })),
   ].filter((l) => l.href !== exclude);
   return (
     <ul className="tool-links">

@@ -5,6 +5,9 @@ import { RevealObserver } from './reveal-observer';
 // legal, 404). Server component on purpose: keeps these pages off the landing
 // client chunk.
 
+export const COMPANY = 'GNIX SEMICONDUCTORS PRIVATE LIMITED';
+export const COMPANY_ADDRESS = '2TF, Satyam Complex 2, Sector Alpha II, Greater Noida, Uttar Pradesh 201310, India';
+
 export const PG = ({ k }: { k: string }) => (
   <span className={`pglyph ${k}`} aria-hidden="true">
     {({ ig: 'I', fb: 'f', x: 'X', li: 'in', tt: 'T', yt: 'Y', th: '@' } as Record<string, string>)[k]}
@@ -49,10 +52,9 @@ export const Footer = () => (
       <div>
         <Brand />
         <p className="lp-foot-note">
-          A product of GNIX SEMICONDUCTORS PRIVATE LIMITED, 2TF, Satyam Complex 2, Sector Alpha II,
-          Greater Noida, Uttar Pradesh 201310, India.
+          A product of {COMPANY}, {COMPANY_ADDRESS}.
         </p>
-        <p className="lp-foot-note">© 2026 GNIX SEMICONDUCTORS PRIVATE LIMITED</p>
+        <p className="lp-foot-note">© 2026 {COMPANY}</p>
       </div>
       <nav className="lp-foot-col" aria-label="Product">
         <h2>Product</h2>

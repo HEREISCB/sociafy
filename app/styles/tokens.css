@@ -13,7 +13,7 @@
   --text-2: #6B6B66;
   --text-3: #76766F; /* ~4:1 on --bg */
 
-  /* One accent: the brand orange. Primary action + active nav only. */
+  /* One accent: the brand orange. Active nav, focus rings, progress, small badges. Never a button fill: primary buttons are ink. */
   --accent: oklch(0.72 0.18 55);
   --accent-soft: oklch(0.96 0.04 70);
   --accent-ink: oklch(0.42 0.16 55); /* accent-coloured text on light surfaces */

@@ -378,6 +378,8 @@ interface TopbarProps {
 
 export const Topbar: React.FC<TopbarProps> = ({ onMenuClick }) => {
   const router = useRouter();
+  // On /compose the page's own Schedule button is the CTA; a second "New post" would compete.
+  const composing = (usePathname() ?? '').startsWith('/compose');
   return (
     <div className="topbar">
       {onMenuClick && (
@@ -399,9 +401,11 @@ export const Topbar: React.FC<TopbarProps> = ({ onMenuClick }) => {
         <AutopilotStatusPill onClick={() => router.push('/autopilot')} />
         <CreditMeter />
         <NotificationsBell />
-        <Link href="/compose" className="btn accent shell-new" aria-label="New post">
-          <Icon name="plus" size={14} /> <span className="shell-new-label">New post</span>
-        </Link>
+        {!composing && (
+          <Link href="/compose" className="btn primary shell-new" aria-label="New post">
+            <Icon name="plus" size={14} /> <span className="shell-new-label">New post</span>
+          </Link>
+        )}
       </div>
     </div>
   );

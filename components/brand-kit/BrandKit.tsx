@@ -102,7 +102,14 @@ export default function BrandKit() {
   const { data, error, mutate } = useApi<Payload>('/api/brand-kit');
   const [save, setSave] = useState<SaveState>(null);
 
-  if (error) return <p className="set-error">Couldn’t load your brand kit. Refresh to try again.</p>;
+  if (error) {
+    return (
+      <div className="set-notice set-actions" role="alert">
+        <span>Couldn’t load your brand kit.</span>
+        <button className="btn sm" onClick={() => mutate()}>Retry</button>
+      </div>
+    );
+  }
   if (!data) return <p className="set-hint">Loading…</p>;
 
   const { kit, profile, brandKitCompleteness: done } = data;
@@ -130,9 +137,6 @@ export default function BrandKit() {
 
   return (
     <div className="stack bk">
-      <p className="settings-intro">
-        Everything we use to make your posts and videos look and sound like you. Every item is optional; fill in what you have.
-      </p>
       <div className="bk-progress">
         <span className="bk-progress__label tnum">{done.done} of {done.total} done</span>
         <span className="bk-segments" aria-hidden>

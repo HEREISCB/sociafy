@@ -68,11 +68,13 @@ const when = (iso: string) =>
   new Date(iso).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' });
 
 /** A two-or-three way choice. `.mode-switch` primitive, as a radio group. */
-function Choice<T extends string | number>({ label, value, options, disabled, onChange }: {
+function Choice<T extends string | number>({ label, value, options, disabled, custom, onChange }: {
   label: string;
   value: T | null;
   options: { id: T; label: string }[];
   disabled?: boolean;
+  /** Shown as the selected option when `value` matches none of `options`. */
+  custom?: string;
   onChange: (v: T) => void;
 }) {
   return (
@@ -90,6 +92,9 @@ function Choice<T extends string | number>({ label, value, options, disabled, on
           {o.label}
         </button>
       ))}
+      {value === null && custom && (
+        <button type="button" role="radio" aria-checked className="opt active" disabled={disabled}>{custom}</button>
+      )}
     </div>
   );
 }
@@ -341,7 +346,7 @@ export default function PlanSettings() {
           />
         </div>
         <div className="ap-row">
-          <Choice label="Post types" value={preset} options={PRESETS} disabled={locked} onChange={(pr) => savePlan({ preset: pr })} />
+          <Choice label="Post types" value={preset} options={PRESETS} disabled={locked} custom={`Custom (${mix.text} text · ${mix.image} image · ${mix.video} video)`} onChange={(pr) => savePlan({ preset: pr })} />
           <span className="ap-sub tnum">≈ {burn.weekly.toLocaleString()} credits per week</span>
         </div>
       </section>

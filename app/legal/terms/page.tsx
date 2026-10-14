@@ -1,12 +1,11 @@
 // Terms of Service. Replace the body with reviewed legal copy before going live.
 
-import { SiteShell } from '../../../components/site-chrome';
+import { COMPANY, COMPANY_ADDRESS, SiteShell } from '../../../components/site-chrome';
 
 export const metadata = {
   title: 'Terms of Service · Sociafy',
 };
 
-const COMPANY = 'GNIX SEMICONDUCTORS PRIVATE LIMITED';
 const SUPPORT_EMAIL = 'support@sociafy.app';
 const LAST_UPDATED = '2026-05-23';
 
@@ -73,7 +72,7 @@ export default function TermsPage() {
 
       <h2>11. Termination</h2>
       <p>
-        You may cancel your subscription at any time from the Billing page. We may suspend or terminate accounts that violate these terms. On termination, your credits expire and your data may be deleted after a reasonable grace period.
+        You may cancel your subscription at any time from Settings → Billing &amp; usage. We may suspend or terminate accounts that violate these terms. On termination, your credits expire and your data may be deleted after a reasonable grace period.
       </p>
 
       <h2>12. Governing law</h2>
@@ -90,7 +89,7 @@ export default function TermsPage() {
       <p>
         <strong>{COMPANY}</strong><br />
         Email: <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a><br />
-        Registered office: <em>[registered address pending]</em>
+        Registered office: {COMPANY_ADDRESS}
       </p>
     </SiteShell>
   );

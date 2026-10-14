@@ -412,7 +412,7 @@ export default function Compose({ draftId, onDone, initial }: {
                 onChange={(e) => { whenSet.current = true; setWhen(e.target.value); }}
               />
             </label>
-            <button type="button" className="btn accent" disabled={!canSubmit} onClick={schedule}>
+            <button type="button" className="btn primary" disabled={!canSubmit} onClick={schedule}>
               {busy === 'schedule' ? 'Scheduling…' : 'Schedule'}
             </button>
             <button type="button" className="btn" disabled={!canSubmit} onClick={() => postNow()}>

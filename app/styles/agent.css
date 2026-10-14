@@ -98,3 +98,9 @@
   .ap-status { flex-direction: column; }
   .ap-toggle { min-height: 44px; }
 }
+
+/* The "Custom (…)" mix label doesn't fit one pill on phones: let the options wrap. */
+.ap-row .mode-switch .opt { white-space: nowrap; }
+@media (max-width: 639px) {
+  .ap-row .mode-switch { flex-wrap: wrap; border-radius: var(--r); }
+}

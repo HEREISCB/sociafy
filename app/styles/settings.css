@@ -20,20 +20,22 @@
 @media (hover: hover) and (pointer: fine) { .settings-nav a:hover { background: var(--subtle); color: var(--text); } }
 .settings-nav a.active { background: var(--subtle); color: var(--text); font-weight: 500; }
 .settings-body { min-width: 0; max-width: 760px; }
-.settings-intro { margin: 0 0 var(--s-6); font-size: var(--fs-sm); color: var(--text-2); max-width: 60ch; }
-.settings-intro a { color: var(--text); }
+/* Section header: every settings page opens with title + one line (from the layout). */
+.settings-head { margin-bottom: var(--s-6); }
+.settings-head h2 { margin: 0 0 var(--s-1); font-size: var(--fs-lg); font-weight: 600; letter-spacing: -0.01em; }
+.settings-head p { margin: 0; font-size: var(--fs-sm); color: var(--text-2); max-width: 60ch; }
 
 @media (max-width: 900px) {
   .settings-layout { grid-template-columns: 1fr; gap: var(--s-4); }
+  /* Tabs wrap to a second line instead of scrolling, so every section is visible. */
   .settings-nav {
     position: static;
     flex-direction: row;
-    gap: var(--s-4);
-    overflow-x: auto;
-    scrollbar-width: none;
+    flex-wrap: wrap;
+    column-gap: var(--s-4);
+    row-gap: 0;
     border-bottom: 1px solid var(--line);
   }
-  .settings-nav::-webkit-scrollbar { display: none; }
   .settings-nav a {
     padding: 10px 0;
     border-radius: 0;

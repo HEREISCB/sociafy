@@ -1,6 +1,5 @@
 /* Settings › Brand kit: a calm checklist, one row per item, each expands to edit. */
 .bk { gap: var(--s-4); }
-.bk .settings-intro { margin-bottom: 0; }
 
 .bk-progress { display: flex; align-items: center; gap: var(--s-3); }
 .bk-progress__label { font-size: var(--fs-sm); font-weight: 500; }
