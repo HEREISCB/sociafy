@@ -23,6 +23,7 @@ from fastapi import FastAPI, Header, HTTPException
 app = modal.App("sociafy-motion-engine")
 
 HF = "hyperframes@0.8.141"
+CHROME = "152.0.7977.30"  # the headless shell HF pins
 MOTION_SRC = pathlib.Path(__file__).resolve().parent.parent / "motion"
 TEMPLATES = ("stat", "showcase", "sting")
 ASPECTS = ("9:16", "16:9")
@@ -70,7 +71,19 @@ image = (
     )
     .pip_install("boto3", "fastapi")
     # Pin the renderer and bake its Chrome in, so a render never downloads anything.
-    .run_commands(f"mkdir -p /app && cd /app && npm init -y >/dev/null && npm i {HF} && npx hyperframes browser ensure")
+    .apt_install("curl", "unzip")
+    # `hyperframes browser ensure` hangs in the image build after its download hits 100%;
+    # fetch the same Chrome headless shell directly and point the renderer at it.
+    .run_commands(
+        f"mkdir -p /app && cd /app && npm init -y >/dev/null && npm i {HF}",
+        f"curl -fsSL -o /tmp/chs.zip https://storage.googleapis.com/chrome-for-testing-public/{CHROME}/linux64/chrome-headless-shell-linux64.zip"
+        " && unzip -q /tmp/chs.zip -d /opt && rm /tmp/chs.zip",
+    )
+    .env({
+        "HYPERFRAMES_BROWSER_PATH": "/opt/chrome-headless-shell-linux64/chrome-headless-shell",
+        "HYPERFRAMES_NO_TELEMETRY": "1",
+        "HYPERFRAMES_NO_UPDATE_CHECK": "1",
+    })
     .add_local_dir(str(MOTION_SRC), "/app/motion", copy=True, ignore=["samples"])
     .run_commands(relink)
 )
