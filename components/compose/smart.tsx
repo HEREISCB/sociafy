@@ -16,6 +16,20 @@ const FORMAT: Record<VideoFormat, string> = {
 const SHAPE: Record<string, string> = { '9:16': 'Vertical', '1:1': 'Square', '16:9': 'Wide' };
 const MIN_CHARS = 15;
 
+type Override = { format: Exclude<VideoFormat, 'none'> } | { cheapest: true };
+// ponytail: module-level memo of recent plans, so "Choose myself" → back (or re-picking a chip) is instant; per tab, no persistence.
+const PLAN_TTL_MS = 5 * 60_000;
+const plans = new Map<string, { at: number; res: PlanResponse }>();
+const recall = (key: string) => {
+  const hit = plans.get(key);
+  return hit && Date.now() - hit.at < PLAN_TTL_MS ? hit.res : null;
+};
+const remember = (key: string, res: PlanResponse) => {
+  plans.delete(key);
+  plans.set(key, { at: Date.now(), res });
+  if (plans.size > 30) plans.delete(plans.keys().next().value!);
+};
+
 /** Video tab default: the planner picks the format, length and sound; one button renders it. */
 export function SmartVideo({ gen, text, platforms, attachments }: {
   gen: MediaGen;
@@ -23,21 +37,25 @@ export function SmartVideo({ gen, text, platforms, attachments }: {
   platforms: string[];
   attachments: { url: string; mimeType: string }[];
 }) {
-  const [res, setRes] = useState<PlanResponse | null>(null);
+  const [override, setOverride] = useState<Override | null>(null);
+  const key = JSON.stringify([text.trim(), platforms, attachments.map((a) => a.url), override]);
+  const [fetched, setRes] = useState<PlanResponse | null>(null);
   const [plannedKey, setPlannedKey] = useState<string | null>(null);
+  // A remembered plan for exactly these inputs shows at once, no request.
+  const remembered = recall(key);
+  const res = remembered ?? fetched;
   const [planning, setPlanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [override, setOverride] = useState<VideoFormat | null>(null);
   /** The price rose at submit; the user has to confirm the new one. */
-  const [repriced, setRepriced] = useState(false);
+  const [repricedKey, setRepricedKey] = useState<string | null>(null);
+  const repriced = repricedKey === key;
   const [retry, setRetry] = useState(0);
   const { data: credits } = useApi<CreditsPayload>('/api/credits');
 
   const tooShort = text.trim().length < MIN_CHARS;
-  const key = JSON.stringify([text.trim(), platforms, attachments.map((a) => a.url), override]);
 
   useEffect(() => {
-    if (tooShort) return;
+    if (tooShort || recall(key)) return;
     const ctrl = new AbortController();
     const t = setTimeout(async () => {
       setPlanning(true);
@@ -46,16 +64,17 @@ export function SmartVideo({ gen, text, platforms, attachments }: {
         const r = await fetch('/api/media/plan-video', {
           method: 'POST', credentials: 'include', signal: ctrl.signal,
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ text: text.trim(), platforms, attachments, ...(override ? { overrides: { format: override } } : {}) }),
+          body: JSON.stringify({ text: text.trim(), platforms, attachments, ...(override ? { overrides: override } : {}) }),
         });
         const data = (await r.json().catch(() => ({}))) as PlanResponse & { hint?: string };
         if (!r.ok || !data.plan) {
           setError(typeof data.hint === 'string' ? data.hint : r.status === 401 ? 'Your session expired — sign in again.' : 'Couldn’t plan this video. Try again.');
           return;
         }
+        remember(key, data);
         setRes(data);
         setPlannedKey(key);
-        setRepriced(false);
+        setRepricedKey(null);
       } catch {
         if (!ctrl.signal.aborted) setError('Couldn’t plan this video. Check your connection and try again.');
       } finally {
@@ -80,8 +99,8 @@ export function SmartVideo({ gen, text, platforms, attachments }: {
     );
   }
 
-  const stale = key !== plannedKey;
-  if (error && !planning) {
+  const stale = !remembered && key !== plannedKey;
+  if (error && !planning && !remembered) {
     return (
       <div className="compose-media-panel">
         <p className="compose-note compose-error">{error}</p>
@@ -108,12 +127,12 @@ export function SmartVideo({ gen, text, platforms, attachments }: {
   const reasons = (res.reasons?.length ? res.reasons : plan.reasons ?? []).slice(0, 3);
   const balance = credits?.balance ?? res.balance;
   const short = (balance != null && balance < price) || res.affordable === false;
-  // The cheapest option, when it's cheaper than the plan and not already offered as an alternative.
-  const cheapest = short && res.cheapest && res.cheapest.estimatedCredits < price
-    && !res.alternatives?.some((a) => a.summary === res.cheapest!.summary) ? res.cheapest : null;
+  // The server dedupes options (cheapest ≠ plan ≠ alternatives); show cheapest only when it is cheaper.
+  const cheapest = short && res.cheapest && res.cheapest.estimatedCredits < price ? res.cheapest : null;
   const none = plan.format === 'none';
   const busy = gen.busy === 'video';
-  const updating = stale || planning;
+  // An aborted fetch leaves `planning` set; a remembered plan is current regardless.
+  const updating = stale || (planning && !remembered);
   const sound = [
     plan.audio?.narration && { icon: 'mic' as const, label: 'Voiceover' },
     plan.audio?.music && { icon: 'waveform' as const, label: 'Music' },
@@ -123,8 +142,11 @@ export function SmartVideo({ gen, text, platforms, attachments }: {
   const go = async () => {
     const fresh = await gen.generateAuto({ text: text.trim(), plan, platforms, attachments });
     if (fresh) {
-      setRes((cur) => ({ ...cur, ...fresh, reasons: fresh.reasons ?? fresh.plan.reasons ?? cur?.reasons }));
-      setRepriced(true);
+      // Summary and reasons always come from the fresh plan, never the old card.
+      const next = { ...res, ...fresh, summary: fresh.summary ?? fresh.plan.summary ?? '', reasons: fresh.reasons ?? fresh.plan.reasons ?? [] };
+      remember(key, next);
+      setRes(next);
+      setRepricedKey(key);
     }
   };
 
@@ -150,13 +172,13 @@ export function SmartVideo({ gen, text, platforms, attachments }: {
       {(res.alternatives?.length || override || cheapest) && !busy ? (
         <div className="compose-chips" role="group" aria-label="Other options">
           {cheapest && (
-            <button type="button" className="prompt-chip" title={cheapest.summary} disabled={updating || cheapest.format === plan.format} onClick={() => setOverride(cheapest.format)}>
-              Cheapest: {FORMAT[cheapest.format] ?? cheapest.format} · {cheapest.estimatedCredits} cr
+            <button type="button" className="prompt-chip" title={cheapest.summary} disabled={updating} onClick={() => setOverride({ cheapest: true })}>
+              Cheapest: {cheapest.label ?? FORMAT[cheapest.format]} · {cheapest.estimatedCredits} cr
             </button>
           )}
-          {res.alternatives?.map((a) => (
-            <button key={a.format} type="button" className="prompt-chip" title={a.summary} disabled={updating} onClick={() => setOverride(a.format)}>
-              {a.estimatedCredits < price ? 'Cheaper: ' : ''}{FORMAT[a.format] ?? a.format} · {a.estimatedCredits} cr
+          {res.alternatives?.slice(0, cheapest ? 2 : 3).map((a) => (
+            <button key={a.key ?? a.format} type="button" className="prompt-chip" title={a.summary} disabled={updating || a.format === 'none'} onClick={() => a.format !== 'none' && setOverride({ format: a.format })}>
+              {a.label ?? FORMAT[a.format]} · {a.estimatedCredits} cr
             </button>
           ))}
           {override && <button type="button" className="btn ghost sm" disabled={updating} onClick={() => setOverride(null)}>Back to the best fit</button>}

@@ -41,6 +41,8 @@ export type Plan = {
   estimatedCredits: number;
   confidence: number;
   signals: string[];
+  /** One customer-facing line about THIS post's video (the scene, the words). No spec, no price. */
+  summary: string;
   reasons: string[];
   /** What runs if the footage of a hybrid fails (refund of the difference + this). Null for other formats. */
   fallback: { format: 'motion_graphic'; estimatedCredits: number } | null;
@@ -52,7 +54,14 @@ export type Plan = {
   cheapest?: PlanOption;
 };
 
-export type PlanOption = { format: PlanFormat; estimatedCredits: number; summary: string };
+/** An option chip. `key` = (format, graphics engine/template, footage engine): distinct options only. */
+export type PlanOption = {
+  key: string; format: PlanFormat; estimatedCredits: number;
+  /** Chip text: "Logo sting", "Motion graphic", "AI video"… */
+  label: string;
+  /** The spec line (tooltip). */
+  summary: string;
+};
 
 export type Availability = {
   /** Sociafy Motion 1 (PiAPI key set). */
@@ -68,7 +77,8 @@ export type Availability = {
 };
 
 export type Attachment = { url: string; mimeType: string };
-export type Overrides = { format?: 'ai_video' | 'motion_graphic' | 'hybrid'; durationSec?: number; aspect?: PlanAspect };
+/** `cheapest`: the "Cheapest:" chip — return the bottom of the downgrade ladder (whatever engine/template that is). */
+export type Overrides = { format?: 'ai_video' | 'motion_graphic' | 'hybrid'; cheapest?: boolean; durationSec?: number; aspect?: PlanAspect };
 
 export type BrainInput = {
   text: string;
@@ -99,6 +109,9 @@ export type Draft = {
   aspect?: string;
   audio?: Partial<PlanAudio>;
   onScreenText?: string[];
+  /** Model-written copy; finalizePlan validates it (copyLine) and uses it only if the plan kept the draft's shape. */
+  summary?: string;
+  reasons?: string[];
   confidence?: number;
   signals?: string[];
 };
@@ -108,6 +121,8 @@ export type Draft = {
 const DEFAULT_DEADLINE_MIN = 30;
 const SAFE_DEFAULT_SEC = 12;
 const FOOTAGE_SEC = { min: 4, max: 8 } as const;
+/** Motion graphics and hybrids run at least this long (the 7 s sting template is the exception). */
+const MIN_GRAPHIC_SEC = 8;
 const MIN_CONFIDENCE = 0.6;
 
 /** Appended to every footage prompt. Diffusion garbles words, screens and logos (rulebook §0, §3). */
@@ -174,14 +189,17 @@ export function priceForPlan(p: Pick<Plan, 'format' | 'footage' | 'graphics' | '
 // ---------------------------------------------------------------- heuristic signals
 
 const RX = {
-  numbers: /\d|%|₹|\$|€|£|https?:\/\/|www\./i,
+  /** Must-show figures: prices, percentages, multi-digit numbers, URLs, dates, times. A lone "7 words" isn't one. */
+  numbers: /[₹$€£]\s?\d|\d\s?%|\d[\d,.]*\d|https?:\/\/|www\.|\b(?:jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d|\b\d{1,2}(?::\d{2})?\s?(?:am|pm)\b/i,
   stats: /\d+(?:\.\d+)?\s*(?:%|x\b|×)|\bfrom\b.{1,40}\bto\b.{0,20}\d/i,
   list: /\b\d+\s+(?:ways|tips|mistakes|steps|reasons|things|lessons|ideas|rules|habits)\b/i,
   listLines: /^\s*(?:\d+[.)]|[-•*])\s+\S/gm,
   opinion: /hot take|unpopular opinion|\bi (?:think|believe)\b|\bmost (?:founders|people|brands)\b|["“][^"”]{12,}["”]/i,
   scene: /\b(?:kitchen|bakery|caf[eé]|coffee|street|beach|mountain|city|warehouse|factory|workshop|studio|field|forest|sunset|sunrise|dawn|morning|rain|ocean|sea|road|market|shop|store|restaurant|gym|farm|garden|courier|delivery|truck|flour|butter|bottle|cooking|plating|running|walking|pouring|brewing|packing|baking|dancing|driving|riding|crafting|painting|surfing|hiking|cycling|harvest\w*)\b/gi,
-  ui: /\b(?:app|dashboard|feature|ui|screens?|saas|software|integration|release|autopilot|workflow|plugin|api)\b/i,
-  announce: /\b(?:launch\w*|introducing|now live|announc\w*|is here|coming soon|webinar|event|join us|new)\b/i,
+  /** Software you'd show on screen. "Order in our app" alone isn't a UI post. */
+  ui: /\b(?:dashboard|feature|ui|screens?|screenshots?|saas|software|integration|autopilot|workflow|plugin|api)\b/i,
+  /** "new" alone ("12,000 new users", "our new machine") isn't an announcement. */
+  announce: /\b(?:launch\w*|introducing|now live|announc\w*|is here|coming soon|webinar|event|join us|this week only|today only|limited time)\b/i,
   mood: /\bfeels? like\b|nostalgi|memor(?:y|ies)|\bstory\b|journey|cinematic|atmosphere|\bvibes?\b/i,
   sound: /\bsound of\b|\bhear\b|\blisten\b|\bambien/i,
   policy: /\b(?:congrat\w*|ceo|co-?founder|founder|celebrit\w*|president|prime minister|minister|politician|kids?|child(?:ren)?|bab(?:y|ies)|toddlers?|teens?|teenagers?|minors?)\b|(?:^|\s)@\w{2,}/i,
@@ -202,7 +220,7 @@ export function detectSignals(text: string, attachments: Attachment[]): Signals 
     S4: RX.opinion.test(text),
     S5: (text.match(RX.scene)?.length ?? 0) >= 1,
     S6: images > 0 && !ui,
-    S7: ui && (images > 0 || /\b(?:introducing|feature|dashboard|app)\b/i.test(text)),
+    S7: ui && (images > 0 || /\b(?:introducing|feature|dashboard)\b/i.test(text)),
     S8: RX.announce.test(text),
     S10: RX.mood.test(text),
     S11: RX.policy.test(text),
@@ -321,6 +339,7 @@ export function finalizePlan(draftIn: Draft | null, input: BrainInput, opts: { r
   // Policy gate (S11): the heuristic regex OR the model can close it; only both can open it.
   const videoAllowed = draft.videoAllowed !== false && !signals.S11 && !RX.policy.test(draft.footagePrompt ?? '');
   const allowFaces = draft.allowFaces === true && videoAllowed;
+  if (!videoAllowed) ctx.notes.push('policy');
 
   // ASPECT
   let aspect: PlanAspect = isAspect(ov.aspect) ? ov.aspect : isAspect(draft.aspect) ? draft.aspect : primaryAspect(input.platforms);
@@ -329,10 +348,7 @@ export function finalizePlan(draftIn: Draft | null, input: BrainInput, opts: { r
   let format = (['ai_video', 'motion_graphic', 'hybrid'] as const).find((f) => f === draft.format) ?? 'motion_graphic';
   const graphicsAvailable = av.aiMotion || av.templates;
   const footageAvailable = av.motion1 || av.cinema;
-  if (!videoAllowed && format !== 'motion_graphic') {
-    format = 'motion_graphic';
-    ctx.notes.push('policy');
-  }
+  if (!videoAllowed) format = 'motion_graphic';
   if (format === 'hybrid' && !(av.motion1 && av.aiMotion)) format = graphicsAvailable || !footageAvailable ? 'motion_graphic' : 'ai_video';
   if (format === 'ai_video' && !footageAvailable) format = 'motion_graphic';
   if (format === 'motion_graphic' && !graphicsAvailable) {
@@ -341,20 +357,24 @@ export function finalizePlan(draftIn: Draft | null, input: BrainInput, opts: { r
   }
 
   // AUDIO (step 7): feed-only → SFX only; narration only for explainers, never feed-only.
+  // Models sometimes answer "upbeat" for music: any non-empty value means on.
+  const on = (v: unknown, d: boolean) => (v == null ? d : !!v);
   const audio: PlanAudio = {
-    narration: !!draft.audio?.narration,
-    music: draft.audio?.music ?? anyVertical(input.platforms),
-    sfx: draft.audio?.sfx ?? true,
+    narration: on(draft.audio?.narration, false),
+    music: on(draft.audio?.music, anyVertical(input.platforms)),
+    // Policy-gated posts are pure kinetic type: give them sound.
+    sfx: on(draft.audio?.sfx, true) || !videoAllowed,
   };
   if (feedOnly(input.platforms)) Object.assign(audio, { narration: false, music: false, sfx: true });
 
   const win = platformWindow(input.platforms);
   const wantSec = ov.durationSec ?? draft.durationSec ?? win.def;
   const onScreenText = (draft.onScreenText ?? []).filter((t) => typeof t === 'string').map((t) => t.slice(0, 120)).slice(0, 6);
+  const llmCopy = ctx.notes.includes('default') ? null : draftIn;
 
   let plan: Plan = {
     format, recipe: null, graphics: null, footage: null, durationSec: wantSec, aspect, audio, onScreenText,
-    estimatedCredits: 0, confidence: Math.max(0, Math.min(1, conf)),
+    summary: '', estimatedCredits: 0, confidence: Math.max(0, Math.min(1, conf)),
     signals: Array.from(new Set([...(draft.signals ?? []).filter((x) => /^S\d{1,2}$/.test(x)), ...activeSignals(signals)])),
     reasons: [], fallback: null,
   };
@@ -367,7 +387,10 @@ export function finalizePlan(draftIn: Draft | null, input: BrainInput, opts: { r
     if (engine !== 'cinema-1' && !av.motion1) engine = 'cinema-1';
     let mode: FootageMode = draft.footageMode === 'image-to-video' || draft.footageMode === 'reference' ? draft.footageMode : 'text';
     if (!image || engine === 'cinema-1') mode = 'text';
+    // Footage under overlays is b-roll (rulebook §3): Fast 720p, unless the user's photo is the hero.
+    if (hybrid && engine === 'motion-1' && mode !== 'image-to-video') engine = 'motion-1-fast';
     let quality: VideoQuality = isQuality(draft.footageQuality) ? draft.footageQuality : '720p';
+    if (hybrid && quality === '1080p' && mode !== 'image-to-video') quality = '720p';
     if (engine !== 'motion-1' && quality === '1080p') quality = '720p'; // Fast and Cinema top out at 720p
     const m = VIDEO_MODELS[engine === 'cinema-1' ? 'sociafy-cinema-1' : 'sociafy-motion-1'];
     return { engine, mode, quality, seconds: clamp(seconds, m.durationSec.min, m.durationSec.max), prompt: footagePrompt(draft.footagePrompt, input.text, allowFaces) };
@@ -379,7 +402,7 @@ export function finalizePlan(draftIn: Draft | null, input: BrainInput, opts: { r
     // Motion 1 is mute; Cinema scores its own sound.
     plan.audio = plan.footage.engine === 'cinema-1' ? { narration: false, music: true, sfx: true } : { narration: false, music: false, sfx: false };
   } else if (format === 'hybrid') {
-    plan.durationSec = clamp(wantSec, MOTION_AI.durationSec.min, MOTION_AI.durationSec.max);
+    plan.durationSec = clamp(wantSec, MIN_GRAPHIC_SEC, MOTION_AI.durationSec.max);
     const want = draft.footageSeconds ?? Math.round(plan.durationSec / 2);
     plan.footage = footage(clamp(want, FOOTAGE_SEC.min, Math.min(FOOTAGE_SEC.max, plan.durationSec - 2)), true);
     const recipe = (['H1', 'H2', 'H3', 'H4'] as const).find((r) => r === draft.recipe);
@@ -391,8 +414,14 @@ export function finalizePlan(draftIn: Draft | null, input: BrainInput, opts: { r
       plan.durationSec = MOTION_TEMPLATES[plan.graphics.template!].durationSec;
       plan.audio = { narration: false, music: false, sfx: false }; // templates ship no audio
     } else {
-      plan.durationSec = clamp(wantSec, MOTION_AI.durationSec.min, MOTION_AI.durationSec.max);
+      plan.durationSec = clamp(wantSec, MIN_GRAPHIC_SEC, MOTION_AI.durationSec.max);
     }
+  }
+  // Every graphic gets 2–4 short lines from the post: the model's, else derived from the text.
+  // Policy-gated posts render the user's own words only: no model paraphrase about a real person.
+  if (plan.graphics) {
+    const mine = videoAllowed ? toLines(plan.onScreenText) : [];
+    plan.onScreenText = (mine.length >= 2 ? mine : Array.from(new Set([...mine, ...toLines([input.text])]))).slice(0, 4);
   }
   if (plan.graphics?.engine === 'template' && aspect === '1:1') plan.aspect = aspect = feedOnly(input.platforms) ? '16:9' : '9:16';
 
@@ -402,26 +431,55 @@ export function finalizePlan(draftIn: Draft | null, input: BrainInput, opts: { r
     // Bottom of the ladder from this plan = the cheapest viable option. If even that is out of reach,
     // keep the best fit as is (priced) so the user sees what we'd make; otherwise walk the ladder.
     cheapest = applyLadder(plan, { ...ctx, balance: 0, notes: [] }, false);
-    if (cheapest.estimatedCredits <= input.balance) plan = applyLadder(plan, ctx, !!ov.format);
+    if (ov.cheapest) plan = cheapest;
+    else if (cheapest.estimatedCredits <= input.balance) plan = applyLadder(plan, ctx, !!ov.format);
   }
   plan.affordable = plan.estimatedCredits <= input.balance;
   if (!plan.affordable && cheapest) {
-    plan.cheapest = { format: cheapest.format, estimatedCredits: cheapest.estimatedCredits, summary: summaryFor(cheapest) };
+    plan.cheapest = optionFor(cheapest);
   }
 
   if (plan.format === 'hybrid') {
     plan.fallback = { format: 'motion_graphic', estimatedCredits: priceForMotionAi(plan.durationSec, plan.audio).credits };
   }
-  plan.reasons = reasonsFor(plan, ctx);
+  const keep = llmCopy && sameShape(plan, llmCopy);
+  // Policy-gated: the model tends to write "shows <celebrity> trying…"; we render type only, so say so in our words.
+  plan.summary = (keep && !ctx.notes.includes('policy') && copyLine(llmCopy.summary, 120)) || describePlan(plan);
+  plan.reasons = reasonsFor(plan, ctx, keep ? llmCopy.reasons : undefined);
   return plan;
+}
+
+/** The plan still is what the model wrote its copy for (same format and template). */
+function sameShape(p: Plan, d: Draft): boolean {
+  const tpl = (format: unknown, engine: unknown, t: unknown) => (format === 'motion_graphic' && engine === 'template' ? t : null);
+  return p.format === d.format && tpl(p.format, p.graphics?.engine, p.graphics?.template) === tpl(d.format, d.graphicsEngine, d.template);
+}
+
+const LINE_MAX = 48;
+/** Short on-screen lines: split at sentence/clause breaks (commas only in long clauses), wrapped to LINE_MAX at word boundaries. */
+export function toLines(parts: string[]): string[] {
+  const out: string[] = [];
+  for (const part of parts) {
+    const pieces = part.replace(/https?:\/\/\S+|www\.\S+|#\w+/g, ' ').split(/(?<=[.!?:;])\s+|\s+[—–-]\s+|\n+/);
+    for (const clause of pieces.flatMap((c) => (c.trim().length > LINE_MAX ? c.split(/,\s+/) : [c]))) {
+      const c = clause.replace(/\s+/g, ' ').replace(/^[\s,;:.—–-]+|[\s,;:.—–-]+$/g, '');
+      let line = '';
+      for (const w of c.split(' ').filter(Boolean)) {
+        if (line && `${line} ${w}`.length > LINE_MAX) { out.push(line); line = w; } else line = line ? `${line} ${w}` : w;
+      }
+      if (line) out.push(line);
+    }
+  }
+  return out;
 }
 
 function graphicsFor(draft: Draft, ctx: Ctx, aspect: PlanAspect): NonNullable<Plan['graphics']> {
   const av = ctx.availability;
   const t = isTemplate(draft.template) ? draft.template : null;
   // Templates: Latin only (S14), stat ≤3 facts, showcase needs kit screenshots; 1:1 → AI motion if we can.
-  // ₹ isn't S14 (it's not a script) but template fonts still lack the glyph.
-  const fits = t && av.templates && !ctx.signals.S14 && !ctx.text.includes('₹') && (t !== 'showcase' || (av.kitScreenshots ?? 0) >= 2) && !(aspect === '1:1' && av.aiMotion);
+  // ₹ isn't S14 (it's not a script) but template fonts still lack the glyph. The sting sets no post text
+  // (the ladder offers it for any post), so the font gate doesn't apply to it.
+  const fits = t && av.templates && (t === 'sting' || (!ctx.signals.S14 && !ctx.text.includes('₹'))) && (t !== 'showcase' || (av.kitScreenshots ?? 0) >= 2) && !(aspect === '1:1' && av.aiMotion);
   if (draft.graphicsEngine === 'template' && fits) return { engine: 'template', template: t };
   if (av.aiMotion) return { engine: 'ai_motion', template: null };
   // AI motion unavailable, templates are: stat is the general-purpose one.
@@ -435,7 +493,7 @@ function none(ctx: Ctx, aspect: PlanAspect): Plan {
   return {
     format: 'none', recipe: null, graphics: null, footage: null, durationSec: 0, aspect,
     audio: { narration: false, music: false, sfx: false }, onScreenText: [], estimatedCredits: 0, confidence: 1,
-    signals: activeSignals(ctx.signals), fallback: null, reason: 'unavailable',
+    signals: activeSignals(ctx.signals), fallback: null, reason: 'unavailable', summary: 'Video is not available yet',
     reasons: ['Video is not available for this account yet. Add your brand name and main color in Brand kit.'],
   };
 }
@@ -471,7 +529,7 @@ function applyLadder(start: Plan, ctx: Ctx, formatLocked: boolean): Plan {
       return { ...p, durationSec: min, footage };
     },
     (p) => ((p.format === 'hybrid' || p.format === 'ai_video') && !formatLocked && av.aiMotion
-      ? { ...p, format: 'motion_graphic', recipe: null, footage: null, graphics: { engine: 'ai_motion', template: null }, durationSec: Math.max(MOTION_AI.durationSec.min, p.durationSec), audio: p.format === 'ai_video' ? { narration: false, music: false, sfx: true } : p.audio } : null),
+      ? { ...p, format: 'motion_graphic', recipe: null, footage: null, graphics: { engine: 'ai_motion', template: null }, durationSec: Math.max(MIN_GRAPHIC_SEC, p.durationSec), audio: p.format === 'ai_video' ? { narration: false, music: false, sfx: true } : p.audio } : null),
     (p) => (p.graphics?.engine === 'ai_motion' && (p.audio.narration || p.audio.music) ? { ...p, audio: { ...p.audio, narration: false, music: false } } : null),
     (p) => (p.format === 'motion_graphic' && p.graphics?.engine === 'ai_motion' && av.templates
       ? { ...p, graphics: { engine: 'template', template: 'sting' }, durationSec: MOTION_TEMPLATES.sting.durationSec, aspect: p.aspect === '1:1' ? (feedOnly(ctx.platforms) ? '16:9' : '9:16') : p.aspect, audio: { narration: false, music: false, sfx: false } } : null),
@@ -517,6 +575,49 @@ export function summaryFor(p: Plan): string {
   return `Motion graphic (${audioLabel(p.audio)}), ${tail}`;
 }
 
+/** Durations, aspect ratios, sound, credits: the spec row and the button already show them. */
+const SPEC_RX = /\b(?:music|soundtrack|sfx|sound effects|voice-?over|narration|silent)\b|\bcredits?\b|\b\d+\s*cr\b|\b\d+(?:\.\d+)?\s*(?:s|secs?|seconds?)\b|\b(?:9:16|16:9|1:1)\b/i;
+
+/** Model copy → one clean line, or null (wrong type, too long, vendor name, spec/price talk). */
+export function copyLine(s: unknown, max: number): string | null {
+  if (typeof s !== 'string') return null;
+  const t = s.replace(/\s+/g, ' ').trim();
+  return t && t.length <= max && !VENDOR_RX.test(t) && !SPEC_RX.test(t) ? t : null;
+}
+
+const clip = (s: string, max: number) => (s.length <= max ? s : `${s.slice(0, s.lastIndexOf(' ', max - 1))}…`);
+/** First two lines, quoted; a second line that continues the first ("and loved it") joins it. */
+const quotedLines = (xs: string[]) => {
+  const [a, b] = xs;
+  const lines = b && /^(?:and|but|so|or|then)\b/i.test(b) ? [`${a} ${b}`] : xs.slice(0, 2);
+  return { text: lines.map((t) => `“${t}”`).join(' and '), many: lines.length > 1 };
+};
+
+/** The footage's subject, from its prompt: first clause, before the negative clause. */
+function sceneOf(p: Plan): string | null {
+  const body = p.footage?.prompt.split(FOOTAGE_NEGATIVE)[0].replace(/^Cinematic footage that shows the scene in this post:\s*/i, '');
+  const first = body?.split(/[,.;:!?]\s|[.!?]$/)[0].trim();
+  return first ? first[0].toUpperCase() + first.slice(1) : null;
+}
+
+/** Code-written summary of THIS video (when the model's is missing, invalid or no longer fits the plan). */
+export function describePlan(p: Plan): string {
+  const { text: lines, many } = quotedLines(p.onScreenText);
+  const verb = many ? 'animate' : 'animates';
+  const scene = sceneOf(p);
+  const t = p.format === 'motion_graphic' && p.graphics?.engine === 'template' ? p.graphics.template : null;
+  let s: string;
+  if (p.format === 'none') s = 'Video is not available yet';
+  else if (p.format === 'ai_video') s = scene ? `${scene}.` : 'AI footage of the scene in your post.';
+  else if (p.format === 'hybrid') s = `${scene ?? 'AI footage of your scene'}, then ${lines ? `${lines} ${verb}` : 'your message animates'} on top.`;
+  else if (t === 'sting') s = 'Your logo and brand colors animate in as a short sting.';
+  else if (t === 'stat') s = lines ? `${lines} count up as big animated numbers.` : 'Your numbers count up as big animated type.';
+  else if (t === 'showcase') s = `Your product screenshots glide in${lines ? `, with ${lines} on top` : ''}.`;
+  else s = lines ? `${lines} ${verb} as bold type in your brand colors.` : 'Your message animates as bold type in your brand colors.';
+  return clip(s, 120);
+}
+
+/** Template reasons: a fallback for missing/invalid model reasons. Each fires only when its signal is true AND agrees with the plan. */
 const SIGNAL_REASON: Partial<Record<keyof Signals, string>> = {
   S1: 'Numbers, prices or dates must stay legible, so they are set as real type.',
   S2: 'Stats read best as animated numbers.',
@@ -525,42 +626,62 @@ const SIGNAL_REASON: Partial<Record<keyof Signals, string>> = {
   S5: 'The post describes a physical scene, so AI footage carries it.',
   S6: 'Your product photo becomes the first frame of the footage.',
   S7: 'Screens and UI stay sharp in a motion graphic; AI video would blur them.',
-  S8: 'The offer, date and call to action are set as type.',
+  S8: 'The announcement is set as bold type, so every detail stays readable.',
   S10: 'A mood or story post suits cinematic footage.',
-  S11: 'Real people, children and other brands are never generated as AI video.',
   S14: 'This script needs real fonts, so it is set as type.',
   S15: 'An explainer works best as a motion graphic.',
 };
+const FOOTAGE_SIGNALS = new Set<keyof Signals>(['S5', 'S6', 'S10']);
+const POLICY_REASON = 'Real people, children and other brands are never generated as AI video.';
+const BUDGET_REASON = 'Scaled down to fit your credit balance.';
+const FORMAT_REASON: Record<PlanFormat, string> = {
+  motion_graphic: 'Type and your brand carry this post; it needs no footage.',
+  ai_video: 'Nothing in this post has to be read, so footage carries it.',
+  hybrid: 'AI footage plays inside the motion graphic, with your brand, text and logo on top as real layers.',
+  none: '',
+};
 
-function reasonsFor(p: Plan, ctx: Ctx): string[] {
+function reasonsFor(p: Plan, ctx: Ctx, llm?: string[]): string[] {
+  const notes = [ctx.notes.includes('policy') && POLICY_REASON, ctx.notes.includes('budget') && BUDGET_REASON].filter((x): x is string => !!x);
+  const mine = Array.from(new Set((Array.isArray(llm) ? llm : []).map((r) => copyLine(r, 90)).filter((r): r is string => !!r)));
+  // The model already explains the policy call when it made it; only the budget step is news to it.
+  if (mine.length >= 2) return ctx.notes.includes('budget') ? [...mine.slice(0, 2), BUDGET_REASON] : mine.slice(0, 3);
+
   const out: string[] = [];
   if (ctx.notes.includes('default')) out.push('A branded motion graphic is the reliable choice for this post.');
   for (const k of activeSignals(ctx.signals)) {
     const r = SIGNAL_REASON[k];
-    if (!r) continue;
-    // Only reasons that agree with the result.
-    if ((k === 'S5' || k === 'S6' || k === 'S10') && !p.footage) continue;
-    out.push(r);
+    // Only reasons that agree with the result: footage reasons need footage, type reasons need graphics.
+    if (r && (FOOTAGE_SIGNALS.has(k) ? p.footage : p.graphics)) out.push(r);
   }
-  if (p.format === 'hybrid') out.push('AI footage plays inside the motion graphic, with your brand, text and logo on top as real layers.');
+  if (p.format === 'hybrid') out.push(FORMAT_REASON.hybrid);
   if (feedOnly(ctx.platforms) && p.format !== 'ai_video') out.push('Feed autoplay is muted, so sound effects only.');
-  if (ctx.notes.includes('budget')) out.push('Scaled down to fit your credit balance.');
-  return Array.from(new Set(out)).slice(0, 5);
+  out.push(...notes);
+  if (out.length < 2) out.push(FORMAT_REASON[p.format]);
+  return Array.from(new Set(out)).filter(Boolean).slice(0, 5);
 }
 
-/** Up to two other options (different format or a cheaper graphic), cheapest first. */
+const TEMPLATE_OPTION: Record<MotionTemplate, string> = { stat: 'Stat graphic', showcase: 'Product showcase', sting: 'Logo sting' };
+const templateOf = (p: Plan) => (p.format === 'motion_graphic' && p.graphics?.engine === 'template' ? p.graphics.template : null);
+const optionKey = (p: Plan) => [p.format, templateOf(p) ?? p.graphics?.engine ?? '', p.footage?.engine ?? ''].join('|');
+
+export function optionFor(p: Plan): PlanOption {
+  const t = templateOf(p);
+  const label = t ? TEMPLATE_OPTION[t] : p.format === 'ai_video' ? 'AI video' : p.format === 'hybrid' ? 'AI footage + motion graphic' : 'Motion graphic';
+  return { key: optionKey(p), format: p.format, estimatedCredits: p.estimatedCredits, label, summary: summaryFor(p) };
+}
+
+/** Up to two other options, distinct from the plan, from each other and from `cheapest`; cheapest first. */
 export function alternativesFor(plan: Plan, input: BrainInput, draft: Draft | null): PlanOption[] {
   if (plan.format === 'none') return [];
-  const seen = new Set([summaryFor(plan)]);
+  const seen = new Set([optionKey(plan), plan.cheapest?.key]);
   const out: PlanOption[] = [];
   for (const format of ['motion_graphic', 'ai_video', 'hybrid'] as const) {
     if (format === plan.format) continue;
-    const alt = finalizePlan({ ...(draft ?? {}), confidence: 1 }, { ...input, overrides: { ...input.overrides, format } });
-    if (alt.format !== format) continue;
-    const summary = summaryFor(alt);
-    if (seen.has(summary)) continue;
-    seen.add(summary);
-    out.push({ format, estimatedCredits: alt.estimatedCredits, summary });
+    const alt = finalizePlan({ ...(draft ?? {}), confidence: 1 }, { ...input, overrides: { ...input.overrides, format, cheapest: undefined } });
+    if (alt.format !== format || seen.has(optionKey(alt))) continue;
+    seen.add(optionKey(alt));
+    out.push(optionFor(alt));
   }
   return out.sort((a, b) => a.estimatedCredits - b.estimatedCredits).slice(0, 2);
 }
@@ -575,12 +696,12 @@ Formats:
 - hybrid: 4-8 s of AI footage inside a motion graphic with type on top. recipe H1 (hook, footage with short caption, end card: announcement + scene), H2 (stat over footage under a color scrim), H3 (product photo image-to-video, then price/spec chips, CTA), H4 (footage in a framed card beside big type, B2B).
 
 Signals: numbers/prices/dates/URLs/CTA/quotes, stats, lists/steps, opinions, non-Latin script, UI/SaaS screenshots → text need (graphics). A concrete physical scene with action and place, a product photo hero, mood/story/sound → scene need (footage). text low+scene low → motion_graphic ai_motion. text high+scene low → motion_graphic. text low+scene high → ai_video. both high → hybrid. Abstract concepts (growth, trust, AI) → motion_graphic, never vague footage.
-Policy: an identifiable real person, celebrity, politician, minor/child, or another company's brand → videoAllowed false.
+Policy: an identifiable real person, celebrity, politician, minor/child, or another company's brand → videoAllowed false, and plan a motion_graphic of kinetic type about the post's message (sfx on).
 Footage engine: "cinema-1" only when sound/atmosphere is central; "motion-1" when the footage is the unobscured hero (product photo, close-up, 1080p); else "motion-1-fast".
 footagePrompt (<=40 words): describe the PHYSICAL scene, subject, action, camera move and light only. Never ask for text, signs, screens, UI, holograms or logos. Prefer hands, silhouettes, back views or wide shots over faces.
 Platforms: LinkedIn/X → graphics, 8-12 s, muted (sfx only). Instagram/TikTok/Facebook → 9:16, footage hook, 10-15 s, music on. Narration only for explainers, never LinkedIn-only.
 
-JSON keys: format, recipe (H1-H4 or null), graphicsEngine, template (or null), footageEngine, footageMode ("text"|"image-to-video"), footageSeconds, footageQuality ("720p"|"1080p"), footagePrompt, allowFaces (bool), videoAllowed (bool), durationSec, aspect ("9:16"|"1:1"|"16:9"), audio {narration, music, sfx}, onScreenText (<=6 short strings that must appear), confidence (0-1), signals (e.g. ["S1","S5"]: S1 must-show text, S2 stats, S3 list, S4 opinion, S5 scene, S6 product photo, S7 UI, S8 announcement, S9 abstract, S10 mood, S11 real person/brand, S12 platform, S13 brand strict, S14 non-Latin, S15 explainer).`;
+JSON keys: format, recipe (H1-H4 or null), graphicsEngine, template (or null), footageEngine, footageMode ("text"|"image-to-video"), footageSeconds, footageQuality ("720p"|"1080p"), footagePrompt, allowFaces (bool), videoAllowed (bool), durationSec (motion_graphic/hybrid >= 8), aspect ("9:16"|"1:1"|"16:9"), audio {narration, music, sfx} (booleans), onScreenText (motion_graphic/hybrid: 2-4 short lines, <=40 chars each, taken from the post; ai_video: []), summary (<=120 chars: one plain sentence saying what the viewer sees in THIS video: the actual scene and the actual words that animate, e.g. "Coffee waiting at the counter, then '₹99 first order' and 'Order ahead' animate on top." Never mention length, aspect, sound, credits or tool names), reasons (2-3 strings, <=90 chars each: why this format suits THIS post, citing what it says; never about platforms, sound, length or price), confidence (0-1), signals (e.g. ["S1","S5"]: S1 must-show text, S2 stats, S3 list, S4 opinion, S5 scene, S6 product photo, S7 UI, S8 announcement, S9 abstract, S10 mood, S11 real person/brand, S12 platform, S13 brand strict, S14 non-Latin, S15 explainer).`;
 
 /** The post as the planner sees it. Availability and balance are applied after, by finalizePlan, so the LLM call runs in parallel with those lookups. */
 export type PostInput = Omit<BrainInput, 'availability' | 'balance'> & { userId?: string };
@@ -617,8 +738,8 @@ export async function llmDraft(input: PostInput): Promise<Draft | null> {
     try {
       const raw = await completeText(ai, {
         system: SYSTEM, user: userMessage(input), json: true, timeoutMs, maxRetries: 0,
-        // The answer is ~250 tokens; gpt-oss counts its (low) reasoning in the same budget.
-        maxOutputTokens: ai.kind === 'groq' ? 900 : 600, reasoningEffort: 'minimal',
+        // The answer is ~350 tokens; gpt-oss counts its (low) reasoning in the same budget.
+        maxOutputTokens: ai.kind === 'groq' ? 1_200 : 900, reasoningEffort: 'minimal',
       });
       const obj = JSON.parse(raw);
       if (obj && typeof obj === 'object' && !Array.isArray(obj)) return obj as Draft;
@@ -684,11 +805,12 @@ export async function planVideo(
   return {
     plan,
     estimatedCredits: plan.estimatedCredits,
-    summary: summaryFor(plan),
+    summary: plan.summary,
     reasons: plan.reasons,
     alternatives: alternativesFor(plan, full, draft),
     affordable: plan.affordable !== false,
-    ...(plan.cheapest ? { cheapest: plan.cheapest } : {}),
+    // A "cheapest" that is the plan itself is no option.
+    ...(plan.cheapest && plan.cheapest.key !== optionKey(plan) ? { cheapest: plan.cheapest } : {}),
   };
 }
 
@@ -710,6 +832,9 @@ export function draftFromPlan(p: Partial<Plan>): Draft {
     aspect: p.aspect,
     audio: p.audio,
     onScreenText: Array.isArray(p.onScreenText) ? p.onScreenText : [],
+    // Copy the user saw; re-validated by finalizePlan like the model's.
+    summary: p.summary,
+    reasons: Array.isArray(p.reasons) ? p.reasons : undefined,
     confidence: 1,
     signals: Array.isArray(p.signals) ? p.signals.filter((s): s is string => typeof s === 'string') : [],
   };

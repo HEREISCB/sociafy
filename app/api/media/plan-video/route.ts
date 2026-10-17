@@ -17,6 +17,8 @@ const bodySchema = z.object({
   attachments: z.array(attachmentSchema).max(9).default([]),
   overrides: z.object({
     format: z.enum(['ai_video', 'motion_graphic', 'hybrid']).optional(),
+    /** The "Cheapest:" chip. */
+    cheapest: z.boolean().optional(),
     durationSec: z.number().int().min(4).max(30).optional(),
     aspect: aspect.optional(),
   }).strict().optional(),

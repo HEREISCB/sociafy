@@ -54,10 +54,11 @@ export type VideoPlan = {
   graphics?: { engine?: 'ai_motion' | 'template' | null; template?: string | null } | null;
   footage?: unknown; durationSec: number; aspect: string;
   audio: { narration?: boolean; music?: boolean; sfx?: boolean };
-  onScreenText?: string[]; estimatedCredits: number; confidence?: number; reasons?: string[];
+  onScreenText?: string[]; estimatedCredits: number; confidence?: number; summary?: string; reasons?: string[];
   fallback?: unknown;
 };
-type PlanOption = { format: VideoFormat; estimatedCredits: number; summary: string };
+/** An option chip: send `{ format }` back as overrides (or `{ cheapest: true }` for `cheapest`). */
+export type PlanOption = { key: string; format: VideoFormat; estimatedCredits: number; label: string; summary: string };
 export type PlanResponse = {
   plan: VideoPlan; estimatedCredits: number; summary: string; reasons?: string[];
   alternatives?: PlanOption[]; balance?: number;

@@ -9,8 +9,8 @@ vi.mock('./client', () => ({
 }));
 
 import {
-  FOOTAGE_NEGATIVE, VENDOR_RX, alternativesFor, cinemaEstimate, draftFromPlan, finalizePlan, heuristicDraft,
-  planVideo, priceForPlan, summaryFor, type Availability, type BrainInput, type Draft, type Plan,
+  FOOTAGE_NEGATIVE, VENDOR_RX, alternativesFor, cinemaEstimate, copyLine, detectSignals, draftFromPlan, finalizePlan, heuristicDraft,
+  planVideo, priceForPlan, summaryFor, toLines, type Availability, type BrainInput, type Draft, type Plan,
 } from './videoBrain';
 
 const ALL: Availability = { motion1: true, cinema: true, templates: true, aiMotion: true, kitScreenshots: 0 };
@@ -103,14 +103,14 @@ describe('finalizePlan: envelopes', () => {
     expect(i2v.footage).toMatchObject({ engine: 'cinema-1', mode: 'text' });
   });
 
-  it('AI motion 6–20 s; hybrid footage 4–8 s and shorter than the video', () => {
+  it('AI motion and hybrids 8–20 s; hybrid footage 4–8 s and shorter than the video', () => {
     expect(finalizePlan(draft({ format: 'motion_graphic', durationSec: 40 }), input()).durationSec).toBe(20);
-    expect(finalizePlan(draft({ format: 'motion_graphic', durationSec: 2 }), input()).durationSec).toBe(6);
+    expect(finalizePlan(draft({ format: 'motion_graphic', durationSec: 2 }), input()).durationSec).toBe(8);
     const hy = finalizePlan(draft({ format: 'hybrid', footageSeconds: 14, durationSec: 12 }), input());
     expect(hy.footage?.seconds).toBe(8);
     const short = finalizePlan(draft({ format: 'hybrid', footageSeconds: 1, durationSec: 6 }), input());
     expect(short.footage?.seconds).toBe(4);
-    expect(short.durationSec).toBe(6);
+    expect(short.durationSec).toBe(8);
   });
 
   it('templates: fixed length, silent, no 1:1 (→ AI motion, or a wide template when AI motion is off)', () => {
@@ -183,12 +183,18 @@ describe('finalizePlan: cost ceiling and downgrade ladder', () => {
   });
 
   it('first step is 1080p → 720p, and a big balance changes nothing', () => {
-    const rich = finalizePlan(pricey, input());
+    // Only a photo-hero hybrid keeps quality-tier 1080p footage (b-roll under overlays is Fast 720p).
+    const hero = draft({ ...pricey, footageMode: 'image-to-video' });
+    const rich = finalizePlan(hero, input({ attachments: PHOTO }));
     expect(rich.footage).toMatchObject({ engine: 'motion-1', quality: '1080p' });
     // ceiling = 25% of 4000 = 1000; 6 s 1080p (540) + 15 s music (330) = 870 fits; no step needed.
-    expect(finalizePlan(pricey, input({ balance: 4_000 })).footage?.quality).toBe('1080p');
+    expect(finalizePlan(hero, input({ attachments: PHOTO, balance: 4_000 })).footage?.quality).toBe('1080p');
     // 25% of 3000 = 750 < 870 → one step (720p: 236 + 330 = 566) is enough.
-    expect(finalizePlan(pricey, input({ balance: 3_000 })).footage).toMatchObject({ engine: 'motion-1', quality: '720p' });
+    expect(finalizePlan(hero, input({ attachments: PHOTO, balance: 3_000 })).footage).toMatchObject({ engine: 'motion-1', quality: '720p' });
+  });
+
+  it('hybrid b-roll under overlays is Fast 720p even when the planner asks for 1080p quality', () => {
+    expect(finalizePlan(pricey, input()).footage).toMatchObject({ engine: 'motion-1-fast', quality: '720p' });
   });
 
   it('cheapest viable above the balance → the best fit unchanged, priced, affordable:false + the cheapest option', () => {
@@ -320,7 +326,8 @@ describe('planVideo', () => {
   it('no LLM configured → the heuristic plans it', async () => {
     const r = await planVideo(input(), input());
     expect(r.plan.format).toBe('ai_video');
-    expect(r.summary).toMatch(/AI video/);
+    expect(r.summary).toMatch(/bakery/); // describes the video, not the spec
+    expect(r.summary).not.toMatch(/credits|\d+ s\b|9:16/);
     expect(r.estimatedCredits).toBe(r.plan.estimatedCredits);
   });
   it('unparseable LLM output → heuristic; valid output → used', async () => {
@@ -329,5 +336,170 @@ describe('planVideo', () => {
     expect((await planVideo(input(), input())).plan.format).toBe('ai_video');
     st.reply = JSON.stringify({ format: 'motion_graphic', graphicsEngine: 'ai_motion', durationSec: 10, confidence: 0.9 });
     expect((await planVideo(input(), input())).plan).toMatchObject({ format: 'motion_graphic', durationSec: 10 });
+  });
+});
+
+// The five posts from the 2026-10-17 live run (/tmp/sociafy-live/v13.log), with the drafts the model gave.
+const V13 = {
+  q3: 'Q3 numbers are in: revenue up 42%, churn down to 1.8%, and 12,000 new users. Thank you to everyone who made it happen.',
+  roastery: 'Behind the scenes at our roastery this morning: beans tumbling out of the drum, steam rising, our head roaster checking the color by hand.',
+  launch: 'Launch day! Order ahead in our app, walk in, and your coffee is waiting. First order is ₹99 this week only.',
+  hotTake: "Hot take: most startups don't have a marketing problem, they have a clarity problem. Say what you do in 7 words.",
+  celeb: 'Elon Musk just tried our new espresso machine and loved it.',
+};
+const ALL4 = ['linkedin', 'facebook', 'youtube', 'instagram'];
+const v13 = (text: string, over: Partial<BrainInput> = {}) => input({ text, platforms: ALL4, ...over });
+const launchDraft = draft({
+  format: 'hybrid', recipe: 'H1', graphicsEngine: 'ai_motion', footageEngine: 'motion-1-fast', footageSeconds: 6, durationSec: 12, aspect: '9:16',
+  footagePrompt: "wide shot of a modern coffee shop counter, barista's hands placing a steaming cup on a tray, soft side lighting",
+  audio: { music: 'upbeat', sfx: 'ambient cafe' } as never, onScreenText: ['Launch Day!', 'Order ahead in app', 'First order ₹99', 'Walk‑in pickup'],
+});
+const celebDraft = draft({ format: 'motion_graphic', graphicsEngine: 'ai_motion', durationSec: 6, aspect: '16:9', videoAllowed: false, audio: { narration: false, music: false, sfx: false }, onScreenText: [], signals: ['S11', 'S12', 'S8'] });
+const hotTakeDraft = draft({
+  format: 'motion_graphic', graphicsEngine: 'ai_motion', durationSec: 10, aspect: '16:9', audio: { sfx: true },
+  onScreenText: ['Hot take: most startups don’t have a marketing problem, they have a clarity problem.', 'Say what you do in 7 words.'],
+});
+
+describe('signals fire only when true (v13 posts)', () => {
+  it('coffee launch: "our app" is not a UI post; ₹99 is a must-show number', () => {
+    const s = detectSignals(V13.launch, []);
+    expect(s).toMatchObject({ S7: false, S1: true, S8: true });
+    expect(finalizePlan(launchDraft, v13(V13.launch)).reasons.join(' ')).not.toMatch(/Screens and UI/);
+  });
+  it('hot take: "7 words" is not a number that must stay legible', () => {
+    expect(detectSignals(V13.hotTake, [])).toMatchObject({ S1: false, S4: true });
+    expect(finalizePlan(hotTakeDraft, v13(V13.hotTake)).reasons.join(' ')).not.toMatch(/Numbers, prices or dates/);
+  });
+  it('celebrity post: no offer or announcement; the policy reason instead', () => {
+    expect(detectSignals(V13.celeb, []).S8).toBe(false);
+    const r = finalizePlan(celebDraft, v13(V13.celeb)).reasons;
+    expect(r.join(' ')).not.toMatch(/offer|call to action|announcement/i);
+    expect(r).toContain('Real people, children and other brands are never generated as AI video.');
+  });
+  it('Q3: "new users" is not an announcement; stats are', () => {
+    expect(detectSignals(V13.q3, [])).toMatchObject({ S8: false, S1: true, S2: true });
+  });
+  it('type reasons need graphics: an AI video never claims numbers are set as type', () => {
+    const p = finalizePlan(draft({ format: 'ai_video' }), v13(V13.roastery));
+    expect(p.reasons.join(' ')).not.toMatch(/set as (real )?type/);
+  });
+});
+
+describe('summary and reasons copy', () => {
+  it('copyLine: ≤ max, no vendor, no spec or credits', () => {
+    expect(copyLine("Coffee waiting at the counter, then '₹99 first order' and 'Order ahead' animate on top.", 120)).toBeTruthy();
+    for (const bad of ['Made with Seedance footage.', 'A 12 s vertical reel.', 'Costs 373 credits.', 'Shot in 9:16.', 'x'.repeat(121), 42, '']) {
+      expect(copyLine(bad, 120)).toBeNull();
+    }
+  });
+  it('the model’s summary and reasons are used when valid and the plan kept its shape', () => {
+    const d = { ...launchDraft, summary: "Coffee waiting at the counter, then '₹99 first order' and 'Order ahead' animate on top.", reasons: ['The counter scene sells walk-in pickup.', 'The ₹99 offer must be readable, so it is set as type.'] };
+    const p = finalizePlan(d, v13(V13.launch, { platforms: ['instagram'] }));
+    expect(p.format).toBe('hybrid');
+    expect(p.summary).toBe(d.summary);
+    expect(p.reasons).toEqual(d.reasons);
+  });
+  it('invalid model copy → code copy about the post; an override format never keeps the model’s summary', () => {
+    const d = { ...launchDraft, summary: 'Hybrid, 12 s, 9:16, 373 credits', reasons: ['Only one reason.'] };
+    const p = finalizePlan(d, v13(V13.launch, { platforms: ['instagram'] }));
+    expect(p.summary).toMatch(/coffee shop counter.*“Launch Day!”/);
+    expect(p.summary).not.toMatch(VENDOR_RX);
+    expect(p.summary.length).toBeLessThanOrEqual(120);
+    expect(p.reasons.length).toBeGreaterThan(0);
+    const good = { ...launchDraft, summary: 'Coffee at the counter, then the offer animates on top.' };
+    const mg = finalizePlan(good, v13(V13.launch, { platforms: ['instagram'], overrides: { format: 'motion_graphic' } }));
+    expect(mg.summary).not.toBe(good.summary);
+    expect(mg.summary).toMatch(/“Launch Day!”/);
+  });
+  it('every override plan comes back with reasons', () => {
+    for (const format of ['ai_video', 'motion_graphic', 'hybrid'] as const) {
+      for (const text of Object.values(V13)) {
+        const p = finalizePlan(draft({ format: 'hybrid' }), v13(text, { overrides: { format } }));
+        expect(p.reasons.length, `${format}: ${text}`).toBeGreaterThan(0);
+        expect(p.summary.length).toBeGreaterThan(0);
+      }
+    }
+  });
+  it('the approved copy survives revalidation', () => {
+    const d = { ...launchDraft, summary: 'Coffee at the counter, then the offer animates on top.', reasons: ['Walk-in pickup reads as a scene.', 'The offer is set as type.'] };
+    const p = finalizePlan(d, v13(V13.launch, { platforms: ['instagram'] }));
+    const again = finalizePlan(draftFromPlan(p), v13(V13.launch, { platforms: ['instagram'], overrides: { format: p.format as "hybrid" } }), { revalidate: true });
+    expect(again).toMatchObject({ summary: p.summary, reasons: p.reasons });
+  });
+});
+
+describe('alternatives: distinct and named (v13 post 3)', () => {
+  const full = v13(V13.launch, { platforms: ['instagram'], balance: 22 });
+  it('cheapest + alternatives are distinct by (format, template, footage engine), ≤ 3 chips, labelled', async () => {
+    const r = await planVideo(full, full, { draft: () => Promise.resolve(launchDraft) });
+    const chips = [r.cheapest!, ...r.alternatives];
+    expect(r.cheapest).toMatchObject({ label: 'Logo sting', estimatedCredits: 126 });
+    expect(new Set(chips.map((c) => c.key)).size).toBe(chips.length);
+    expect(chips.length).toBeLessThanOrEqual(3);
+    expect(r.alternatives.map((a) => a.label).sort()).toEqual(['AI video', 'Motion graphic']);
+    expect(chips.map((c) => c.key)).not.toContain(r.plan.format + '|ai_motion|motion-1-fast');
+  });
+  it('each chip re-plans to exactly its option: { cheapest: true } for cheapest, { format } for alternatives', async () => {
+    const r = await planVideo(full, full, { draft: () => Promise.resolve(launchDraft) });
+    const c = finalizePlan(launchDraft, { ...full, overrides: { cheapest: true } });
+    expect(c).toMatchObject({ graphics: { engine: 'template', template: 'sting' }, estimatedCredits: r.cheapest!.estimatedCredits });
+    // …and generate-auto's revalidation keeps it (the ₹ font gate doesn't apply to the sting).
+    expect(finalizePlan(draftFromPlan(c), { ...full, overrides: { format: 'motion_graphic' } }, { revalidate: true }).estimatedCredits).toBe(c.estimatedCredits);
+    for (const a of r.alternatives) {
+      const p = finalizePlan(launchDraft, { ...full, overrides: { format: a.format as 'hybrid' } });
+      expect([p.estimatedCredits, p.format]).toEqual([a.estimatedCredits, a.format]);
+    }
+    // A Cinema cheapest (engine differs, label the same) is reachable too.
+    const d = draft({ format: 'ai_video', footageEngine: 'motion-1-fast', durationSec: 8 });
+    const roast = v13(V13.roastery, { platforms: ['instagram'], balance: 22 });
+    expect(finalizePlan(d, roast).cheapest?.key).toBe('ai_video||cinema-1');
+    expect(finalizePlan(d, { ...roast, overrides: { cheapest: true } }).footage?.engine).toBe('cinema-1');
+  });
+  it('an alternative equal to cheapest is shown once (as cheapest)', () => {
+    const d = draft({ format: 'ai_video', graphicsEngine: 'template', template: 'sting' });
+    const inp = v13(V13.roastery, { platforms: ['instagram'], balance: 22 });
+    const p = finalizePlan(d, inp);
+    expect(p.cheapest?.key).toBe('motion_graphic|sting|');
+    expect(alternativesFor(p, inp, d).map((a) => a.key)).not.toContain('motion_graphic|sting|');
+  });
+  it('a cheapest that is the plan itself is dropped', async () => {
+    const inp = v13(V13.celeb, { balance: 22, availability: { ...ALL, templates: false } });
+    const r = await planVideo(inp, inp, { draft: () => Promise.resolve(celebDraft) });
+    expect(r.plan.cheapest?.key).toBe('motion_graphic|ai_motion|');
+    expect(r.cheapest).toBeUndefined();
+  });
+});
+
+describe('thin plans get real content (v13 posts 4 and 5)', () => {
+  it('celebrity post: kinetic type of the message, ≥ 8 s, 2–4 lines, SFX on, no footage', () => {
+    const p = finalizePlan(celebDraft, v13(V13.celeb));
+    expect(p).toMatchObject({ format: 'motion_graphic', footage: null, graphics: { engine: 'ai_motion' } });
+    expect(p.durationSec).toBeGreaterThanOrEqual(8);
+    expect(p.audio.sfx).toBe(true);
+    expect(p.onScreenText.length).toBeGreaterThanOrEqual(2);
+    expect(p.onScreenText.length).toBeLessThanOrEqual(4);
+    expect(p.onScreenText.join(' ')).toMatch(/espresso machine/);
+    // The user's own words only, even if the model paraphrased.
+    const para = finalizePlan({ ...celebDraft, onScreenText: ['Elon Musk tried our espresso', 'He loved the rich, smooth brew'] }, v13(V13.celeb));
+    expect(para.onScreenText.join(' ')).not.toMatch(/smooth brew/);
+    expect(para.summary).toMatch(/“Elon Musk just tried our new espresso machine and loved it”/);
+    expect(para.reasons.length).toBeGreaterThanOrEqual(2);
+  });
+  it('long model lines are split into short ones', () => {
+    const p = finalizePlan(hotTakeDraft, v13(V13.hotTake));
+    expect(p.onScreenText.length).toBeGreaterThanOrEqual(2);
+    expect(p.onScreenText.length).toBeLessThanOrEqual(4);
+    for (const l of p.onScreenText) expect(l.length).toBeLessThanOrEqual(48);
+  });
+  it('only the logo sting may run under 8 s', () => {
+    expect(finalizePlan(draft({ format: 'motion_graphic', graphicsEngine: 'template', template: 'sting' }), input({ text: V13.hotTake })).durationSec).toBe(7);
+    expect(finalizePlan(draft({ format: 'motion_graphic', durationSec: 6 }), input({ text: V13.hotTake, overrides: { durationSec: 6 } })).durationSec).toBe(8);
+  });
+  it('toLines: clause breaks, word-wrapped, no URLs or hashtags', () => {
+    expect(toLines(['Q3 numbers are in: revenue up 42%, churn down to 1.8%. #growth https://x.co'])).toEqual(['Q3 numbers are in', 'revenue up 42%, churn down to 1.8%']);
+    expect(toLines(['Hot take: most startups don’t have a marketing problem, they have a clarity problem.'])).toEqual(['Hot take', 'most startups don’t have a marketing problem', 'they have a clarity problem']);
+  });
+  it('music: "upbeat" from the model reads as music on', () => {
+    expect(finalizePlan(launchDraft, v13(V13.launch, { platforms: ['instagram'] })).audio).toMatchObject({ music: true, sfx: true });
   });
 });

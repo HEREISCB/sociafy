@@ -4,7 +4,7 @@ import { withUser, jsonError } from '../../../../lib/api';
 import { parseBody } from '../../../../lib/validation';
 import { rateLimit } from '../../../../lib/rate-limit';
 import { isStubMode } from '../../../../lib/env';
-import { draftFromPlan, finalizePlan, summaryFor, type Plan } from '../../../../lib/ai/videoBrain';
+import { draftFromPlan, finalizePlan, type Plan } from '../../../../lib/ai/videoBrain';
 import { priceCinemaRender } from '../../../../lib/ai/cue';
 import { ensureAudioLine } from '../../../../lib/ai/prompt-rewriter';
 import { attachmentSchema, brainContext } from '../../../../lib/media/autoVideo';
@@ -36,6 +36,8 @@ const planSchema = z.object({
   audio: z.object({ narration: z.boolean(), music: z.boolean(), sfx: z.boolean() }).partial().optional(),
   onScreenText: z.array(z.string().max(200)).max(10).optional(),
   signals: z.array(z.string().max(4)).max(20).optional(),
+  summary: z.string().max(300).optional(),
+  reasons: z.array(z.string().max(300)).max(6).optional(),
   estimatedCredits: z.number().int().nonnegative(),
 });
 
@@ -83,7 +85,7 @@ export async function POST(req: NextRequest) {
       }
     }
     if (fresh.format !== approved.format || fresh.estimatedCredits > approved.estimatedCredits) {
-      return jsonError('plan_changed', 409, { plan: fresh, estimatedCredits: fresh.estimatedCredits, summary: summaryFor(fresh), reasons: fresh.reasons });
+      return jsonError('plan_changed', 409, { plan: fresh, estimatedCredits: fresh.estimatedCredits, summary: fresh.summary, reasons: fresh.reasons });
     }
     // Unaffordable plans are shown (priced) but never run: refuse before any re-host, insert or charge.
     if (fresh.estimatedCredits > balance) return insufficientCreditsResponse({ balance, needed: fresh.estimatedCredits });

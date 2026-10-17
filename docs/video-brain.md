@@ -110,6 +110,9 @@ and user overrides.
      2.5     if footage is the unobscured hero (product image-to-video, close faces, 1080p asked) or refs are needed.
      Fast    otherwise (default for b-roll under overlays).
 6. DURATION: LinkedIn 8–12 s, Reels/TikTok 10–15 s, sting 7 s. Hybrid footage 4–8 s.
+   Motion graphics and hybrids are never under 8 s (only the sting is), and always carry 2–4 short
+   on-screen lines (≤ 48 chars) from the post: the model's, else split from the post text. A policy-gated
+   post becomes kinetic type of its message with SFX on (text allowed, no footage or likeness).
 7. AUDIO: Reels/TikTok → music on (or Cinema audio). Narration only for explainers (S15) and never LinkedIn-only.
    LinkedIn → SFX only.
 8. COST: estimate credits (footage s × engine rate + total s × 18 + audio s × 4; Cinema by live quote).
@@ -137,6 +140,17 @@ Output schema:
   "onScreenText": ["…"], "estimatedCredits": 330, "confidence": 0.8,
   "signals": ["S1","S8"], "reasons": ["…"], "fallback": {"format": "motion_graphic", "estimatedCredits": 216} }
 ```
+Copy: the model also drafts `summary` (≤ 120 chars, what the viewer sees in THIS video: the scene and
+the words, never length/aspect/sound/credits) and 2–3 `reasons` (≤ 90 chars, about the post's content).
+Code validates both (`copyLine`: VENDOR_RX, length caps, no spec or credit talk) and uses them only if
+the final plan kept the draft's format and template; otherwise `describePlan` writes the summary from
+`onScreenText` and the footage subject, and signal-template reasons (each firing only when its signal is
+true and agrees with the plan) fill in. Every plan, overrides included, comes back with reasons.
+
+Options: `alternatives` (≤ 2) and `cheapest` are distinct by (format, template, footage engine) and carry
+a `label` ("Logo sting", "Stat graphic", "Motion graphic", "AI video", "AI footage + motion graphic").
+An alternative equal to `cheapest` is dropped; a `cheapest` equal to the plan is omitted. A chip re-plans
+with `overrides: {format}`, the Cheapest chip with `overrides: {cheapest: true}` (the ladder bottom).
 The `fallback` field is what runs if the AI video job is refused or fails. A refund plus an automatic
 switch to the graphic beats an error.
 
