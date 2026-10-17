@@ -46,8 +46,8 @@ export function SmartVideo({ gen, text, platforms, attachments }: {
   const keys = planKeys(text, platforms, attachments, override);
   const key = keys.full;
   const setOverride = (v: Override | null) => setPicked(v && { input: keys.input, v });
-  /** The last plan that arrived, with the exact inputs it was planned for. */
-  const [last, setLast] = useState<Keyed<PlanResponse> | null>(null);
+  /** The last plan that arrived, with the exact inputs (and override) it was planned for. */
+  const [last, setLast] = useState<(Keyed<PlanResponse> & { override: Override | null }) | null>(null);
   // Exactly these inputs (cache or response), else this post's last plan while re-planning; never another post's.
   const shown = shownPlan(keys, recall(key), last);
   const res = shown.res;
@@ -83,7 +83,7 @@ export function SmartVideo({ gen, text, platforms, attachments }: {
           return;
         }
         remember(key, data);
-        setLast({ key, input: keys.input, res: data });
+        setLast({ key, input: keys.input, res: data, override });
         setRepricedKey(null);
       } catch {
         if (!ctrl.signal.aborted && live.current === key) setError({ key, msg: 'Couldn’t plan this video. Check your connection and try again.' });
@@ -142,6 +142,8 @@ export function SmartVideo({ gen, text, platforms, attachments }: {
   const none = plan.format === 'none';
   const busy = gen.busy === 'video';
   const updating = !shown.current;
+  // The label describes the plan on screen: while a re-plan is in flight that's still the last one.
+  const shownOverride = updating ? last?.override : override;
   const sound = [
     plan.audio?.narration && { icon: 'mic' as const, label: 'Voiceover' },
     plan.audio?.music && { icon: 'waveform' as const, label: 'Music' },
@@ -154,7 +156,7 @@ export function SmartVideo({ gen, text, platforms, attachments }: {
       // Summary and reasons always come from the fresh plan, never the old card.
       const next = { ...res, ...fresh, summary: fresh.summary ?? fresh.plan.summary ?? '', reasons: fresh.reasons ?? fresh.plan.reasons ?? [] };
       remember(key, next);
-      setLast({ key, input: keys.input, res: next });
+      setLast({ key, input: keys.input, res: next, override });
       setRepricedKey(key);
     }
   };
@@ -162,7 +164,7 @@ export function SmartVideo({ gen, text, platforms, attachments }: {
   return (
     <div className={`compose-media-panel smart-card${updating ? ' is-updating' : ''}`} aria-busy={updating}>
       <div className="smart-head">
-        <span className="compose-label">{override ? 'Your pick' : 'Best fit for this post'}</span>
+        <span className="compose-label">{shownOverride ? 'Your pick' : 'Best fit for this post'}</span>
         <h3 className="smart-format">{FORMAT[plan.format] ?? 'Video'}</h3>
         {summary && <p className="smart-summary">{summary}</p>}
       </div>

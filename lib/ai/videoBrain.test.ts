@@ -10,7 +10,7 @@ vi.mock('./client', () => ({
 
 import {
   FOOTAGE_NEGATIVE, VENDOR_RX, alternativesFor, cinemaEstimate, copyLine, detectSignals, draftFromPlan, finalizePlan, heuristicDraft,
-  planVideo, priceForPlan, sceneProse, summaryFor, toLines, type Availability, type BrainInput, type Draft, type Plan,
+  filmsAScene, planVideo, priceForPlan, sceneProse, summaryFor, toLines, type Availability, type BrainInput, type Draft, type Plan,
 } from './videoBrain';
 
 const ALL: Availability = { motion1: true, cinema: true, templates: true, aiMotion: true, kitScreenshots: 0 };
@@ -578,5 +578,49 @@ describe('override views (v14 post 3)', () => {
         expect([r.summary, ...r.reasons].join(' ')).not.toMatch(/real footage|actual footage/i);
       }
     }
+  });
+});
+
+describe('override footage uses defaults, not another format’s draft (v15 post 3)', () => {
+  // The model drafted a hybrid with hero-grade footage: Motion 1, 1080p. Fine as its own b-roll rules apply, not for an AI video override.
+  const d = { ...launchDraft, footageEngine: 'motion-1', footageQuality: '1080p', footageSeconds: 8, durationSec: 10 };
+  const post = (over: Partial<BrainInput> = {}) => input({ text: V13.launch, platforms: ['instagram'], balance: 22, ...over });
+
+  it('AI video alternative: Fast 720p at the best fit’s 10 s, ≤ 250 cr, and the chip price is the card price', async () => {
+    const best = await planVideo(post(), post(), { draft: () => Promise.resolve(d) });
+    expect(best.plan).toMatchObject({ format: 'hybrid', durationSec: 10 });
+    const chip = best.alternatives.find((a) => a.format === 'ai_video')!;
+    expect(chip.estimatedCredits).toBeLessThanOrEqual(250);
+    const picked = await planVideo(post({ overrides: { format: 'ai_video' } }), post(), { draft: () => Promise.resolve(d) });
+    expect(picked.plan.footage).toMatchObject({ engine: 'motion-1-fast', quality: '720p', seconds: 10 });
+    expect(picked.estimatedCredits).toBe(chip.estimatedCredits);
+    // Every chip on both cards matches the plan its click produces.
+    for (const r of [best, picked]) {
+      for (const a of r.alternatives) {
+        const p = await planVideo(post({ overrides: { format: a.format as 'hybrid' } }), post(), { draft: () => Promise.resolve(d) });
+        expect(p.estimatedCredits, a.label).toBe(a.estimatedCredits);
+      }
+    }
+  });
+
+  it('the drafted format keeps the model’s footage; a hero photo makes the override image-to-video', () => {
+    const own = finalizePlan({ ...d, format: 'ai_video' }, post({ balance: 100_000, overrides: { format: 'ai_video' } }));
+    expect(own.footage).toMatchObject({ engine: 'motion-1', quality: '1080p' });
+    const photo = finalizePlan(d, post({ attachments: PHOTO, overrides: { format: 'ai_video' } }));
+    expect(photo.footage).toMatchObject({ engine: 'motion-1', mode: 'image-to-video', quality: '720p' });
+  });
+});
+
+describe('motion graphic summaries never invent footage (v15 post 1)', () => {
+  const bad = 'Animated stats rise on a sleek desk scene, then the three figures appear as kinetic text.';
+  it('a scene in a motion graphic summary falls back to our description', () => {
+    expect(filmsAScene(bad)).toBe(true);
+    expect(filmsAScene('“Order at the counter” and “₹99” animate as bold type.')).toBe(false);
+    const p = finalizePlan(draft({ format: 'motion_graphic', graphicsEngine: 'ai_motion', summary: bad, onScreenText: ['Revenue up 42%', 'Churn down to 1.8%'] }), v13(V13.q3, { platforms: ['linkedin'] }));
+    expect(p.format).toBe('motion_graphic');
+    expect(p.summary).not.toBe(bad);
+    expect(p.summary).not.toMatch(/desk|scene/);
+    // A hybrid summary may describe its footage.
+    expect(finalizePlan({ ...launchDraft, summary: 'Coffee at the counter, then the offer animates on top.' }, v13(V13.launch, { platforms: ['instagram'] })).summary).toBe('Coffee at the counter, then the offer animates on top.');
   });
 });

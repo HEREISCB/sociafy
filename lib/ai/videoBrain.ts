@@ -346,6 +346,7 @@ export function finalizePlan(draftIn: Draft | null, input: BrainInput, opts: { r
   if (draft !== draftIn) ctx.notes.push('default');
 
   const ov = input.overrides ?? {};
+  const drafted = draft.format;
   if (ov.format) draft = { ...draft, format: ov.format };
   const av = input.availability;
   const deadline = input.deadlineMin ?? DEFAULT_DEADLINE_MIN;
@@ -394,16 +395,21 @@ export function finalizePlan(draftIn: Draft | null, input: BrainInput, opts: { r
   };
 
   const image = input.attachments.find((a) => a.mimeType.startsWith('image/'));
+  // The model's footage settings (engine, quality, seconds) were written for the format it drafted.
+  // Any other format (an override, an alternative chip, an availability switch) starts from defaults:
+  // Fast 720p, or Motion 1 image-to-video when the user's photo is the hero. Same draft → chip price == card price.
+  const hero = signals.S6 && !!image;
+  const fd: Draft = format === drafted ? draft : { footageEngine: hero ? 'motion-1' : 'motion-1-fast', footageMode: hero ? 'image-to-video' : 'text' };
   const footage = (seconds: number, hybrid: boolean): NonNullable<Plan['footage']> => {
-    let engine: FootageEngine = draft.footageEngine === 'motion-1' || draft.footageEngine === 'cinema-1' ? draft.footageEngine : 'motion-1-fast';
+    let engine: FootageEngine = fd.footageEngine === 'motion-1' || fd.footageEngine === 'cinema-1' ? fd.footageEngine : 'motion-1-fast';
     // Cinema: sound/mood work only, within its deadline, never inside a hybrid (v1), never with refs.
-    if (engine === 'cinema-1' && (hybrid || !av.cinema || !cinemaFits(seconds, deadline) || draft.footageMode === 'reference')) engine = 'motion-1-fast';
+    if (engine === 'cinema-1' && (hybrid || !av.cinema || !cinemaFits(seconds, deadline) || fd.footageMode === 'reference')) engine = 'motion-1-fast';
     if (engine !== 'cinema-1' && !av.motion1) engine = 'cinema-1';
-    let mode: FootageMode = draft.footageMode === 'image-to-video' || draft.footageMode === 'reference' ? draft.footageMode : 'text';
+    let mode: FootageMode = fd.footageMode === 'image-to-video' || fd.footageMode === 'reference' ? fd.footageMode : 'text';
     if (!image || engine === 'cinema-1') mode = 'text';
     // Footage under overlays is b-roll (rulebook §3): Fast 720p, unless the user's photo is the hero.
     if (hybrid && engine === 'motion-1' && mode !== 'image-to-video') engine = 'motion-1-fast';
-    let quality: VideoQuality = isQuality(draft.footageQuality) ? draft.footageQuality : '720p';
+    let quality: VideoQuality = isQuality(fd.footageQuality) ? fd.footageQuality : '720p';
     if (hybrid && quality === '1080p' && mode !== 'image-to-video') quality = '720p';
     if (engine !== 'motion-1' && quality === '1080p') quality = '720p'; // Fast and Cinema top out at 720p
     const m = VIDEO_MODELS[engine === 'cinema-1' ? 'sociafy-cinema-1' : 'sociafy-motion-1'];
@@ -417,7 +423,7 @@ export function finalizePlan(draftIn: Draft | null, input: BrainInput, opts: { r
     plan.audio = plan.footage.engine === 'cinema-1' ? { narration: false, music: true, sfx: true } : { narration: false, music: false, sfx: false };
   } else if (format === 'hybrid') {
     plan.durationSec = clamp(wantSec, MIN_GRAPHIC_SEC, MOTION_AI.durationSec.max);
-    const want = draft.footageSeconds ?? Math.round(plan.durationSec / 2);
+    const want = fd.footageSeconds ?? Math.round(plan.durationSec / 2);
     plan.footage = footage(clamp(want, FOOTAGE_SEC.min, Math.min(FOOTAGE_SEC.max, plan.durationSec - 2)), true);
     const recipe = (['H1', 'H2', 'H3', 'H4'] as const).find((r) => r === draft.recipe);
     plan.recipe = plan.footage.mode === 'image-to-video' ? 'H3' : recipe && recipe !== 'H3' ? recipe : 'H1';
@@ -458,7 +464,8 @@ export function finalizePlan(draftIn: Draft | null, input: BrainInput, opts: { r
   }
   const keep = llmCopy && sameShape(plan, llmCopy);
   // Policy-gated: the model tends to write "shows <celebrity> trying…"; we render type only, so say so in our words.
-  plan.summary = (keep && !ctx.notes.includes('policy') && copyLine(llmCopy.summary, 120)) || describePlan(plan);
+  const modelSummary = keep && !ctx.notes.includes('policy') ? copyLine(llmCopy.summary, 120) : null;
+  plan.summary = (modelSummary && !(plan.format === 'motion_graphic' && filmsAScene(modelSummary)) ? modelSummary : null) || describePlan(plan);
   plan.reasons = reasonsFor(plan, ctx, keep ? llmCopy.reasons : undefined);
   return plan;
 }
@@ -468,6 +475,11 @@ function sameShape(p: Plan, d: Draft): boolean {
   const tpl = (format: unknown, engine: unknown, t: unknown) => (format === 'motion_graphic' && engine === 'template' ? t : null);
   return p.format === d.format && tpl(p.format, p.graphics?.engine, p.graphics?.template) === tpl(d.format, d.graphicsEngine, d.template);
 }
+
+/** A filmed place or camera talk. A motion graphic has no footage, so its summary can't describe one. */
+const FILMED_RX = /\b(?:desk|office|street|room|kitchen|counter|table|caf[eé]|shop|store|studio|warehouse|city|skyline|beach|scene|setting|footage|filmed|camera|shot of|close-?up)\b/i;
+/** Quoted on-screen words ("“Order at the counter”") are type, not a scene: only the rest is checked. */
+export const filmsAScene = (summary: string) => FILMED_RX.test(summary.replace(/[“"][^“”"]*[”"]|(?<!\w)['‘][^'‘’]*['’](?!\w)/g, ' '));
 
 const LINE_MAX = 48;
 /** Short on-screen lines: split at sentence/clause breaks (commas only in long clauses), wrapped to LINE_MAX at word boundaries. */
@@ -742,7 +754,7 @@ Footage engine: "cinema-1" only when sound/atmosphere is central; "motion-1" whe
 footagePrompt (<=40 words, ALWAYS include it, even for motion_graphic: it is used if the user switches to video): start with the PHYSICAL scene; describe the scene, subject, action, camera move and light only. Never ask for text, signs, screens, UI, holograms or logos. Prefer hands, silhouettes, back views or wide shots over faces.
 Platforms: LinkedIn/X → graphics, 8-12 s, muted (sfx only). Instagram/TikTok/Facebook → 9:16, footage hook, 10-15 s, music on. Narration only for explainers, never LinkedIn-only.
 
-JSON keys: format, recipe (H1-H4 or null), graphicsEngine, template (or null), footageEngine, footageMode ("text"|"image-to-video"), footageSeconds, footageQuality ("720p"|"1080p"), footagePrompt, allowFaces (bool), videoAllowed (bool), durationSec (motion_graphic/hybrid >= 8), aspect ("9:16"|"1:1"|"16:9"), audio {narration, music, sfx} (booleans), onScreenText (motion_graphic/hybrid: 2-4 short lines, <=40 chars each, taken from the post; ai_video: []), summary (<=120 chars: one plain sentence saying what the viewer sees in THIS video: the actual scene and the actual words that animate, e.g. "Coffee waiting at the counter, then '₹99 first order' and 'Order ahead' animate on top." Never mention length, aspect, sound, credits or tool names), reasons (2-3 strings, <=90 chars each: why this format suits THIS post, citing what it says; never about platforms, sound, length or price; say "AI footage", never "real footage"), confidence (0-1), signals (e.g. ["S1","S5"]: S1 must-show text, S2 stats, S3 list, S4 opinion, S5 scene, S6 product photo, S7 UI, S8 announcement, S9 abstract, S10 mood, S11 real person/brand, S12 platform, S13 brand strict, S14 non-Latin, S15 explainer).`;
+JSON keys: format, recipe (H1-H4 or null), graphicsEngine, template (or null), footageEngine, footageMode ("text"|"image-to-video"), footageSeconds, footageQuality ("720p"|"1080p"), footagePrompt, allowFaces (bool), videoAllowed (bool), durationSec (motion_graphic/hybrid >= 8), aspect ("9:16"|"1:1"|"16:9"), audio {narration, music, sfx} (booleans), onScreenText (motion_graphic/hybrid: 2-4 short lines, <=40 chars each, taken from the post; ai_video: []), summary (<=120 chars: one plain sentence saying what the viewer sees in THIS video: the actual scene and the actual words that animate, e.g. "Coffee waiting at the counter, then '₹99 first order' and 'Order ahead' animate on top." Never mention length, aspect, sound, credits or tool names. motion_graphic has NO footage: describe only the animated type, numbers, logo and brand colors, never a place, scene or camera), reasons (2-3 strings, <=90 chars each: why this format suits THIS post, citing what it says; never about platforms, sound, length or price; say "AI footage", never "real footage"), confidence (0-1), signals (e.g. ["S1","S5"]: S1 must-show text, S2 stats, S3 list, S4 opinion, S5 scene, S6 product photo, S7 UI, S8 announcement, S9 abstract, S10 mood, S11 real person/brand, S12 platform, S13 brand strict, S14 non-Latin, S15 explainer).`;
 
 /** The post as the planner sees it. Availability and balance are applied after, by finalizePlan, so the LLM call runs in parallel with those lookups. */
 export type PostInput = Omit<BrainInput, 'availability' | 'balance'> & { userId?: string };
