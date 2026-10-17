@@ -23,9 +23,10 @@ const bodySchema = z.object({
 });
 
 /**
- * POST /api/media/plan-video → 200 { plan, estimatedCredits, summary, reasons, alternatives, balance }
+ * POST /api/media/plan-video → 200 { plan, estimatedCredits, summary, reasons, alternatives, affordable, cheapest?, balance }
  * The video brain (lib/ai/videoBrain.ts): which format suits this post, and what
- * it costs. No charge. Generate with POST /api/media/generate-auto.
+ * it costs. A low balance never hides the plan: it comes back priced with
+ * affordable:false and the cheapest option. No charge. Generate with POST /api/media/generate-auto.
  */
 export async function POST(req: NextRequest) {
   return withUser(async (user) => {
@@ -35,8 +36,9 @@ export async function POST(req: NextRequest) {
     if (!parsed.ok) return parsed.response;
     const { text, platforms, attachments, overrides } = parsed.data;
 
-    const { availability, balance } = await brainContext(user.id);
-    const result = await planVideo({ text, platforms: platforms.map((p) => p.toLowerCase()), attachments, overrides, availability, balance });
-    return { ...result, balance };
+    // Balance/brand lookups run alongside the LLM call.
+    const context = brainContext(user.id);
+    const result = await planVideo({ userId: user.id, text, platforms: platforms.map((p) => p.toLowerCase()), attachments, overrides }, context);
+    return { ...result, balance: (await context).balance };
   }, req);
 }

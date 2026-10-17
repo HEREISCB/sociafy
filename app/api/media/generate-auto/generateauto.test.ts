@@ -21,7 +21,7 @@ vi.mock('../../../../lib/api', () => ({
 }));
 vi.mock('../../../../lib/rate-limit', () => ({ rateLimit: () => ({ ok: true }) }));
 vi.mock('../../../../lib/env', () => ({ isStubMode: { r2: () => false } }));
-vi.mock('../../../../lib/ai/client', () => ({ getTextAI: () => null, completeText: () => Promise.resolve('') }));
+vi.mock('../../../../lib/ai/client', () => ({ getTextAI: () => null, getGroq: () => null, GROQ_MODELS: {}, completeText: () => Promise.resolve('') }));
 vi.mock('../../../../lib/ai/cue', () => ({ priceCinemaRender: () => Promise.resolve({ credits: st.cinemaQuote, megapixels: 0.98, steps: 20, providerUsd: 0.29 }) }));
 vi.mock('../../../../lib/media/autoVideo', async () => {
   const { z } = await import('zod');
@@ -131,6 +131,15 @@ describe('POST /api/media/generate-auto', () => {
     const r = await post({ text: TEXT, plan });
     expect(r).toMatchObject({ error: 'video_submit_failed', status: 502 });
     expect(JSON.stringify(r)).not.toMatch(/claude/i);
+  });
+
+  it('an unaffordable plan → 402 insufficient_credits before any fetch, re-host or charge', async () => {
+    const photo = [{ url: 'https://example.com/bottle.jpg', mimeType: 'image/jpeg' }];
+    const text = 'Our new cold brew is here. ₹199 this weekend only.';
+    const plan = planFor({ format: 'hybrid', footageEngine: 'motion-1', footageMode: 'image-to-video' }, text, photo);
+    st.balance = 22;
+    expect(await post({ text, plan, platforms: ['instagram'], attachments: photo })).toMatchObject({ status: 402, error: 'insufficient_credits' });
+    expect(st.calls).toHaveLength(0);
   });
 
   it('rejects a malformed plan', async () => {

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { Icon } from '../icons';
 import { useApi } from '../../lib/ui/fetcher';
 import type { CreditsPayload } from '../credits';
@@ -94,7 +95,7 @@ export function SmartVideo({ gen, text, platforms, attachments }: {
   if (!res) {
     return (
       <div className="compose-media-panel" aria-busy="true">
-        <span className="sr-only" role="status">Planning your video…</span>
+        <p className="compose-note" role="status">Picking the best format…</p>
         <div className="sk smart-sk smart-sk--title" />
         <div className="sk smart-sk" />
         <div className="sk smart-sk smart-sk--short" />
@@ -106,7 +107,10 @@ export function SmartVideo({ gen, text, platforms, attachments }: {
   const { plan, summary, estimatedCredits: price } = res;
   const reasons = (res.reasons?.length ? res.reasons : plan.reasons ?? []).slice(0, 3);
   const balance = credits?.balance ?? res.balance;
-  const short = balance != null && balance < price;
+  const short = (balance != null && balance < price) || res.affordable === false;
+  // The cheapest option, when it's cheaper than the plan and not already offered as an alternative.
+  const cheapest = short && res.cheapest && res.cheapest.estimatedCredits < price
+    && !res.alternatives?.some((a) => a.summary === res.cheapest!.summary) ? res.cheapest : null;
   const none = plan.format === 'none';
   const busy = gen.busy === 'video';
   const updating = stale || planning;
@@ -143,8 +147,13 @@ export function SmartVideo({ gen, text, platforms, attachments }: {
           )) : <span>Silent</span>}
         </div>
       )}
-      {(res.alternatives?.length || override) && !busy ? (
+      {(res.alternatives?.length || override || cheapest) && !busy ? (
         <div className="compose-chips" role="group" aria-label="Other options">
+          {cheapest && (
+            <button type="button" className="prompt-chip" title={cheapest.summary} disabled={updating || cheapest.format === plan.format} onClick={() => setOverride(cheapest.format)}>
+              Cheapest: {FORMAT[cheapest.format] ?? cheapest.format} · {cheapest.estimatedCredits} cr
+            </button>
+          )}
           {res.alternatives?.map((a) => (
             <button key={a.format} type="button" className="prompt-chip" title={a.summary} disabled={updating} onClick={() => setOverride(a.format)}>
               {a.estimatedCredits < price ? 'Cheaper: ' : ''}{FORMAT[a.format] ?? a.format} · {a.estimatedCredits} cr
@@ -158,7 +167,9 @@ export function SmartVideo({ gen, text, platforms, attachments }: {
         <p className="compose-note compose-error" id="smart-reason">The price changed to {price} cr since we planned this. Nothing was charged — confirm to go ahead.</p>
       )}
       {short && !none && (
-        <p className="compose-note compose-error" id="smart-reason">Not enough credits — {balance} of {price}.</p>
+        <p className="compose-note compose-error" id="smart-reason">
+          Not enough credits — {balance ?? 0} of {price}. <Link href="/account/billing">Top up</Link>
+        </p>
       )}
       <div className="row smart-actions">
         {!none && (

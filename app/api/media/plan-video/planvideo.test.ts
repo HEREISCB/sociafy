@@ -8,7 +8,7 @@ vi.mock('../../../../lib/api', () => ({
   jsonError: (error: string, status = 400, extra?: Record<string, unknown>) => ({ error, status, ...extra }),
 }));
 vi.mock('../../../../lib/rate-limit', () => ({ rateLimit: () => ({ ok: st.rl, retryAfterSec: 5 }) }));
-vi.mock('../../../../lib/ai/client', () => ({ getTextAI: () => null, completeText: () => Promise.resolve('') }));
+vi.mock('../../../../lib/ai/client', () => ({ getTextAI: () => null, getGroq: () => null, GROQ_MODELS: {}, completeText: () => Promise.resolve('') }));
 vi.mock('../../../../lib/media/autoVideo', async () => {
   const { z } = await import('zod');
   return {
@@ -34,6 +34,13 @@ describe('POST /api/media/plan-video', () => {
     expect(Array.isArray(r.reasons)).toBe(true);
     expect((r.alternatives as unknown[]).length).toBeLessThanOrEqual(2);
     expect(JSON.stringify(r)).not.toMatch(VENDOR_RX);
+  });
+
+  it('a low balance still returns the priced best fit, affordable:false and the cheapest option', async () => {
+    st.balance = 22;
+    const r = await post({ text: 'Sunday mornings at our bakery: flour, butter, first light.', platforms: ['instagram'] });
+    expect(r).toMatchObject({ plan: { format: 'ai_video' }, affordable: false, balance: 22, cheapest: { estimatedCredits: expect.any(Number) } });
+    expect(r.estimatedCredits as number).toBeGreaterThan(22);
   });
 
   it('honours an override format', async () => {

@@ -60,7 +60,7 @@ target platforms.
 | S11 | **Identifiable real person, celebrity, minor, competitor brand** | graphics | Policy gate: no AI video of them. Use a still in a graphic (showcase) or faceless footage (hands, back view, wide shot) |
 | S12 | **Platform** | LinkedIn/X → graphics. Reels/TikTok/Shorts → footage | LinkedIn B2B: text-led, 1:1 or 16:9 (or 9:16 mobile), assume muted autoplay, SFX only. Reels/TikTok/Shorts: 9:16, footage hook in the first 1–2 s, sound on (music bed or Cinema audio) |
 | S13 | **Brand kit strictness** (strict colors, logo present, `brandSafetyStrict`) | graphics or hybrid | AI video colors are approximate. Brand must-haves go in the overlay layer |
-| S14 | **Language not Latin / ₹** | AI motion | Templates fall back to system fonts for these. AI motion uses Noto. AI video cannot write any script |
+| S14 | **Language not Latin**: a letter from a non-Latin script. Currency symbols (₹), digits, punctuation and emoji don't count | AI motion | Templates fall back to system fonts for these (and for ₹, which keeps a post off templates without being S14). AI motion uses Noto. AI video cannot write any script |
 | S15 | **Explainer / how-to longer than 12 s** | AI motion + narration | Narration ≤2.3 words/s (scaffold rule). Skip narration for LinkedIn-only posts |
 
 ## 3. Hybrid recipes
@@ -83,6 +83,12 @@ render). One footage clip per hybrid in v1. Keep all must-show text out of the f
 (say "no text, no signage, no logos" in the prompt). Overlay text sits in the scaffold safe area.
 
 ## 4. Decision procedure (one LLM call, JSON out)
+
+Planner: Groq `openai/gpt-oss-120b` (reasoning low), falling back to gpt-5-mini (reasoning minimal), then
+the regex heuristic. Measured 2026-10-17 from the prod box, 3 posts, LLM call only: gpt-5-mini low p50
+7.3 s (old), gpt-5-mini minimal p50 3.1 s, gpt-oss-120b p50 0.9 s. The balance/brand lookup runs in
+parallel; drafts are cached 10 min per user + post, so re-plans (overrides, alternatives) cost only the
+lookup (~0.35 s).
 
 Inputs: post text, attachments (type and count, `has_person_photo`), brand kit (colors, logo,
 `brandSafetyStrict`), target platforms, user credit balance, `deadline` (publish time minus now),
@@ -110,7 +116,11 @@ and user overrides.
    ceiling = min(balance, max(0.25 × balance, cheapest viable option), user per-post cap if set).
    Above the ceiling → downgrade in order: 1080p→720p, 2.5→Fast, Fast→Cinema (if the deadline allows),
    shorten to the platform minimum, hybrid→motion_graphic, AI motion→sting template (126 cr).
-   Cheapest viable still > balance → format="none", reason="insufficient_credits".
+   Only when the balance covers the cheapest viable option (the bottom of this ladder). If even that is
+   > balance, skip the ladder: return the best-fit plan unchanged and priced, with `affordable: false` and
+   `cheapest: {format, estimatedCredits, summary}`. The UI shows it with Generate disabled + Top up;
+   generate-auto refuses it (402 insufficient_credits) before any charge. `none` is only for genuine
+   impossibility (no engine this account can use), never for a low balance.
 9. TIE-BREAKS (in order): legible text > brand fidelity > policy safety > cost > latency > visual novelty.
    LinkedIn breaks ties toward graphics; Reels/TikTok/Shorts toward footage.
 10. SAFE DEFAULT (confidence < 0.6 or a parse failure): motion_graphic via AI motion, 12 s,
@@ -139,13 +149,13 @@ switch to the graphic beats an error.
 | 3 | "5 mistakes killing your Reels reach" Instagram | motion_graphic, AI motion 9:16, 15 s, music on, 330 cr | S3 list. Text is the content. Music for Reels |
 | 4 | "Sunday mornings at our bakery: flour, butter, first light." Instagram, no attachments | ai_video Fast 720p 9:16, 8 s + H6 end card (≈144+54 cr) | S5 scene, little text. Fast is enough at 8 s |
 | 5 | Same bakery post, publish in 2 h, "with the sound of the place" | ai_video Cinema 8 s (~25 cr, ~6 min) + H6 | S10 plus a sound need. Deadline covers latency. Cheapest engine |
-| 6 | "Our new cold brew is here. ₹199 this weekend only." + bottle photo, Reels | hybrid H3: 2.5 image-to-video 5 s from the photo (195 cr) + ₹199/CTA overlays, 12 s total (≈216 graphics) ≈411 cr | S6 hero photo, S1 price, S14 ₹ glyph needs Noto (AI motion, not template) |
+| 6 | "Our new cold brew is here. ₹199 this weekend only." + bottle photo, Reels | hybrid H3: 2.5 image-to-video 5 s from the photo (195 cr) + ₹199/CTA overlays, 12 s total (≈216 graphics) ≈411 cr | S6 hero photo, S1 price, ₹ glyph needs Noto (AI motion, not template; ₹ alone is not S14) |
 | 7 | "We cut delivery times 40% across Pune." Reels + LinkedIn | hybrid H2: Fast b-roll of a courier 9 s under a scrim, 40% counts up, end card | S2 stat plus S5 scene. The scrim hides Fast artifacts |
 | 8 | "Introducing Autopilot: posts written, scheduled, published." + 3 UI screenshots | motion_graphic `showcase` 9:16/16:9, 288 cr | S7 UI. AI video would turn the screens to mush |
 | 9 | "Congrats to our CEO Priya on Forbes 30u30!" + her photo | motion_graphic (`showcase` with the photo as a still, or AI motion) | S11 real-person policy gate. Forbes is third-party brand text, so it goes in type |
 | 10 | "Join our webinar Oct 30, 6 pm IST: scaling D2C in India" LinkedIn | motion_graphic AI motion 16:9, 12 s | S1 date and time must be exact. Abstract topic (S9) |
 | 11 | "Behind the scenes: our team packing 1,000 orders before Diwali" Reels | hybrid H1: Fast 6 s faceless packing hands + "1,000 orders" type, music on | S5 + S1. Hands, not faces (finger warping is acceptable at a quick cut, faces of real staff are not) |
-| 12 | Any post, balance 150 cr | sting template 7 s (126 cr) or `none` | Cost ladder bottom. Never overdraw |
+| 12 | Any post, balance 150 cr / 22 cr | 150: sting template 7 s (126 cr). 22: the best fit, priced, `affordable: false`, cheapest = sting 126 | Cost ladder bottom. Never overdraw, never hide the plan |
 
 ## 6. Known unknowns (cheap experiments)
 

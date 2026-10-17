@@ -57,9 +57,14 @@ export type VideoPlan = {
   onScreenText?: string[]; estimatedCredits: number; confidence?: number; reasons?: string[];
   fallback?: unknown;
 };
+type PlanOption = { format: VideoFormat; estimatedCredits: number; summary: string };
 export type PlanResponse = {
   plan: VideoPlan; estimatedCredits: number; summary: string; reasons?: string[];
-  alternatives?: { format: VideoFormat; estimatedCredits: number; summary: string }[]; balance?: number;
+  alternatives?: PlanOption[]; balance?: number;
+  /** False: the best fit costs more than the balance (Generate is refused server-side). */
+  affordable?: boolean;
+  /** With affordable:false, the cheapest option we could make. */
+  cheapest?: PlanOption;
 };
 /** AI-designed graphics (alone or over footage) open in the motion editor. */
 export const planEditable = (p: VideoPlan) => p.format === 'hybrid' || (p.format === 'motion_graphic' && p.graphics?.engine !== 'template');

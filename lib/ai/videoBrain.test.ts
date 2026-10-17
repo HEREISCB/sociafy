@@ -3,6 +3,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const st = vi.hoisted(() => ({ ai: null as null | object, reply: '' }));
 vi.mock('./client', () => ({
   getTextAI: () => st.ai,
+  getGroq: () => null,
+  GROQ_MODELS: {},
   completeText: () => Promise.resolve(st.reply),
 }));
 
@@ -189,8 +191,22 @@ describe('finalizePlan: cost ceiling and downgrade ladder', () => {
     expect(finalizePlan(pricey, input({ balance: 3_000 })).footage).toMatchObject({ engine: 'motion-1', quality: '720p' });
   });
 
-  it('cheapest viable above the balance → none, insufficient_credits', () => {
-    expect(finalizePlan(pricey, input({ balance: 100 }))).toMatchObject({ format: 'none', reason: 'insufficient_credits' });
+  it('cheapest viable above the balance → the best fit unchanged, priced, affordable:false + the cheapest option', () => {
+    const rich = finalizePlan(pricey, input());
+    const p = finalizePlan(pricey, input({ balance: 22 }));
+    expect(p.format).toBe('hybrid');
+    expect(p).toMatchObject({ affordable: false, estimatedCredits: rich.estimatedCredits, footage: rich.footage, durationSec: rich.durationSec });
+    expect(p.cheapest).toMatchObject({ format: 'motion_graphic', estimatedCredits: 126 });
+    expect(p.cheapest!.summary).toMatch(/Sting/i);
+    // Reasons stay about the content, not money.
+    expect(p.reasons.join(' ')).not.toMatch(/credit|balance|top up/i);
+    expect(rich).toMatchObject({ affordable: true });
+    expect(rich.cheapest).toBeUndefined();
+  });
+
+  it('a locked format the ladder cannot fit → still priced, affordable:false, cheapest offered', () => {
+    const p = finalizePlan(pricey, input({ balance: 150, overrides: { format: 'hybrid' } }));
+    expect(p).toMatchObject({ format: 'hybrid', affordable: false, cheapest: { estimatedCredits: 126 } });
   });
 });
 
@@ -261,9 +277,48 @@ describe('revalidation (generate-auto)', () => {
   });
 });
 
+describe('S14 (non-Latin script)', () => {
+  const s14 = (text: string) => heuristicDraft({ text, platforms: ['instagram'], attachments: [] }).signals?.includes('S14');
+  it.each([
+    ['First order is ₹99', false],
+    ['Launch day 🚀 — 50% off, €20 / £15 / $25!', false],
+    ['Café crème à São Paulo', false],
+    ['पहला ऑर्डर ₹99', true],
+    ['新品上市', true],
+  ])('%s → %s', (text, want) => expect(s14(text)).toBe(want));
+});
+
 describe('planVideo', () => {
+  it('low balance: the response carries the priced best fit, affordable:false and the cheapest', async () => {
+    const r = await planVideo(input(), { availability: ALL, balance: 22 });
+    expect(r.plan.format).not.toBe('none');
+    expect(r).toMatchObject({ affordable: false, estimatedCredits: r.plan.estimatedCredits, cheapest: { estimatedCredits: expect.any(Number) } });
+    expect(r.estimatedCredits).toBeGreaterThan(22);
+    expect((await planVideo(input(), input())).affordable).toBe(true);
+  });
+
+  it('caches the draft per user + post for re-plans (overrides, alternatives); balance is applied fresh', async () => {
+    let calls = 0;
+    const draft = () => { calls++; return Promise.resolve(draft0); };
+    const draft0 = { format: 'ai_video', footageEngine: 'motion-1-fast', confidence: 0.9 } as Draft;
+    const post = { ...input(), userId: 'cache_user', text: 'Rain on the bakery window, first loaves out.' };
+    const a = await planVideo(post, input(), { draft });
+    const b = await planVideo({ ...post, text: `  ${post.text}  `, overrides: { format: 'motion_graphic' } }, input({ balance: 22 }), { draft });
+    expect(calls).toBe(1);
+    expect(a.plan.format).toBe('ai_video');
+    expect(b).toMatchObject({ plan: { format: 'motion_graphic' }, affordable: false });
+    await planVideo({ ...post, userId: 'other_user' }, input(), { draft });
+    expect(calls).toBe(2);
+    // A failed draft isn't cached.
+    const failing = () => { calls++; return Promise.resolve(null); };
+    await planVideo({ ...post, userId: 'fail_user' }, input(), { draft: failing });
+    await new Promise((r) => setTimeout(r, 0));
+    await planVideo({ ...post, userId: 'fail_user' }, input(), { draft: failing });
+    expect(calls).toBe(4);
+  });
+
   it('no LLM configured → the heuristic plans it', async () => {
-    const r = await planVideo(input());
+    const r = await planVideo(input(), input());
     expect(r.plan.format).toBe('ai_video');
     expect(r.summary).toMatch(/AI video/);
     expect(r.estimatedCredits).toBe(r.plan.estimatedCredits);
@@ -271,8 +326,8 @@ describe('planVideo', () => {
   it('unparseable LLM output → heuristic; valid output → used', async () => {
     st.ai = { kind: 'openai' };
     st.reply = 'not json';
-    expect((await planVideo(input())).plan.format).toBe('ai_video');
+    expect((await planVideo(input(), input())).plan.format).toBe('ai_video');
     st.reply = JSON.stringify({ format: 'motion_graphic', graphicsEngine: 'ai_motion', durationSec: 10, confidence: 0.9 });
-    expect((await planVideo(input())).plan).toMatchObject({ format: 'motion_graphic', durationSec: 10 });
+    expect((await planVideo(input(), input())).plan).toMatchObject({ format: 'motion_graphic', durationSec: 10 });
   });
 });

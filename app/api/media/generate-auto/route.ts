@@ -85,6 +85,8 @@ export async function POST(req: NextRequest) {
     if (fresh.format !== approved.format || fresh.estimatedCredits > approved.estimatedCredits) {
       return jsonError('plan_changed', 409, { plan: fresh, estimatedCredits: fresh.estimatedCredits, summary: summaryFor(fresh), reasons: fresh.reasons });
     }
+    // Unaffordable plans are shown (priced) but never run: refuse before any re-host, insert or charge.
+    if (fresh.estimatedCredits > balance) return insufficientCreditsResponse({ balance, needed: fresh.estimatedCredits });
 
     try {
       // Stills for image-to-video / reference footage: fetched, checked and re-hosted before any charge.

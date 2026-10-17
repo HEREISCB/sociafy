@@ -14,7 +14,7 @@
  * ('motion-1' | 'motion-1-fast' | 'cinema-1'), never a vendor's.
  */
 
-import { completeText, getTextAI } from './client';
+import { completeText, getGroq, getTextAI, GROQ_MODELS, type TextAI } from './client';
 import { MOTION_AI, MOTION_TEMPLATES, VIDEO_MODELS, type MotionTemplate } from './models';
 import { priceForMotion, priceForMotionAi, priceForVideo, type VideoQuality } from '../credits/pricing';
 
@@ -44,9 +44,15 @@ export type Plan = {
   reasons: string[];
   /** What runs if the footage of a hybrid fails (refund of the difference + this). Null for other formats. */
   fallback: { format: 'motion_graphic'; estimatedCredits: number } | null;
-  /** Set when format is 'none'. */
-  reason?: 'insufficient_credits' | 'unavailable';
+  /** Set when format is 'none' (nothing can run for this account). */
+  reason?: 'unavailable';
+  /** False when the balance can't cover this plan. The plan is still the best fit, priced; generate-auto refuses it. */
+  affordable?: boolean;
+  /** Set when not affordable: the cheapest option the downgrade ladder reaches from this plan. */
+  cheapest?: PlanOption;
 };
+
+export type PlanOption = { format: PlanFormat; estimatedCredits: number; summary: string };
 
 export type Availability = {
   /** Sociafy Motion 1 (PiAPI key set). */
@@ -179,7 +185,8 @@ const RX = {
   mood: /\bfeels? like\b|nostalgi|memor(?:y|ies)|\bstory\b|journey|cinematic|atmosphere|\bvibes?\b/i,
   sound: /\bsound of\b|\bhear\b|\blisten\b|\bambien/i,
   policy: /\b(?:congrat\w*|ceo|co-?founder|founder|celebrit\w*|president|prime minister|minister|politician|kids?|child(?:ren)?|bab(?:y|ies)|toddlers?|teens?|teenagers?|minors?)\b|(?:^|\s)@\w{2,}/i,
-  nonLatin: /[₹Ѐ-ӿ؀-ۿऀ-෿฀-๿぀-ヿ一-鿿가-힯]/,
+  /** A letter (\p{L}) outside the Latin script. Currency, digits, punctuation and emoji don't count. */
+  nonLatin: /[^\P{L}\p{Script=Latin}]/u,
   explainer: /\bhow to\b|step[- ]by[- ]step|\bguide\b|explained|tutorial|here'?s how/i,
 };
 
@@ -329,7 +336,7 @@ export function finalizePlan(draftIn: Draft | null, input: BrainInput, opts: { r
   if (format === 'hybrid' && !(av.motion1 && av.aiMotion)) format = graphicsAvailable || !footageAvailable ? 'motion_graphic' : 'ai_video';
   if (format === 'ai_video' && !footageAvailable) format = 'motion_graphic';
   if (format === 'motion_graphic' && !graphicsAvailable) {
-    if (!footageAvailable || !videoAllowed) return none(ctx, aspect, 'unavailable');
+    if (!footageAvailable || !videoAllowed) return none(ctx, aspect);
     format = 'ai_video';
   }
 
@@ -390,9 +397,17 @@ export function finalizePlan(draftIn: Draft | null, input: BrainInput, opts: { r
   if (plan.graphics?.engine === 'template' && aspect === '1:1') plan.aspect = aspect = feedOnly(input.platforms) ? '16:9' : '9:16';
 
   plan.estimatedCredits = priceForPlan(plan);
-  if (!ctx.revalidate) plan = applyLadder(plan, ctx, !!ov.format);
-  if (plan.format === 'none') return plan;
-  if (plan.estimatedCredits > input.balance && !ctx.revalidate) return none(ctx, plan.aspect, 'insufficient_credits');
+  let cheapest: Plan | null = null;
+  if (!ctx.revalidate) {
+    // Bottom of the ladder from this plan = the cheapest viable option. If even that is out of reach,
+    // keep the best fit as is (priced) so the user sees what we'd make; otherwise walk the ladder.
+    cheapest = applyLadder(plan, { ...ctx, balance: 0, notes: [] }, false);
+    if (cheapest.estimatedCredits <= input.balance) plan = applyLadder(plan, ctx, !!ov.format);
+  }
+  plan.affordable = plan.estimatedCredits <= input.balance;
+  if (!plan.affordable && cheapest) {
+    plan.cheapest = { format: cheapest.format, estimatedCredits: cheapest.estimatedCredits, summary: summaryFor(cheapest) };
+  }
 
   if (plan.format === 'hybrid') {
     plan.fallback = { format: 'motion_graphic', estimatedCredits: priceForMotionAi(plan.durationSec, plan.audio).credits };
@@ -405,7 +420,8 @@ function graphicsFor(draft: Draft, ctx: Ctx, aspect: PlanAspect): NonNullable<Pl
   const av = ctx.availability;
   const t = isTemplate(draft.template) ? draft.template : null;
   // Templates: Latin only (S14), stat ≤3 facts, showcase needs kit screenshots; 1:1 → AI motion if we can.
-  const fits = t && av.templates && !ctx.signals.S14 && (t !== 'showcase' || (av.kitScreenshots ?? 0) >= 2) && !(aspect === '1:1' && av.aiMotion);
+  // ₹ isn't S14 (it's not a script) but template fonts still lack the glyph.
+  const fits = t && av.templates && !ctx.signals.S14 && !ctx.text.includes('₹') && (t !== 'showcase' || (av.kitScreenshots ?? 0) >= 2) && !(aspect === '1:1' && av.aiMotion);
   if (draft.graphicsEngine === 'template' && fits) return { engine: 'template', template: t };
   if (av.aiMotion) return { engine: 'ai_motion', template: null };
   // AI motion unavailable, templates are: stat is the general-purpose one.
@@ -414,14 +430,13 @@ function graphicsFor(draft: Draft, ctx: Ctx, aspect: PlanAspect): NonNullable<Pl
 
 const activeSignals = (s: Signals) => (Object.keys(s) as (keyof Signals)[]).filter((k) => k !== 'sound' && s[k]);
 
-function none(ctx: Ctx, aspect: PlanAspect, reason: 'insufficient_credits' | 'unavailable'): Plan {
+/** Only for genuine impossibility (no engine this account can use). Low balance is never 'none'. */
+function none(ctx: Ctx, aspect: PlanAspect): Plan {
   return {
     format: 'none', recipe: null, graphics: null, footage: null, durationSec: 0, aspect,
     audio: { narration: false, music: false, sfx: false }, onScreenText: [], estimatedCredits: 0, confidence: 1,
-    signals: activeSignals(ctx.signals), fallback: null, reason,
-    reasons: [reason === 'insufficient_credits'
-      ? 'Not enough credits for any video. Top up to make one.'
-      : 'Video is not available for this account yet. Add your brand name and main color in Brand kit.'],
+    signals: activeSignals(ctx.signals), fallback: null, reason: 'unavailable',
+    reasons: ['Video is not available for this account yet. Add your brand name and main color in Brand kit.'],
   };
 }
 
@@ -491,7 +506,7 @@ const audioLabel = (a: PlanAudio) => {
 
 /** One line, customer-facing, no vendor names. */
 export function summaryFor(p: Plan): string {
-  if (p.format === 'none') return p.reason === 'insufficient_credits' ? 'Not enough credits for a video' : 'Video is not available yet';
+  if (p.format === 'none') return 'Video is not available yet';
   const tail = `${p.durationSec} s, ${p.aspect}, ${p.estimatedCredits} credits`;
   if (p.format === 'ai_video') {
     const sound = p.footage!.engine === 'cinema-1' ? 'with sound' : 'silent';
@@ -513,7 +528,7 @@ const SIGNAL_REASON: Partial<Record<keyof Signals, string>> = {
   S8: 'The offer, date and call to action are set as type.',
   S10: 'A mood or story post suits cinematic footage.',
   S11: 'Real people, children and other brands are never generated as AI video.',
-  S14: 'The script or currency symbols need real fonts.',
+  S14: 'This script needs real fonts, so it is set as type.',
   S15: 'An explainer works best as a motion graphic.',
 };
 
@@ -534,10 +549,10 @@ function reasonsFor(p: Plan, ctx: Ctx): string[] {
 }
 
 /** Up to two other options (different format or a cheaper graphic), cheapest first. */
-export function alternativesFor(plan: Plan, input: BrainInput, draft: Draft | null): { format: PlanFormat; estimatedCredits: number; summary: string }[] {
+export function alternativesFor(plan: Plan, input: BrainInput, draft: Draft | null): PlanOption[] {
   if (plan.format === 'none') return [];
   const seen = new Set([summaryFor(plan)]);
-  const out: { format: PlanFormat; estimatedCredits: number; summary: string }[] = [];
+  const out: PlanOption[] = [];
   for (const format of ['motion_graphic', 'ai_video', 'hybrid'] as const) {
     if (format === plan.format) continue;
     const alt = finalizePlan({ ...(draft ?? {}), confidence: 1 }, { ...input, overrides: { ...input.overrides, format } });
@@ -552,46 +567,93 @@ export function alternativesFor(plan: Plan, input: BrainInput, draft: Draft | nu
 
 // ---------------------------------------------------------------- LLM
 
-const SYSTEM = `You plan one short social video for a post. Choose ONE format and reply with JSON only.
+const SYSTEM = `You plan one short social video for a post. Choose ONE format and reply with JSON only; omit keys that don't apply.
 
 Formats:
 - motion_graphic: animated type + brand (exact colors, logo, any language). graphicsEngine "ai_motion" (custom, 6-20 s, any aspect) or "template" ("stat" 15 s for <=3 numbers, "showcase" 16 s for product screenshots, "sting" 7 s logo). Templates: Latin script only, no 1:1.
 - ai_video: generated footage, 4-15 s. It CANNOT write words, numbers, logos or UI.
 - hybrid: 4-8 s of AI footage inside a motion graphic with type on top. recipe H1 (hook, footage with short caption, end card: announcement + scene), H2 (stat over footage under a color scrim), H3 (product photo image-to-video, then price/spec chips, CTA), H4 (footage in a framed card beside big type, B2B).
 
-Signals: numbers/prices/dates/URLs/CTA/quotes, stats, lists/steps, opinions, non-Latin script or ₹, UI/SaaS screenshots → text need (graphics). A concrete physical scene with action and place, a product photo hero, mood/story/sound → scene need (footage). text low+scene low → motion_graphic ai_motion. text high+scene low → motion_graphic. text low+scene high → ai_video. both high → hybrid. Abstract concepts (growth, trust, AI) → motion_graphic, never vague footage.
+Signals: numbers/prices/dates/URLs/CTA/quotes, stats, lists/steps, opinions, non-Latin script, UI/SaaS screenshots → text need (graphics). A concrete physical scene with action and place, a product photo hero, mood/story/sound → scene need (footage). text low+scene low → motion_graphic ai_motion. text high+scene low → motion_graphic. text low+scene high → ai_video. both high → hybrid. Abstract concepts (growth, trust, AI) → motion_graphic, never vague footage.
 Policy: an identifiable real person, celebrity, politician, minor/child, or another company's brand → videoAllowed false.
 Footage engine: "cinema-1" only when sound/atmosphere is central; "motion-1" when the footage is the unobscured hero (product photo, close-up, 1080p); else "motion-1-fast".
-footagePrompt: describe the PHYSICAL scene, subject, action, camera move and light only. Never ask for text, signs, screens, UI, holograms or logos. Prefer hands, silhouettes, back views or wide shots over faces.
+footagePrompt (<=40 words): describe the PHYSICAL scene, subject, action, camera move and light only. Never ask for text, signs, screens, UI, holograms or logos. Prefer hands, silhouettes, back views or wide shots over faces.
 Platforms: LinkedIn/X → graphics, 8-12 s, muted (sfx only). Instagram/TikTok/Facebook → 9:16, footage hook, 10-15 s, music on. Narration only for explainers, never LinkedIn-only.
 
 JSON keys: format, recipe (H1-H4 or null), graphicsEngine, template (or null), footageEngine, footageMode ("text"|"image-to-video"), footageSeconds, footageQuality ("720p"|"1080p"), footagePrompt, allowFaces (bool), videoAllowed (bool), durationSec, aspect ("9:16"|"1:1"|"16:9"), audio {narration, music, sfx}, onScreenText (<=6 short strings that must appear), confidence (0-1), signals (e.g. ["S1","S5"]: S1 must-show text, S2 stats, S3 list, S4 opinion, S5 scene, S6 product photo, S7 UI, S8 announcement, S9 abstract, S10 mood, S11 real person/brand, S12 platform, S13 brand strict, S14 non-Latin, S15 explainer).`;
 
-function userMessage(input: BrainInput): string {
+/** The post as the planner sees it. Availability and balance are applied after, by finalizePlan, so the LLM call runs in parallel with those lookups. */
+export type PostInput = Omit<BrainInput, 'availability' | 'balance'> & { userId?: string };
+type BrainContext = Pick<BrainInput, 'availability' | 'balance'>;
+
+function userMessage(input: PostInput): string {
   const images = input.attachments.filter((a) => a.mimeType.startsWith('image/')).length;
   const videos = input.attachments.filter((a) => a.mimeType.startsWith('video/')).length;
-  const av = input.availability;
   return [
     `Platforms: ${input.platforms.join(', ') || 'unspecified'}`,
     `Attachments: ${images} image(s), ${videos} video(s)`,
-    `Available: ai_video=${av.motion1 || av.cinema}, cinema-1=${av.cinema}, ai_motion=${av.aiMotion}, templates=${av.templates}`,
     'Post:',
     input.text.slice(0, 4_000),
   ].join('\n');
 }
 
-/** One fast-tier JSON call. Null on any failure (no provider, timeout, bad JSON). */
-export async function llmDraft(input: BrainInput): Promise<Draft | null> {
-  const ai = getTextAI('fast');
-  if (!ai) return null;
-  try {
-    const raw = await completeText(ai, { system: SYSTEM, user: userMessage(input), maxOutputTokens: 1_500, json: true, timeoutMs: 20_000 });
-    const obj = JSON.parse(raw);
-    return obj && typeof obj === 'object' && !Array.isArray(obj) ? (obj as Draft) : null;
-  } catch (e) {
-    console.warn('[videoBrain] llm draft failed:', e instanceof Error ? e.message.slice(0, 200) : e);
-    return null;
+/**
+ * Planner providers, fastest first. Measured 2026-10-17 from the prod box, 3 posts:
+ * Groq gpt-oss-120b (low) p50 1.1 s; gpt-5-mini minimal p50 3.3 s; gpt-5-mini low p50 7.3 s.
+ * A Groq failure (rate limit, outage) falls through to OpenAI, then to the heuristic.
+ */
+function planners(): { ai: TextAI; timeoutMs: number }[] {
+  const groq = getGroq();
+  const openai = getTextAI('fast');
+  return [
+    ...(groq ? [{ ai: { client: groq, kind: 'groq', model: GROQ_MODELS.planner, supportsTools: false } as TextAI, timeoutMs: 5_000 }] : []),
+    ...(openai?.kind === 'openai' ? [{ ai: openai, timeoutMs: 8_000 }] : []),
+  ];
+}
+
+/** One small JSON call. Null on any failure (no provider, timeout, bad JSON). */
+export async function llmDraft(input: PostInput): Promise<Draft | null> {
+  for (const { ai, timeoutMs } of planners()) {
+    try {
+      const raw = await completeText(ai, {
+        system: SYSTEM, user: userMessage(input), json: true, timeoutMs, maxRetries: 0,
+        // The answer is ~250 tokens; gpt-oss counts its (low) reasoning in the same budget.
+        maxOutputTokens: ai.kind === 'groq' ? 900 : 600, reasoningEffort: 'minimal',
+      });
+      const obj = JSON.parse(raw);
+      if (obj && typeof obj === 'object' && !Array.isArray(obj)) return obj as Draft;
+    } catch (e) {
+      console.warn(`[videoBrain] llm draft failed (${ai.kind}):`, e instanceof Error ? e.message.slice(0, 200) : e);
+    }
   }
+  return null;
+}
+
+// ponytail: per-process LRU; a shared cache (Redis) only if we run more than one app process.
+const DRAFT_TTL_MS = 10 * 60_000;
+const DRAFT_MAX = 500;
+const draftCache = new Map<string, { at: number; draft: Promise<Draft | null> }>();
+
+/**
+ * Drafts are cached per (user, post text, platforms, attachments) for 10 min. The draft doesn't
+ * depend on overrides, balance or availability (finalizePlan applies those fresh every time), so
+ * toggling formats or alternatives re-plans instantly and a top-up shows up at once.
+ */
+function cachedDraft(input: PostInput, make: (i: PostInput) => Promise<Draft | null>): Promise<Draft | null> {
+  if (!input.userId) return make(input);
+  const key = JSON.stringify([input.userId, input.text.trim().replace(/\s+/g, ' '), input.platforms, input.attachments.map((a) => [a.url, a.mimeType])]);
+  const hit = draftCache.get(key);
+  draftCache.delete(key);
+  if (hit && Date.now() - hit.at < DRAFT_TTL_MS) {
+    draftCache.set(key, hit);
+    return hit.draft;
+  }
+  const entry = { at: Date.now(), draft: make(input) };
+  draftCache.set(key, entry);
+  if (draftCache.size > DRAFT_MAX) draftCache.delete(draftCache.keys().next().value!);
+  // Don't keep failures: the next re-plan should try the model again.
+  entry.draft.then((d) => { if (!d && draftCache.get(key) === entry) draftCache.delete(key); }, () => draftCache.delete(key));
+  return entry.draft;
 }
 
 export type PlanResult = {
@@ -599,19 +661,34 @@ export type PlanResult = {
   estimatedCredits: number;
   summary: string;
   reasons: string[];
-  alternatives: { format: PlanFormat; estimatedCredits: number; summary: string }[];
+  alternatives: PlanOption[];
+  /** False when the balance can't cover the plan; generate-auto will refuse it. */
+  affordable: boolean;
+  /** Present when not affordable: the cheapest option we could make. */
+  cheapest?: PlanOption;
 };
 
-/** Plan a video for a post: LLM draft (heuristic if unavailable) → deterministic post-pass. */
-export async function planVideo(input: BrainInput, deps: { draft?: (i: BrainInput) => Promise<Draft | null> } = {}): Promise<PlanResult> {
-  const draft = (await (deps.draft ?? llmDraft)(input)) ?? heuristicDraft(input);
-  const plan = finalizePlan(draft, input);
+/**
+ * Plan a video for a post: LLM draft (heuristic if unavailable) → deterministic post-pass.
+ * `context` (availability + balance) may be a pending promise: it's awaited alongside the LLM call.
+ */
+export async function planVideo(
+  input: PostInput,
+  context: BrainContext | Promise<BrainContext>,
+  deps: { draft?: (i: PostInput) => Promise<Draft | null> } = {},
+): Promise<PlanResult> {
+  const [ctx, llm] = await Promise.all([context, cachedDraft(input, deps.draft ?? llmDraft)]);
+  const full: BrainInput = { ...input, ...ctx };
+  const draft = llm ?? heuristicDraft(input);
+  const plan = finalizePlan(draft, full);
   return {
     plan,
     estimatedCredits: plan.estimatedCredits,
     summary: summaryFor(plan),
     reasons: plan.reasons,
-    alternatives: alternativesFor(plan, input, draft),
+    alternatives: alternativesFor(plan, full, draft),
+    affordable: plan.affordable !== false,
+    ...(plan.cheapest ? { cheapest: plan.cheapest } : {}),
   };
 }
 

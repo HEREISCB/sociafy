@@ -54,6 +54,8 @@ export function getGroq(): OpenAI | null {
 
 export const GROQ_MODELS = {
   fast: 'llama-3.3-70b-versatile',
+  /** The video brain's planner (lib/ai/videoBrain.ts): ~1 s JSON on Groq. */
+  planner: 'openai/gpt-oss-120b',
 } as const;
 
 /**
@@ -101,9 +103,17 @@ export function getTextAI(tier: keyof typeof MODELS = 'fast'): TextAI | null {
  */
 export async function completeText(
   ai: TextAI,
-  opts: { system: string; user: string; maxOutputTokens: number; json?: boolean; timeoutMs?: number },
+  opts: {
+    system: string; user: string; maxOutputTokens: number; json?: boolean; timeoutMs?: number;
+    /** Reasoning models only. Default 'low'. gpt-oss has no 'minimal' and gets 'low'. */
+    reasoningEffort?: 'minimal' | 'low';
+    /** SDK retries (default 2). Latency-bound callers with their own fallback pass 0. */
+    maxRetries?: number;
+  },
 ): Promise<string> {
-  const reqOpts = opts.timeoutMs ? { timeout: opts.timeoutMs } : undefined;
+  const reqOpts = opts.timeoutMs || opts.maxRetries !== undefined
+    ? { ...(opts.timeoutMs ? { timeout: opts.timeoutMs } : {}), ...(opts.maxRetries !== undefined ? { maxRetries: opts.maxRetries } : {}) }
+    : undefined;
 
   if (ai.kind === 'openai') {
     const resp = await ai.client.responses.create(
@@ -117,7 +127,7 @@ export async function completeText(
         ...(opts.json ? { text: { format: { type: 'json_object' as const } } } : {}),
         // gpt-5 models burn output budget on reasoning before emitting text;
         // keep effort low so the answer itself is never truncated.
-        ...(ai.model.startsWith('gpt-5') ? { reasoning: { effort: 'low' as const } } : {}),
+        ...(ai.model.startsWith('gpt-5') ? { reasoning: { effort: opts.reasoningEffort ?? 'low' } } : {}),
       },
       reqOpts,
     );
@@ -133,6 +143,7 @@ export async function completeText(
       ],
       max_tokens: opts.maxOutputTokens,
       temperature: 0.7,
+      ...(ai.model.startsWith('openai/gpt-oss') ? { reasoning_effort: 'low' as const } : {}),
       ...(opts.json ? { response_format: { type: 'json_object' as const } } : {}),
     },
     reqOpts,
