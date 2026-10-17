@@ -10,7 +10,7 @@ vi.mock('./client', () => ({
 
 import {
   FOOTAGE_NEGATIVE, VENDOR_RX, alternativesFor, cinemaEstimate, copyLine, detectSignals, draftFromPlan, finalizePlan, heuristicDraft,
-  planVideo, priceForPlan, summaryFor, toLines, type Availability, type BrainInput, type Draft, type Plan,
+  planVideo, priceForPlan, sceneProse, summaryFor, toLines, type Availability, type BrainInput, type Draft, type Plan,
 } from './videoBrain';
 
 const ALL: Availability = { motion1: true, cinema: true, templates: true, aiMotion: true, kitScreenshots: 0 };
@@ -465,7 +465,7 @@ describe('alternatives: distinct and named (v13 post 3)', () => {
   it('a cheapest that is the plan itself is dropped', async () => {
     const inp = v13(V13.celeb, { balance: 22, availability: { ...ALL, templates: false } });
     const r = await planVideo(inp, inp, { draft: () => Promise.resolve(celebDraft) });
-    expect(r.plan.cheapest?.key).toBe('motion_graphic|ai_motion|');
+    expect(r.plan.cheapest).toBeUndefined();
     expect(r.cheapest).toBeUndefined();
   });
 });
@@ -501,5 +501,82 @@ describe('thin plans get real content (v13 posts 4 and 5)', () => {
   });
   it('music: "upbeat" from the model reads as music on', () => {
     expect(finalizePlan(launchDraft, v13(V13.launch, { platforms: ['instagram'] })).audio).toMatchObject({ music: true, sfx: true });
+  });
+});
+
+describe('override views (v14 post 3)', () => {
+  // The live draft: the model picked a motion graphic and wrote no footage prompt.
+  const v14Draft = draft({
+    format: 'motion_graphic', graphicsEngine: 'ai_motion', aspect: '16:9', confidence: 0.97, durationSec: 10, audio: { narration: false, music: false, sfx: true },
+    onScreenText: ['Launch day!', 'Order ahead in app', 'First order ₹99 this week only'],
+    reasons: ['Numbers, prices or dates must stay legible.', 'The announcement is set as bold type.'],
+  });
+  const post = (over: Partial<BrainInput> = {}) => input({ text: V13.launch, platforms: ['linkedin', 'facebook'], balance: 22, ...over });
+  const plan = (overrides?: BrainInput['overrides'], d: Draft = v14Draft) => planVideo(post({ overrides }), post(), { draft: () => Promise.resolve(d) });
+  const BEST_FIT_CLAIM = /best (?:fit|shown)|works best|suits|carries it|so footage/i;
+
+  it('cheapest is the post-wide cheapest in every view, never a same-label chip', async () => {
+    const best = await plan();
+    expect(best.cheapest).toMatchObject({ label: 'Logo sting', estimatedCredits: 126 });
+    const ai = await plan({ format: 'ai_video' });
+    expect(ai.plan.format).toBe('ai_video');
+    expect(ai.cheapest).toMatchObject({ label: 'Logo sting', estimatedCredits: 126 });
+    expect(ai.cheapest?.label).not.toBe('AI video');
+    // On the cheapest card itself there is no cheaper chip.
+    expect((await plan({ cheapest: true })).cheapest).toBeUndefined();
+  });
+
+  it('picked AI video: honest tradeoff reasons, grounded in the post', async () => {
+    const { plan: p, reasons } = await plan({ format: 'ai_video' });
+    // Live prices: AI video 181 vs the best fit's 180, so no "Cheaper".
+    expect([p.estimatedCredits, (await plan()).estimatedCredits]).toEqual([181, 180]);
+    expect(reasons).toEqual([
+      "The ₹99 offer won't appear as readable text.",
+      'Footage only — add the offer in your caption.',
+      'Our pick for this post: Motion graphic.',
+    ]);
+    expect(p.reasons).toEqual(reasons);
+    for (const r of reasons) expect(r).not.toMatch(BEST_FIT_CLAIM);
+    // Every line survives generate-auto's revalidation.
+    for (const r of reasons) expect(copyLine(r, 90)).toBe(r);
+  });
+
+  it('picked cheapest / hybrid / motion graphic: what each gives up or adds', async () => {
+    const longer = { ...v14Draft, durationSec: 12, audio: { music: true, sfx: true } };
+    expect((await plan({ format: 'ai_video' }, longer)).reasons[0]).toBe("Cheaper, but the ₹99 offer won't appear as readable text.");
+    expect((await plan({ cheapest: true })).reasons[0]).toBe("Just your logo and tagline — the post's message isn't shown.");
+    expect((await plan({ format: 'hybrid' })).reasons[0]).toBe('Adds AI footage of the scene behind your text.');
+    const roast = input({ text: V13.roastery, platforms: ['instagram'], balance: 22, overrides: { format: 'motion_graphic' } });
+    const r = await planVideo(roast, roast, { draft: () => Promise.resolve(draft({ format: 'ai_video', footagePrompt: 'Beans tumble from a roasting drum, steam rising' })) });
+    expect(r.reasons[0]).toMatch(/^(?:Cheaper, but no|No) AI footage — the scene in your post isn't shown\.$/);
+    expect(r.reasons.at(-1)).toBe('Our pick for this post: AI video.');
+  });
+
+  it('AI video summary describes the scene (≥ 6 words); the prompt starts with it, no dangling clause', async () => {
+    const { plan: p, summary } = await plan({ format: 'ai_video' });
+    const prompt = p.footage!.prompt;
+    expect(prompt.startsWith('Walk in, and your coffee is waiting.')).toBe(true);
+    expect(prompt).not.toMatch(/Cinematic footage that shows|First order|this week only|Launch day|app/);
+    expect(summary.split(/\s+/).length).toBeGreaterThanOrEqual(6);
+    expect(summary).toMatch(/coffee is waiting/);
+    // With the model's scene prompt, the summary is that scene.
+    const withScene = await plan({ format: 'ai_video' }, { ...v14Draft, footagePrompt: 'Wide shot of a barista sliding a steaming cup across the counter, soft morning light' });
+    expect(withScene.summary).toBe('Wide shot of a barista sliding a steaming cup across the counter, soft morning light.');
+  });
+
+  it('sceneProse drops must-read clauses whole', () => {
+    expect(sceneProse(V13.launch, true)).toBe('Walk in, and your coffee is waiting.');
+    expect(sceneProse('Hands pour latte art, steam rising, sign reads "₹99". Morning light fills the cafe.', false)).toBe('Hands pour latte art, steam rising. Morning light fills the cafe.');
+  });
+
+  it('never "real footage": model copy is rewritten, templates never say it', async () => {
+    expect(copyLine('The post describes a vivid scene, best shown with real footage', 90)).toBe('The post describes a vivid scene, best shown with AI footage');
+    expect(copyLine('We must avoid actual footage of a real person', 90)).toBe('We must avoid AI footage of a real person');
+    for (const text of Object.values(V13)) {
+      for (const overrides of [undefined, { format: 'ai_video' as const }, { format: 'hybrid' as const }, { cheapest: true }]) {
+        const r = await planVideo(input({ text, overrides }), input({ text }), { draft: () => Promise.resolve(null) });
+        expect([r.summary, ...r.reasons].join(' ')).not.toMatch(/real footage|actual footage/i);
+      }
+    }
   });
 });

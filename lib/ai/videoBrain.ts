@@ -230,16 +230,33 @@ export function detectSignals(text: string, attachments: Attachment[]): Signals 
   };
 }
 
-/** Footage prompt from the post itself: words only, nothing that must be legible. */
+/** Bits diffusion can't render legibly: quotes, links, handles, prices, figures. */
+const MUST_READ = /["“”]|https?:\/\/|www\.|[#@]\w|[\d₹$€£%]/;
+/** Ordering/app talk isn't something a camera films. */
+const OFF_CAMERA = /\b(?:app|apps|website|site|online|link|download|click|tap|sign ?up|dm)\b/i;
+const words = (s: string) => s.split(/\s+/).filter(Boolean).length;
+
+/**
+ * Footage prose: a clause carrying must-read bits (or, for post text, app talk) is dropped whole,
+ * and a sentence left with < 3 words goes too, so no broken grammar ("First order is this week only").
+ * Post text also loses its short hooks ("Launch day!"): a prompt starts with the scene.
+ */
+export function sceneProse(text: string, fromPost: boolean): string {
+  const out: string[] = [];
+  for (const sentence of text.replace(/\s+/g, ' ').trim().split(/(?<=[.!?])\s+/)) {
+    const kept = sentence.split(/,\s+/).filter((c) => !MUST_READ.test(c) && !(fromPost && OFF_CAMERA.test(c)));
+    let s = kept.join(', ').replace(/^(?:and|but|so|or|then)\s+/i, '').replace(/[\s,;:—–-]+$/, '').trim();
+    if (words(s) < 3) continue;
+    if (!/[.!?]$/.test(s)) s += '.';
+    out.push(s[0].toUpperCase() + s.slice(1));
+  }
+  return out.join(' ');
+}
+
+/** Footage prompt from the post itself: the scene first, nothing that must be legible. */
 function sceneFromText(text: string): string {
-  const clean = text
-    .replace(/https?:\/\/\S+|www\.\S+|[#@]\w+/g, ' ')
-    .replace(/["“”][^"“”]*["“”]/g, ' ')
-    .replace(/[\d₹$€£%]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 240);
-  return `Cinematic footage that shows the scene in this post: ${clean}`;
+  const prose = sceneProse(text.replace(/https?:\/\/\S+|www\.\S+|[#@]\w+/g, ' '), true).slice(0, 240);
+  return prose ? `${prose} Cinematic, natural light, slow camera move.` : 'Cinematic footage of the setting this post describes, natural light, slow camera move.';
 }
 
 /** The regex-only planner. Confidence < MIN_CONFIDENCE when the signals are ambiguous → safe default. */
@@ -299,12 +316,9 @@ const isQuality = (v: unknown): v is VideoQuality => v === '480p' || v === '720p
 
 /** Strip anything that would have to be legible, then append the negative clause. */
 export function footagePrompt(raw: string | undefined, text: string, allowFaces: boolean): string {
-  const body = (raw?.trim() ? raw : sceneFromText(text))
-    .replace(/["“”][^"“”]*["“”]/g, ' ')
-    .replace(/[\d₹$€£%]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 700);
+  const src = raw?.trim() ? raw : sceneFromText(text);
+  // Whole clauses go; stripping characters only if that leaves nothing.
+  const body = (sceneProse(src, false) || src.replace(/["“”][^"“”]*["“”]/g, ' ').replace(/[\d₹$€£%]+/g, ' ').replace(/\s+/g, ' ').trim()).slice(0, 700);
   return `${body} ${FOOTAGE_NEGATIVE}${allowFaces ? '' : ` ${NO_FACES}`}`;
 }
 
@@ -581,7 +595,8 @@ const SPEC_RX = /\b(?:music|soundtrack|sfx|sound effects|voice-?over|narration|s
 /** Model copy → one clean line, or null (wrong type, too long, vendor name, spec/price talk). */
 export function copyLine(s: unknown, max: number): string | null {
   if (typeof s !== 'string') return null;
-  const t = s.replace(/\s+/g, ' ').trim();
+  // Our footage is generated: never "real/actual footage".
+  const t = s.replace(/\s+/g, ' ').trim().replace(/\b(?:real|actual)(?:[- ]life)? (?:footage|video|filming)\b/gi, 'AI footage');
   return t && t.length <= max && !VENDOR_RX.test(t) && !SPEC_RX.test(t) ? t : null;
 }
 
@@ -593,10 +608,10 @@ const quotedLines = (xs: string[]) => {
   return { text: lines.map((t) => `“${t}”`).join(' and '), many: lines.length > 1 };
 };
 
-/** The footage's subject, from its prompt: first clause, before the negative clause. */
+/** The footage's subject, from its prompt: the first sentence, before the negative clause. */
 function sceneOf(p: Plan): string | null {
   const body = p.footage?.prompt.split(FOOTAGE_NEGATIVE)[0].replace(/^Cinematic footage that shows the scene in this post:\s*/i, '');
-  const first = body?.split(/[,.;:!?]\s|[.!?]$/)[0].trim();
+  const first = body?.split(/[.;!?](?:\s|$)/)[0].trim();
   return first ? first[0].toUpperCase() + first.slice(1) : null;
 }
 
@@ -608,8 +623,9 @@ export function describePlan(p: Plan): string {
   const t = p.format === 'motion_graphic' && p.graphics?.engine === 'template' ? p.graphics.template : null;
   let s: string;
   if (p.format === 'none') s = 'Video is not available yet';
-  else if (p.format === 'ai_video') s = scene ? `${scene}.` : 'AI footage of the scene in your post.';
-  else if (p.format === 'hybrid') s = `${scene ?? 'AI footage of your scene'}, then ${lines ? `${lines} ${verb}` : 'your message animates'} on top.`;
+  else if (p.format === 'ai_video') {
+    s = scene && words(scene) >= 6 ? `${scene}.` : `Filmed-looking AI footage of the scene${scene ? `: ${scene[0].toLowerCase()}${scene.slice(1)}` : ' in your post'}.`;
+  } else if (p.format === 'hybrid') s = `${scene?.split(/,\s/)[0] ?? 'AI footage of your scene'}, then ${lines ? `${lines} ${verb}` : 'your message animates'} on top.`;
   else if (t === 'sting') s = 'Your logo and brand colors animate in as a short sting.';
   else if (t === 'stat') s = lines ? `${lines} count up as big animated numbers.` : 'Your numbers count up as big animated type.';
   else if (t === 'showcase') s = `Your product screenshots glide in${lines ? `, with ${lines} on top` : ''}.`;
@@ -671,6 +687,31 @@ export function optionFor(p: Plan): PlanOption {
   return { key: optionKey(p), format: p.format, estimatedCredits: p.estimatedCredits, label, summary: summaryFor(p) };
 }
 
+const hasSound = (a: PlanAudio) => a.narration || a.music || a.sfx;
+
+/**
+ * Reasons for an option the user picked over the best fit: what it gives up, in the post's terms.
+ * Never claims the pick is the best fit. Code templates only (deterministic); every line passes copyLine.
+ */
+export function tradeoffReasons(p: Plan, best: Plan, text: string): string[] {
+  if (optionKey(p) === optionKey(best)) return p.reasons;
+  const cheaper = p.estimatedCredits < best.estimatedCredits;
+  const lead = (s: string) => (cheaper ? `Cheaper, but ${s}` : s[0].toUpperCase() + s.slice(1));
+  const price = text.match(/[₹$€£]\s?\d[\d,.]*/)?.[0];
+  const figure = text.match(/\d+(?:\.\d+)?\s?%/)?.[0];
+  const what = price ? `the ${price} offer` : figure ? `the ${figure} figure` : 'your message';
+  const lost: string[] = [];
+  if (templateOf(p) === 'sting') lost.push("Just your logo and tagline — the post's message isn't shown.");
+  else if (best.graphics && best.onScreenText.length && !p.graphics) {
+    lost.push(lead(`${what} won't appear as readable text.`), `Footage only — add ${price ? 'the offer' : figure ? 'the figure' : 'your message'} in your caption.`);
+  }
+  if (best.footage && !p.footage) lost.push(lost.length ? "No AI footage — the scene in your post isn't shown." : lead("no AI footage — the scene in your post isn't shown."));
+  if (p.footage && !best.footage && p.graphics) lost.push(lead('adds AI footage of the scene behind your text.').replace('Cheaper, but adds', 'Cheaper, and adds'));
+  if (hasSound(best.audio) && !hasSound(p.audio)) lost.push('Plays with no sound.');
+  if (!lost.length) lost.push(lead('a different take on this post.'));
+  return [...lost.slice(0, 2), `Our pick for this post: ${optionFor(best).label}.`];
+}
+
 /** Up to two other options, distinct from the plan, from each other and from `cheapest`; cheapest first. */
 export function alternativesFor(plan: Plan, input: BrainInput, draft: Draft | null): PlanOption[] {
   if (plan.format === 'none') return [];
@@ -698,10 +739,10 @@ Formats:
 Signals: numbers/prices/dates/URLs/CTA/quotes, stats, lists/steps, opinions, non-Latin script, UI/SaaS screenshots → text need (graphics). A concrete physical scene with action and place, a product photo hero, mood/story/sound → scene need (footage). text low+scene low → motion_graphic ai_motion. text high+scene low → motion_graphic. text low+scene high → ai_video. both high → hybrid. Abstract concepts (growth, trust, AI) → motion_graphic, never vague footage.
 Policy: an identifiable real person, celebrity, politician, minor/child, or another company's brand → videoAllowed false, and plan a motion_graphic of kinetic type about the post's message (sfx on).
 Footage engine: "cinema-1" only when sound/atmosphere is central; "motion-1" when the footage is the unobscured hero (product photo, close-up, 1080p); else "motion-1-fast".
-footagePrompt (<=40 words): describe the PHYSICAL scene, subject, action, camera move and light only. Never ask for text, signs, screens, UI, holograms or logos. Prefer hands, silhouettes, back views or wide shots over faces.
+footagePrompt (<=40 words, ALWAYS include it, even for motion_graphic: it is used if the user switches to video): start with the PHYSICAL scene; describe the scene, subject, action, camera move and light only. Never ask for text, signs, screens, UI, holograms or logos. Prefer hands, silhouettes, back views or wide shots over faces.
 Platforms: LinkedIn/X → graphics, 8-12 s, muted (sfx only). Instagram/TikTok/Facebook → 9:16, footage hook, 10-15 s, music on. Narration only for explainers, never LinkedIn-only.
 
-JSON keys: format, recipe (H1-H4 or null), graphicsEngine, template (or null), footageEngine, footageMode ("text"|"image-to-video"), footageSeconds, footageQuality ("720p"|"1080p"), footagePrompt, allowFaces (bool), videoAllowed (bool), durationSec (motion_graphic/hybrid >= 8), aspect ("9:16"|"1:1"|"16:9"), audio {narration, music, sfx} (booleans), onScreenText (motion_graphic/hybrid: 2-4 short lines, <=40 chars each, taken from the post; ai_video: []), summary (<=120 chars: one plain sentence saying what the viewer sees in THIS video: the actual scene and the actual words that animate, e.g. "Coffee waiting at the counter, then '₹99 first order' and 'Order ahead' animate on top." Never mention length, aspect, sound, credits or tool names), reasons (2-3 strings, <=90 chars each: why this format suits THIS post, citing what it says; never about platforms, sound, length or price), confidence (0-1), signals (e.g. ["S1","S5"]: S1 must-show text, S2 stats, S3 list, S4 opinion, S5 scene, S6 product photo, S7 UI, S8 announcement, S9 abstract, S10 mood, S11 real person/brand, S12 platform, S13 brand strict, S14 non-Latin, S15 explainer).`;
+JSON keys: format, recipe (H1-H4 or null), graphicsEngine, template (or null), footageEngine, footageMode ("text"|"image-to-video"), footageSeconds, footageQuality ("720p"|"1080p"), footagePrompt, allowFaces (bool), videoAllowed (bool), durationSec (motion_graphic/hybrid >= 8), aspect ("9:16"|"1:1"|"16:9"), audio {narration, music, sfx} (booleans), onScreenText (motion_graphic/hybrid: 2-4 short lines, <=40 chars each, taken from the post; ai_video: []), summary (<=120 chars: one plain sentence saying what the viewer sees in THIS video: the actual scene and the actual words that animate, e.g. "Coffee waiting at the counter, then '₹99 first order' and 'Order ahead' animate on top." Never mention length, aspect, sound, credits or tool names), reasons (2-3 strings, <=90 chars each: why this format suits THIS post, citing what it says; never about platforms, sound, length or price; say "AI footage", never "real footage"), confidence (0-1), signals (e.g. ["S1","S5"]: S1 must-show text, S2 stats, S3 list, S4 opinion, S5 scene, S6 product photo, S7 UI, S8 announcement, S9 abstract, S10 mood, S11 real person/brand, S12 platform, S13 brand strict, S14 non-Latin, S15 explainer).`;
 
 /** The post as the planner sees it. Availability and balance are applied after, by finalizePlan, so the LLM call runs in parallel with those lookups. */
 export type PostInput = Omit<BrainInput, 'availability' | 'balance'> & { userId?: string };
@@ -740,6 +781,8 @@ export async function llmDraft(input: PostInput): Promise<Draft | null> {
         system: SYSTEM, user: userMessage(input), json: true, timeoutMs, maxRetries: 0,
         // The answer is ~350 tokens; gpt-oss counts its (low) reasoning in the same budget.
         maxOutputTokens: ai.kind === 'groq' ? 1_200 : 900, reasoningEffort: 'minimal',
+        // Same post → same plan (chat models; the Responses API's reasoning models take neither).
+        temperature: 0, seed: 7,
       });
       const obj = JSON.parse(raw);
       if (obj && typeof obj === 'object' && !Array.isArray(obj)) return obj as Draft;
@@ -802,6 +845,16 @@ export async function planVideo(
   const full: BrainInput = { ...input, ...ctx };
   const draft = llm ?? heuristicDraft(input);
   const plan = finalizePlan(draft, full);
+  const ov = input.overrides ?? {};
+  if (ov.format || ov.cheapest) {
+    const base: BrainInput = { ...full, overrides: { ...ov, format: undefined, cheapest: undefined } };
+    // "Cheapest" is one thing per post, whatever card shows: the bottom of the BEST FIT's ladder
+    // (not a cheaper config of the picked format, which would read "Cheapest: AI video" on an AI video card).
+    if (ov.format) plan.cheapest = plan.affordable === false ? optionFor(finalizePlan(draft, { ...base, overrides: { ...base.overrides, cheapest: true } })) : undefined;
+    plan.reasons = tradeoffReasons(plan, finalizePlan(draft, base), input.text);
+  }
+  // A "cheapest" that is the plan itself (or no cheaper) is no option.
+  if (plan.cheapest && (plan.cheapest.key === optionKey(plan) || plan.cheapest.estimatedCredits >= plan.estimatedCredits)) plan.cheapest = undefined;
   return {
     plan,
     estimatedCredits: plan.estimatedCredits,
@@ -809,8 +862,7 @@ export async function planVideo(
     reasons: plan.reasons,
     alternatives: alternativesFor(plan, full, draft),
     affordable: plan.affordable !== false,
-    // A "cheapest" that is the plan itself is no option.
-    ...(plan.cheapest && plan.cheapest.key !== optionKey(plan) ? { cheapest: plan.cheapest } : {}),
+    ...(plan.cheapest ? { cheapest: plan.cheapest } : {}),
   };
 }
 

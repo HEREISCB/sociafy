@@ -93,10 +93,20 @@ export default function Compose({ draftId, onDone, initial }: {
   const [attached, setAttached] = useState<MediaItem[]>([]);
   /** The attached motion graphic open in the editor. */
   const [editing, setEditing] = useState<MediaItem | null>(null);
-  const [when, setWhen] = useState(() => toLocalInput(future(initial?.slot) ?? nextHour()));
+  // Local wall-clock times are the browser's: computed on the server (UTC) they'd mismatch hydration,
+  // so both are set after mount.
+  const [when, setWhen] = useState('');
   const whenSet = useRef(Boolean(future(initial?.slot)));
   // Picker floor, fixed at mount; schedule() still rejects past times at submit.
-  const [minWhen] = useState(() => toLocalInput(new Date(Date.now() + 60_000)));
+  const [minWhen, setMinWhen] = useState('');
+  useEffect(() => {
+    // Mount-only, client-only values: the documented hydration-safe pattern.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMinWhen(toLocalInput(new Date(Date.now() + 60_000)));
+    setWhen((w) => w || toLocalInput(future(initial?.slot) ?? nextHour()));
+    // Compose is keyed by slot: initial never changes for a mounted instance.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [preset, setPreset] = useState('announcement');
   const [research, setResearch] = useState(false);
   const [media, setMedia] = useState<'text' | 'image' | 'video'>('text');

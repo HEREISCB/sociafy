@@ -109,6 +109,9 @@ export async function completeText(
     reasoningEffort?: 'minimal' | 'low';
     /** SDK retries (default 2). Latency-bound callers with their own fallback pass 0. */
     maxRetries?: number;
+    /** Chat-completions path only (default 0.7). Pass 0 + a seed for repeatable output. */
+    temperature?: number;
+    seed?: number;
   },
 ): Promise<string> {
   const reqOpts = opts.timeoutMs || opts.maxRetries !== undefined
@@ -142,7 +145,8 @@ export async function completeText(
         { role: 'user', content: opts.user },
       ],
       max_tokens: opts.maxOutputTokens,
-      temperature: 0.7,
+      temperature: opts.temperature ?? 0.7,
+      ...(opts.seed !== undefined ? { seed: opts.seed } : {}),
       ...(ai.model.startsWith('openai/gpt-oss') ? { reasoning_effort: 'low' as const } : {}),
       ...(opts.json ? { response_format: { type: 'json_object' as const } } : {}),
     },

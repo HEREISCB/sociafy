@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Icon } from '../icons';
 import { useApi } from '../../lib/ui/fetcher';
+import { planKeys, shownPlan, type Keyed } from '../../lib/ui/planKey';
 import type { CreditsPayload } from '../credits';
 import type { MediaGen, PlanResponse, VideoFormat } from './generate';
 
@@ -17,6 +18,7 @@ const SHAPE: Record<string, string> = { '9:16': 'Vertical', '1:1': 'Square', '16
 const MIN_CHARS = 15;
 
 type Override = { format: Exclude<VideoFormat, 'none'> } | { cheapest: true };
+// Keyed by planKeys().full (post + override), same as every request and response.
 // ponytail: module-level memo of recent plans, so "Choose myself" → back (or re-picking a chip) is instant; per tab, no persistence.
 const PLAN_TTL_MS = 5 * 60_000;
 const plans = new Map<string, { at: number; res: PlanResponse }>();
@@ -37,20 +39,27 @@ export function SmartVideo({ gen, text, platforms, attachments }: {
   platforms: string[];
   attachments: { url: string; mimeType: string }[];
 }) {
-  const [override, setOverride] = useState<Override | null>(null);
-  const key = JSON.stringify([text.trim(), platforms, attachments.map((a) => a.url), override]);
-  const [fetched, setRes] = useState<PlanResponse | null>(null);
-  const [plannedKey, setPlannedKey] = useState<string | null>(null);
-  // A remembered plan for exactly these inputs shows at once, no request.
-  const remembered = recall(key);
-  const res = remembered ?? fetched;
-  const [planning, setPlanning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // An override belongs to the post it was picked on: new text, platforms or attachments → best fit again.
+  const [picked, setPicked] = useState<{ input: string; v: Override } | null>(null);
+  const inputKey = planKeys(text, platforms, attachments, null).input;
+  const override = picked?.input === inputKey ? picked.v : null;
+  const keys = planKeys(text, platforms, attachments, override);
+  const key = keys.full;
+  const setOverride = (v: Override | null) => setPicked(v && { input: keys.input, v });
+  /** The last plan that arrived, with the exact inputs it was planned for. */
+  const [last, setLast] = useState<Keyed<PlanResponse> | null>(null);
+  // Exactly these inputs (cache or response), else this post's last plan while re-planning; never another post's.
+  const shown = shownPlan(keys, recall(key), last);
+  const res = shown.res;
+  const [planningKey, setPlanningKey] = useState<string | null>(null);
+  const [error, setError] = useState<{ key: string; msg: string } | null>(null);
   /** The price rose at submit; the user has to confirm the new one. */
   const [repricedKey, setRepricedKey] = useState<string | null>(null);
   const repriced = repricedKey === key;
   const [retry, setRetry] = useState(0);
   const { data: credits } = useApi<CreditsPayload>('/api/credits');
+  const live = useRef(key);
+  useEffect(() => { live.current = key; }, [key]);
 
   const tooShort = text.trim().length < MIN_CHARS;
 
@@ -58,7 +67,7 @@ export function SmartVideo({ gen, text, platforms, attachments }: {
     if (tooShort || recall(key)) return;
     const ctrl = new AbortController();
     const t = setTimeout(async () => {
-      setPlanning(true);
+      setPlanningKey(key);
       setError(null);
       try {
         const r = await fetch('/api/media/plan-video', {
@@ -67,20 +76,21 @@ export function SmartVideo({ gen, text, platforms, attachments }: {
           body: JSON.stringify({ text: text.trim(), platforms, attachments, ...(override ? { overrides: override } : {}) }),
         });
         const data = (await r.json().catch(() => ({}))) as PlanResponse & { hint?: string };
+        // A response for inputs that are no longer on screen is dropped, aborted or not.
+        if (ctrl.signal.aborted || live.current !== key) return;
         if (!r.ok || !data.plan) {
-          setError(typeof data.hint === 'string' ? data.hint : r.status === 401 ? 'Your session expired — sign in again.' : 'Couldn’t plan this video. Try again.');
+          setError({ key, msg: typeof data.hint === 'string' ? data.hint : r.status === 401 ? 'Your session expired — sign in again.' : 'Couldn’t plan this video. Try again.' });
           return;
         }
         remember(key, data);
-        setRes(data);
-        setPlannedKey(key);
+        setLast({ key, input: keys.input, res: data });
         setRepricedKey(null);
       } catch {
-        if (!ctrl.signal.aborted) setError('Couldn’t plan this video. Check your connection and try again.');
+        if (!ctrl.signal.aborted && live.current === key) setError({ key, msg: 'Couldn’t plan this video. Check your connection and try again.' });
       } finally {
-        if (!ctrl.signal.aborted) setPlanning(false);
+        setPlanningKey((k) => (k === key ? null : k));
       }
-    }, 800);
+    }, 500);
     return () => { clearTimeout(t); ctrl.abort(); };
     // `key` covers text, platforms, attachments and override.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -99,11 +109,11 @@ export function SmartVideo({ gen, text, platforms, attachments }: {
     );
   }
 
-  const stale = !remembered && key !== plannedKey;
-  if (error && !planning && !remembered) {
+  const err = error?.key === key && planningKey !== key ? error.msg : null;
+  if (err && !shown.current) {
     return (
       <div className="compose-media-panel">
-        <p className="compose-note compose-error">{error}</p>
+        <p className="compose-note compose-error">{err}</p>
         <div className="row">
           <button type="button" className="btn sm" onClick={() => setRetry((n) => n + 1)}><Icon name="refresh" size={12} /> Try again</button>
           {chooseMyself}
@@ -131,8 +141,7 @@ export function SmartVideo({ gen, text, platforms, attachments }: {
   const cheapest = short && res.cheapest && res.cheapest.estimatedCredits < price ? res.cheapest : null;
   const none = plan.format === 'none';
   const busy = gen.busy === 'video';
-  // An aborted fetch leaves `planning` set; a remembered plan is current regardless.
-  const updating = stale || (planning && !remembered);
+  const updating = !shown.current;
   const sound = [
     plan.audio?.narration && { icon: 'mic' as const, label: 'Voiceover' },
     plan.audio?.music && { icon: 'waveform' as const, label: 'Music' },
@@ -145,7 +154,7 @@ export function SmartVideo({ gen, text, platforms, attachments }: {
       // Summary and reasons always come from the fresh plan, never the old card.
       const next = { ...res, ...fresh, summary: fresh.summary ?? fresh.plan.summary ?? '', reasons: fresh.reasons ?? fresh.plan.reasons ?? [] };
       remember(key, next);
-      setRes(next);
+      setLast({ key, input: keys.input, res: next });
       setRepricedKey(key);
     }
   };
@@ -153,7 +162,7 @@ export function SmartVideo({ gen, text, platforms, attachments }: {
   return (
     <div className={`compose-media-panel smart-card${updating ? ' is-updating' : ''}`} aria-busy={updating}>
       <div className="smart-head">
-        <span className="compose-label">Best fit for this post</span>
+        <span className="compose-label">{override ? 'Your pick' : 'Best fit for this post'}</span>
         <h3 className="smart-format">{FORMAT[plan.format] ?? 'Video'}</h3>
         {summary && <p className="smart-summary">{summary}</p>}
       </div>
