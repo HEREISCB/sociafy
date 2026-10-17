@@ -67,6 +67,8 @@ export const planApproveSchema = z.object({
   overrides: z.record(uuid, z.string().datetime()).optional(),
 }).refine((b) => b.all || b.draftIds, { message: 'draftIds or all:true required' });
 export const planSkipSchema = z.object({ draftId: uuid });
+const validTimeZone = (tz: string) => { try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); return true; } catch { return false; } };
+export const planSpreadSchema = z.object({ timeZone: z.string().min(1).max(64).refine(validTimeZone, 'invalid time zone') });
 
 // Schedule -------------------------------------------------------------
 export const scheduleCreateSchema = z.object({

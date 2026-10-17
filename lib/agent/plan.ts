@@ -1,7 +1,9 @@
-import { and, asc, eq, gte, inArray, isNotNull, lt, or, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
 import { db } from '../db';
 import { agentSettings, drafts, scheduledPosts, activityLog, type DraftMedia, type DraftVariant, type Platform } from '../db/schema';
 import { nextFreeSlot } from '../schedule/slots';
+import { autoPlace, similarKey, DEFAULT_PER_DAY } from '../schedule/autoPlace';
+import { postKind } from '../platforms/capabilities';
 import { PLATFORM_LIMITS } from '../ai/compose';
 import { getBalance } from '../credits/ledger';
 import { draftCost } from '../credits/estimator';
@@ -262,4 +264,51 @@ export async function skipDraft(userId: string, draftId: string): Promise<boolea
     .where(and(eq(drafts.id, draftId), eq(drafts.userId, userId), eq(drafts.status, 'draft')))
     .returning({ id: drafts.id });
   return !!row;
+}
+
+/**
+ * "Spread across the week": every draft in review with no time (or one already
+ * passed) gets a proposed slot over the plan horizon, in the user's time zone.
+ * Only planned_at changes — it stays a draft to review; nothing is approved or
+ * queued. Approved-while-rendering drafts keep theirs. Drafts that don't fit
+ * (the horizon is full) stay unscheduled. Returns the old times for undo.
+ */
+export async function spreadDrafts(userId: string, timeZone: string, now = new Date()) {
+  const [s] = await db().select().from(agentSettings).where(eq(agentSettings.userId, userId)).limit(1);
+  const [rows, planned, pending] = await Promise.all([
+    db().select().from(drafts).where(and(inReview(userId), or(isNull(drafts.plannedAt), lt(drafts.plannedAt, now)))).orderBy(asc(drafts.createdAt)),
+    db().select().from(drafts).where(and(inReview(userId), gte(drafts.plannedAt, now))),
+    db()
+      .select({ draftId: scheduledPosts.draftId, at: scheduledPosts.scheduledAt, media: scheduledPosts.media })
+      .from(scheduledPosts)
+      .where(and(eq(scheduledPosts.userId, userId), inArray(scheduledPosts.status, ['pending', 'publishing']), gte(scheduledPosts.scheduledAt, now))),
+  ]);
+  const kind = (d: Draft) => (d.videoJobId ? 'video' : postKind(d.media));
+  const loose = rows.filter((d) => !isApproved(d));
+  const posts = new Map(pending.map((p) => [p.draftId, p])); // one per post, not per platform row
+  const placed = autoPlace({
+    items: loose.map((d) => ({ id: d.id, kind: kind(d), group: similarKey(d.title) })),
+    taken: [
+      ...planned.map((d) => ({ at: new Date(d.plannedAt!), kind: kind(d), group: similarKey(d.title) })),
+      ...[...posts.values()].map((p) => ({ at: new Date(p.at), kind: postKind(p.media) })),
+    ],
+    from: now,
+    days: s?.planHorizonDays ?? 7,
+    timeZone,
+    perDay: Math.max(DEFAULT_PER_DAY, s ? Math.ceil(weeklyTarget(s) / 7) : 0),
+    quiet: s?.quietHours,
+  });
+  const out: { draftId: string; plannedAt: string; previous: string | null }[] = [];
+  for (const d of loose) {
+    const at = placed.get(d.id);
+    if (!at) continue;
+    // Conditional on the time we read: a drag or approve in between wins.
+    const [row] = await db()
+      .update(drafts)
+      .set({ plannedAt: at, updatedAt: new Date() })
+      .where(and(eq(drafts.id, d.id), eq(drafts.userId, userId), eq(drafts.status, 'draft'), d.plannedAt ? eq(drafts.plannedAt, d.plannedAt) : isNull(drafts.plannedAt)))
+      .returning({ id: drafts.id });
+    if (row) out.push({ draftId: d.id, plannedAt: at.toISOString(), previous: d.plannedAt ? new Date(d.plannedAt).toISOString() : null });
+  }
+  return { placed: out, left: loose.length - out.length };
 }

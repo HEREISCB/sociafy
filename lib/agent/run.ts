@@ -48,7 +48,7 @@ const LEASE_MS = 15 * 60_000;
  * Autopilot's entry point (cron, the enable-kick, the manual button).
  * Unforced, it keeps the user's plan filled to their horizon, a few posts per
  * call. `force` (the manual "Auto-draft from trends" button) drafts two text
- * posts now, unplanned, regardless of plan, pacing and credit cap — but a
+ * posts now, in the next free plan slots, regardless of plan, pacing and credit cap — but a
  * paused agent still never schedules a live post (publishOrHold checks).
  */
 export async function runAgentForUser(userId: string, opts?: { force?: boolean }): Promise<AgentRunResult> {
@@ -60,7 +60,16 @@ export async function runAgentForUser(userId: string, opts?: { force?: boolean }
   const ctx = await context(userId, settings);
   if (!('brandBlock' in ctx)) return ctx;
   if ((await getBalance(userId)) < draftCost('text') * 2) return blocked(userId, 'insufficient_credits', 'no_credits');
-  const out = await draftBatch(ctx, ['text', 'text'], [null, null]);
+  // Proposed slots like a plan run's, so they land on days instead of piling
+  // up unscheduled. No room in the horizon: they stay unscheduled.
+  const now = new Date();
+  const [planned, pending] = await Promise.all([
+    db().select({ at: drafts.plannedAt }).from(drafts).where(and(eq(drafts.userId, userId), eq(drafts.status, 'draft'), gte(drafts.plannedAt, now))),
+    db().select({ at: scheduledPosts.scheduledAt }).from(scheduledPosts).where(and(eq(scheduledPosts.userId, userId), eq(scheduledPosts.status, 'pending'), gte(scheduledPosts.scheduledAt, now))),
+  ]);
+  const taken = [...planned, ...pending].map((r) => new Date(r.at!));
+  const slots = planSlots({ from: now, horizonDays: settings.planHorizonDays ?? 7, count: 2, quiet: settings.quietHours, taken });
+  const out = await draftBatch(ctx, ['text', 'text'], [slots[0] ?? null, slots[1] ?? null]);
   await db().update(agentSettings).set({ lastRunAt: new Date() }).where(eq(agentSettings.userId, userId));
   return out;
 }

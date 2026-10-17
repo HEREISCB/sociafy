@@ -223,6 +223,18 @@ export default function Dashboard() {
       else notice(`Approved ${r.approved.length}.`);
     });
 
+  /** The buffer's drafts get proposed times across the week — still drafts to review. Undo puts them back. */
+  const spread = () =>
+    run(async () => {
+      const r = await apiPost<{ placed: { draftId: string; previous: string | null }[]; left: number }>('/api/plan/spread', { timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone });
+      const n = r.placed.length;
+      if (!n) return notice('No free slots left this week. Drag a post onto a day instead.');
+      notice(`Spread ${n} post${n > 1 ? 's' : ''} across the week.${r.left ? ` ${r.left} didn’t fit.` : ''}`, () => run(async () => {
+        await Promise.all(r.placed.map((p) => apiPatch(`/api/drafts/${p.draftId}`, { plannedAt: p.previous })));
+        notice('Moved back.');
+      }));
+    });
+
   /** Move a post (drag onto a day, or the time picker). Undo puts it back. */
   const reschedule = (it: CalItem, at: Date) => {
     if (at.getTime() < clock() + SOON_MS) return failure('That time has passed. Pick a later day or time.');
@@ -308,6 +320,9 @@ export default function Dashboard() {
             ))}
           </div>
           <div key={shownKey} className="dposts">
+            {shown?.key === NO_TIME && shown.items.some((i) => i.kind === 'draft' && movable(i)) && (
+              <button type="button" className="btn sm dposts__spread" onClick={spread} disabled={busy}>Spread across the week</button>
+            )}
             {shown?.items.length ? shown.items.map((i) => (
               <PostCard
                 key={i.key}
