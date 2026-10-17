@@ -19,7 +19,8 @@ Hard requirements (the worker rejects the job otherwise):
 - **No network at render time.** No CDN `<script>`/`<link>`/`@import`/remote `url()`. GSAP is at
   `assets/gsap.min.js` (already wired in the stub). Brand logo/fonts, if provided, are already in
   `assets/` (listed in `BRIEF.md`). Otherwise use system fonts: "Noto Sans", "Noto Serif",
-  "Noto Sans Display", sans-serif. No other images unless you draw them in SVG/CSS.
+  "Noto Sans Display", sans-serif. No other images unless you draw them in SVG/CSS. Exception:
+  footage clips listed in `BRIEF.md` → Footage (already in `assets/footage/`), see below.
 - Use the brand colors from `BRIEF.md`. Text must be legible (strong contrast), never cut off,
   never overlapping. Keep important text inside the safe area given in `BRIEF.md`.
 - Final beat: a brand end card (logo if provided, else brand name; tagline/CTA if provided)
@@ -40,6 +41,35 @@ Before finishing, write `segments.json` in this folder describing your timeline:
 `endSec`, the last ends at exactly {{DUR}}. `onScreenText` is the text visible in that segment.
 `suggestions` holds 2–3 short, concrete edits a user could click to improve that segment.
 When narration is on, add `"narration": "…"` to each segment with the exact words spoken in it.
+
+## Footage (only when `BRIEF.md` has a Footage section)
+
+A hybrid video: real footage underneath, crisp brand type/overlays on top. **Every listed clip
+must be on screen** (the user paid for footage); the end card stays brand-exact on brand colors.
+
+- Place each clip as a muted, framework-owned `<video>` (no `play()`/seek code, no `crossorigin`):
+  ```html
+  <div class="footage-wrap" id="fw1" style="position:absolute;inset:0;overflow:hidden">
+    <video id="f1" class="clip" src="assets/footage/f1.mp4" muted playsinline
+      data-start="0" data-duration="5" data-track-index="0"
+      style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover"></video>
+  </div>
+  ```
+  Timing goes on the `<video>` only (never `data-start` on an ancestor too). Its `data-duration`
+  must not exceed the clip's duration in BRIEF.md. A clip with a given start must begin exactly
+  there; sequence the rest in manifest order. Full-bleed (`object-fit: cover`, crop, never stretch
+  or distort the aspect) or framed (a card/phone/window shape; still `cover` inside it): your call.
+- Fill the remaining time with your own motion design (brand background, type); total stays
+  exactly {{DUR}} s. Footage usually leads (hook/proof); the end card is pure brand, no footage.
+- Motion over footage stays slow and subtle (gentle push-in 1.00→1.06 on the wrapper, soft fades,
+  short slides); the footage already moves. Animate the wrapper or overlays, never the
+  `<video>`'s size, and never `autoAlpha`/`visibility` on a `.clip`.
+- Legibility: text never sits directly on busy footage. Put it on a scrim: a gradient
+  (e.g. `linear-gradient(to top, rgba(0,0,0,.72), transparent 55%)` behind bottom text), a
+  solid/blurred brand-color panel, or a darkened full overlay (≈ 35–55 %). Light text on dark
+  scrim or dark text on light panel, contrast ≥ 4.5:1. Keep text inside the safe area (on 9:16:
+  headline in the upper-middle or lower third above the bottom 380 px, nothing in the top 220 px).
+- In `segments.json`, add `"footage": true` to every segment where footage is on screen.
 
 ## Audio (only the kinds `BRIEF.md` → Audio turns on)
 

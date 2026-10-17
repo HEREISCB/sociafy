@@ -1,7 +1,7 @@
 // node --test motion-ai/
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validKey, parseSubmit, parseSegments, parseEdit, parseAudio, audioResult } from './lib.mjs';
+import { validKey, parseSubmit, parseFootage, parseSegments, parseEdit, parseAudio, audioResult } from './lib.mjs';
 
 test('keys stay inside users/', () => {
   assert.ok(validKey('users/abc/motion/1.mp4'));
@@ -65,4 +65,34 @@ test('segments keep optional narration', () => {
   const s = parseSegments({ segments: [seg(0, 3, ' Three days. '), seg(3, 6), seg(6, 10, '')] }, 10);
   assert.equal(s[0].narration, 'Three days.');
   assert.ok(!('narration' in s[1]) && !('narration' in s[2]));
+});
+
+test('footage validation', () => {
+  const ok = { prompt: 'hi', aspect: '9:16', durationSec: 10, videoKey: 'users/a/v.mp4', posterKey: 'users/a/p.jpg' };
+  assert.equal(parseSubmit(ok).footage, undefined);
+  assert.equal(parseSubmit({ ...ok, footage: [] }).footage, undefined);
+  const r = parseSubmit({ ...ok, footage: [{ url: 'https://x.r2.dev/a.mp4', label: ' Barista ', startSec: 0, trimStartSec: 1.25, durationSec: 4 }] });
+  assert.deepEqual(r.footage, [{ url: 'https://x.r2.dev/a.mp4', label: 'Barista', startSec: 0, trimStartSec: 1.3, durationSec: 4 }]);
+  const bad = (footage) => assert.equal(parseSubmit({ ...ok, footage }).error, 'bad_footage', JSON.stringify(footage));
+  const u = 'https://x.r2.dev/a.mp4';
+  bad({ url: u }); // not an array
+  bad([{ url: 'http://x/a.mp4' }]);
+  bad([{ url: 'file:///etc/passwd' }]);
+  bad([{}]);
+  bad(Array(6).fill({ url: u }));
+  bad([{ url: u, startSec: -1 }]);
+  bad([{ url: u, startSec: 10 }]); // at/after the end
+  bad([{ url: u, durationSec: 0 }]);
+  bad([{ url: u, durationSec: 11 }]);
+  bad([{ url: u, trimStartSec: '2' }]);
+  bad([{ url: u, trimStartSec: NaN }]);
+  bad([{ url: u, label: 5 }]);
+  assert.equal(parseFootage(Array(5).fill({ url: u }), 10).length, 5);
+});
+
+test('segments keep the footage flag', () => {
+  const seg = (a, b, footage) => ({ id: 'x', label: 'L', startSec: a, endSec: b, onScreenText: 't', footage });
+  const s = parseSegments({ segments: [seg(0, 3, true), seg(3, 6, 'yes'), seg(6, 10)] }, 10);
+  assert.equal(s[0].footage, true);
+  assert.ok(!('footage' in s[1]) && !('footage' in s[2]));
 });

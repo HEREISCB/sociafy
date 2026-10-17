@@ -18,6 +18,8 @@ export function parseSubmit(b) {
   const durationSec = Number(b.durationSec);
   if (!Number.isFinite(durationSec) || durationSec < 6 || durationSec > 20) return { error: 'bad_duration' };
   if (!validKey(b.videoKey) || !validKey(b.posterKey)) return { error: 'bad_key' };
+  const footage = parseFootage(b.footage, durationSec);
+  if (!footage) return { error: 'bad_footage' };
   const br = b.brand && typeof b.brand === 'object' ? b.brand : {};
   const colors = {};
   for (const c of ['primary', 'secondary', 'background', 'text', 'accent']) if (HEX.test(br.colors?.[c] ?? '')) colors[c] = br.colors[c];
@@ -31,7 +33,27 @@ export function parseSubmit(b) {
       style: br.style === 'bold' ? 'bold' : 'soft',
     },
     audio: parseAudio(b.audio),
+    ...(footage.length && { footage }),
   };
+}
+
+// submit.footage → [{url, label, startSec?, trimStartSec?, durationSec?}] or null when malformed.
+// Unlike brand assets, footage is never silently dropped: the app charged for a hybrid.
+export function parseFootage(f, dur) {
+  if (f == null) return [];
+  if (!Array.isArray(f) || f.length > 5) return null;
+  const out = [];
+  for (const x of f) {
+    if (!x || typeof x !== 'object' || !url(x.url) || (x.label != null && typeof x.label !== 'string')) return null;
+    const o = { url: x.url, label: str(x.label, 80) };
+    for (const [k, min, max] of [['startSec', 0, dur - 0.5], ['trimStartSec', 0, 600], ['durationSec', 0.5, dur]]) {
+      if (x[k] == null) continue;
+      if (typeof x[k] !== 'number' || !Number.isFinite(x[k]) || x[k] < min || x[k] > max) return null;
+      o[k] = Math.round(x[k] * 10) / 10;
+    }
+    out.push(o);
+  }
+  return out;
 }
 
 // submit.audio → {narration, sfx, music, voice, language}. Missing/odd fields fall back to defaults.
@@ -69,6 +91,7 @@ export function parseSegments(raw, dur) {
     startSec: i === 0 ? 0 : s[i - 1].endSec, endSec: i === s.length - 1 ? dur : g.endSec,
     onScreenText: str(g.onScreenText, 400),
     ...(str(g.narration, 400) && { narration: str(g.narration, 400) }),
+    ...(g.footage === true && { footage: true }),
     suggestions: (Array.isArray(g.suggestions) ? g.suggestions : []).map((x) => str(x, 120)).filter(Boolean).slice(0, 3),
   }));
 }

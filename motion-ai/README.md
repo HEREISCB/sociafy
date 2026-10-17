@@ -22,6 +22,7 @@ Every request needs `X-Engine-Secret: <ENGINE_SECRET>`, otherwise `401 {"error":
     "style": "soft | bold"
   },
   "audio": { "narration": false, "sfx": false, "music": false, "voice": "ElevenLabs voice id or name", "language": "en | hi | hi-IN …" },
+  "footage": [ { "url": "https://…/clip.mp4", "label": "barista hands", "startSec": 0, "trimStartSec": 0, "durationSec": 5 } ],
   "videoKey": "users/<id>/….mp4",
   "posterKey": "users/<id>/….jpg"
 }
@@ -31,6 +32,19 @@ Every request needs `X-Engine-Secret: <ENGINE_SECRET>`, otherwise `401 {"error":
 (keys must start with `users/` and use only `[A-Za-z0-9._-/]`, no `..`). Brand URLs must be
 `https://` (≤10 MB, 20 s timeout). Non-https, unreachable or unknown-type assets are skipped
 rather than failing the job. Invalid colors are dropped.
+
+`footage` is optional (hybrid video: AI/stock footage under brand type). Up to 5 clips; `url` must be
+`https://`; `label` a string (≤ 80 chars kept); `startSec` (0 … duration − 0.5, where the clip starts
+in the video), `trimStartSec` (0 … 600, offset into the source) and `durationSec` (0.5 … duration,
+how much of the source to use) are optional numbers. Anything else → `400 {"error":"bad_footage"}`.
+Before Claude runs, the worker downloads each clip (https only, also after redirects; response
+`content-type: video/*`; ≤ 200 MB; 60 s), probes it with ffprobe and normalises it (trim, muted
+H.264 yuv420p 30 fps, longest side ≤ 1920) into `assets/footage/fN.mp4`, then lists the clips in
+`footage.json` (`id, file, label, durationSec, width, height, startSec?`) and BRIEF.md. Claude must
+place every clip as a muted `<video>` (cover/crop, scrims behind text, brand-pure end card). Any
+clip failing to download/probe/transcode fails the job with `footage_failed` (footage is never
+dropped). Footage jobs get +5 min on the job timeout. Edits inherit the parent's footage (copied
+from its project, not re-downloaded).
 
 `audio` is optional; missing or non-boolean flags take the defaults shown (narration off, SFX on,
 music off). `voice` (`[A-Za-z0-9 ._'-]`, ≤ 60) and `language` (`xx` or `xx-YY`) are dropped when
@@ -43,12 +57,12 @@ Canvas: 9:16 → 1080×1920, 16:9 → 1920×1080, 1:1 → 1080×1080.
 
 ```json
 { "status": "pending" }
-{ "status": "failed", "error": "claude_failed | check_failed | render_failed | timeout | upload_failed | parent_not_found | internal_error" }
+{ "status": "failed", "error": "footage_failed | claude_failed | check_failed | render_failed | timeout | upload_failed | parent_not_found | internal_error" }
 { "status": "done", "videoKey": "…", "posterKey": "…", "videoUrl": "<R2_PUBLIC_URL_BASE>/<videoKey>",
   "posterUrl": "<R2_PUBLIC_URL_BASE>/<posterKey>", "sizeBytes": 1234567,
   "segments": [ { "id": "s1", "label": "Hook", "startSec": 0, "endSec": 3.2,
                   "onScreenText": "…", "narration": "words spoken here (only when narrated)",
-                  "suggestions": ["Make the headline punchier", "…"] } ],
+                  "suggestions": ["Make the headline punchier", "…"], "footage": true } ],
   "audio": { "narration": true, "sfx": true, "music": true } }
 ```
 
@@ -56,7 +70,8 @@ Unknown callId → `404 {"status":"failed","error":"not_found"}`.
 
 `segments` is always present when done. It holds 3–6 contiguous segments from 0 to the duration,
 written by Claude (`segments.json`) and validated by the worker. If the manifest is missing or
-invalid, it's one segment covering the whole video with `suggestions: []`.
+invalid, it's one segment covering the whole video with `suggestions: []`. `footage: true` is present
+only on segments where footage is on screen (hybrid jobs).
 
 `audio` says what the MP4 really carries (a kind counts only when its file is used by the final
 composition and the render has audible sound). Audio never fails a job: if ElevenLabs is
@@ -117,7 +132,7 @@ parent's segments), `bad_instruction` (empty or > 1000 chars), `bad_key`.
 | file | what |
 | --- | --- |
 | `server.mjs` | node:http server, queue, job pipeline |
-| `lib.mjs`, `lib.test.mjs` | input, audio + segments validation (`node --test motion-ai/`) |
+| `lib.mjs`, `lib.test.mjs` | input, footage, audio + segments validation (`node --test motion-ai/`) |
 | `motion-audio.mjs` | the ElevenLabs audio CLI Claude may run inside the sandbox (tts / sfx / music / voices) |
 | `scaffold/` | per-job project template (CLAUDE.md with the strict rules, index.html stub, local GSAP) |
 | `motionai.service` | systemd **user** unit (`@BASE@` filled by install.sh) |

@@ -14,7 +14,8 @@ const JOBS = `${BASE}/jobs`;
 const APP = path.dirname(new URL(import.meta.url).pathname);
 const HF = 'hyperframes@0.8.141';
 const MIN = 60_000;
-const LIMIT = { claude: 8 * MIN, check: 2 * MIN, render: 5 * MIN, job: 15 * MIN };
+const LIMIT = { claude: 8 * MIN, check: 2 * MIN, render: 5 * MIN, job: 15 * MIN, footage: 5 * MIN }; // footage jobs get job + footage
+const FOOTAGE_MAX = 200 * 1024 * 1024;
 const CONCURRENCY = 2;
 const KEEP_MS = 30 * 24 * 3600_000; // project dirs are kept for the future /edit endpoint
 const TOOLS = 'Read,Write,Edit,Glob,Grep,Skill,Bash(npx hyperframes*),Bash(npm run *),Bash(ls*),Bash(motion-audio *)';
@@ -89,6 +90,61 @@ async function download(u, dest, signal) {
   return `${path.basename(path.dirname(dest)) === 'fonts' ? 'assets/fonts' : 'assets'}/${path.basename(dest)}.${ext}`;
 }
 
+// Hybrid jobs: download every clip (https, video/*, <= 200 MB, 60 s), probe it and normalise it to
+// muted H.264 yuv420p 30 fps (trimmed per trimStartSec/durationSec, longest side <= 1920) in
+// assets/footage/fN.mp4, all before Claude runs. Any failure fails the job: never drop footage.
+// ffprobe/ffmpeg see untrusted media, so they run in the sandbox too.
+async function fetchFootage(j, proj, signal) {
+  const dir = `${JOBS}/${j.id}`, list = [];
+  fs.mkdirSync(`${proj}/assets/footage`, { recursive: true });
+  const ffprobe = async (file, tag) => {
+    const out = `${dir}/footage-${tag}.probe.json`;
+    const p = await sandbox(dir, 'ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_type,codec_name,width,height:format=duration', '-of', 'json', file],
+      { timeout: MIN, signal, out });
+    const o = p.code === 0 ? JSON.parse(fs.readFileSync(out, 'utf8')) : {};
+    const v = o.streams?.find((x) => x.codec_type === 'video');
+    const d = Number(o.format?.duration);
+    if (!v?.width || !Number.isFinite(d) || d <= 0) throw new Error('not a video');
+    return { codec: v.codec_name, width: v.width, height: v.height, durationSec: Math.round(d * 100) / 100, hasAudio: o.streams.some((x) => x.codec_type === 'audio') };
+  };
+  for (const [i, f] of j.input.footage.entries()) {
+    const id = `f${i + 1}`, src = `${dir}/${id}.src`, file = `assets/footage/${id}.mp4`;
+    try {
+      const r = await fetch(f.url, { signal: AbortSignal.any([signal, AbortSignal.timeout(60_000)]), redirect: 'follow' });
+      if (!r.ok) throw new Error(`http ${r.status}`);
+      if (!r.url.startsWith('https://')) throw new Error('redirected off https');
+      if (!/^video\//.test(r.headers.get('content-type') || '')) throw new Error(`content-type ${r.headers.get('content-type')}`);
+      if (Number(r.headers.get('content-length')) > FOOTAGE_MAX) throw new Error('too big');
+      const ws = fs.createWriteStream(src);
+      let n = 0;
+      try {
+        for await (const chunk of r.body) {
+          if ((n += chunk.length) > FOOTAGE_MAX) throw new Error('too big');
+          if (!ws.write(chunk)) await new Promise((ok) => ws.once('drain', ok));
+        }
+      } finally { await new Promise((ok) => ws.end(ok)); }
+      const source = await ffprobe(src, `${id}-src`);
+      const trim = f.trimStartSec || 0;
+      if (trim >= source.durationSec - 0.2) throw new Error(`trimStartSec ${trim} past clip end ${source.durationSec}`);
+      const t = await sandbox(dir, 'ffmpeg', ['-y', '-loglevel', 'error', ...(trim ? ['-ss', String(trim)] : []), '-i', src,
+        ...(f.durationSec ? ['-t', String(f.durationSec)] : []), '-map', '0:v:0', '-an',
+        '-vf', "scale='if(gt(iw,ih),min(1920,iw),-2)':'if(gt(iw,ih),-2,min(1920,ih))',fps=30",
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', `${proj}/${file}`],
+        { timeout: 3 * MIN, signal, out: `${dir}/footage-${id}.ffmpeg.log` });
+      if (t.code !== 0) throw new Error(`transcode exit ${t.code}`);
+      const p = await ffprobe(`${proj}/${file}`, id);
+      list.push({ id, file, label: f.label || '', durationSec: p.durationSec, width: p.width, height: p.height,
+        ...(f.startSec != null && { startSec: f.startSec }), source: { ...source, sizeBytes: n } });
+    } catch (e) {
+      throw fail(signal.aborted ? 'timeout' : 'footage_failed', `${id}: ${e.message}`);
+    } finally { fs.rmSync(src, { force: true }); }
+  }
+  j.footage = list;
+  const manifest = list.map(({ source, ...x }) => x);
+  fs.writeFileSync(`${proj}/footage.json`, JSON.stringify(manifest, null, 1));
+  return manifest;
+}
+
 async function scaffold(j, signal) {
   const dir = `${JOBS}/${j.id}`, proj = `${dir}/project`;
   fs.rmSync(proj, { recursive: true, force: true });
@@ -108,6 +164,7 @@ async function scaffold(j, signal) {
     try { assets.push(`- ${label}: \`${await download(b[field], `${proj}/${dest}`, signal)}\``); }
     catch (e) { j.log.push(`asset ${field}: ${e.message}`); }
   }
+  const footage = j.input.footage ? await fetchFootage(j, proj, signal) : null;
   const safe = aspect === '9:16' ? 'top 220px, bottom 380px, sides 80px (platform UI overlays)' : 'an 80px margin on every side';
   const fill = (s) => s.replaceAll('{{W}}', W).replaceAll('{{H}}', H).replaceAll('{{DUR}}', dur).replaceAll('{{BG}}', c.background).replaceAll('{{TEXT}}', c.text);
   for (const f of ['CLAUDE.md', 'index.html']) fs.writeFileSync(`${proj}/${f}`, fill(fs.readFileSync(`${proj}/${f}`, 'utf8')));
@@ -123,7 +180,12 @@ flow: autonomous
 
 ## Audio
 ${audioBrief(j.input.audio)}
-
+${footage ? `
+## Footage (hybrid: required)
+This is a hybrid video: the clips below MUST appear as muted \`<video>\` layers under your type/overlays (CLAUDE.md → Footage).
+Manifest: \`footage.json\`. A clip's \`data-duration\` must not exceed its duration below.
+${footage.map((f) => `- \`${f.file}\` (id ${f.id})${f.label ? ` "${f.label}"` : ''}: ${f.durationSec} s, ${f.width}×${f.height}${f.startSec != null ? `; place it starting at ${f.startSec} s` : ''}`).join('\n')}
+` : ''}
 ## Brand
 - Name: ${b.brandName || '(none; use no brand name)'}
 - Tagline: ${b.tagline || '(none)'}
@@ -179,7 +241,10 @@ function copyParent(j) {
   const src = `${JOBS}/${parentCallId}/project`, proj = `${JOBS}/${j.id}/project`;
   if (!fs.existsSync(`${src}/index.html`)) throw fail('parent_not_found');
   fs.rmSync(proj, { recursive: true, force: true });
-  fs.cpSync(src, proj, { recursive: true, filter: (f) => !/(^|\/)(node_modules|renders?)$|\.(mp4|webm|mov)$/.test(path.relative(src, f)) });
+  fs.cpSync(src, proj, { recursive: true, filter: (f) => {
+    const rel = path.relative(src, f); // keep hybrid footage; drop renders
+    return rel.startsWith('assets/footage') || !/(^|\/)(node_modules|renders?)$|\.(mp4|webm|mov)$/.test(rel);
+  } });
   fs.symlinkSync(`${BASE}/hf/node_modules`, `${proj}/node_modules`);
   const target = segment
     ? `Segment \`${segment.id}\` ("${segment.label}"), ${segment.startSec}–${segment.endSec} s only. Currently on screen: ${segment.onScreenText || '(n/a)'}`
@@ -220,7 +285,7 @@ function probe(file) {
 async function runJob(j) {
   const dir = `${JOBS}/${j.id}`, t0 = Date.now();
   const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), LIMIT.job);
+  const timer = setTimeout(() => ctl.abort(), LIMIT.job + (j.input.footage ? LIMIT.footage : 0));
   const signal = ctl.signal;
   const lap = (k) => (j.timings[k] = Math.round((Date.now() - t0) / 1000));
   const step = (s) => { j.step = s; save(j); };
