@@ -5,8 +5,8 @@ import Link from 'next/link';
 import { Icon } from '../icons';
 import { VoicePicker } from '../voice-studio';
 import { priceForImage } from '../../lib/credits/pricing';
-import { MOTION_GRAPHICS, MOTION_TEMPLATE_IDS, MOTION_TEMPLATES, VIDEO_MODELS, VIDEO_MODEL_IDS, type VideoModelId } from '../../lib/ai/models';
-import { motionReady, type BrandKit, type BrandProfile } from '../../lib/brand/kit';
+import { MOTION_AI, MOTION_GRAPHICS, MOTION_TEMPLATE_IDS, MOTION_TEMPLATES, VIDEO_MODELS, VIDEO_MODEL_IDS, type VideoModelId } from '../../lib/ai/models';
+import { motionAiReady, motionReady, type BrandKit, type BrandProfile } from '../../lib/brand/kit';
 import { useApi } from '../../lib/ui/fetcher';
 import { cinemaBlockers, videoDuration, videoModel, type Anchor, type MediaGen, type VideoMode } from './generate';
 
@@ -26,7 +26,6 @@ const VIDEO_MODES: { id: VideoMode; label: string }[] = [
   { id: 'reference', label: 'From reference images' },
   { id: 'audio-driven', label: 'Synced to audio' },
   { id: 'avatar', label: 'Talking avatar' },
-  { id: 'motion', label: 'Motion graphic (uses your brand kit)' },
 ];
 
 const ACCEPT: Record<Anchor, string> = {
@@ -66,7 +65,7 @@ function Slot({ label, url, kind, onPick, onClear }: { label: string; url: strin
 }
 
 /** The primary action at the foot of a media panel. */
-function GenerateButton({ what, busy, cost, disabled, onClick }: { what: 'image' | 'video'; busy: boolean; cost: number | null; disabled: boolean; onClick: () => void }) {
+function GenerateButton({ what, busy, cost, disabled, onClick }: { what: 'image' | 'video' | 'motion graphic'; busy: boolean; cost: number | null; disabled: boolean; onClick: () => void }) {
   return (
     <button type="button" className="btn primary compose-self-start" disabled={disabled} onClick={onClick}>
       <Icon name="sparkle" size={12} /> {busy ? `Making ${what}…` : `Generate ${what}`}
@@ -150,13 +149,19 @@ export function VideoOptions({ gen, cost, disabled, onGenerate }: PanelProps) {
   const model = VIDEO_MODELS[videoModel(s)];
   const avatar = s.videoMode === 'avatar';
   const motion = s.videoMode === 'motion';
+  const aiMotion = motion && s.motionAi;
   const prompted = !avatar && !motion;
   const wantsCinema = s.videoModel === 'sociafy-cinema-1';
   const blockers = cinemaBlockers(s);
   const motionOnly = wantsCinema ? ' (Motion only)' : '';
-  // `motion` is the server's feature flag; without it the option doesn't exist.
-  const { data: brand } = useApi<{ kit: BrandKit; profile: BrandProfile; motion?: boolean }>('/api/brand-kit');
-  const modes = VIDEO_MODES.filter((m) => m.id !== 'motion' || brand?.motion);
+  // `motion` / `motionAi` are the server's feature flags; without them the option doesn't exist.
+  const { data: brand } = useApi<{ kit: BrandKit; profile: BrandProfile; motion?: boolean; motionAi?: boolean }>('/api/brand-kit');
+  const motionKinds = [
+    ...(brand?.motion ? [{ ai: false, label: 'Templates' }] : []),
+    ...(brand?.motionAi ? [{ ai: true, label: 'AI-designed' }] : []),
+  ];
+  // Templates render 9:16 / 16:9 only; square falls back to vertical.
+  const pickMotion = (ai: boolean) => set({ videoMode: 'motion', motionAi: ai, ...(!ai && s.videoAspect === '1:1' ? { videoAspect: '9:16' as const } : {}) });
 
   return (
     <div className="compose-media-panel">
@@ -171,23 +176,46 @@ export function VideoOptions({ gen, cost, disabled, onGenerate }: PanelProps) {
         }}
       />
 
-      <div className="compose-field">
+      {motionKinds.length > 0 && (
+        <div className="compose-field">
+          <span className="compose-label">Kind</span>
+          <div className="mode-switch compose-self-start" role="radiogroup" aria-label="Kind">
+            <button type="button" role="radio" aria-checked={!motion} className={`opt${!motion ? ' active' : ''}`} onClick={() => motion && set({ videoMode: 'text' })}>AI video</button>
+            <button type="button" role="radio" aria-checked={motion} className={`opt${motion ? ' active' : ''}`} onClick={() => !motion && pickMotion(!brand?.motion)}>Motion graphics</button>
+          </div>
+        </div>
+      )}
+
+      {motion && motionKinds.length > 0 && (
+        <div className="compose-field">
+          <span className="compose-label">Style</span>
+          <div className="mode-switch compose-self-start" role="radiogroup" aria-label="Motion graphic style">
+            {motionKinds.map((k) => (
+              <button key={k.label} type="button" role="radio" aria-checked={s.motionAi === k.ai} className={`opt${s.motionAi === k.ai ? ' active' : ''}`} onClick={() => pickMotion(k.ai)}>
+                {k.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {!motion && <div className="compose-field">
         <span className="compose-label">Made from</span>
         <div className="compose-chips" role="radiogroup" aria-label="Made from">
-          {modes.map((m) => (
+          {VIDEO_MODES.map((m) => (
             <button
               key={m.id}
               type="button"
               role="radio"
               aria-checked={s.videoMode === m.id}
               className={`prompt-chip${s.videoMode === m.id ? ' active' : ''}`}
-              onClick={() => set({ videoMode: m.id, ...(m.id === 'motion' && s.videoAspect === '1:1' ? { videoAspect: '9:16' as const } : {}) })}
+              onClick={() => set({ videoMode: m.id })}
             >
               {m.label}{m.id === 'reference' ? motionOnly : ''}
             </button>
           ))}
         </div>
-      </div>
+      </div>}
 
       {prompted && (
         <div className="compose-field">
@@ -271,7 +299,7 @@ export function VideoOptions({ gen, cost, disabled, onGenerate }: PanelProps) {
         </div>
       )}
 
-      {motion && (
+      {motion && !aiMotion && (
         <div className="stack">
           <div className="compose-chips" role="group" aria-label="Template">
             {MOTION_TEMPLATE_IDS.map((t) => (
@@ -286,6 +314,10 @@ export function VideoOptions({ gen, cost, disabled, onGenerate }: PanelProps) {
         </div>
       )}
 
+      {aiMotion && brand && !motionAiReady(brand.kit, brand.profile) && (
+        <p className="compose-error">Needs your brand name and main color. <Link href="/settings/brand">Open Brand kit</Link></p>
+      )}
+
       <div className="compose-grid">
         {!motion && <Field label="Quality">
           <select className="input" value={s.videoQuality} onChange={(e) => set({ videoQuality: e.target.value as typeof s.videoQuality })}>
@@ -297,10 +329,15 @@ export function VideoOptions({ gen, cost, disabled, onGenerate }: PanelProps) {
         <Field label="Shape">
           <select className="input" value={s.videoAspect} onChange={(e) => set({ videoAspect: e.target.value as typeof s.videoAspect })}>
             <option value="9:16">Vertical 9:16</option>
-            {!motion && <option value="1:1">Square 1:1</option>}
+            {(!motion || aiMotion) && <option value="1:1">Square 1:1</option>}
             <option value="16:9">Wide 16:9</option>
           </select>
         </Field>
+        {aiMotion && (
+          <Field label={`Length · ${s.motionAiDuration}s`}>
+            <input type="range" min={MOTION_AI.durationSec.min} max={MOTION_AI.durationSec.max} value={s.motionAiDuration} onChange={(e) => set({ motionAiDuration: Number(e.target.value) })} />
+          </Field>
+        )}
         {prompted && (
           <Field label={`Length · ${videoDuration(s)}s`}>
             <input type="range" min={model.durationSec.min} max={model.durationSec.max} value={videoDuration(s)} onChange={(e) => set({ videoDuration: Number(e.target.value) })} />
@@ -330,10 +367,11 @@ export function VideoOptions({ gen, cost, disabled, onGenerate }: PanelProps) {
 
       <p className="compose-note">
         {avatar ? 'Talking avatar — lip-synced to the voice or audio you pick.'
+          : aiMotion ? 'Designed from your post text and brand kit — takes a few minutes.'
           : motion ? `Renders on ${MOTION_GRAPHICS.name} from your brand kit — silent, usually under two minutes.`
           : `Renders on ${model.name}${model.nativeAudio ? ' — with sound' : ' — silent'}${s.videoFast && s.videoQuality !== '1080p' ? ', fast render' : ''}.`}
       </p>
-      <GenerateButton what="video" busy={gen.busy === 'video'} cost={cost} disabled={disabled} onClick={onGenerate} />
+      <GenerateButton what={motion ? 'motion graphic' : 'video'} busy={gen.busy === 'video'} cost={cost} disabled={disabled} onClick={onGenerate} />
     </div>
   );
 }

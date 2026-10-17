@@ -4,6 +4,7 @@ import { videoJobs, mediaAssets } from '../db/schema';
 import { getSeedanceTask } from '../ai/piapi';
 import { CueError, deleteCueRender, downloadCueRender, getCueRender } from '../ai/cue';
 import { getMotionResult, motionConfigured } from '../ai/motion';
+import { getMotionAiResult, motionAiConfigured } from '../ai/motionAi';
 import { makeMediaKey, publicUrlFor, uploadBuffer } from '../storage/r2';
 import { downloadToBuffer } from './finalize';
 import { refund } from '../credits/ledger';
@@ -57,7 +58,8 @@ export async function finalizeVideoJob(job: VideoJob): Promise<FinalizeVideoResu
   // of "we have bytes" is genuinely shared, everything upstream genuinely is
   // not.
   if (job.provider === 'cue-h3') return finalizeCinemaJob(job);
-  if (job.provider === 'motion-hf') return finalizeMotionJob(job);
+  if (job.provider === 'motion-hf') return finalizeMotionJob(job, motionConfigured, getMotionResult);
+  if (job.provider === 'motion-claude') return finalizeMotionJob(job, motionAiConfigured, getMotionAiResult);
 
   const apiKey = process.env.PIAPI_API_KEY;
   if (!apiKey) return { status: 'pending', pollError: 'video_provider_not_configured' };
@@ -259,12 +261,21 @@ async function finalizeCinemaJob(job: VideoJob): Promise<FinalizeVideoResult> {
 }
 
 /**
- * Reconcile one motion-graphics render. The engine uploads straight to the
+ * Reconcile one motion-graphics render — template engine or AI-designed
+ * worker, which share a result shape. The engine uploads straight to the
  * R2 key we chose at submit (inside the user's prefix) and echoes it back, so
  * there are no bytes to move — only the claim.
+ *
+ * MAX_AGE_MS (2h) is the give-up window for both. AI-designed jobs take 3–10
+ * min and the worker runs 2 at a time, so a queue of them needs well over the
+ * ~20 min one job takes; 2h covers that without holding credits for long.
  */
-async function finalizeMotionJob(job: VideoJob): Promise<FinalizeVideoResult> {
-  if (!motionConfigured()) return { status: 'pending', pollError: 'video_provider_not_configured' };
+async function finalizeMotionJob(
+  job: VideoJob,
+  configured: () => boolean,
+  getResult: (callId: string) => ReturnType<typeof getMotionResult>,
+): Promise<FinalizeVideoResult> {
+  if (!configured()) return { status: 'pending', pollError: 'video_provider_not_configured' };
   const ageMs = Date.now() - job.createdAt.getTime();
 
   if (!job.providerTaskId) {
@@ -274,7 +285,7 @@ async function finalizeMotionJob(job: VideoJob): Promise<FinalizeVideoResult> {
 
   let r;
   try {
-    r = await getMotionResult(job.providerTaskId);
+    r = await getResult(job.providerTaskId);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error('[finalize-video] motion poll failed:', msg.slice(0, 400));

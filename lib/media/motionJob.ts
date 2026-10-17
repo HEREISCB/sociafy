@@ -1,11 +1,12 @@
 import { eq } from 'drizzle-orm';
 import { db } from '../db';
 import { agentSettings, brandKits, videoJobs } from '../db/schema';
-import { motionReady, motionVariables, type BrandKit, type BrandProfile } from '../brand/kit';
-import { MOTION_GRAPHICS, MOTION_TEMPLATES, type MotionTemplate } from '../ai/models';
+import { motionAiReady, motionReady, motionVariables, type BrandKit, type BrandProfile } from '../brand/kit';
+import { MOTION_AI, MOTION_GRAPHICS, MOTION_TEMPLATES, type MotionTemplate } from '../ai/models';
 import { submitMotion } from '../ai/motion';
+import { submitMotionAi, type MotionAiBrand } from '../ai/motionAi';
 import { writeMotionCopy } from '../ai/motionCopy';
-import { priceForMotion } from '../credits/pricing';
+import { priceForMotion, priceForMotionAi, type CreditAction } from '../credits/pricing';
 import { charge, ensureBalance, refund, InsufficientCreditsError } from '../credits/ledger';
 import { makeMediaKey } from '../storage/r2';
 
@@ -52,30 +53,83 @@ export async function submitMotionVideo(args: {
   });
   const vars = motionVariables(kit, profile, copy);
 
+  return startJob({
+    userId, price,
+    row: { provider: MOTION_GRAPHICS.backend, prompt: topic, rewrittenPrompt: copy.hook || null, durationSec, aspect, genMode: `motion-${template}` },
+    meta: { template, aspect, durationSec, via: args.via },
+    submit: () => submitMotion({
+      template, aspect, vars,
+      videoKey: makeMediaKey(userId, `motion-${template}.mp4`),
+      posterKey: makeMediaKey(userId, `motion-${template}-poster.jpg`),
+    }),
+  });
+}
+
+/**
+ * Start one AI-designed motion graphic: the worker authors it from the post
+ * text + brand kit. Same money semantics as submitMotionVideo. Readiness is
+ * name + main color (motionAiReady) — the worker designs around a missing logo.
+ */
+export async function submitMotionAiVideo(args: {
+  userId: string;
+  aspect: '9:16' | '16:9' | '1:1';
+  durationSec: number;
+  topic: string;
+  via: 'compose' | 'autopilot';
+}): Promise<{ job: typeof videoJobs.$inferSelect; creditsCharged: number }> {
+  const { userId, aspect, topic } = args;
+  const { kit, profile } = await loadBrand(userId);
+  if (!motionAiReady(kit, profile)) throw new MotionNotReady();
+
+  const { min, max } = MOTION_AI.durationSec;
+  const durationSec = Math.min(max, Math.max(min, Math.round(args.durationSec)));
+  const price = priceForMotionAi(durationSec);
+  const pre = await ensureBalance(userId, price.credits);
+  if (!pre.ok) throw new InsufficientCreditsError(pre.balance, pre.needed);
+
+  // motionVariables picks the font URLs ('' = none chosen); copy is the worker's job.
+  const v = motionVariables(kit, profile, { hook: '', lines: [], facts: [] });
+  const brand: MotionAiBrand = {
+    brandName: v.brandName || undefined,
+    tagline: v.tagline || undefined,
+    cta: v.cta || undefined,
+    colors: v.colors,
+    logoUrl: v.logoUrl ?? undefined,
+    logoReverseUrl: v.logoReverseUrl ?? undefined,
+    fontDisplayUrl: v.fontDisplayUrl || undefined,
+    fontBodyUrl: v.fontBodyUrl || undefined,
+    style: v.style,
+  };
+
+  return startJob({
+    userId, price,
+    row: { provider: MOTION_AI.backend, prompt: topic, rewrittenPrompt: null, durationSec, aspect, genMode: 'motion-ai' },
+    meta: { template: 'ai', aspect, durationSec, via: args.via },
+    submit: () => submitMotionAi({
+      prompt: topic.slice(0, 4_000), aspect, durationSec, brand,
+      videoKey: makeMediaKey(userId, 'motion-ai.mp4'),
+      posterKey: makeMediaKey(userId, 'motion-ai-poster.jpg'),
+    }),
+  });
+}
+
+/** row → charge → submit; refund on a definitive submit failure, leave an ambiguous one to the sweeper. */
+async function startJob(a: {
+  userId: string;
+  price: { action: CreditAction; credits: number };
+  row: { provider: string; prompt: string; rewrittenPrompt: string | null; durationSec: number; aspect: string; genMode: string };
+  meta: Record<string, unknown>;
+  submit: () => Promise<{ callId: string }>;
+}): Promise<{ job: typeof videoJobs.$inferSelect; creditsCharged: number }> {
+  const { userId, price } = a;
   const [row] = await db()
     .insert(videoJobs)
-    .values({
-      userId,
-      provider: MOTION_GRAPHICS.backend,
-      providerTaskId: '',
-      status: 'pending',
-      prompt: topic.slice(0, 2_000),
-      rewrittenPrompt: copy.hook || null,
-      durationSec,
-      aspect,
-      quality: '1080p',
-      genMode: `motion-${template}`,
-    })
+    .values({ ...a.row, userId, providerTaskId: '', status: 'pending', prompt: a.row.prompt.slice(0, 2_000), quality: '1080p' })
     .returning();
 
   let charged;
   try {
-    charged = await charge({
-      userId,
-      action: price.action,
-      credits: price.credits,
-      meta: { videoJobId: row.id, template, aspect, durationSec, via: args.via },
-    });
+    charged = await charge({ userId, action: price.action, credits: price.credits, meta: { videoJobId: row.id, ...a.meta } });
   } catch (e) {
     await db().update(videoJobs).set({ status: 'failed', error: 'charge_failed', updatedAt: new Date() }).where(eq(videoJobs.id, row.id));
     throw e;
@@ -85,11 +139,7 @@ export async function submitMotionVideo(args: {
     .where(eq(videoJobs.id, row.id));
 
   try {
-    const { callId } = await submitMotion({
-      template, aspect, vars,
-      videoKey: makeMediaKey(userId, `motion-${template}.mp4`),
-      posterKey: makeMediaKey(userId, `motion-${template}-poster.jpg`),
-    });
+    const { callId } = await a.submit();
     const [live] = await db().update(videoJobs)
       .set({ providerTaskId: callId, updatedAt: new Date() })
       .where(eq(videoJobs.id, row.id))

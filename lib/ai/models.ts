@@ -19,7 +19,7 @@ import type { VideoQuality } from '../credits/pricing';
 /** Internal backend identifiers. Persisted to videoJobs.provider. Never public.
  *  'piapi-seedance-2' is no longer written (Motion quality moved to 2.5) but
  *  stays here because existing rows carry it. */
-export type VideoBackend = 'piapi-seedance-2.5' | 'piapi-seedance-2' | 'piapi-seedance-2-fast' | 'cue-h3' | 'motion-hf';
+export type VideoBackend = 'piapi-seedance-2.5' | 'piapi-seedance-2' | 'piapi-seedance-2-fast' | 'cue-h3' | 'motion-hf' | 'motion-claude';
 
 export const VIDEO_MODEL_IDS = ['sociafy-motion-1', 'sociafy-cinema-1'] as const;
 export type VideoModelId = (typeof VIDEO_MODEL_IDS)[number];
@@ -121,6 +121,20 @@ export const MOTION_GRAPHICS = { backend: 'motion-hf', name: 'Sociafy Motion Gra
   backend: VideoBackend;
   name: string;
 };
+
+/**
+ * AI-designed motion graphics: a one-off motion graphic authored from the post
+ * text + brand kit on a GPU worker (lib/ai/motionAi.ts), not a fixed template.
+ * Same reasoning as MOTION_GRAPHICS for staying out of VIDEO_MODELS. Rows carry
+ * provider 'motion-claude' — internal only; the public name is all that leaves.
+ * Only offered when MOTION_AI_URL + MOTION_AI_SECRET are set.
+ */
+export const MOTION_AI = {
+  backend: 'motion-claude',
+  name: 'AI-designed motion graphic',
+  durationSec: { min: 6, max: 20, default: 15 },
+  aspects: ['9:16', '16:9', '1:1'],
+} as const satisfies { backend: VideoBackend; name: string; durationSec: { min: number; max: number; default: number }; aspects: readonly string[] };
 
 /** Templates and their fixed lengths (motion/README.md). 9:16 and 16:9 only. */
 export const MOTION_TEMPLATES = {

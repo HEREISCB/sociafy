@@ -1,0 +1,68 @@
+/**
+ * Client for the AI-designed motion-graphics worker (motion-ai/): a model
+ * authors a composition from the post text + brand kit, the worker renders it
+ * and uploads to the R2 keys we pass. Same contract as lib/ai/motion.ts —
+ * `X-Engine-Secret`, submit → poll — and the same white-label rule: nothing
+ * from here (worker names, error text) may reach a response body.
+ *
+ * The feature flag IS the config: with MOTION_AI_URL or MOTION_AI_SECRET unset,
+ * the option is hidden everywhere and nothing here is called.
+ */
+
+import type { MotionResult } from './motion';
+
+export function motionAiConfigured(): boolean {
+  return Boolean(process.env.MOTION_AI_URL && process.env.MOTION_AI_SECRET);
+}
+
+async function call<T>(path: string, init: { method: 'GET' | 'POST'; body?: unknown; timeoutMs?: number }): Promise<T> {
+  const root = process.env.MOTION_AI_URL;
+  const secret = process.env.MOTION_AI_SECRET;
+  if (!root || !secret) throw new Error('motion_ai_not_configured');
+  const res = await fetch(new URL(path, root.endsWith('/') ? root : root + '/'), {
+    method: init.method,
+    headers: {
+      'X-Engine-Secret': secret,
+      Accept: 'application/json',
+      ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+    },
+    body: init.body ? JSON.stringify(init.body) : undefined,
+    signal: AbortSignal.timeout(init.timeoutMs ?? 30_000),
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`motion_ai_${res.status}: ${text.slice(0, 300)}`);
+  return JSON.parse(text) as T;
+}
+
+export type MotionAiBrand = {
+  brandName?: string;
+  tagline?: string;
+  cta?: string;
+  colors?: { primary: string; secondary: string; background: string; text: string; accent: string };
+  logoUrl?: string;
+  logoReverseUrl?: string;
+  fontDisplayUrl?: string;
+  fontBodyUrl?: string;
+  style?: 'soft' | 'bold';
+};
+
+export type SubmitMotionAiArgs = {
+  /** The post text, ≤4000 chars. */
+  prompt: string;
+  aspect: '9:16' | '16:9' | '1:1';
+  /** 6–20. */
+  durationSec: number;
+  brand: MotionAiBrand;
+  /** R2 keys the worker uploads to — ours, so the asset lands in the user's prefix. */
+  videoKey: string;
+  posterKey: string;
+};
+
+export function submitMotionAi(args: SubmitMotionAiArgs): Promise<{ callId: string }> {
+  return call('motion-ai/submit', { method: 'POST', body: args });
+}
+
+/** Same result shape as the template engine. */
+export function getMotionAiResult(callId: string): Promise<MotionResult> {
+  return call(`motion-ai/result?callId=${encodeURIComponent(callId)}`, { method: 'GET', timeoutMs: 15_000 });
+}

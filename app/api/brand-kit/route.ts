@@ -6,11 +6,12 @@ import { agentSettings, brandKits, mediaAssets } from '../../../lib/db/schema';
 import { brandKitPatchSchema, parseBody } from '../../../lib/validation';
 import { brandKitCompleteness, type BrandKit, type BrandProfile } from '../../../lib/brand/kit';
 import { motionConfigured } from '../../../lib/ai/motion';
+import { motionAiConfigured } from '../../../lib/ai/motionAi';
 
 export const runtime = 'nodejs';
 
 /**
- * GET   /api/brand-kit → { kit, profile, brandKitCompleteness, motion }
+ * GET   /api/brand-kit → { kit, profile, brandKitCompleteness, motion, motionAi }
  * PATCH /api/brand-kit   body: any subset of BrandKit's top-level sections;
  *                        each one sent replaces the stored section (null clears
  *                        guidePdf / narratorVoiceId). Returns the GET shape.
@@ -35,8 +36,9 @@ async function load(userId: string) {
   ]);
   const kit: BrandKit = k?.kit ?? {};
   const profile: BrandProfile = s ?? { companyName: null, brandBio: null, website: null, instructions: null };
-  // `motion`: the motion-graphics feature flag, so client surfaces can hide it.
-  return { kit, profile, brandKitCompleteness: brandKitCompleteness(kit, profile), motion: motionConfigured() };
+  // `motion` / `motionAi`: the template and AI-designed motion-graphics feature
+  // flags, so client surfaces can hide what isn't configured.
+  return { kit, profile, brandKitCompleteness: brandKitCompleteness(kit, profile), motion: motionConfigured(), motionAi: motionAiConfigured() };
 }
 
 export async function GET(req: NextRequest) {

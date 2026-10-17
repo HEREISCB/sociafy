@@ -10,6 +10,7 @@
  */
 
 import type { Platform } from '../db/schema';
+import { MOTION_AI } from '../ai/models';
 
 /** Stable action keys persisted to credit_ledger.action. */
 export type CreditAction =
@@ -39,6 +40,7 @@ export type CreditAction =
   | 'avatar_video_720p'
   | 'video_cinema'
   | 'video_motion_graphics'
+  | 'video_motion_ai'
   | 'text_chat';
 
 /** Single source-of-truth credit cost per action. */
@@ -108,6 +110,12 @@ export const CREDIT_PRICES: Record<CreditAction, number> = {
   // for a 15–16s stat/showcase → $0.06–0.12 @business, >85% margin, and still
   // an order of magnitude under a generated clip.
   video_motion_graphics: 5,
+  // AI-designed motion graphics: a model authors the composition on a GPU box
+  // (several minutes of agent + render compute per job, retries included),
+  // then renders it. Priced PER SECOND of output (see priceForMotionAi): 12 cr
+  // for 6s, 30 cr for 15s, 40 cr for 20s. The authoring compute, not the
+  // render, is most of the cost — owner to confirm the rate.
+  video_motion_ai: 2,
   // POST /api/v1/chat/completions. Metered per call from the provider's actual
   // token usage by priceForChat() below; this number is only the per-call floor.
   text_chat: 1,
@@ -254,6 +262,14 @@ export function priceForMotion(durationSec: number): { action: CreditAction; cre
   return { action, credits: CREDIT_PRICES[action] * Math.max(1, Math.ceil(durationSec / 8)) };
 }
 
+/** CREDIT_PRICES.video_motion_ai per second of output, length clamped to 6–20s. */
+export function priceForMotionAi(durationSec: number): { action: CreditAction; credits: number } {
+  const action: CreditAction = 'video_motion_ai';
+  const { min, max } = MOTION_AI.durationSec;
+  const sec = Math.min(max, Math.max(min, Math.round(durationSec) || min));
+  return { action, credits: CREDIT_PRICES[action] * sec };
+}
+
 // =====================================================
 // Text-post price helper
 // =====================================================
@@ -384,6 +400,7 @@ export const ACTION_LABELS: Record<CreditAction, string> = {
   avatar_video_720p: 'Avatar video · 720p',
   video_cinema: 'Video · Cinema (sound-on)',
   video_motion_graphics: 'Video · Motion graphic',
+  video_motion_ai: 'Video · AI-designed motion graphic',
   text_chat: 'API chat / vision',
 };
 

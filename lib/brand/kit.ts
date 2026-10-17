@@ -198,6 +198,11 @@ export function motionReady(kit: BrandKit, profile: Partial<Pick<BrandProfile, '
   return !!profile.companyName?.trim() && !!kit.logo?.primary && !!kit.colors?.primary;
 }
 
+/** AI-designed motion graphics compose around a missing logo, so name + primary color is enough. */
+export function motionAiReady(kit: BrandKit, profile: Partial<Pick<BrandProfile, 'companyName'>>): boolean {
+  return !!profile.companyName?.trim() && !!kit.colors?.primary;
+}
+
 /**
  * brandVariables + generated copy → the motion template variables
  * (motion/README.md). No font chosen → '' so templates keep their bundled

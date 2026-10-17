@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { priceForAvatar, priceForImage, priceForMotion, priceForVideo } from '../../lib/credits/pricing';
-import { DEFAULT_VIDEO_MODEL, MOTION_TEMPLATES, VIDEO_MODELS, type MotionTemplate, type VideoModelId } from '../../lib/ai/models';
+import { priceForAvatar, priceForImage, priceForMotion, priceForMotionAi, priceForVideo } from '../../lib/credits/pricing';
+import { DEFAULT_VIDEO_MODEL, MOTION_AI, MOTION_TEMPLATES, VIDEO_MODELS, type MotionTemplate, type VideoModelId } from '../../lib/ai/models';
 import type { MediaItem } from './attachments';
 
 export type VideoMode = 'text' | 'image-to-video' | 'reference' | 'audio-driven' | 'avatar' | 'motion';
@@ -34,6 +34,9 @@ export const DEFAULT_SETTINGS = {
   avatarScript: '',
   avatarAudioMode: 'voice' as 'voice' | 'audio',
   motionTemplate: 'stat' as MotionTemplate,
+  /** Under videoMode 'motion': AI-designed instead of a template. */
+  motionAi: false,
+  motionAiDuration: MOTION_AI.durationSec.default as number,
 };
 export type GenSettings = typeof DEFAULT_SETTINGS;
 
@@ -63,6 +66,7 @@ export function genCosts(s: GenSettings, attachedImages: number): { image: numbe
   const image = priceForImage(s.imageSize, s.imageQuality, refs).credits * s.imageCount;
   const avatarQ = s.videoQuality === '1080p' ? '720p' : s.videoQuality;
   if (s.videoMode === 'avatar') return { image, video: priceForAvatar(avatarQ).credits };
+  if (s.videoMode === 'motion' && s.motionAi) return { image, video: priceForMotionAi(s.motionAiDuration).credits };
   if (s.videoMode === 'motion') return { image, video: priceForMotion(MOTION_TEMPLATES[s.motionTemplate].durationSec).credits };
   if (videoModel(s) === 'sociafy-cinema-1') return { image, video: null };
   const refSec = s.videoMode === 'reference' ? s.refVideoSec : null;
@@ -75,7 +79,8 @@ const PHASE_LABEL: Record<ClipPhase, string> = {
   queued: 'Queued', rendering: 'Rendering', storing: 'Saving to your library', done: 'Done', failed: 'Failed',
 };
 const ORDER: ClipPhase[] = ['queued', 'rendering', 'storing', 'done', 'failed'];
-type Render = { startedAt: number; phases: ClipPhase[] };
+/** `usual` / `slowAfterSec` override the default wait copy (2–4 min, slow after 4). */
+type Render = { startedAt: number; phases: ClipPhase[]; usual?: string; slowAfterSec?: number };
 
 export type GenReport = {
   added: (items: MediaItem[]) => void;
@@ -201,12 +206,15 @@ export function useMediaGen(report: GenReport) {
   const generateVideo = async (prompt: string) => {
     const model = videoModel(s);
     const motion = s.videoMode === 'motion';
-    // Motion graphics render 9:16 or 16:9 only; square falls back to vertical.
-    const motionAspect = s.videoAspect === '16:9' ? '16:9' : '9:16';
+    const motionAi = motion && s.motionAi;
+    // Template motion graphics render 9:16 or 16:9 only; square falls back to vertical.
+    const motionAspect = motionAi ? s.videoAspect : s.videoAspect === '16:9' ? '16:9' : '9:16';
     setBusy('video');
     report.notice(null);
     try {
-      const { r, data } = motion
+      const { r, data } = motionAi
+        ? await postJson('/api/media/generate-motion', { topic: prompt, template: 'ai', aspect: motionAspect, durationSec: s.motionAiDuration })
+        : motion
         ? await postJson('/api/media/generate-motion', { topic: prompt, template: s.motionTemplate, aspect: motionAspect })
         : await postJson('/api/media/generate-video', {
         prompt, model, durationSec: videoDuration(s), quality: s.videoQuality, aspect: s.videoAspect,
@@ -222,12 +230,16 @@ export function useMediaGen(report: GenReport) {
       const jobs = (data.jobs as { id: string }[] | undefined) ?? [];
       if (!jobs.length) { report.notice('Video generation did not start. Try again.'); return; }
 
-      setRender({ startedAt: Date.now(), phases: jobs.map(() => 'queued') });
+      setRender({
+        startedAt: Date.now(), phases: jobs.map(() => 'queued'),
+        ...(motionAi ? { usual: 'AI-designed motion graphics take 3–10 minutes.', slowAfterSec: 12 * 60 } : {}),
+      });
       const setPhase = (i: number, p: ClipPhase) => setRender((v) => (v ? { ...v, phases: v.phases.map((x, k) => (k === i ? p : x)) } : v));
       const aspect = (motion ? motionAspect : s.videoAspect).replace(':', '/');
       const settled = await Promise.all(jobs.map(async (j, i) => {
         const out = await pollJob(
-          `/api/media/video-job/${j.id}`, 15 * 60_000, [4_000, 500, 8_000],
+          // AI-designed jobs queue behind a 2-wide worker, so they get longer.
+          `/api/media/video-job/${j.id}`, (motionAi ? 25 : 15) * 60_000, [4_000, 500, 8_000],
           (pd) => {
             if (pd.status === 'pending') setPhase(i, pd.providerStatus === 'processing' || pd.providerStatus === 'staged' ? 'rendering' : pd.providerStatus === 'finalizing' ? 'storing' : 'queued');
           },
@@ -331,9 +343,9 @@ export function RenderStatus({ render }: { render: Render }) {
       </div>
       <div className="render-bar" />
       <p className="compose-note">
-        {elapsed >= 240
+        {elapsed >= (render.slowAfterSec ?? 240)
           ? 'Longer than usual — still rendering. It lands in your library even if you leave.'
-          : 'Videos usually take 2–4 minutes.'}
+          : render.usual ?? 'Videos usually take 2–4 minutes.'}
       </p>
     </div>
   );

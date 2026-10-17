@@ -21,6 +21,8 @@ const state = vi.hoisted(() => ({
   cueDownloadStatus: 0,
   cueRender: { status: 'done' } as { status: string; error?: string },
   motionConfigured: true,
+  motionAiConfigured: true,
+  motionAiResult: { status: 'done', videoKey: 'users/user_1/motion-ai.mp4', sizeBytes: 456 } as Record<string, unknown>,
   motionResult: { status: 'done', videoKey: 'users/user_1/motion.mp4', sizeBytes: 123 } as Record<string, unknown>,
   task: { status: 'completed', videoUrl: 'https://cdn.piapi/x.mp4' } as
     { status: string; videoUrl?: string; error?: string },
@@ -113,6 +115,10 @@ vi.mock('../ai/motion', () => ({
   motionConfigured: () => state.motionConfigured,
   getMotionResult: () => Promise.resolve(state.motionResult),
 }));
+vi.mock('../ai/motionAi', () => ({
+  motionAiConfigured: () => state.motionAiConfigured,
+  getMotionAiResult: () => Promise.resolve(state.motionAiResult),
+}));
 vi.mock('../storage/r2', () => ({
   makeMediaKey: (u: string, n: string) => `users/${u}/${n}`,
   publicUrlFor: (k: string) => `https://cdn.test/${k}`,
@@ -160,6 +166,8 @@ beforeEach(() => {
   state.cueStub = false; state.cueDeletes = []; state.cueDownloadStatus = 0;
   state.cueRender = { status: 'done' };
   state.motionConfigured = true;
+  state.motionAiConfigured = true;
+  state.motionAiResult = { status: 'done', videoKey: 'users/user_1/motion-ai.mp4', sizeBytes: 456 };
   state.motionResult = { status: 'done', videoKey: 'users/user_1/motion.mp4', sizeBytes: 123 };
 });
 
@@ -400,5 +408,40 @@ describe('finalizeVideoJob — motion graphics', () => {
     expect(r.status).toBe('pending');
     expect(state.refunds).toHaveLength(0);
     expect(state.assets).toHaveLength(0);
+  });
+});
+
+describe('finalizeVideoJob — AI-designed motion graphics', () => {
+  const aiJob = (over: Record<string, unknown> = {}) =>
+    job({ provider: 'motion-claude', providerTaskId: 'ai-1', durationSec: 15, genMode: 'motion-ai', ...over });
+
+  it('claims the worker-uploaded key as the asset', async () => {
+    state.motionConfigured = false; // the template engine's flag must not matter
+    const r = await finalizeVideoJob(aiJob());
+    expect(r.status).toBe('completed');
+    expect(state.uploads).toBe(0);
+    expect(state.assets[0]).toMatchObject({ storageKey: 'users/user_1/motion-ai.mp4', sizeBytes: 456 });
+  });
+
+  it('stays pending at 20 minutes, refunds once on failure, guards the key prefix', async () => {
+    state.motionAiResult = { status: 'pending' };
+    expect((await finalizeVideoJob(aiJob({ createdAt: new Date(Date.now() - 20 * 60_000) }))).status).toBe('pending');
+    expect(state.refunds).toHaveLength(0);
+
+    state.motionAiResult = { status: 'failed', error: 'authoring failed' };
+    expect(await finalizeVideoJob(aiJob())).toMatchObject({ status: 'failed', error: expect.stringMatching(/^motion_failed/) });
+    expect(state.refunds).toHaveLength(1);
+
+    state.refunds = [];
+    state.motionAiResult = { status: 'done', videoKey: 'users/other/x.mp4' };
+    expect((await finalizeVideoJob(aiJob())).status).toBe('failed');
+    expect(state.assets).toHaveLength(0);
+    expect(state.refunds).toHaveLength(1);
+  });
+
+  it('stays pending, touching nothing, when the worker is unconfigured', async () => {
+    state.motionAiConfigured = false;
+    expect((await finalizeVideoJob(aiJob())).status).toBe('pending');
+    expect(state.refunds).toHaveLength(0);
   });
 });

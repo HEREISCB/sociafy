@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
+  MOTION_AI,
+  MOTION_GRAPHICS,
   DEFAULT_VIDEO_MODEL,
   VIDEO_MODELS,
   VIDEO_MODEL_IDS,
@@ -43,6 +45,9 @@ describe('the white-label boundary', () => {
     // follow the default for new renders.
     expect(modelForBackend(null)).toBe('sociafy-motion-1');
     expect(modelForBackend('something-new')).toBe('sociafy-motion-1');
+    // AI-designed motion graphics are labelled exactly like template ones — never Cinema, never the raw column.
+    expect(modelForBackend(MOTION_AI.backend)).toBe(modelForBackend(MOTION_GRAPHICS.backend));
+    expect(MOTION_AI.name).not.toMatch(/claude|anthropic|hyperframes/i);
   });
 
   it('defaults new renders to Motion (Seedance 2.5)', () => {

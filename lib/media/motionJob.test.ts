@@ -44,6 +44,9 @@ vi.mock('../ai/motionCopy', () => ({ writeMotionCopy: () => Promise.resolve({ ho
 vi.mock('../ai/motion', () => ({
   submitMotion: (a: Record<string, unknown>) => { st.submitted.push(a); return st.submit!(); },
 }));
+vi.mock('../ai/motionAi', () => ({
+  submitMotionAi: (a: Record<string, unknown>) => { st.submitted.push(a); return st.submit!(); },
+}));
 vi.mock('../credits/ledger', () => {
   class InsufficientCreditsError extends Error {
     constructor(readonly balance: number, readonly needed: number) { super('insufficient'); }
@@ -56,7 +59,7 @@ vi.mock('../credits/ledger', () => {
   };
 });
 
-import { MotionNotReady, autopilotTemplate, submitMotionVideo } from './motionJob';
+import { MotionNotReady, autopilotTemplate, submitMotionAiVideo, submitMotionVideo } from './motionJob';
 
 const READY = { logo: { primary: { id: 'l', url: 'https://cdn/logo.svg', mime: 'image/svg+xml' } }, colors: { primary: '#5B5EF2' }, facts: ['12 languages'] };
 const go = () => submitMotionVideo({ userId: 'u1', template: 'stat', aspect: '9:16', topic: 'Hindi support is live', via: 'compose' });
@@ -109,5 +112,41 @@ describe('autopilotTemplate', () => {
     const shot = { id: 's', url: 'u', mime: 'image/png' };
     expect(autopilotTemplate({ screenshots: [shot, shot] })).toBe('showcase');
     expect(autopilotTemplate({})).toBe('stat');
+  });
+});
+
+describe('submitMotionAiVideo', () => {
+  const ai = (durationSec = 15) => submitMotionAiVideo({ userId: 'u1', aspect: '1:1', durationSec, topic: 'Hindi support is live', via: 'compose' });
+
+  it('charges by length, then submits the post text + brand into the user prefix', async () => {
+    const { job, creditsCharged } = await ai();
+    expect(creditsCharged).toBe(30);
+    expect(st.charges[0]).toMatchObject({ action: 'video_motion_ai', credits: 30, meta: { videoJobId: 'job_1', template: 'ai', durationSec: 15 } });
+    expect(job).toMatchObject({ provider: 'motion-claude', genMode: 'motion-ai', providerTaskId: 'fc-1', creditLedgerId: 'led_1', durationSec: 15, aspect: '1:1' });
+    const sent = st.submitted[0] as { prompt: string; durationSec: number; videoKey: string; posterKey: string; brand: Record<string, unknown> };
+    expect(sent).toMatchObject({ prompt: 'Hindi support is live', aspect: '1:1', durationSec: 15 });
+    expect(sent.videoKey).toMatch(/^users\/u1\/.*\.mp4$/);
+    expect(sent.posterKey).toMatch(/^users\/u1\/.*\.jpg$/);
+    expect(sent.brand).toMatchObject({ brandName: 'IndusLabs', logoUrl: 'https://cdn/logo.svg', colors: { primary: '#5B5EF2' }, style: 'soft' });
+  });
+
+  it('runs without a logo, but not without a main color — refusing before any charge', async () => {
+    st.kit = { colors: { primary: '#5B5EF2' } };
+    await expect(ai(6)).resolves.toMatchObject({ creditsCharged: 12 });
+    expect((st.submitted[0] as { brand: Record<string, unknown> }).brand.logoUrl).toBeUndefined();
+    st.rows = []; st.charges = [];
+    st.kit = { logo: READY.logo };
+    await expect(ai()).rejects.toBeInstanceOf(MotionNotReady);
+    st.kit = READY; st.balance = 20;
+    await expect(ai(20)).rejects.toThrow('insufficient');
+    expect(st.rows).toHaveLength(0);
+    expect(st.charges).toHaveLength(0);
+  });
+
+  it('refunds a definitive submit rejection and fails the row', async () => {
+    st.submit = () => Promise.reject(new Error('motion_ai_503: busy'));
+    await expect(ai()).rejects.toThrow('motion_ai_503');
+    expect(st.rows[0]).toMatchObject({ status: 'failed' });
+    expect(st.refunds).toEqual([expect.objectContaining({ ledgerId: 'led_1', meta: { videoJobId: 'job_1' } })]);
   });
 });
