@@ -64,11 +64,20 @@ must be on screen** (the user paid for footage); the end card stays brand-exact 
 - Motion over footage stays slow and subtle (gentle push-in 1.00→1.06 on the wrapper, soft fades,
   short slides); the footage already moves. Animate the wrapper or overlays, never the
   `<video>`'s size, and never `autoAlpha`/`visibility` on a `.clip`.
-- Legibility: text never sits directly on busy footage. Put it on a scrim: a gradient
-  (e.g. `linear-gradient(to top, rgba(0,0,0,.72), transparent 55%)` behind bottom text), a
-  solid/blurred brand-color panel, or a darkened full overlay (≈ 35–55 %). Light text on dark
-  scrim or dark text on light panel, contrast ≥ 4.5:1. Keep text inside the safe area (on 9:16:
-  headline in the upper-middle or lower third above the bottom 380 px, nothing in the top 220 px).
+- Legibility (mandatory): text never sits directly on footage. Every overlay text over footage
+  needs ALL of:
+  1. **Scrim**: a gradient from ~70 % to 0 % of the darkest brand-safe color (or `#000`) covering
+     the text region plus margin (e.g. `linear-gradient(to top, rgba(0,0,0,.7), transparent)`
+     sized to the text block + ~120 px), or, for short stat/CTA text, a solid rounded text plate in
+     a brand color. The scrim is visible for the whole time the text is (fade it with the text).
+     Light text on dark scrim or dark text on light plate, contrast ≥ 4.5:1.
+  2. **Opaque hold**: text is fully opaque (opacity 1) for its whole hold time. Fade only at entry
+     and exit, each ≤ 0.3 s; never mid-hold, never a slow cross-fade over bright detail.
+  3. **Calm footage under text**: optionally darken the footage wrapper 8–15 % or add a slight
+     blur (≈ 2–4 px) while text is on screen (animate the wrapper, not the `<video>`).
+  4. **Placement**: never put text over the footage's own busiest region; prefer the lower third /
+     safe zones. On 9:16 keep all text clear of the top 220 px and bottom 380 px of 1920 (platform
+     UI); headline in the upper-middle or the lower third above the bottom 380 px.
 - In `segments.json`, add `"footage": true` to every segment where footage is on screen.
 
 ## Audio (only the kinds `BRIEF.md` → Audio turns on)
