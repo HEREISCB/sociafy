@@ -58,7 +58,12 @@ export type SubmitMotionAiArgs = {
   posterKey: string;
   /** What to mix in. Omitted = silent (the worker defaults every flag off). */
   audio?: MotionAudioRequest;
+  /** Hybrid: AI footage clips (https, ≤5) the composition plays. A clip the worker can't fetch fails the job (`footage_failed`). */
+  footage?: MotionFootage[];
 };
+
+/** One footage clip for a hybrid. Seconds are on the composition's timeline (startSec) and into the clip (trimStartSec). */
+export type MotionFootage = { url: string; label?: string; startSec?: number; trimStartSec?: number; durationSec?: number };
 
 /** Narration = voiceover; sfx = sound effects; music = a music bed. `language` is a code ("en", "hi"). */
 export type MotionAudioRequest = { narration: boolean; sfx: boolean; music: boolean; voice?: string; language?: string };

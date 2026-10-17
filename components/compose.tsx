@@ -16,6 +16,7 @@ import { ImageOptions, PRESETS, VideoOptions, WritingOptions } from './compose/o
 import { Preview } from './compose/preview';
 import { AvatarCropModal } from './compose/avatar-crop';
 import { MotionEditor } from './compose/motion-editor';
+import { SmartVideo } from './compose/smart';
 
 /** Hard caption limits per platform (mirrors PLATFORM_LIMITS in lib/ai/compose.ts,
  *  which is server-only). */
@@ -320,7 +321,7 @@ export default function Compose({ draftId, onDone, initial }: {
             </button>
           ))}
         </div>
-        {media !== 'text' && !body.trim() && !(media === 'video' && gen.s.videoMode === 'avatar') && (
+        {media !== 'text' && !body.trim() && !(media === 'video' && !gen.s.videoSmart && gen.s.videoMode === 'avatar') && (
           <p className="compose-note">Describe the {media} in the post box above — that text is the prompt.</p>
         )}
         {media === 'image' && (
@@ -332,7 +333,20 @@ export default function Compose({ draftId, onDone, initial }: {
             onGenerate={() => gen.generateImage(body.trim(), readyImages.map((m) => m.url!))}
           />
         )}
-        {media === 'video' && (
+        {media === 'video' && gen.s.videoSmart && (
+          <SmartVideo
+            gen={gen}
+            text={body}
+            platforms={targets}
+            attachments={ready.flatMap((m) => (m.url && m.mimeType ? [{ url: m.url, mimeType: m.mimeType }] : []))}
+          />
+        )}
+        {media === 'video' && !gen.s.videoSmart && (
+          <button type="button" className="btn ghost sm" onClick={() => gen.set({ videoSmart: true })}>
+            <Icon name="sparkle" size={12} /> Use smart
+          </button>
+        )}
+        {media === 'video' && !gen.s.videoSmart && (
           <VideoOptions
             gen={gen}
             cost={costs.video}

@@ -9,6 +9,8 @@ export type VideoMode = 'text' | 'image-to-video' | 'reference' | 'audio-driven'
 export type Anchor = 'start' | 'end' | 'reference' | 'refVideo' | 'audio' | 'avatarFace';
 
 export const DEFAULT_SETTINGS = {
+  /** Video tab: the planner picks format, length and sound. false = "Choose myself". */
+  videoSmart: true,
   imageSize: '1024x1024' as '1024x1024' | '1536x1024' | '1024x1536',
   imageQuality: 'medium' as 'low' | 'medium' | 'high',
   imageCount: 1,
@@ -44,6 +46,23 @@ export const DEFAULT_SETTINGS = {
   motionAiLanguage: 'en' as 'en' | 'hi',
 };
 export type GenSettings = typeof DEFAULT_SETTINGS;
+
+export type VideoFormat = 'ai_video' | 'motion_graphic' | 'hybrid' | 'none';
+/** The plan /api/media/plan-video returns; sent back unchanged to generate-auto. */
+export type VideoPlan = {
+  format: VideoFormat; recipe?: string | null;
+  graphics?: { engine?: 'ai_motion' | 'template' | null; template?: string | null } | null;
+  footage?: unknown; durationSec: number; aspect: string;
+  audio: { narration?: boolean; music?: boolean; sfx?: boolean };
+  onScreenText?: string[]; estimatedCredits: number; confidence?: number; reasons?: string[];
+  fallback?: unknown;
+};
+export type PlanResponse = {
+  plan: VideoPlan; estimatedCredits: number; summary: string; reasons?: string[];
+  alternatives?: { format: VideoFormat; estimatedCredits: number; summary: string }[]; balance?: number;
+};
+/** AI-designed graphics (alone or over footage) open in the motion editor. */
+export const planEditable = (p: VideoPlan) => p.format === 'hybrid' || (p.format === 'motion_graphic' && p.graphics?.engine !== 'template');
 
 const CINEMA = VIDEO_MODELS['sociafy-cinema-1'];
 
@@ -225,6 +244,31 @@ export function useMediaGen(report: GenReport) {
     }
   };
 
+  /** Poll video jobs to the end, showing phases, then report what landed.
+   *  `motionAi` jobs (AI-designed / hybrid) are slower and open in the editor. */
+  const track = async (jobs: { id: string; aspect?: string }[], aspect: string, motionAi: boolean) => {
+    setRender({
+      startedAt: Date.now(), phases: jobs.map(() => 'queued'),
+      ...(motionAi ? { usual: 'AI-designed motion graphics take 3–10 minutes.', slowAfterSec: 12 * 60 } : {}),
+    });
+    const setPhase = (i: number, p: ClipPhase) => setRender((v) => (v ? { ...v, phases: v.phases.map((x, k) => (k === i ? p : x)) } : v));
+    const settled = await Promise.all(jobs.map(async (j, i) => {
+      const out = await pollJob(
+        // AI-designed jobs queue behind a 2-wide worker, so they get longer.
+        `/api/media/video-job/${j.id}`, (motionAi ? 25 : 15) * 60_000, [4_000, 500, 8_000],
+        (pd) => {
+          if (pd.status === 'pending') setPhase(i, pd.providerStatus === 'processing' || pd.providerStatus === 'staged' || pd.providerStatus === 'footage' ? 'rendering' : pd.providerStatus === 'finalizing' ? 'storing' : 'queued');
+        },
+        () => setPhase(i, 'storing'),
+      );
+      setPhase(i, 'asset' in out ? 'done' : 'failed');
+      return out;
+    }));
+    const added = settled.flatMap((o, k) => ('asset' in o && o.asset ? [toItem(o.asset, jobs[k]?.aspect?.replace(':', '/') ?? aspect, motionAi, audioNote(o.audioWarning))] : []));
+    if (added.length) report.added(added);
+    report.videoSettled({ added: added.length, total: jobs.length, failed: settled.flatMap((o) => ('failed' in o && o.failed ? [o.failed] : [])), notes: added.flatMap((m) => (m.note ? [m.note] : [])) });
+  };
+
   const generateVideo = async (prompt: string) => {
     const model = videoModel(s);
     const motion = s.videoMode === 'motion';
@@ -252,33 +296,34 @@ export function useMediaGen(report: GenReport) {
       const jobs = (data.jobs as { id: string }[] | undefined) ?? [];
       if (!jobs.length) { report.notice('Video generation did not start. Try again.'); return; }
 
-      setRender({
-        startedAt: Date.now(), phases: jobs.map(() => 'queued'),
-        ...(motionAi ? { usual: 'AI-designed motion graphics take 3–10 minutes.', slowAfterSec: 12 * 60 } : {}),
-      });
-      const setPhase = (i: number, p: ClipPhase) => setRender((v) => (v ? { ...v, phases: v.phases.map((x, k) => (k === i ? p : x)) } : v));
-      const aspect = (motion ? motionAspect : s.videoAspect).replace(':', '/');
-      const settled = await Promise.all(jobs.map(async (j, i) => {
-        const out = await pollJob(
-          // AI-designed jobs queue behind a 2-wide worker, so they get longer.
-          `/api/media/video-job/${j.id}`, (motionAi ? 25 : 15) * 60_000, [4_000, 500, 8_000],
-          (pd) => {
-            if (pd.status === 'pending') setPhase(i, pd.providerStatus === 'processing' || pd.providerStatus === 'staged' ? 'rendering' : pd.providerStatus === 'finalizing' ? 'storing' : 'queued');
-          },
-          () => setPhase(i, 'storing'),
-        );
-        setPhase(i, 'asset' in out ? 'done' : 'failed');
-        return out;
-      }));
-      const added = settled.flatMap((o) => ('asset' in o && o.asset ? [toItem(o.asset, aspect, motionAi, audioNote(o.audioWarning))] : []));
-      if (added.length) report.added(added);
-      report.videoSettled({ added: added.length, total: jobs.length, failed: settled.flatMap((o) => ('failed' in o && o.failed ? [o.failed] : [])), notes: added.flatMap((m) => (m.note ? [m.note] : [])) });
+      await track(jobs, (motion ? motionAspect : s.videoAspect).replace(':', '/'), motionAi);
     } catch {
       report.notice('Video generation failed. Check your connection and try again.');
     } finally {
       setRender(null);
       setBusy(null);
     }
+  };
+
+  /** Smart flow: render the plan the video brain returned. Returns the fresh
+   *  plan when the price rose since it was shown (nothing was charged). */
+  const generateAuto = async (body: { text: string; plan: VideoPlan; platforms?: string[]; attachments?: { url: string; mimeType: string }[] }): Promise<PlanResponse | null> => {
+    setBusy('video');
+    report.notice(null);
+    try {
+      const { r, data } = await postJson('/api/media/generate-auto', body);
+      if (r.status === 409 && data.error === 'plan_changed') return data as unknown as PlanResponse;
+      if (handled(r, data, 'Video generation')) return null;
+      const jobs = (data.jobs as { id: string; aspect?: string }[] | undefined) ?? [];
+      if (!jobs.length) { report.notice('Video generation did not start. Try again.'); return null; }
+      await track(jobs, body.plan.aspect.replace(':', '/'), planEditable(body.plan));
+    } catch {
+      report.notice('Video generation failed. Check your connection and try again.');
+    } finally {
+      setRender(null);
+      setBusy(null);
+    }
+    return null;
   };
 
   const generateAvatar = async (prompt: string) => {
@@ -335,7 +380,7 @@ export function useMediaGen(report: GenReport) {
 
   return {
     s, set, busy, render, cropFile, setCropFile, setAnchor, applyFace, voicePreview, previewVoice,
-    generateImage,
+    generateImage, generateAuto,
     generateVideo: (prompt: string) => (s.videoMode === 'avatar' ? generateAvatar(prompt) : generateVideo(prompt)),
   };
 }

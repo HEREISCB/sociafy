@@ -79,6 +79,8 @@ vi.mock('../media/finalizeVideoJob', () => ({
   },
 }));
 
+vi.mock('../media/hybridJob', () => ({ advanceHybrids: () => Promise.resolve(0) }));
+
 vi.mock('../../app/api/v1/shared', () => ({
   IMAGE_JOB_KIND: 'image',
   failImageJob: (job: { id: string }, error: string) => {

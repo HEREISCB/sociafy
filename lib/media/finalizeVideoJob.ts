@@ -38,7 +38,13 @@ export type FinalizeVideoResult =
 const SUBMIT_GRACE_MS = 10 * 60_000;
 /** Seedance resolves in 30–120s. A row still non-terminal after this is dead
  *  upstream — close it and refund rather than leave credits hanging. */
-const MAX_AGE_MS = 2 * 60 * 60_000;
+export const MAX_AGE_MS = 2 * 60 * 60_000;
+
+/** A hybrid's parent row while its footage renders, and while it is being
+ *  handed to the motion worker. Not 'pending': nothing is upstream for it yet,
+ *  so the no-task-id grace below must not fail it. lib/media/hybridJob.ts owns it. */
+export const HYBRID_WAITING = 'footage';
+export const HYBRID_SUBMITTING = 'hybrid_submitting';
 /** Cinema is slower by design — a 30s render is ~50 minutes of GPU, and it
  *  queues behind at most two others. Two hours would reap live work. */
 const CINEMA_MAX_AGE_MS = 6 * 60 * 60_000;
@@ -55,6 +61,7 @@ export async function finalizeVideoJob(job: VideoJob): Promise<FinalizeVideoResu
   // Parked for a render slot (lib/agent/media.ts): uncharged and not upstream,
   // so the no-task-id grace below must not fail it. Its sweep owns it.
   if (job.status === 'queued' || job.status === 'submitting') return { status: 'pending', providerStatus: 'queued' };
+  if (job.status === HYBRID_WAITING || job.status === HYBRID_SUBMITTING) return { status: 'pending', providerStatus: 'footage' };
 
   // Cinema runs on a different backend with a different poll, a different
   // failure vocabulary and an AUTHENTICATED artifact URL. Split here rather

@@ -551,6 +551,26 @@ export const motionVersions = pgTable(
 );
 
 // =====================================================
+// hybrid_parts — AI footage rendered for a hybrid motion graphic.
+//
+// The parent is the user-facing motion-claude job (charged the whole hybrid
+// price once); the child is an internal footage render (credits_charged 0).
+// `spec` is what the parent needs to submit once the footage lands — shape =
+// HybridSpec in lib/media/hybridJob.ts. Own table for the reason above (0021).
+// =====================================================
+export const hybridParts = pgTable(
+  'hybrid_parts',
+  {
+    parentJobId: uuid('parent_job_id').notNull(),
+    childJobId: uuid('child_job_id').primaryKey(),
+    role: text('role').notNull().default('footage'),
+    spec: jsonb('spec').$type<Record<string, unknown>>().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index('hybrid_parts_parent_idx').on(t.parentJobId)],
+);
+
+// =====================================================
 // voices — cloned "Voice Twin" profiles + consent record.
 //
 // The underlying model is zero-shot, so a "voice" is not a trained artifact:

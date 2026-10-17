@@ -138,6 +138,14 @@ describe('submitMotionAiVideo', () => {
     expect(sent.brand).toMatchObject({ brandName: 'IndusLabs', logoUrl: 'https://cdn/logo.svg', colors: { primary: '#5B5EF2' }, style: 'soft' });
   });
 
+  it('always sends all five brand colors, filled from primary, so the worker never picks its own', async () => {
+    await ai();
+    const colors = (st.submitted[0] as { brand: { colors: Record<string, string> } }).brand.colors;
+    expect(Object.keys(colors).sort()).toEqual(['accent', 'background', 'primary', 'secondary', 'text']);
+    for (const c of Object.values(colors)) expect(c).toMatch(/^#[0-9A-F]{6}$/);
+    expect(colors.accent).toBe(colors.secondary);
+  });
+
   it('charges the voiceover surcharge and sends the audio choice to the worker', async () => {
     const audio = { narration: true, sfx: true, music: false, language: 'hi' };
     const { creditsCharged } = await submitMotionAiVideo({ userId: 'u1', aspect: '9:16', durationSec: 15, topic: 'Hindi support is live', via: 'compose', audio });

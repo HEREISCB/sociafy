@@ -4,7 +4,8 @@ import { withUser, jsonError } from '../../../../../lib/api';
 import { db } from '../../../../../lib/db';
 import { videoJobs } from '../../../../../lib/db/schema';
 import { isStubMode } from '../../../../../lib/env';
-import { finalizeVideoJob } from '../../../../../lib/media/finalizeVideoJob';
+import { finalizeVideoJob, HYBRID_WAITING } from '../../../../../lib/media/finalizeVideoJob';
+import { advanceHybrid } from '../../../../../lib/media/hybridJob';
 // The same mapping /api/v1/videos uses. Imported, not copied: two mappings mean
 // one failure eventually gets described two different ways.
 import { publicVideoError } from '../../../v1/shared';
@@ -32,12 +33,20 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ jobId: stri
       });
     }
 
-    const [job] = await db()
+    const load = () => db()
       .select()
       .from(videoJobs)
       .where(and(eq(videoJobs.id, jobId), eq(videoJobs.userId, user.id)))
       .limit(1);
+    let [job] = await load();
     if (!job) return jsonError('job_not_found', 404);
+    // A hybrid waiting on its footage: move it along (footage done → submit the
+    // motion graphic, footage failed → fallback), then report the fresh row.
+    if (job.status === HYBRID_WAITING) {
+      await advanceHybrid(job);
+      [job] = await load();
+      if (!job) return jsonError('job_not_found', 404);
+    }
 
     const result = await finalizeVideoJob(job);
     // Same invariant the /api/v1 readers enforce: never announce a completion we

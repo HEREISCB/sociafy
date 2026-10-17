@@ -304,3 +304,18 @@ li.compose-thumb { cursor: default; }
 }
 
 .compose input[type="range"] { accent-color: var(--text); }
+
+/* Smart video: the planner's pick, one button. */
+.smart-card { gap: var(--s-3); transition: opacity 0.15s; }
+.smart-card.is-updating { opacity: 0.6; }
+.smart-head { display: flex; flex-direction: column; gap: 2px; }
+.smart-format { margin: 0; font-size: var(--fs-md); font-weight: 600; }
+.smart-summary { margin: 0; font-size: var(--fs-sm); color: var(--text); }
+.smart-reasons { margin: 0; padding-left: 1.1em; font-size: var(--fs-xs); color: var(--text-2); display: flex; flex-direction: column; gap: 2px; }
+.smart-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-1) var(--s-3); font-size: var(--fs-xs); color: var(--text-2); }
+.smart-sound { display: inline-flex; align-items: center; gap: 4px; }
+.smart-actions { flex-wrap: wrap; gap: var(--s-2); }
+.smart-sk { height: 14px; width: 80%; }
+.smart-sk--title { height: 20px; width: 40%; }
+.smart-sk--short { width: 55%; }
+@media (prefers-reduced-motion: reduce) { .smart-card { transition: none; } .smart-sk { animation: none; } }

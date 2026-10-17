@@ -4,6 +4,7 @@ import { genJobs, videoJobs } from '../db/schema';
 import { isStubMode } from '../env';
 import { finalizeVideoJob } from '../media/finalizeVideoJob';
 import { attachFinishedVideos, submitQueuedVideos } from '../agent/media';
+import { advanceHybrids } from '../media/hybridJob';
 import { sweepTryGenerations } from '../try';
 // failImageJob is colocated with the /v1/images route that writes these rows and
 // is the only claim-then-refund path for them. Importing app/ from lib/ is
@@ -106,6 +107,14 @@ export async function runFinalizeJobs(): Promise<FinalizeJobsResult> {
       console.error('[cron/finalize-video-jobs] image', job.id, msg.slice(0, 300));
       results.push({ id: job.id, status: 'error', error: msg.slice(0, 200) });
     }
+  }
+
+  // Hybrids whose footage just ended (above): hand them to the motion worker,
+  // or fall back to a plain motion graphic.
+  try {
+    await advanceHybrids();
+  } catch (e) {
+    console.error('[cron/finalize-video-jobs] hybrid', e instanceof Error ? e.message.slice(0, 300) : e);
   }
 
   // Autopilot renders parked for a slot. After the sweep above, which is what

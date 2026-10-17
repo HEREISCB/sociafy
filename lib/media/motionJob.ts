@@ -12,7 +12,7 @@ import { charge, ensureBalance, refund, InsufficientCreditsError } from '../cred
 import { makeMediaKey } from '../storage/r2';
 
 /** No HTTP response came back, so the engine may have taken the job: the sweeper settles it. */
-const AMBIGUOUS_SUBMIT_RX = /ETIMEDOUT|ECONNRESET|ECONNABORTED|EPIPE|socket hang up|TimeoutError|aborted/i;
+export const AMBIGUOUS_SUBMIT_RX = /ETIMEDOUT|ECONNRESET|ECONNABORTED|EPIPE|socket hang up|TimeoutError|aborted/i;
 
 export class MotionNotReady extends Error {
   constructor() { super('brand_kit_incomplete'); }
@@ -90,19 +90,7 @@ export async function submitMotionAiVideo(args: {
   const pre = await ensureBalance(userId, price.credits);
   if (!pre.ok) throw new InsufficientCreditsError(pre.balance, pre.needed);
 
-  // motionVariables picks the font URLs ('' = none chosen); copy is the worker's job.
-  const v = motionVariables(kit, profile, { hook: '', lines: [], facts: [] });
-  const brand: MotionAiBrand = {
-    brandName: v.brandName || undefined,
-    tagline: v.tagline || undefined,
-    cta: v.cta || undefined,
-    colors: v.colors,
-    logoUrl: v.logoUrl ?? undefined,
-    logoReverseUrl: v.logoReverseUrl ?? undefined,
-    fontDisplayUrl: v.fontDisplayUrl || undefined,
-    fontBodyUrl: v.fontBodyUrl || undefined,
-    style: v.style,
-  };
+  const brand = motionAiBrand(kit, profile);
 
   return startJob({
     userId, price,
@@ -114,6 +102,27 @@ export async function submitMotionAiVideo(args: {
       posterKey: makeMediaKey(userId, 'motion-ai-poster.jpg'),
     }),
   });
+}
+
+/**
+ * The brand block the AI motion worker gets. ALWAYS all five colors
+ * (resolveColors fills gaps from primary): a missing role makes the worker use
+ * its own default, which then shows up on the end card.
+ */
+export function motionAiBrand(kit: BrandKit, profile: Pick<BrandProfile, 'companyName' | 'website'>): MotionAiBrand {
+  // motionVariables picks the font URLs ('' = none chosen); copy is the worker's job.
+  const v = motionVariables(kit, profile, { hook: '', lines: [], facts: [] });
+  return {
+    brandName: v.brandName || undefined,
+    tagline: v.tagline || undefined,
+    cta: v.cta || undefined,
+    colors: v.colors,
+    logoUrl: v.logoUrl ?? undefined,
+    logoReverseUrl: v.logoReverseUrl ?? undefined,
+    fontDisplayUrl: v.fontDisplayUrl || undefined,
+    fontBodyUrl: v.fontBodyUrl || undefined,
+    style: v.style,
+  };
 }
 
 /**

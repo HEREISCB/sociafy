@@ -14,6 +14,7 @@ import path from 'node:path';
 const state = vi.hoisted(() => ({
   job: { id: 'job_1', userId: 'user_1' } as Record<string, unknown>,
   result: { status: 'pending' } as Record<string, unknown>,
+  advanced: [] as string[],
 }));
 
 vi.mock('../../../../lib/api', () => ({
@@ -43,7 +44,11 @@ vi.mock('../../../../lib/db/schema', () => ({
 }));
 vi.mock('../../../../lib/env', () => ({ isStubMode: { r2: () => false, database: () => false } }));
 vi.mock('../../../../lib/media/finalizeVideoJob', () => ({
+  HYBRID_WAITING: 'footage',
   finalizeVideoJob: () => Promise.resolve(state.result),
+}));
+vi.mock('../../../../lib/media/hybridJob', () => ({
+  advanceHybrid: (job: Record<string, unknown>) => { state.advanced.push(job.id as string); return Promise.resolve(); },
 }));
 
 import { GET } from './[jobId]/route';
@@ -55,9 +60,19 @@ beforeEach(() => {
   process.env.PIAPI_API_KEY = 'k';
   state.job = { id: 'job_1', userId: 'user_1' };
   state.result = { status: 'pending' };
+  state.advanced = [];
 });
 
 describe('GET /api/media/video-job/[jobId]', () => {
+  it('moves a hybrid waiting on its footage along before reporting, and only that', async () => {
+    state.job = { id: 'job_1', userId: 'user_1', status: 'footage' };
+    expect(await poll()).toEqual({ status: 'pending' });
+    expect(state.advanced).toEqual(['job_1']);
+    state.job = { id: 'job_1', userId: 'user_1', status: 'pending' };
+    await poll();
+    expect(state.advanced).toEqual(['job_1']);
+  });
+
   it('reports a content refusal as prompt_rejected, with no provider text', async () => {
     state.result = { status: 'failed', error: 'piapi_failed: Your content violated community guidelines.' };
     const res = await poll();
