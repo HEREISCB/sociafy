@@ -1,0 +1,12 @@
+[Unit]
+Description=Reverse SSH tunnel: prod 127.0.0.1:8790 -> this box's motion-ai worker
+After=network-online.target
+
+[Service]
+# Key is restricted on prod to this one reverse forward (permitlisten, command=/bin/false).
+ExecStart=/usr/bin/ssh -N -i %h/.ssh/motionai_tunnel -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=accept-new -o BatchMode=yes -R 127.0.0.1:8790:127.0.0.1:8790 ubuntu@ec2-13-233-124-31.ap-south-1.compute.amazonaws.com
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

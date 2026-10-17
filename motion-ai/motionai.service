@@ -1,0 +1,19 @@
+[Unit]
+Description=Sociafy motion-ai worker (Claude-authored HyperFrames motion graphics)
+After=network-online.target
+
+[Service]
+EnvironmentFile=@BASE@/.env
+Environment=PATH=@BASE@/node/bin:/usr/bin:/bin
+WorkingDirectory=@BASE@/app
+ExecStart=@BASE@/node/bin/node @BASE@/app/server.mjs
+StandardOutput=append:@BASE@/server.log
+StandardError=append:@BASE@/server.log
+Restart=always
+RestartSec=3
+KillMode=mixed
+TimeoutStopSec=20
+Nice=5
+
+[Install]
+WantedBy=default.target
