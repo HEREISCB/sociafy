@@ -37,10 +37,23 @@ export const DEFAULT_SETTINGS = {
   /** Under videoMode 'motion': AI-designed instead of a template. */
   motionAi: false,
   motionAiDuration: MOTION_AI.durationSec.default as number,
+  /** AI-designed audio. Voiceover or music add 1 cr/s; sound effects are free. */
+  motionAiVoiceover: false,
+  motionAiSfx: true,
+  motionAiMusic: false,
+  motionAiLanguage: 'en' as 'en' | 'hi',
 };
 export type GenSettings = typeof DEFAULT_SETTINGS;
 
 const CINEMA = VIDEO_MODELS['sociafy-cinema-1'];
+
+/** The `audio` body for an AI-designed motion graphic (also what prices it). */
+export function motionAiAudio(s: GenSettings) {
+  return {
+    narration: s.motionAiVoiceover, sfx: s.motionAiSfx, music: s.motionAiMusic,
+    ...(s.motionAiVoiceover ? { language: s.motionAiLanguage } : {}),
+  };
+}
 
 /** Settings Cinema can't serve, as UI copy. Empty = Cinema can take it. */
 export function cinemaBlockers(s: GenSettings): string[] {
@@ -66,7 +79,7 @@ export function genCosts(s: GenSettings, attachedImages: number): { image: numbe
   const image = priceForImage(s.imageSize, s.imageQuality, refs).credits * s.imageCount;
   const avatarQ = s.videoQuality === '1080p' ? '720p' : s.videoQuality;
   if (s.videoMode === 'avatar') return { image, video: priceForAvatar(avatarQ).credits };
-  if (s.videoMode === 'motion' && s.motionAi) return { image, video: priceForMotionAi(s.motionAiDuration).credits };
+  if (s.videoMode === 'motion' && s.motionAi) return { image, video: priceForMotionAi(s.motionAiDuration, motionAiAudio(s)).credits };
   if (s.videoMode === 'motion') return { image, video: priceForMotion(MOTION_TEMPLATES[s.motionTemplate].durationSec).credits };
   if (videoModel(s) === 'sociafy-cinema-1') return { image, video: null };
   const refSec = s.videoMode === 'reference' ? s.refVideoSec : null;
@@ -87,11 +100,11 @@ export type GenReport = {
   notice: (msg: string | null) => void;
   credits: (e: { balance: number; needed: number }) => void;
   /** Video jobs settled. `failed` holds public failure codes, one per clip. */
-  videoSettled: (r: { added: number; total: number; failed: string[] }) => void;
+  videoSettled: (r: { added: number; total: number; failed: string[]; notes?: string[] }) => void;
 };
 
 type Asset = { id: string; publicUrl: string; mimeType: string; label?: string };
-type JobPoll = { status?: 'pending' | 'completed' | 'failed'; providerStatus?: string; asset?: Asset; error?: string };
+type JobPoll = { status?: 'pending' | 'completed' | 'failed'; providerStatus?: string; asset?: Asset; error?: string; audioWarning?: string };
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -111,7 +124,7 @@ export async function pollJob(url: string, maxMs: number, step: [number, number,
       pd = (await r.json().catch(() => ({}))) as JobPoll;
     } catch { continue; } finally { clearTimeout(slow); }
     onPoll?.(pd);
-    if (pd.status === 'completed' && pd.asset) return { asset: pd.asset };
+    if (pd.status === 'completed' && pd.asset) return { asset: pd.asset, audioWarning: pd.audioWarning };
     if (pd.status === 'failed') return { failed: pd.error || 'generation_failed' };
   }
   return { failed: 'poll_timeout' };
@@ -133,8 +146,15 @@ function failCopy(status: number, data: Record<string, unknown>, what: string): 
   return `${what} failed. Try again.`;
 }
 
-const toItem = (a: Asset, aspect?: string, motionAi?: boolean): MediaItem => ({
-  id: a.id, url: a.publicUrl, mimeType: a.mimeType, label: a.label || 'Generated', aspect, ...(motionAi ? { motionAi } : {}),
+/** Item note for asked-for audio the render couldn't carry. */
+export function audioNote(warning: string | undefined): string | undefined {
+  if (warning === 'audio_unavailable') return 'Couldn’t add audio this time — the video is silent.';
+  if (warning === 'audio_partial') return 'Some audio couldn’t be added.';
+  return undefined;
+}
+
+const toItem = (a: Asset, aspect?: string, motionAi?: boolean, note?: string): MediaItem => ({
+  id: a.id, url: a.publicUrl, mimeType: a.mimeType, label: a.label || 'Generated', aspect, ...(motionAi ? { motionAi } : {}), ...(note ? { note } : {}),
 });
 
 export function useMediaGen(report: GenReport) {
@@ -215,7 +235,7 @@ export function useMediaGen(report: GenReport) {
     report.notice(null);
     try {
       const { r, data } = motionAi
-        ? await postJson('/api/media/generate-motion', { topic: prompt, template: 'ai', aspect: motionAspect, durationSec: s.motionAiDuration })
+        ? await postJson('/api/media/generate-motion', { topic: prompt, template: 'ai', aspect: motionAspect, durationSec: s.motionAiDuration, audio: motionAiAudio(s) })
         : motion
         ? await postJson('/api/media/generate-motion', { topic: prompt, template: s.motionTemplate, aspect: motionAspect })
         : await postJson('/api/media/generate-video', {
@@ -250,9 +270,9 @@ export function useMediaGen(report: GenReport) {
         setPhase(i, 'asset' in out ? 'done' : 'failed');
         return out;
       }));
-      const added = settled.flatMap((o) => ('asset' in o && o.asset ? [toItem(o.asset, aspect, motionAi)] : []));
+      const added = settled.flatMap((o) => ('asset' in o && o.asset ? [toItem(o.asset, aspect, motionAi, audioNote(o.audioWarning))] : []));
       if (added.length) report.added(added);
-      report.videoSettled({ added: added.length, total: jobs.length, failed: settled.flatMap((o) => ('failed' in o && o.failed ? [o.failed] : [])) });
+      report.videoSettled({ added: added.length, total: jobs.length, failed: settled.flatMap((o) => ('failed' in o && o.failed ? [o.failed] : [])), notes: added.flatMap((m) => (m.note ? [m.note] : [])) });
     } catch {
       report.notice('Video generation failed. Check your connection and try again.');
     } finally {

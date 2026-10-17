@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { withUser, jsonError } from '../../../../../../lib/api';
 import { motionAiConfigured, getMotionAiResult } from '../../../../../../lib/ai/motionAi';
-import { cleanSegments, findMotionJob, listVersions, saveMotionResult } from '../../../../../../lib/media/motionVersions';
+import { cleanAudio, cleanSegments, findMotionJob, listVersions, saveMotionResult } from '../../../../../../lib/media/motionVersions';
 
 export const runtime = 'nodejs';
 
@@ -37,6 +37,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ jobId: stri
         const r = await getMotionAiResult(job.providerTaskId);
         if (r.status === 'done') {
           me.segments = cleanSegments(r.segments, job.durationSec);
+          me.audio = cleanAudio(r.audio);
           await saveMotionResult(job, r);
         }
       } catch (e) {
@@ -52,6 +53,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ jobId: stri
       videoUrl: me.asset.publicUrl,
       posterUrl: me.posterUrl,
       segments: me.segments,
+      /** What this version's MP4 carries; null = silent. */
+      audio: me.audio,
       versions: versions.map((v) => ({
         jobId: v.jobId, version: v.version, status: v.status, instruction: v.instruction,
         assetId: v.asset?.id ?? null, videoUrl: v.asset?.publicUrl ?? null, posterUrl: v.posterUrl,

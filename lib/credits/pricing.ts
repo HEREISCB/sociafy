@@ -115,7 +115,9 @@ export const CREDIT_PRICES: Record<CreditAction, number> = {
   // (several minutes of agent + render compute per job, retries included),
   // then renders it. Priced PER SECOND of output (see priceForMotionAi): 12 cr
   // for 6s, 30 cr for 15s, 40 cr for 20s. The authoring compute, not the
-  // render, is most of the cost — owner to confirm the rate.
+  // render, is most of the cost — owner to confirm the rate. A voiceover or
+  // music bed adds MOTION_AI_AUDIO_PER_SEC (generated audio has a real cost);
+  // sound effects are free.
   video_motion_ai: 2,
   // An edit of an AI-designed motion graphic ("make the logo bigger"): the
   // worker revises the existing composition and re-renders. Per second of the
@@ -267,12 +269,22 @@ export function priceForMotion(durationSec: number): { action: CreditAction; cre
   return { action, credits: CREDIT_PRICES[action] * Math.max(1, Math.ceil(durationSec / 8)) };
 }
 
-/** CREDIT_PRICES.video_motion_ai per second of output, length clamped to 6–20s. */
-export function priceForMotionAi(durationSec: number): { action: CreditAction; credits: number } {
+/** Per-second surcharge when a voiceover or music bed is mixed in — once, even with both. Sound effects are free. */
+export const MOTION_AI_AUDIO_PER_SEC = 1;
+
+/**
+ * CREDIT_PRICES.video_motion_ai per second of output, length clamped to 6–20s,
+ * + MOTION_AI_AUDIO_PER_SEC per second with narration or music.
+ */
+export function priceForMotionAi(
+  durationSec: number,
+  audio?: { narration?: boolean; music?: boolean; sfx?: boolean },
+): { action: CreditAction; credits: number } {
   const action: CreditAction = 'video_motion_ai';
   const { min, max } = MOTION_AI.durationSec;
   const sec = Math.min(max, Math.max(min, Math.round(durationSec) || min));
-  return { action, credits: CREDIT_PRICES[action] * sec };
+  const perSec = CREDIT_PRICES[action] + (audio?.narration || audio?.music ? MOTION_AI_AUDIO_PER_SEC : 0);
+  return { action, credits: perSec * sec };
 }
 
 /** CREDIT_PRICES.video_motion_ai_edit per second of the video being edited, clamped to 6–20s. */

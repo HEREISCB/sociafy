@@ -21,6 +21,14 @@ const bodySchema = z.object({
   aspect: z.enum(MOTION_AI.aspects).default('9:16'),
   /** 'ai' only; templates have fixed lengths. */
   durationSec: z.number().int().min(MOTION_AI.durationSec.min).max(MOTION_AI.durationSec.max).default(MOTION_AI.durationSec.default),
+  /** 'ai' only. Omitted = silent. Voiceover or music adds 1 cr/s (priceForMotionAi). */
+  audio: z.object({
+    narration: z.boolean().default(false),
+    sfx: z.boolean().default(false),
+    music: z.boolean().default(false),
+    voice: z.string().trim().regex(/^[A-Za-z0-9 ._'-]{1,60}$/).optional(),
+    language: z.string().trim().regex(/^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})?$/).optional(),
+  }).strict().optional(),
 });
 
 /**
@@ -38,7 +46,7 @@ export async function POST(req: NextRequest) {
 
     const parsed = parseBody(bodySchema, await req.json().catch(() => ({})));
     if (!parsed.ok) return parsed.response;
-    const { topic, aspect, durationSec } = parsed.data;
+    const { topic, aspect, durationSec, audio } = parsed.data;
     const ai = parsed.data.template === 'ai';
     if (!(ai ? motionAiConfigured() : motionConfigured())) return jsonError('not_found', 404);
     if (!ai && (aspect === '1:1' || topic.length > 2_000)) {
@@ -48,7 +56,7 @@ export async function POST(req: NextRequest) {
 
     try {
       const { job, creditsCharged } = ai
-        ? await submitMotionAiVideo({ userId: user.id, aspect, durationSec, topic, via: 'compose' })
+        ? await submitMotionAiVideo({ userId: user.id, aspect, durationSec, topic, audio, via: 'compose' })
         : await submitMotionVideo({ userId: user.id, template, aspect: aspect as (typeof MOTION_ASPECTS)[number], topic, via: 'compose' });
       return new Response(
         JSON.stringify({

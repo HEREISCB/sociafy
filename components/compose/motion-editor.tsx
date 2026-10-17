@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { priceForMotionAiEdit } from '../../lib/credits/pricing';
-import type { MotionSegment } from '../../lib/ai/motionAi';
+import type { MotionAudio, MotionSegment } from '../../lib/ai/motionAi';
 import { pollJob, RenderStatus, type Render } from './generate';
 import type { MediaItem } from './attachments';
 
@@ -15,8 +15,20 @@ export type MotionEditData = {
   videoUrl: string;
   posterUrl: string | null;
   segments: MotionSegment[];
+  /** What this version's MP4 carries; null = silent. */
+  audio?: MotionAudio | null;
   versions: Version[];
 };
+
+/** Quick asks for the audio this version actually has. */
+function audioChips(a: MotionAudio | null | undefined): string[] {
+  if (!a) return [];
+  return [
+    a.narration ? 'Make the voice calmer' : null,
+    a.sfx ? 'Remove the sound effects' : null,
+    a.music ? 'Lower the music' : null,
+  ].filter((x): x is string => x !== null);
+}
 
 const EDITING: Omit<Render, 'startedAt'> = { phases: ['rendering'], usual: 'Editing — usually 1–5 minutes.', slowAfterSec: 6 * 60 };
 
@@ -110,7 +122,10 @@ export function MotionEditor({
 
   const cur = data?.versions.find((v) => v.jobId === data.jobId);
   const seg = data?.segments.find((s) => s.id === sel) ?? null;
-  const suggestions = seg ? seg.suggestions : (data?.segments ?? []).flatMap((s) => s.suggestions.slice(0, 1)).slice(0, 4);
+  const suggestions = [...new Set([
+    ...(seg ? seg.suggestions : (data?.segments ?? []).flatMap((s) => s.suggestions.slice(0, 1)).slice(0, 4)),
+    ...audioChips(data?.audio),
+  ])];
   const cost = data ? priceForMotionAiEdit(data.durationSec).credits : 0;
   const dur = data?.durationSec || 1;
 
@@ -172,6 +187,8 @@ export function MotionEditor({
             ) : (
               <p className="compose-note">Describe the change for the whole video.</p>
             )}
+
+            {seg?.narration && <p className="compose-note motion-edit-narration">Voiceover: “{seg.narration}”</p>}
 
             {suggestions.length > 0 && (
               <div className="compose-chips" role="group" aria-label="Suggestions">

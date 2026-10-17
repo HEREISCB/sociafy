@@ -56,7 +56,15 @@ export type SubmitMotionAiArgs = {
   /** R2 keys the worker uploads to — ours, so the asset lands in the user's prefix. */
   videoKey: string;
   posterKey: string;
+  /** What to mix in. Omitted = silent (the worker defaults every flag off). */
+  audio?: MotionAudioRequest;
 };
+
+/** Narration = voiceover; sfx = sound effects; music = a music bed. `language` is a code ("en", "hi"). */
+export type MotionAudioRequest = { narration: boolean; sfx: boolean; music: boolean; voice?: string; language?: string };
+
+/** What the finished MP4 actually carries; `warning` when some or all asked-for audio couldn't be added. */
+export type MotionAudio = { narration: boolean; sfx: boolean; music: boolean; warning?: 'audio_unavailable' | 'audio_partial' };
 
 export function submitMotionAi(args: SubmitMotionAiArgs): Promise<{ callId: string }> {
   return call('motion-ai/submit', { method: 'POST', body: args });
@@ -70,10 +78,12 @@ export type MotionSegment = {
   endSec: number;
   onScreenText: string;
   suggestions: string[];
+  /** The voiceover line for this beat, when the render has one. */
+  narration?: string;
 };
 
 /** The template engine's result, plus the composition's segments once done (and the parent for an edit). */
-export type MotionAiResult = MotionResult & { segments?: MotionSegment[]; parentCallId?: string };
+export type MotionAiResult = MotionResult & { segments?: MotionSegment[]; parentCallId?: string; audio?: MotionAudio };
 
 export function getMotionAiResult(callId: string): Promise<MotionAiResult> {
   return call(`motion-ai/result?callId=${encodeURIComponent(callId)}`, { method: 'GET', timeoutMs: 15_000 });

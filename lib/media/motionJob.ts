@@ -4,7 +4,7 @@ import { agentSettings, brandKits, videoJobs } from '../db/schema';
 import { motionAiReady, motionReady, motionVariables, type BrandKit, type BrandProfile } from '../brand/kit';
 import { MOTION_AI, MOTION_GRAPHICS, MOTION_TEMPLATES, type MotionTemplate } from '../ai/models';
 import { submitMotion } from '../ai/motion';
-import { editMotionAi, submitMotionAi, type MotionAiBrand } from '../ai/motionAi';
+import { editMotionAi, submitMotionAi, type MotionAiBrand, type MotionAudioRequest } from '../ai/motionAi';
 import { recordEdit, rootOf } from './motionVersions';
 import { writeMotionCopy } from '../ai/motionCopy';
 import { priceForMotion, priceForMotionAi, priceForMotionAiEdit, type CreditAction } from '../credits/pricing';
@@ -77,14 +77,16 @@ export async function submitMotionAiVideo(args: {
   durationSec: number;
   topic: string;
   via: 'compose' | 'autopilot';
+  /** Omitted = silent. Narration or music adds to the price. */
+  audio?: MotionAudioRequest;
 }): Promise<{ job: typeof videoJobs.$inferSelect; creditsCharged: number }> {
-  const { userId, aspect, topic } = args;
+  const { userId, aspect, topic, audio } = args;
   const { kit, profile } = await loadBrand(userId);
   if (!motionAiReady(kit, profile)) throw new MotionNotReady();
 
   const { min, max } = MOTION_AI.durationSec;
   const durationSec = Math.min(max, Math.max(min, Math.round(args.durationSec)));
-  const price = priceForMotionAi(durationSec);
+  const price = priceForMotionAi(durationSec, audio);
   const pre = await ensureBalance(userId, price.credits);
   if (!pre.ok) throw new InsufficientCreditsError(pre.balance, pre.needed);
 
@@ -105,9 +107,9 @@ export async function submitMotionAiVideo(args: {
   return startJob({
     userId, price,
     row: { provider: MOTION_AI.backend, prompt: topic, rewrittenPrompt: null, durationSec, aspect, genMode: 'motion-ai' },
-    meta: { template: 'ai', aspect, durationSec, via: args.via },
+    meta: { template: 'ai', aspect, durationSec, via: args.via, ...(audio ? { audio } : {}) },
     submit: () => submitMotionAi({
-      prompt: topic.slice(0, 4_000), aspect, durationSec, brand,
+      prompt: topic.slice(0, 4_000), aspect, durationSec, brand, ...(audio ? { audio } : {}),
       videoKey: makeMediaKey(userId, 'motion-ai.mp4'),
       posterKey: makeMediaKey(userId, 'motion-ai-poster.jpg'),
     }),

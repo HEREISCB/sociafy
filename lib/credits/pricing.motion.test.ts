@@ -21,6 +21,17 @@ describe('AI-designed motion-graphics pricing', () => {
     expect(priceForMotionAi(60).credits).toBe(40);
     expect(ACTION_LABELS.video_motion_ai).toBeTruthy();
   });
+
+  it('adds 1 cr/s for a voiceover or music (once for both); sound effects are free', () => {
+    const off = { narration: false, sfx: false, music: false };
+    expect(priceForMotionAi(15, off).credits).toBe(30);
+    expect(priceForMotionAi(15, { ...off, sfx: true }).credits).toBe(30);
+    expect(priceForMotionAi(15, { ...off, narration: true })).toEqual({ action: 'video_motion_ai', credits: 45 });
+    expect(priceForMotionAi(15, { ...off, music: true }).credits).toBe(45);
+    expect(priceForMotionAi(15, { narration: true, sfx: true, music: true }).credits).toBe(45);
+    expect(priceForMotionAi(6, { ...off, narration: true }).credits).toBe(18);
+    expect(priceForMotionAi(60, { ...off, music: true }).credits).toBe(60);
+  });
 });
 
 describe('AI-designed motion-graphic edit pricing', () => {

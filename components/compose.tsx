@@ -118,11 +118,11 @@ export default function Compose({ draftId, onDone, initial }: {
     },
     notice: setNotice,
     credits: (e) => { setCreditError(e); refreshCredits(); },
-    videoSettled: ({ added, total, failed }) => {
+    videoSettled: ({ added, total, failed, notes = [] }) => {
       refreshCredits();
       const reasons = [...new Set(failed)].map(videoFailCopy);
       const extra = added > 1 ? 'The other clips are in your library.' : null;
-      setNotice([failed.length && added ? `${added} of ${total} clips made.` : null, extra, ...reasons].filter(Boolean).join(' ') || null);
+      setNotice([failed.length && added ? `${added} of ${total} clips made.` : null, extra, ...reasons, ...new Set(notes)].filter(Boolean).join(' ') || null);
     },
   });
 

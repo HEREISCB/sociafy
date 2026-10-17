@@ -23,6 +23,7 @@ const state = vi.hoisted(() => ({
   motionConfigured: true,
   motionAiConfigured: true,
   saved: [] as { job: Record<string, unknown>; r: Record<string, unknown> }[],
+  savedWarning: undefined as string | undefined,
   motionAiResult: { status: 'done', videoKey: 'users/user_1/motion-ai.mp4', sizeBytes: 456 } as Record<string, unknown>,
   motionResult: { status: 'done', videoKey: 'users/user_1/motion.mp4', sizeBytes: 123 } as Record<string, unknown>,
   task: { status: 'completed', videoUrl: 'https://cdn.piapi/x.mp4' } as
@@ -121,6 +122,8 @@ vi.mock('../ai/motionAi', () => ({
   getMotionAiResult: () => Promise.resolve(state.motionAiResult),
 }));
 vi.mock('./motionVersions', () => ({
+  cleanAudio: (a: unknown) => a ?? null,
+  savedAudioWarning: () => Promise.resolve(state.savedWarning),
   saveMotionResult: (job: Record<string, unknown>, r: Record<string, unknown>) => { state.saved.push({ job, r }); return Promise.resolve(); },
 }));
 vi.mock('../storage/r2', () => ({
@@ -171,7 +174,7 @@ beforeEach(() => {
   state.cueRender = { status: 'done' };
   state.motionConfigured = true;
   state.motionAiConfigured = true;
-  state.saved = [];
+  state.saved = []; state.savedWarning = undefined;
   state.motionAiResult = { status: 'done', videoKey: 'users/user_1/motion-ai.mp4', sizeBytes: 456 };
   state.motionResult = { status: 'done', videoKey: 'users/user_1/motion.mp4', sizeBytes: 123 };
 });
@@ -450,10 +453,23 @@ describe('finalizeVideoJob — AI-designed motion graphics', () => {
     expect((await finalizeVideoJob(aiJob({ genMode: 'motion-ai-edit' }))).status).toBe('completed');
     expect(state.saved).toEqual([{ job: expect.objectContaining({ id: 'job_1' }), r: expect.objectContaining({ segments, posterKey: 'users/user_1/p.jpg' }) }]);
 
-    state.saved = [];
+    state.saved = []; state.savedWarning = undefined;
     state.motionAiResult = { status: 'failed', error: 'x' };
     await finalizeVideoJob(aiJob());
     expect(state.saved).toHaveLength(0);
+  });
+
+  it('reports an audio warning on the completion — fresh, and again once already claimed', async () => {
+    state.motionAiResult = { status: 'done', videoKey: 'users/user_1/motion-ai.mp4', audio: { narration: false, sfx: false, music: false, warning: 'audio_unavailable' } };
+    expect(await finalizeVideoJob(aiJob())).toMatchObject({ status: 'completed', audioWarning: 'audio_unavailable' });
+    expect(state.saved[0].r).toMatchObject({ audio: { warning: 'audio_unavailable' } });
+
+    state.savedWarning = 'audio_partial';
+    expect(await finalizeVideoJob(aiJob({ status: 'completed', mediaAssetId: 'asset_1' }))).toMatchObject({ status: 'completed', audioWarning: 'audio_partial' });
+
+    state.assets = []; state.savedWarning = undefined;
+    state.motionAiResult = { status: 'done', videoKey: 'users/user_1/motion-ai.mp4', audio: { narration: true, sfx: true, music: false } };
+    expect(await finalizeVideoJob(aiJob())).not.toHaveProperty('audioWarning');
   });
 
   it('stores no segments for template motion graphics', async () => {

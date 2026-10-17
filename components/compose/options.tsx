@@ -354,6 +354,30 @@ export function VideoOptions({ gen, cost, disabled, onGenerate }: PanelProps) {
         )}
       </div>
 
+      {aiMotion && (
+        <div className="compose-field" role="group" aria-label="Sound">
+          <span className="compose-label">Sound</span>
+          <label className="compose-check">
+            <input type="checkbox" checked={s.motionAiVoiceover} onChange={(e) => set({ motionAiVoiceover: e.target.checked })} />
+            Voiceover <span className="compose-note">{s.motionAiMusic ? 'no extra with music' : '+1 cr/s'}</span>
+          </label>
+          {s.motionAiVoiceover && (
+            <select className="input compose-self-start" aria-label="Voiceover language" value={s.motionAiLanguage} onChange={(e) => set({ motionAiLanguage: e.target.value as typeof s.motionAiLanguage })}>
+              <option value="en">English</option>
+              <option value="hi">Hindi</option>
+            </select>
+          )}
+          <label className="compose-check">
+            <input type="checkbox" checked={s.motionAiSfx} onChange={(e) => set({ motionAiSfx: e.target.checked })} />
+            Sound effects <span className="compose-note">free</span>
+          </label>
+          <label className="compose-check">
+            <input type="checkbox" checked={s.motionAiMusic} onChange={(e) => set({ motionAiMusic: e.target.checked })} />
+            Music <span className="compose-note">{s.motionAiVoiceover ? 'no extra with voiceover' : '+1 cr/s'}</span>
+          </label>
+        </div>
+      )}
+
       {prompted && (
         <>
           <label className="compose-check">

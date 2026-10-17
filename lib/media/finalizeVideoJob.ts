@@ -4,8 +4,8 @@ import { videoJobs, mediaAssets } from '../db/schema';
 import { getSeedanceTask } from '../ai/piapi';
 import { CueError, deleteCueRender, downloadCueRender, getCueRender } from '../ai/cue';
 import { getMotionResult, motionConfigured } from '../ai/motion';
-import { getMotionAiResult, motionAiConfigured, type MotionAiResult } from '../ai/motionAi';
-import { saveMotionResult } from './motionVersions';
+import { getMotionAiResult, motionAiConfigured, type MotionAiResult, type MotionAudio } from '../ai/motionAi';
+import { cleanAudio, saveMotionResult, savedAudioWarning } from './motionVersions';
 import { makeMediaKey, publicUrlFor, uploadBuffer } from '../storage/r2';
 import { downloadToBuffer } from './finalize';
 import { refund } from '../credits/ledger';
@@ -30,7 +30,7 @@ export type MediaAsset = typeof mediaAssets.$inferSelect;
 
 export type FinalizeVideoResult =
   | { status: 'pending'; providerStatus?: string; pollError?: string }
-  | { status: 'completed'; asset?: MediaAsset; rewrittenPrompt?: string | null }
+  | { status: 'completed'; asset?: MediaAsset; rewrittenPrompt?: string | null; /** AI-designed motion: asked-for audio that didn't make it in. */ audioWarning?: MotionAudio['warning'] }
   | { status: 'failed'; error: string };
 
 /** A submit whose socket died has no task id to poll. PiAPI may or may not
@@ -46,7 +46,10 @@ const CINEMA_MAX_AGE_MS = 6 * 60 * 60_000;
 export async function finalizeVideoJob(job: VideoJob): Promise<FinalizeVideoResult> {
   // Already terminal — short-circuit so the client can stop polling.
   if (job.status === 'completed' && job.mediaAssetId) {
-    return { status: 'completed', asset: await loadAsset(job.mediaAssetId), rewrittenPrompt: job.rewrittenPrompt };
+    const done = { status: 'completed' as const, asset: await loadAsset(job.mediaAssetId), rewrittenPrompt: job.rewrittenPrompt };
+    // Claimed by the sweeper first: the warning is only in what finalize stored.
+    const audioWarning = job.provider === 'motion-claude' ? await savedAudioWarning(job.id) : undefined;
+    return audioWarning ? { ...done, audioWarning } : done;
   }
   if (job.status === 'failed') return { status: 'failed', error: job.error ?? 'unknown' };
   // Parked for a render slot (lib/agent/media.ts): uncharged and not upstream,
@@ -305,8 +308,10 @@ async function finalizeMotionJob(
   const claimed = await claimAsset(job, r.videoKey, 'video/mp4', r.sizeBytes ?? null);
   // AI-designed renders (originals and edits) keep their segments for the edit
   // timeline. Best-effort and idempotent, so the race loser re-writing is fine.
-  if (claimed.status === 'completed' && job.provider === 'motion-claude') await saveMotionResult(job, r);
-  return claimed;
+  if (claimed.status !== 'completed' || job.provider !== 'motion-claude') return claimed;
+  await saveMotionResult(job, r);
+  const audioWarning = cleanAudio(r.audio)?.warning;
+  return audioWarning ? { ...claimed, audioWarning } : claimed;
 }
 
 async function loadAsset(id: string): Promise<MediaAsset | undefined> {

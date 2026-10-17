@@ -12,7 +12,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import type { BrandKit } from '../brand/kit';
-import type { MotionSegment } from '../ai/motionAi';
+import type { MotionAudio, MotionSegment } from '../ai/motionAi';
 
 export const PLATFORMS = ['x', 'linkedin', 'instagram', 'facebook', 'tiktok', 'youtube', 'reddit'] as const;
 export type Platform = (typeof PLATFORMS)[number];
@@ -528,7 +528,9 @@ export const videoJobs = pgTable(
 //
 // One row per motion-claude video job: the original (root_job_id = itself)
 // and every edit of it (parent_job_id = the version it revised). `segments`
-// is the worker's beat list for that render — the edit UI's timeline.
+// is the worker's beat list for that render — the edit UI's timeline. A
+// render with audio stores `{ segments, audio }` there instead (no migration;
+// silent and older rows stay a bare array — read via readStored).
 // Its own table, not a video_jobs column: drizzle selects every column it
 // knows about, so a new video_jobs column would break every video poll until
 // the migration (0020) runs.
@@ -541,7 +543,7 @@ export const motionVersions = pgTable(
     parentJobId: uuid('parent_job_id'),
     segmentId: text('segment_id'),
     instruction: text('instruction'),
-    segments: jsonb('segments').$type<MotionSegment[]>(),
+    segments: jsonb('segments').$type<MotionSegment[] | { segments: MotionSegment[]; audio: MotionAudio }>(),
     posterKey: text('poster_key'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },

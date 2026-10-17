@@ -2,7 +2,7 @@ import { and, asc, eq, ne, or } from 'drizzle-orm';
 import { db } from '../db';
 import { mediaAssets, motionVersions, videoJobs } from '../db/schema';
 import { MOTION_AI } from '../ai/models';
-import type { MotionAiResult, MotionSegment } from '../ai/motionAi';
+import type { MotionAiResult, MotionAudio, MotionSegment } from '../ai/motionAi';
 import { publicUrlFor } from '../storage/r2';
 
 /**
@@ -28,14 +28,33 @@ export function cleanSegments(raw: unknown, durationSec: number): MotionSegment[
       endSec: sec(s.endSec),
       onScreenText: str(s.onScreenText, 500),
       suggestions: (Array.isArray(s.suggestions) ? s.suggestions : []).filter((x): x is string => typeof x === 'string').slice(0, 8).map((x) => x.slice(0, 200)),
+      ...(str(s.narration, 500).trim() ? { narration: str(s.narration, 500) } : {}),
     }))
     .filter((s) => s.endSec > s.startSec)
     .slice(0, 40);
 }
 
-/** Store a finished render's segments + poster. Idempotent; an edit's row (from submit) keeps its parent link. */
+/** The worker's report of what audio the MP4 carries. null = none reported (silent, or rendered before audio). */
+export function cleanAudio(raw: unknown): MotionAudio | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const a = raw as Record<string, unknown>;
+  const out: MotionAudio = { narration: a.narration === true, sfx: a.sfx === true, music: a.music === true };
+  if (a.warning === 'audio_unavailable' || a.warning === 'audio_partial') out.warning = a.warning;
+  return out.narration || out.sfx || out.music || out.warning ? out : null;
+}
+
+/** motion_versions.segments: a bare array (silent / older renders) or `{ segments, audio }`. */
+export function readStored(raw: unknown): { segments: MotionSegment[]; audio: MotionAudio | null } {
+  if (Array.isArray(raw)) return { segments: raw as MotionSegment[], audio: null };
+  const o = raw && typeof raw === 'object' ? (raw as { segments?: unknown; audio?: unknown }) : {};
+  return { segments: Array.isArray(o.segments) ? (o.segments as MotionSegment[]) : [], audio: cleanAudio(o.audio) };
+}
+
+/** Store a finished render's segments + audio + poster. Idempotent; an edit's row (from submit) keeps its parent link. */
 export async function saveMotionResult(job: Pick<Job, 'id' | 'userId' | 'durationSec'>, r: MotionAiResult): Promise<void> {
-  const segments = cleanSegments(r.segments, job.durationSec);
+  const clean = cleanSegments(r.segments, job.durationSec);
+  const audio = cleanAudio(r.audio);
+  const segments = audio ? { segments: clean, audio } : clean;
   const posterKey = r.posterKey?.startsWith(`users/${job.userId}/`) ? r.posterKey : null;
   try {
     await db().insert(motionVersions)
@@ -43,6 +62,16 @@ export async function saveMotionResult(job: Pick<Job, 'id' | 'userId' | 'duratio
       .onConflictDoUpdate({ target: motionVersions.videoJobId, set: { segments, posterKey } });
   } catch (e) {
     console.warn('[motion-versions] save failed:', e instanceof Error ? e.message.slice(0, 200) : e);
+  }
+}
+
+/** A finished render's audio warning, from what saveMotionResult stored. Best-effort: undefined on any error. */
+export async function savedAudioWarning(jobId: string): Promise<MotionAudio['warning']> {
+  try {
+    const [v] = await db().select({ segments: motionVersions.segments }).from(motionVersions).where(eq(motionVersions.videoJobId, jobId)).limit(1);
+    return readStored(v?.segments).audio?.warning;
+  } catch {
+    return undefined;
   }
 }
 
@@ -79,6 +108,7 @@ export type MotionVersion = {
   asset: { id: string; publicUrl: string; mimeType: string; label: string | null } | null;
   posterUrl: string | null;
   segments: MotionSegment[];
+  audio: MotionAudio | null;
 };
 
 /** Every non-failed version in this job's family, oldest first (v1 = the original). */
@@ -100,6 +130,6 @@ export async function listVersions(userId: string, job: Job): Promise<MotionVers
     createdAt: r.job.createdAt.toISOString(),
     asset: r.asset ? { id: r.asset.id, publicUrl: r.asset.publicUrl, mimeType: r.asset.mimeType, label: r.asset.label } : null,
     posterUrl: r.v?.posterKey ? publicUrlFor(r.v.posterKey) : null,
-    segments: r.v?.segments ?? [],
+    ...readStored(r.v?.segments),
   }));
 }

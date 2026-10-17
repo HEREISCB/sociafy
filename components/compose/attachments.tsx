@@ -13,6 +13,8 @@ export type MediaItem = {
   aspect?: string;
   /** An AI-designed motion graphic — offers Edit. */
   motionAi?: boolean;
+  /** A short honest caveat about this item (e.g. audio that couldn't be added). */
+  note?: string;
 };
 
 /** Mirrors the drafts schema cap (lib/validation.ts media .max(20)). */
@@ -127,6 +129,7 @@ export function Attachments({
           {attached.map((m) => (
             <li key={m.id ?? m.label} className="compose-thumb">
               <Thumb m={m} />
+              {m.note && <span className="compose-thumb-note" role="note" aria-label={m.note} title={m.note}>!</span>}
               {m.motionAi && m.id && onEdit && (
                 <button type="button" className="compose-thumb-edit" aria-label={`Edit ${m.label}`} onClick={() => onEdit(m)}>Edit</button>
               )}

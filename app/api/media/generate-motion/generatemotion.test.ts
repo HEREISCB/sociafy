@@ -53,6 +53,19 @@ describe('POST /api/media/generate-motion', () => {
     expect(st.ai).toHaveLength(0);
   });
 
+  it('passes the audio choice through to the AI worker, and validates it', async () => {
+    const audio = { narration: true, sfx: true, music: false, language: 'hi' };
+    expect((await post({ topic: 'Hindi support is live', template: 'ai', audio })).status).toBe(202);
+    expect(st.ai[0]).toMatchObject({ audio });
+    expect((await post({ topic: 'Hindi support is live', template: 'ai', audio: { sfx: true } })).status).toBe(202);
+    expect(st.ai[1].audio).toEqual({ narration: false, sfx: true, music: false });
+    expect((await post({ topic: 'Hindi support is live', template: 'ai' })).status).toBe(202);
+    expect(st.ai[2].audio).toBeUndefined();
+    expect((await post({ topic: 'Hello there', template: 'ai', audio: { narration: 'yes' } })).status).toBe(400);
+    expect((await post({ topic: 'Hello there', template: 'ai', audio: { narration: true, voice: '<script>' } })).status).toBe(400);
+    expect(st.ai).toHaveLength(3);
+  });
+
   it('rejects an out-of-range length', async () => {
     expect((await post({ topic: 'Hello there', template: 'ai', durationSec: 30 })).status).toBe(400);
     expect(st.ai).toHaveLength(0);
