@@ -125,7 +125,7 @@ export default function Dashboard() {
   const [dir, setDir] = useState(0);
   /** A day tile picked that has no posts: show it empty. */
   const [dayPick, setDayPick] = useState<string | null>(null);
-  // Default: the first post to review on a day (the "Needs a time" pile waits its turn).
+  // Default: the first post to review on a day (the "Buffer" pile waits its turn).
   const sel = order.find((i) => idOf(i) === selId)
     ?? strip.filter((b) => b.day).flatMap((b) => b.items).find(toReview) ?? order.find(toReview) ?? order[0] ?? null;
   const selIndex = sel ? order.indexOf(sel) : -1;
@@ -398,7 +398,7 @@ function DayTile({ b, today, on, over, onClick, drop }: { b: Bucket; today: Date
       {...drop}
     >
       <span className="dtile__h">
-        {b.key === NO_TIME ? <b>Needs a time</b> : b.key === LATER ? <b>Later</b>
+        {b.key === NO_TIME ? <b>Buffer</b> : b.key === LATER ? <b>Later</b>
           : <><b>{isToday ? 'Today' : format(b.day!, 'EEE')}</b><span className="tnum">{format(b.day!, 'd')}</span></>}
       </span>
       {b.topic && <span className="dtile__tp">{b.topic}</span>}
