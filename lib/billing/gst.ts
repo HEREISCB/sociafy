@@ -1,7 +1,7 @@
 /**
  * Indian GST primitives — state codes, GSTIN validation, inclusive-tax split.
  *
- * PRICING IS TAX-INCLUSIVE. ₹2,999 is what Razorpay charges and what the
+ * PRICING IS TAX-INCLUSIVE. ₹7,999 is what Razorpay charges and what the
  * invoice totals to; the 18% GST is backed OUT of that figure, not added on
  * top. That keeps the amount on the card, the amount in the ledger, and the
  * amount on the invoice identical — the alternative (exclusive pricing) means

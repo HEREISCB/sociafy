@@ -152,7 +152,7 @@ async function raise(
           date: todayInIST(),
           reference_number: args.providerPaymentId ?? args.source,
           // Our headline prices already contain the GST — do not let Zoho add
-          // 18% on top of ₹2,999 and invoice for more than the card was charged.
+          // 18% on top of ₹7,999 and invoice for more than the card was charged.
           is_inclusive_tax: !isExport,
           line_items: [
             {

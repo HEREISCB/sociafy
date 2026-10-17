@@ -28,8 +28,8 @@ export const TIER_PRICING: Record<Currency, Record<Tier, {
     business: { priceMonthly: '$299', amountMinor: 29900  },
   },
   INR: {
-    starter:  { priceMonthly: '₹2,999',  amountMinor: 299900   },
-    pro:      { priceMonthly: '₹7,999',  amountMinor: 799900   },
+    starter:  { priceMonthly: '₹7,999',  amountMinor: 799900   },
+    pro:      { priceMonthly: '₹14,999', amountMinor: 1499900  },
     business: { priceMonthly: '₹29,999', amountMinor: 2999900  },
   },
 };

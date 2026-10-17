@@ -64,7 +64,7 @@ describe('GET /api/billing — geo currency', () => {
     const body = await (await call({ 'cf-ipcountry': 'IN' })).json();
     expect(body.isIndia).toBe(true);
     expect(body.currency).toBe('INR');
-    expect(body.tiers[0].priceMonthly).toBe('₹2,999');
+    expect(body.tiers[0].priceMonthly).toBe('₹7,999');
     expect(body.tiers[0].priceApproximate).toBe(false);
   });
 
@@ -74,7 +74,7 @@ describe('GET /api/billing — geo currency', () => {
     expect(body.currency).toBe('USD');
     expect(body.tiers[0].priceMonthly).toMatch(/^≈\$/);
     // The approximation must always be shown next to the real charge.
-    expect(body.tiers[0].chargeMonthly).toBe('₹2,999');
+    expect(body.tiers[0].chargeMonthly).toBe('₹7,999');
   });
 
   it('still honours x-vercel-ip-country when there is no CF header (preview deploys)', async () => {

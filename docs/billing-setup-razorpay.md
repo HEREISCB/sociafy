@@ -1,8 +1,8 @@
 # Razorpay Setup — One-time
 
 1. **Create three Plans** in Razorpay Dashboard → Subscriptions → Plans:
-   - "Sociafy Starter (INR)" · ₹2,999 · Monthly · 30 days.
-   - "Sociafy Pro (INR)" · ₹7,999 · Monthly · 30 days.
+   - "Sociafy Starter (INR)" · ₹7,999 · Monthly · 30 days.
+   - "Sociafy Pro (INR)" · ₹14,999 · Monthly · 30 days.
    - "Sociafy Business (INR)" · ₹29,999 · Monthly · 30 days.
 
    Copy each plan's `plan_id` (looks like `plan_OabcXyz`) into:

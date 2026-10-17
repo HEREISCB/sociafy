@@ -11,8 +11,8 @@ describe('TIER_PRICING', () => {
   });
 
   it('uses correct minor units for INR (paise)', () => {
-    expect(TIER_PRICING.INR.starter.amountMinor).toBe(299900);
-    expect(TIER_PRICING.INR.pro.amountMinor).toBe(799900);
+    expect(TIER_PRICING.INR.starter.amountMinor).toBe(799900);
+    expect(TIER_PRICING.INR.pro.amountMinor).toBe(1499900);
     expect(TIER_PRICING.INR.business.amountMinor).toBe(2999900);
   });
 
@@ -39,7 +39,7 @@ describe('TOPUP_PRICING', () => {
 describe('tierPriceView', () => {
   it('shows plain rupees in India, with no approximation', () => {
     expect(tierPriceView('INR', 'starter')).toMatchObject({
-      display: '₹2,999', charge: '₹2,999', chargeMinor: 299900, approximate: false,
+      display: '₹7,999', charge: '₹7,999', chargeMinor: 799900, approximate: false,
     });
     expect(tierPriceView('INR', 'business').display).toBe('₹29,999');
   });
@@ -47,7 +47,7 @@ describe('tierPriceView', () => {
   it('derives the non-India figure from the INR amount, not TIER_PRICING.USD', () => {
     const v = tierPriceView('USD', 'starter');
     expect(v.approximate).toBe(true);
-    expect(v.display).toBe(`≈$${Math.round(299900 / 100 / INR_PER_USD)}`);
+    expect(v.display).toBe(`≈$${Math.round(799900 / 100 / INR_PER_USD)}`);
     // The separate USD price point must never be what we show.
     expect(v.display).not.toContain('30');
   });
@@ -66,7 +66,7 @@ describe('tierPriceView', () => {
     // A low INR_PER_USD keeps the shown dollar figure at or above the true
     // conversion, so we never advertise less than we bill.
     const v = tierPriceView('USD', 'pro');
-    expect(v.displayMajor).toBeGreaterThanOrEqual(799900 / 100 / 90);
+    expect(v.displayMajor).toBeGreaterThanOrEqual(1499900 / 100 / 90);
   });
 });
 

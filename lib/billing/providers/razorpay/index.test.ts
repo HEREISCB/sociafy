@@ -167,9 +167,9 @@ describe('razorpayProvider.changeTier — upgrade', () => {
 
     const result = await razorpayProvider().changeTier({ userId: 'u1', toTier: 'pro' });
 
-    // Starter → Pro: 7999 - 2999 = 5000 INR diff, half cycle remaining → 2500 INR = 250000 paise.
+    // Starter → Pro: 14999 - 7999 = 7000 INR diff, half cycle remaining → 3500 INR = 350000 paise.
     expect(ordersCreate).toHaveBeenCalledWith(expect.objectContaining({
-      amount: 250000,
+      amount: 350000,
       currency: 'INR',
       notes: expect.objectContaining({
         sociafy_user_id: 'u1',
@@ -184,7 +184,7 @@ describe('razorpayProvider.changeTier — upgrade', () => {
       expect(result.handoff).toMatchObject({
         kind: 'razorpay_modal',
         orderId: 'order_up',
-        amountMinor: 250000,
+        amountMinor: 350000,
       });
     }
 

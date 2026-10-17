@@ -30,8 +30,8 @@ loadEnv('.env.local');
 
 // Mirrors TIER_PRICING.INR — paise. Keep in sync with lib/billing/pricing.ts.
 const EXPECTED = {
-  starter:  { env: 'RAZORPAY_PLAN_STARTER',  amount: 299900  },
-  pro:      { env: 'RAZORPAY_PLAN_PRO',      amount: 799900  },
+  starter:  { env: 'RAZORPAY_PLAN_STARTER',  amount: 799900  },
+  pro:      { env: 'RAZORPAY_PLAN_PRO',      amount: 1499900 },
   business: { env: 'RAZORPAY_PLAN_BUSINESS', amount: 2999900 },
 };
 

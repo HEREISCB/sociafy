@@ -6,11 +6,11 @@ path — invoicing happens in the webhook, after the money and the credits.
 
 ## The one pricing decision baked in
 
-**Our prices are GST-inclusive.** ₹2,999 is what the card is charged *and* what
-the invoice totals to; the 18% is backed out of it (₹2,541.53 + ₹457.47). The
+**Our prices are GST-inclusive.** ₹7,999 is what the card is charged *and* what
+the invoice totals to; the 18% is backed out of it (₹6,778.81 + ₹1,220.19). The
 alternative — adding 18% on top — means editing every price in
 `lib/billing/pricing.ts`, every Razorpay Plan, and the pricing page, and your
-₹2,999 plan starts charging ₹3,538.82. If you want exclusive pricing instead,
+₹7,999 plan starts charging ₹9,438.82. If you want exclusive pricing instead,
 say so; it's a pricing change, not a code change to this integration.
 
 Zoho does the CGST+SGST vs IGST split itself, from the customer's place of
