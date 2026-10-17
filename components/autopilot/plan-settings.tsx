@@ -66,7 +66,8 @@ const PRESETS: { id: MixPreset; label: string }[] = [
 ];
 
 const VIDEO_STYLES: { id: AutopilotVideoStyle; label: string }[] = [
-  { id: 'cinema', label: 'Cinema' },
+  // Stored id stays 'cinema' (persisted in brand kits); it means a generated clip.
+  { id: 'cinema', label: 'AI video' },
   { id: 'motion', label: 'Motion graphics' },
   { id: 'mix', label: 'Mix' },
 ];
@@ -401,7 +402,7 @@ export default function PlanSettings() {
               <span className="ap-label">Video style</span>
               <Choice label="Video style" value={brand.kit.video?.autopilot ?? 'cinema'} options={VIDEO_STYLES} disabled={locked} onChange={saveVideoStyle} />
               {!motionReady(brand.kit, brand.profile) && (
-                <span className="ap-hint">Motion graphics need your brand name, logo and main color — until then video posts use Cinema. <Link href="/settings/brand">Brand kit</Link></span>
+                <span className="ap-hint">Motion graphics need your brand name, logo and main color — until then video posts use AI video. <Link href="/settings/brand">Brand kit</Link></span>
               )}
             </div>
           )}

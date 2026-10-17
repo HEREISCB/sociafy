@@ -29,7 +29,9 @@ export const GOOGLE_FONTS = [
 ] as const;
 export const MUSIC_MOODS = ['calm', 'upbeat', 'cinematic', 'none'] as const;
 export const VIDEO_STYLES = ['soft', 'bold'] as const;
-/** What autopilot video slots render as (brand_kits.kit.video.autopilot; unset = cinema). */
+/** What autopilot video slots render as (brand_kits.kit.video.autopilot; unset = cinema).
+ *  'cinema' is a legacy stored id meaning "generated AI clip" (shown as "AI video"),
+ *  not the Cinema model — autopilot renders it on DEFAULT_VIDEO_MODEL. */
 export const AUTOPILOT_VIDEO_STYLES = ['cinema', 'motion', 'mix'] as const;
 export type AutopilotVideoStyle = (typeof AUTOPILOT_VIDEO_STYLES)[number];
 export const COLOR_ROLES = ['primary', 'secondary', 'background', 'text', 'accent'] as const;

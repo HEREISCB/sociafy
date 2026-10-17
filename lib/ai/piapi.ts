@@ -1,14 +1,16 @@
 import * as https from 'node:https';
 
 /**
- * PiAPI Seedance 2.0 video-gen client.
+ * PiAPI Seedance video-gen client: Seedance 2.5 for quality renders, 2.0 Fast
+ * for fast ones (2.5 has no fast tier).
  *
  * Same TLS-hardened path as our OpenAI direct fallback — explicit
  * https.request with TLS 1.2 + http/1.1 + IPv4. PiAPI's edge is Cloudflare
  * so it's already friendly, but the cap is cheap insurance against the
  * Windows-AV / TLS-1.3 class of issues that bit us on OpenAI.
  *
- * API contract (https://piapi.ai/docs/seedance-api/seedance-2):
+ * API contract (https://piapi.ai/docs/seedance-api/seedance-25, and
+ * https://piapi.ai/docs/seedance-api/seedance-2 for the fast tier):
  *   POST https://api.piapi.ai/api/v1/task
  *   GET  https://api.piapi.ai/api/v1/task/{task_id}
  *   Header: `X-API-Key: <key>`
@@ -93,7 +95,9 @@ export type CreateSeedanceTaskArgs = {
   imageUrls?: string[];
   videoUrls?: string[];
   audioUrls?: string[];
-  /** "seedance-2" (quality) or "seedance-2-fast" (fast). Default quality. */
+  /** "seedance-2.5" (quality) or "seedance-2-fast" (fast). Default quality.
+   *  Fast has no 1080p, so a 1080p fast request renders on quality — the
+   *  price already falls back the same way (priceForVideo). */
   fast?: boolean;
   /**
    * Opt-in push notification (https://piapi.ai/docs/unified-webhook). PiAPI
@@ -113,10 +117,13 @@ type PiapiCreateResponse = {
   message: string;
 };
 
+export const seedanceTaskType = (fast: boolean | undefined, resolution: SeedanceQuality) =>
+  fast && resolution !== '1080p' ? 'seedance-2-fast' : 'seedance-2.5';
+
 export async function createSeedanceTask(args: CreateSeedanceTaskArgs & { apiKey: string }): Promise<string> {
   const body = {
     model: 'seedance',
-    task_type: args.fast ? 'seedance-2-fast' : 'seedance-2',
+    task_type: seedanceTaskType(args.fast, args.resolution),
     input: {
       prompt: args.prompt,
       mode: args.mode,

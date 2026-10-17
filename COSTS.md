@@ -55,28 +55,32 @@ flat per-image figures below come from OpenAI's calculator.
 
 Endpoint: `POST /v1/images/generations`. Same SDK as text.
 
-## Video generation — Seedance 2.0 (PiAPI)
+## Video generation — Seedance 2.5 / 2.0 Fast (PiAPI)
 
-**Pricing is per second × resolution**, not per call. Duration: integer 4–15s.
+**Pricing is per second × resolution**, not per call. Duration: integer 4–15s
+(2.5 itself takes 4–30s; Motion's envelope stays at 15s because the fast tier
+caps there). Motion quality renders on `seedance-2.5`, fast on `seedance-2-fast`
+(2.5 has no fast tier). Source: https://piapi.ai/docs/seedance-api/seedance-25
 
 | Model | 480p | 720p | 1080p |
 |---|---|---|---|
-| `seedance-2` (quality) | $0.10/s | $0.20/s | $0.50/s |
+| `seedance-2.5` (quality) | $0.15/s | $0.35/s | $0.80/s |
+| `seedance-2` (legacy quality, no longer used) | $0.10/s | $0.20/s | $0.50/s |
 | `seedance-2-fast` | $0.08/s | $0.16/s | not supported |
 
 | Duration / Resolution | Cost | + 10% |
 |---|---|---|
 | seedance-2-fast @ 480p × 5s | $0.40 | **$0.440** |
 | seedance-2-fast @ 720p × 5s | $0.80 | **$0.880** |
-| seedance-2 @ 480p × 5s | $0.50 | **$0.550** |
-| seedance-2 @ 720p × 5s | $1.00 | **$1.100** |
-| seedance-2 @ 720p × 10s | $2.00 | **$2.200** |
-| seedance-2 @ 1080p × 5s | $2.50 | **$2.750** |
-| seedance-2 @ 1080p × 10s | $5.00 | **$5.500** |
+| seedance-2.5 @ 480p × 5s | $0.75 | **$0.825** |
+| seedance-2.5 @ 720p × 5s | $1.75 | **$1.925** |
+| seedance-2.5 @ 720p × 10s | $3.50 | **$3.850** |
+| seedance-2.5 @ 1080p × 5s | $4.00 | **$4.400** |
+| seedance-2.5 @ 1080p × 10s | $8.00 | **$8.800** |
 
 **Video-to-video adds**: `(unit_price ÷ 2) × input_duration` on top.
 
-Note: Seedance is ~3–5× the cost of Kling. The 1080p 10s tier is **$5
+Note: Seedance is ~3–5× the cost of Kling. The 1080p 10s tier is **$8
 provider cost** — for a single video. Recommend defaulting to
 `seedance-2-fast @ 720p` for most user-initiated generations and unlocking
 quality/1080p as a Pro-tier feature only.

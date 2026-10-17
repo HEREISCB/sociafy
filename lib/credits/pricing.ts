@@ -70,14 +70,17 @@ export const CREDIT_PRICES: Record<CreditAction, number> = {
   // 6 cr = $0.072 at the Business rate ($0.012/credit) → ~58% margin, and still
   // ~15% if the real rate is double again ($40/1M → $0.0608). Break-even ≈ $47/1M.
   image_reference: 6,
+  // Motion. Fast = Seedance 2.0 Fast; Quality = Seedance 2.5 ($0.15 / $0.35 /
+  // $0.80 per s at 480p / 720p / 1080p, piapi.ai/docs/seedance-api/seedance-25).
+  // Quality = ceil(provider $ × CREDITS_PER_PROVIDER_USD), e.g. 8s 720p $2.80 → 315.
   video_8s_480p_fast: 75,
-  video_8s_480p_quality: 90,
+  video_8s_480p_quality: 135,
   video_8s_720p_fast: 145,
-  video_8s_720p_quality: 180,
-  video_8s_1080p_quality: 445,
-  video_15s_480p_quality: 168,        // 15s @ 480p Quality (Seedance $0.10/s)
-  video_15s_720p_quality: 335,
-  video_15s_1080p_quality: 835,
+  video_8s_720p_quality: 315,
+  video_8s_1080p_quality: 720,
+  video_15s_480p_quality: 254,
+  video_15s_720p_quality: 591,
+  video_15s_1080p_quality: 1350,
   variant_regenerate: 1,
   // Autopilot draft = gpt-5 + web_search per run (~$0.042), up to 2 drafts/run.
   // Worst case (1 research-backed draft) needs ≥4 cr to stay profitable at the
@@ -188,7 +191,8 @@ export function priceForVideo(args: {
 }): { action: CreditAction; credits: number; surcharge: number } {
   const { durationSec, quality, fast } = args;
   const is15 = durationSec >= 13;
-  // 1080p Fast is not currently offered by Seedance — fall back to Quality.
+  // 1080p Fast is not offered by Seedance — fall back to Quality (piapi.ts
+  // seedanceTaskType routes the render the same way).
   const useFast = fast && quality !== '1080p';
 
   let action: CreditAction;
@@ -205,7 +209,7 @@ export function priceForVideo(args: {
   }
 
   // For durations between buckets, scale linearly off the 8s base.
-  // (e.g. 6s 720p Quality = 180 * 6/8 = 135.)
+  // (e.g. 6s 720p Quality = 315 * 6/8 = 236.)
   const baseCredits = CREDIT_PRICES[action];
   let credits = baseCredits;
   if (!is15 && durationSec !== 8) {
@@ -217,8 +221,8 @@ export function priceForVideo(args: {
   // Reference-video surcharge = (unit_price / 2) × input_duration, expressed in
   // credits. Derive it from baseCredits rather than a second dollar table:
   // baseCredits already encodes unit_price × bucketSec at this file's basis
-  // ($0.012/credit at the Business rate — e.g. 8s/720p/Quality is 180 cr for
-  // Seedance's $1.60, i.e. 112.5 cr per provider dollar), so credits-per-input-
+  // ($0.012/credit at the Business rate — e.g. 8s/720p/Quality is 315 cr for
+  // Seedance 2.5's $2.80, i.e. 112.5 cr per provider dollar), so credits-per-input-
   // second is just baseCredits / bucketSec and the margin stays identical
   // across every resolution and the fast/quality split for free.
   const bucketSec = is15 ? 15 : 8;
@@ -272,7 +276,7 @@ export function priceForCompose(args: {
  * Credits we charge per dollar the video backend charges us.
  *
  * Pinned to the basis the rest of this file already uses: 8s/720p/Quality is
- * 180 cr against a $1.60 provider cost, i.e. 112.5 cr per provider dollar at
+ * 315 cr against a $2.80 provider cost, i.e. 112.5 cr per provider dollar at
  * $0.012/credit (the Business rate). Cinema is priced off a live quote rather
  * than a bucket, so it needs the ratio stated rather than baked into a
  * constant — change this one number to move Cinema's margin, and nothing else.

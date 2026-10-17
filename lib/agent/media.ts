@@ -4,9 +4,8 @@ import { agentSettings, drafts, genJobs, videoJobs, mediaAssets, activityLog, ty
 import { charge } from '../credits/ledger';
 import { priceForImage } from '../credits/pricing';
 import { AGENT_IMAGE, AGENT_VIDEO } from '../credits/estimator';
-import { rewritePromptForMedia, ensureAudioLine } from '../ai/prompt-rewriter';
-import { DEFAULT_VIDEO_MODEL, MOTION_GRAPHICS, backendFor, type MotionTemplate } from '../ai/models';
-import { CUE_CONCURRENCY } from '../ai/cue';
+import { rewritePromptForMedia } from '../ai/prompt-rewriter';
+import { DEFAULT_VIDEO_MODEL, MOTION_GRAPHICS, backendFor, modelForBackend, type MotionTemplate, type VideoModelId } from '../ai/models';
 import { motionConfigured } from '../ai/motion';
 import { motionReady } from '../brand/kit';
 import { autopilotTemplate, loadBrand, submitMotionVideo } from '../media/motionJob';
@@ -19,7 +18,7 @@ import { isApproved, queueApprovedRender } from './plan';
 
 type Post = { userId: string; title: string; body: string; brandBlock: string };
 
-const mediaPrompt = (p: Post, target: 'gpt-image-2' | 'cinema') =>
+const mediaPrompt = (p: Post, target: 'gpt-image-2' | 'seedance-2') =>
   rewritePromptForMedia({ userPrompt: `${p.title}\n\n${p.body}`.slice(0, 1_500), target, caption: p.body, brandBlock: p.brandBlock });
 
 /** Generate the image for an autopilot post. Null = it failed and the charge was refunded. */
@@ -58,22 +57,26 @@ export const VIDEO_QUEUED = 'queued';
 const VIDEO_SUBMITTING = 'submitting';
 /** A queued render that has not found a slot in a day is not going to. */
 const QUEUE_MAX_MS = 24 * 60 * 60_000;
+/** Parked rows looked at per sweep. */
+const SWEEP_BATCH = 12;
 
-/** All slots busy — before the charge (our own count) or after it (the
- *  backend's 429, already refunded by submitVideo). Either way: retry later. */
+/** All slots busy — before the charge (our own count, Cinema only) or after
+ *  it (either backend's 429, already refunded by submitVideo). Retry later. */
 const isAtCapacity = (e: unknown) =>
-  e instanceof SubmitFailure && (e.code === 'at_capacity' || /cue_429/.test(e.detail));
+  e instanceof SubmitFailure && (e.code === 'at_capacity' || /(piapi|cue)_429/.test(e.detail));
 
-const renderAgentVideo = (userId: string, prompt: string) =>
-  submitVideo({ auth: { userId }, model: DEFAULT_VIDEO_MODEL, prompt, ...AGENT_VIDEO, source: null, via: 'autopilot' });
+/** `model` is only ever not the default for a row parked before autopilot
+ *  moved off Cinema: it renders on what it was queued (and prompted) for. */
+const renderAgentVideo = (userId: string, prompt: string, model: VideoModelId = DEFAULT_VIDEO_MODEL) =>
+  submitVideo({ auth: { userId }, model, prompt, ...AGENT_VIDEO, source: null, via: 'autopilot' });
 
 /**
  * Start the render for an autopilot video post. Returns the video_jobs id to
  * park on the draft.
  *
- * When every render slot is taken (three, account-wide), the post is not
- * dropped to text: a VIDEO_QUEUED row is parked instead, uncharged, and the
- * five-minute sweep submits it once a slot frees.
+ * When the backend is at its concurrency limit (it answers 429), the post is
+ * not dropped to text: a VIDEO_QUEUED row is parked instead, uncharged, and
+ * the five-minute sweep submits it once a slot frees.
  */
 export async function submitAgentVideo(p: Post): Promise<string> {
   const template = await motionTemplateFor(p.userId);
@@ -83,7 +86,8 @@ export async function submitAgentVideo(p: Post): Promise<string> {
     });
     return job.id;
   }
-  const prompt = ensureAudioLine((await mediaPrompt(p, 'cinema')).prompt);
+  // Motion is mute, so no Audio: line (that is Cinema's convention).
+  const { prompt } = await mediaPrompt(p, 'seedance-2');
   try {
     return (await renderAgentVideo(p.userId, prompt)).job.id;
   } catch (e) {
@@ -107,7 +111,7 @@ export async function submitAgentVideo(p: Post): Promise<string> {
 }
 
 /**
- * Motion graphics instead of Cinema for this slot? Only with the engine
+ * Motion graphics instead of a generated clip for this slot? Only with the engine
  * configured and a brand kit that can carry it (name + logo + primary color).
  * 'mix' alternates against the user's last video render.
  */
@@ -147,7 +151,7 @@ export async function submitQueuedVideos(): Promise<number> {
     .from(videoJobs)
     .where(inArray(videoJobs.status, [VIDEO_QUEUED, VIDEO_SUBMITTING]))
     .orderBy(asc(videoJobs.createdAt))
-    .limit(CUE_CONCURRENCY * 4);
+    .limit(SWEEP_BATCH);
 
   let submitted = 0;
   for (const q of parked) {
@@ -180,7 +184,7 @@ export async function submitQueuedVideos(): Promise<number> {
     if (!claimed) continue;
 
     try {
-      const { job } = await renderAgentVideo(q.userId, q.prompt);
+      const { job } = await renderAgentVideo(q.userId, q.prompt, modelForBackend(q.provider));
       await db().update(drafts).set({ videoJobId: job.id, updatedAt: new Date() }).where(eq(drafts.videoJobId, q.id));
       await db().delete(videoJobs).where(eq(videoJobs.id, q.id));
       submitted++;

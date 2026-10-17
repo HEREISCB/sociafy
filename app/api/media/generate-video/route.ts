@@ -5,7 +5,7 @@ import { withUser, jsonError } from '../../../../lib/api';
 import { parseBody } from '../../../../lib/validation';
 import { rateLimit } from '../../../../lib/rate-limit';
 import { rewritePromptForMedia, ensureAudioLine } from '../../../../lib/ai/prompt-rewriter';
-import { DEFAULT_VIDEO_MODEL, VIDEO_MODEL_IDS, validateAgainstModel, type VideoModelId } from '../../../../lib/ai/models';
+import { DEFAULT_VIDEO_MODEL, VIDEO_MODEL_IDS, backendFor, validateAgainstModel, type VideoModelId } from '../../../../lib/ai/models';
 import { encodeCinemaFrames, CinemaAttachmentTooLarge } from '../../../../lib/ai/cue';
 import { loadBrandContext, renderBrandBlock } from '../../../../lib/ai/brand-context';
 import { getOpenAI } from '../../../../lib/ai/client';
@@ -300,7 +300,7 @@ export async function POST(req: NextRequest) {
           .insert(videoJobs)
           .values({
             userId: user.id,
-            provider: fast ? 'piapi-seedance-2-fast' : 'piapi-seedance-2',
+            provider: backendFor('sociafy-motion-1', fast),
             providerTaskId: '',
             status: 'pending',
             prompt,

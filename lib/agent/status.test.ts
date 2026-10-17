@@ -53,7 +53,7 @@ describe('kindQueue', () => {
 
 describe('affordableKind', () => {
   it('drops to a cheaper kind rather than crossing the weekly cap', () => {
-    // video is 25 (AGENT_VIDEO_CREDITS_ESTIMATE), text is 4
+    // video is AGENT_VIDEO_CREDITS_ESTIMATE (315), text is 4
     expect(affordableKind(['video', 'text'], 1000, 20, 0)).toEqual({ kind: 'text' });
     expect(affordableKind(['video', 'text'], 1000, null, 0)).toEqual({ kind: 'video' });
   });

@@ -10,6 +10,7 @@ import {
 } from './models';
 import { CREDITS_PER_PROVIDER_USD, creditsFromProviderUsd } from '../credits/pricing';
 import { CINEMA_MAX_ATTACHMENT_B64, CinemaAttachmentTooLarge, encodeCinemaFrames } from './cue';
+import { seedanceTaskType } from './piapi';
 
 const base = {
   durationSec: 8,
@@ -35,6 +36,7 @@ describe('the white-label boundary', () => {
 
   it('maps backends to public ids without ever returning the raw column', () => {
     expect(modelForBackend('cue-h3')).toBe('sociafy-cinema-1');
+    expect(modelForBackend('piapi-seedance-2.5')).toBe('sociafy-motion-1');
     expect(modelForBackend('piapi-seedance-2')).toBe('sociafy-motion-1');
     expect(modelForBackend('piapi-seedance-2-fast')).toBe('sociafy-motion-1');
     // Legacy and unknown rows are Motion — a fact about history, so it must not
@@ -43,17 +45,23 @@ describe('the white-label boundary', () => {
     expect(modelForBackend('something-new')).toBe('sociafy-motion-1');
   });
 
-  it('defaults new renders to Cinema without relabelling old ones', () => {
-    expect(DEFAULT_VIDEO_MODEL).toBe('sociafy-cinema-1');
-    expect(DEFAULT_VIDEO_MODEL).not.toBe(modelForBackend(null));
+  it('defaults new renders to Motion (Seedance 2.5)', () => {
+    expect(DEFAULT_VIDEO_MODEL).toBe('sociafy-motion-1');
+    expect(backendFor(DEFAULT_VIDEO_MODEL, false)).toBe('piapi-seedance-2.5');
   });
 
   it('routes a public id to the right backend', () => {
     expect(backendFor('sociafy-cinema-1', false)).toBe('cue-h3');
     // Cinema has one speed; `fast` must not route it somewhere else.
     expect(backendFor('sociafy-cinema-1', true)).toBe('cue-h3');
-    expect(backendFor('sociafy-motion-1', false)).toBe('piapi-seedance-2');
+    expect(backendFor('sociafy-motion-1', false)).toBe('piapi-seedance-2.5');
     expect(backendFor('sociafy-motion-1', true)).toBe('piapi-seedance-2-fast');
+  });
+
+  it('submits Motion quality on 2.5 and keeps fast off 1080p (2.0 Fast has none)', () => {
+    expect(seedanceTaskType(false, '720p')).toBe('seedance-2.5');
+    expect(seedanceTaskType(true, '720p')).toBe('seedance-2-fast');
+    expect(seedanceTaskType(true, '1080p')).toBe('seedance-2.5');
   });
 
   it('recognises only real ids', () => {
@@ -121,9 +129,9 @@ describe('validateAgainstModel', () => {
 describe('creditsFromProviderUsd', () => {
   it('holds the same margin basis as the rest of the price table', () => {
     // 112.5 cr per provider dollar — the ratio 8s/720p/Quality already encodes
-    // (180 cr for a $1.60 cost). Cinema must not silently undercut it.
+    // (315 cr for Seedance 2.5's $2.80). Cinema must not silently undercut it.
     expect(CREDITS_PER_PROVIDER_USD).toBe(112.5);
-    expect(creditsFromProviderUsd(1.6)).toBe(180);
+    expect(creditsFromProviderUsd(2.8)).toBe(315);
   });
 
   it('rounds up, so a sub-credit render is never free', () => {

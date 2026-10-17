@@ -9,7 +9,7 @@
  * to charge real generations, so the preview can't drift from reality.
  */
 
-import { priceForImage, CREDIT_PRICES } from './pricing';
+import { priceForImage, priceForVideo, CREDIT_PRICES } from './pricing';
 import type { PostKind } from '../platforms/capabilities';
 import type { Platform } from '../db/schema';
 
@@ -57,17 +57,10 @@ export type EstimatorResult = {
 /** What autopilot generates for an image or video post. lib/agent/media.ts
  *  renders with exactly these, so the forecast and the bill cannot drift. */
 export const AGENT_IMAGE = { size: '1024x1024', quality: 'medium' } as const;
-/** Cinema (the default model): one speed, so `fast` is false; 720p renders at
- *  CINEMA_MEGAPIXELS['720p'] (0.98 MP). */
+/** Motion (DEFAULT_VIDEO_MODEL) at quality, not fast. */
 export const AGENT_VIDEO = { durationSec: 8, quality: '720p', fast: false, aspect: '9:16' } as const;
-/**
- * Forecast for one AGENT_VIDEO render. Cinema is CHARGED from a live quote
- * (lib/ai/cue.ts priceCinemaRender), which this synchronous, client-imported
- * file cannot make — so the forecast is a pinned number, not the bill.
- * Quote on 2026-10-14 for 8s at 0.98 MP: $0.192 → 22 credits; rounded up for
- * headroom. ponytail: drifts if the vendor retunes; re-quote and bump it.
- */
-export const AGENT_VIDEO_CREDITS_ESTIMATE = 25;
+/** Forecast for one AGENT_VIDEO render — the exact price submitVideo charges. */
+export const AGENT_VIDEO_CREDITS_ESTIMATE = priceForVideo(AGENT_VIDEO).credits;
 
 /** Credits one autopilot draft of this kind costs: the copy, plus its media. */
 export function draftCost(kind: PostKind): number {

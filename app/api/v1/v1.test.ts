@@ -242,7 +242,7 @@ describe('POST /api/v1/videos', () => {
     expect(res.status).toBe(202);
     const body = await res.json();
     expect(body.status).toBe('pending');
-    expect(body.credits_charged).toBe(180); // 8s / 720p / quality
+    expect(body.credits_charged).toBe(315); // 8s / 720p / quality
     expect(body.poll_url).toBe(`/api/v1/videos/${body.id}`);
 
     expect(state.charges).toHaveLength(1);
@@ -437,7 +437,7 @@ describe('POST /api/v1/videos — reference stills', () => {
       reference_images: [REF_A, REF_B],
     });
     expect(res.status).toBe(202);
-    expect((await res.json()).credits_charged).toBe(180); // identical to text-only
+    expect((await res.json()).credits_charged).toBe(315); // identical to text-only
 
     expect(state.fetched).toEqual([REF_A, REF_B]);
     expect(state.uploads).toHaveLength(2);
@@ -537,7 +537,7 @@ describe('GET /api/v1/videos/{id}', () => {
     const res = await GET(new Request('https://sociafy.test/x') as never, params(created.id));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toMatchObject({ id: created.id, status: 'pending', video_url: null, credits_charged: 180 });
+    expect(body).toMatchObject({ id: created.id, status: 'pending', video_url: null, credits_charged: 315 });
   });
 
   it('serves a completed job with the stored url', async () => {

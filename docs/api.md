@@ -133,7 +133,7 @@ curl -s https://sociafy.app/api/v1/models \
         "native_audio": false,
         "fast_tier": true
       },
-      "example": { "duration_sec": 8, "quality": "720p", "credits": 180 }
+      "example": { "duration_sec": 8, "quality": "720p", "credits": 315 }
     },
     {
       "id": "sociafy-cinema-1",
@@ -173,7 +173,7 @@ retrying the same one.
 | Quality | 480p, 720p, 1080p | 480p, 720p |
 | Still images as input | yes | not yet |
 | `fast` tier | yes | no |
-| 8s at 720p | 180 credits | 33 credits |
+| 8s at 720p | 315 credits | 33 credits |
 
 Cinema writes its own soundtrack from the prompt. End the prompt with an
 `Audio:` line to direct it — *"Audio: room tone, one ceramic knock, distant
@@ -214,7 +214,7 @@ Status codes: `200`, `401`, `500`, `503`.
     {
       "id": "8f2c1d6e-4a71-4b0e-9a3c-77c1e5b2d901",
       "status": "pending",
-      "credits_charged": 180,
+      "credits_charged": 315,
       "model": "sociafy-motion-1",
       "duration_sec": 8,
       "quality": "720p",
@@ -335,7 +335,7 @@ Status codes: `200`, `401`, `500`, `503`.
       "model": "sociafy-motion-1",
       "status": "completed",
       "video_url": "https://<your-media-host>/users/user_2ab.../vid-1753538201-9f3c.mp4",
-      "credits_charged": 180,
+      "credits_charged": 315,
       "error": null
     }
     ```
@@ -697,21 +697,21 @@ Status codes: `200`, `401`, `500`, `503`.
     third of the 720p price.
 
     **Video, 4–12 s** (scaled pro-rata from the 8 s price, e.g. 6 s at 720p quality
-    = `180 × 6/8` = 135):
+    = `315 × 6/8` = 236):
 
     | Quality | `fast: true` | `fast: false` |
     |---|---|---|
-    | 480p | 75 | 90 |
-    | 720p | 145 | 180 |
-    | 1080p | — | 445 |
+    | 480p | 75 | 135 |
+    | 720p | 145 | 315 |
+    | 1080p | — | 720 |
 
     **Video, 13–15 s** (scaled pro-rata from the 15 s price; no fast tier):
 
     | Quality | Credits |
     |---|---|
-    | 480p | 168 |
-    | 720p | 335 |
-    | 1080p | 835 |
+    | 480p | 254 |
+    | 720p | 591 |
+    | 1080p | 1350 |
 
     **Video reference stills** (`reference_images`, `start_frame`, `end_frame`):
     **no surcharge.** The provider prices video per second of *output*; still input
@@ -910,9 +910,9 @@ Status codes: `200`, `401`, `500`, `503`.
     ```json
     {
       "error": "insufficient_credits",
-      "message": "You need 180 credits but have 45. Top up or upgrade your plan.",
+      "message": "You need 315 credits but have 45. Top up or upgrade your plan.",
       "balance": 45,
-      "needed": 180
+      "needed": 315
     }
     ```
 

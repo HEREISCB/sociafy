@@ -159,8 +159,15 @@ describe('POST /api/media/generate-video — model default', () => {
   const raw = (body: Record<string, unknown>) =>
     POST({ json: async () => body } as never) as unknown as Promise<Response>;
 
-  it('renders on Cinema when no model is named, with an Audio line', async () => {
-    const res = await raw({ prompt: 'a coffee pour', count: 2 });
+  it('renders on Motion (Seedance 2.0) when no model is named', async () => {
+    const res = await raw({ prompt: 'a coffee pour' });
+    expect(res.status).toBe(202);
+    expect(state.cinema).toHaveLength(0);
+    expect(state.calls).toEqual(['insert', 'charge', 'submit']);
+  });
+
+  it('renders on Cinema when named, with an Audio line', async () => {
+    const res = await raw({ prompt: 'a coffee pour', model: 'sociafy-cinema-1', count: 2 });
     expect(res.status).toBe(202);
     expect(state.calls).not.toContain('submit'); // never touched Motion
     expect(state.cinema).toHaveLength(2);

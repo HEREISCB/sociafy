@@ -12,7 +12,7 @@ import type { Platform } from '../lib/db/schema';
 import { InsufficientCreditsBanner } from './credits';
 import { Attachments, MAX_ATTACHED, type MediaItem } from './compose/attachments';
 import { genCosts, RenderStatus, useMediaGen } from './compose/generate';
-import { MoreOptions } from './compose/options';
+import { ImageOptions, PRESETS, VideoOptions, WritingOptions } from './compose/options';
 import { Preview } from './compose/preview';
 import { AvatarCropModal } from './compose/avatar-crop';
 
@@ -95,6 +95,7 @@ export default function Compose({ draftId, onDone, initial }: {
   const [minWhen] = useState(() => toLocalInput(new Date(Date.now() + 60_000)));
   const [preset, setPreset] = useState('announcement');
   const [research, setResearch] = useState(false);
+  const [media, setMedia] = useState<'text' | 'image' | 'video'>('text');
   const [savedId, setSavedId] = useState<string | null>(null);
   const [busy, setBusy] = useState<null | 'write' | 'schedule' | 'post'>(null);
   const lock = useRef(false);
@@ -255,7 +256,8 @@ export default function Compose({ draftId, onDone, initial }: {
     : null;
   const canSubmit = !empty && !blocker && targets.length > 0 && busy === null;
   const done = result?.kind === 'scheduled' ? result.platforms.length > 0 : result?.rows.length ? result.rows.every((r) => r.ok) : false;
-  const costs = genCosts(gen.s, ready.filter((m) => m.mimeType?.startsWith('image/')).length);
+  const readyImages = ready.filter((m) => m.mimeType?.startsWith('image/'));
+  const costs = genCosts(gen.s, readyImages.length);
   const writeCost = priceForCompose({ withTools: research, extraSearches: 0 }).credits;
   const retryable = result?.kind === 'published'
     ? result.rows.filter((r) => !r.ok && !r.error?.startsWith('already_publishing') && !r.error?.startsWith('platform_not_connected')).map((r) => r.platform)
@@ -280,13 +282,6 @@ export default function Compose({ draftId, onDone, initial }: {
           rows={7}
         />
         <Attachments attached={attached} onChange={setAttached} onNotice={setNotice}>
-          <button type="button" className="btn ghost sm" disabled={!body.trim() || gen.busy !== null} onClick={() => gen.generateImage(body.trim(), ready.filter((m) => m.mimeType?.startsWith('image/')).map((m) => m.url!))}>
-            <Icon name="sparkle" size={12} /> {gen.busy === 'image' ? 'Making image…' : 'Image'} <span className="compose-cost">{costs.image} cr</span>
-          </button>
-          <button type="button" className="btn ghost sm" disabled={!body.trim() || gen.busy !== null} onClick={() => gen.generateVideo(body.trim())}>
-            <Icon name="sparkle" size={12} /> {gen.busy === 'video' ? 'Making video…' : 'Video'}
-            {costs.video !== null && <span className="compose-cost">{costs.video} cr</span>}
-          </button>
           <span className="compose-spacer" />
           <button type="button" className="btn ghost sm" disabled={!body.trim() || busy !== null} onClick={write}>
             <Icon name="sparkle" size={12} /> {busy === 'write' ? 'Writing…' : variants.length ? 'Rewrite' : 'Write it for me'} <span className="compose-cost">{writeCost} cr</span>
@@ -304,6 +299,36 @@ export default function Compose({ draftId, onDone, initial }: {
           ))}
         </div>
       )}
+
+      <section className="compose-media" aria-label="Media">
+        <div className="mode-switch" role="radiogroup" aria-label="Add media">
+          {([['text', 'Text only', 'edit'], ['image', 'Image', 'image'], ['video', 'Video', 'play']] as const).map(([id, name, icon]) => (
+            <button key={id} type="button" role="radio" aria-checked={media === id} className={`opt${media === id ? ' active' : ''}`} onClick={() => setMedia(id)}>
+              <Icon name={icon} size={12} /> {name}
+            </button>
+          ))}
+        </div>
+        {media !== 'text' && !body.trim() && !(media === 'video' && gen.s.videoMode === 'avatar') && (
+          <p className="compose-note">Describe the {media} in the post box above — that text is the prompt.</p>
+        )}
+        {media === 'image' && (
+          <ImageOptions
+            gen={gen}
+            cost={costs.image}
+            attachedImages={readyImages.length}
+            disabled={!body.trim() || gen.busy !== null}
+            onGenerate={() => gen.generateImage(body.trim(), readyImages.map((m) => m.url!))}
+          />
+        )}
+        {media === 'video' && (
+          <VideoOptions
+            gen={gen}
+            cost={costs.video}
+            disabled={(!body.trim() && gen.s.videoMode !== 'avatar') || gen.busy !== null}
+            onGenerate={() => gen.generateVideo(body.trim())}
+          />
+        )}
+      </section>
 
       {gen.render && <RenderStatus render={gen.render} />}
       {notice && <p role="status" aria-live="polite" className="compose-notice">{notice}</p>}
@@ -424,15 +449,8 @@ export default function Compose({ draftId, onDone, initial }: {
       )}
 
       <details className="compose-more">
-        <summary>More options</summary>
-        <MoreOptions
-          gen={gen}
-          preset={preset}
-          setPreset={setPreset}
-          research={research}
-          setResearch={setResearch}
-          attachedImages={ready.filter((m) => m.mimeType?.startsWith('image/')).length}
-        />
+        <summary>Writing options · {PRESETS.find((p) => p.id === preset)?.label ?? preset}{research ? ' + research' : ''}</summary>
+        <WritingOptions preset={preset} setPreset={setPreset} research={research} setResearch={setResearch} />
       </details>
 
       {!empty && targets.length > 0 && (

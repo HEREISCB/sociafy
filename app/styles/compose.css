@@ -52,6 +52,18 @@
 .compose-spacer { flex: 1; }
 .compose-cost { font-family: var(--mono); font-size: var(--fs-xs); color: var(--text-3); }
 
+/* Media picker: Text only / Image / Video, then that media's panel. */
+.compose-media { display: flex; flex-direction: column; align-items: flex-start; gap: var(--s-3); }
+.compose-media-panel {
+  align-self: stretch;
+  display: flex; flex-direction: column; gap: var(--s-4);
+  padding: var(--s-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface);
+}
+.btn.primary .compose-cost { color: inherit; opacity: 0.75; }
+
 /* Thumbnails: attached strip, library grid, reference images. */
 .compose-strip {
   display: flex; flex-wrap: wrap; gap: var(--s-2);

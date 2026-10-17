@@ -16,14 +16,16 @@
 
 import type { VideoQuality } from '../credits/pricing';
 
-/** Internal backend identifiers. Persisted to videoJobs.provider. Never public. */
-export type VideoBackend = 'piapi-seedance-2' | 'piapi-seedance-2-fast' | 'cue-h3' | 'motion-hf';
+/** Internal backend identifiers. Persisted to videoJobs.provider. Never public.
+ *  'piapi-seedance-2' is no longer written (Motion quality moved to 2.5) but
+ *  stays here because existing rows carry it. */
+export type VideoBackend = 'piapi-seedance-2.5' | 'piapi-seedance-2' | 'piapi-seedance-2-fast' | 'cue-h3' | 'motion-hf';
 
 export const VIDEO_MODEL_IDS = ['sociafy-motion-1', 'sociafy-cinema-1'] as const;
 export type VideoModelId = (typeof VIDEO_MODEL_IDS)[number];
 
 /** What a NEW generation renders on when the caller does not choose. */
-export const DEFAULT_VIDEO_MODEL: VideoModelId = 'sociafy-cinema-1';
+export const DEFAULT_VIDEO_MODEL: VideoModelId = 'sociafy-motion-1';
 
 /** What an OLD row is. Every backend id that predates the catalogue is Motion,
  *  and that is a fact about history — it must not follow the default above, or
@@ -133,7 +135,7 @@ export const MOTION_ASPECTS = ['9:16', '16:9'] as const;
 /** Which backend serves a public model id at these settings. */
 export function backendFor(model: VideoModelId, fast: boolean): VideoBackend {
   if (model === 'sociafy-cinema-1') return 'cue-h3';
-  return fast ? 'piapi-seedance-2-fast' : 'piapi-seedance-2';
+  return fast ? 'piapi-seedance-2-fast' : 'piapi-seedance-2.5';
 }
 
 /** Public model id for a stored backend id. Legacy rows predate the catalogue

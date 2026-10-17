@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 /**
- * Render slots are three, account-wide. An autopilot video that finds them
- * full must wait for one — parked uncharged, then submitted by the sweep —
- * rather than silently becoming a text post.
+ * Render slots are finite (the backend answers 429 at its limit). An autopilot
+ * video that finds them full must wait for one — parked uncharged, then
+ * submitted by the sweep — rather than silently becoming a text post.
  */
 
 type Row = Record<string, unknown>;
@@ -12,7 +12,7 @@ type Pred = (r: Row) => boolean;
 const state = vi.hoisted(() => ({
   videos: [] as Row[],
   drafts: [] as Row[],
-  /** What each submitVideo call does: 'ok' | 'full' | 'boom'. */
+  /** What each submitVideo call does: 'ok' | 'full' | '429' | 'boom'. */
   outcomes: [] as string[],
   submits: [] as Row[],
   /** attachFinishedVideos' join result. */
@@ -86,6 +86,7 @@ vi.mock('../../app/api/v1/shared', () => {
       state.submits.push(a);
       const o = state.outcomes.shift() ?? 'ok';
       if (o === 'full') return Promise.reject(new SubmitFailure('at_capacity', false, 'cinema slots busy: 3/3'));
+      if (o === '429') return Promise.reject(new SubmitFailure('provider_rejected', true, 'piapi_429: too many tasks'));
       if (o === 'boom') return Promise.reject(new SubmitFailure('provider_rejected', true, 'cue_500: down'));
       return Promise.resolve({ job: { id: `real${state.submits.length}` }, creditsCharged: 22, replayed: false });
     },
@@ -115,17 +116,17 @@ beforeEach(() => {
 });
 
 describe('submitAgentVideo', () => {
-  it('renders on Cinema, 9:16, with an Audio line', async () => {
+  it('renders on Motion, 9:16, without a Cinema Audio line', async () => {
     expect(await submitAgentVideo(post)).toBe('real1');
-    expect(state.submits[0]).toMatchObject({ model: 'sociafy-cinema-1', aspect: '9:16', fast: false, quality: '720p', via: 'autopilot' });
+    expect(state.submits[0]).toMatchObject({ model: 'sociafy-motion-1', aspect: '9:16', fast: false, quality: '720p', via: 'autopilot' });
     expect(state.submits[0].durationSec).toBeGreaterThanOrEqual(4);
-    expect(String(state.submits[0].prompt)).toMatch(/\nAudio: /);
+    expect(String(state.submits[0].prompt)).not.toMatch(/Audio:/);
   });
 
-  it('parks an uncharged placeholder when every slot is busy', async () => {
-    state.outcomes = ['full'];
+  it('parks an uncharged placeholder when the backend is at its limit', async () => {
+    state.outcomes = ['429'];
     const id = await submitAgentVideo(post);
-    expect(state.videos).toEqual([expect.objectContaining({ id, status: VIDEO_QUEUED, provider: 'cue-h3', providerTaskId: '' })]);
+    expect(state.videos).toEqual([expect.objectContaining({ id, status: VIDEO_QUEUED, provider: 'piapi-seedance-2.5', providerTaskId: '' })]);
     expect(state.videos[0].creditLedgerId).toBeUndefined();
   });
 
@@ -137,8 +138,8 @@ describe('submitAgentVideo', () => {
 });
 
 describe('submitQueuedVideos', () => {
-  const park = (id: string, draftStatus = 'draft') => {
-    state.videos.push({ id, status: VIDEO_QUEUED, prompt: 'p', createdAt: new Date() });
+  const park = (id: string, draftStatus = 'draft', provider = 'piapi-seedance-2.5') => {
+    state.videos.push({ id, status: VIDEO_QUEUED, provider, prompt: 'p', createdAt: new Date() });
     state.drafts.push({ id: `d-${id}`, status: draftStatus, videoJobId: id });
   };
 
@@ -147,6 +148,13 @@ describe('submitQueuedVideos', () => {
     expect(await submitQueuedVideos()).toBe(1);
     expect(state.drafts[0].videoJobId).toBe('real1');
     expect(state.videos).toEqual([]);
+    expect(state.submits[0].model).toBe('sociafy-motion-1');
+  });
+
+  it('renders a row parked before the switch on the Cinema it was queued for', async () => {
+    park('q1', 'draft', 'cue-h3');
+    expect(await submitQueuedVideos()).toBe(1);
+    expect(state.submits[0].model).toBe('sociafy-cinema-1');
   });
 
   it('puts it back and stops at the first full slot', async () => {

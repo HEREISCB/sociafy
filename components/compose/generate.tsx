@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { priceForAvatar, priceForImage, priceForMotion, priceForVideo } from '../../lib/credits/pricing';
-import { MOTION_TEMPLATES, VIDEO_MODELS, type MotionTemplate, type VideoModelId } from '../../lib/ai/models';
+import { DEFAULT_VIDEO_MODEL, MOTION_TEMPLATES, VIDEO_MODELS, type MotionTemplate, type VideoModelId } from '../../lib/ai/models';
 import type { MediaItem } from './attachments';
 
 export type VideoMode = 'text' | 'image-to-video' | 'reference' | 'audio-driven' | 'avatar' | 'motion';
@@ -16,6 +16,7 @@ export const DEFAULT_SETTINGS = {
   /** Use the attached images as references for the next image. */
   attachedAsRefs: false,
   videoMode: 'text' as VideoMode,
+  videoModel: DEFAULT_VIDEO_MODEL as VideoModelId,
   videoDuration: 8,
   videoQuality: '720p' as '480p' | '720p' | '1080p',
   videoAspect: '9:16' as '9:16' | '1:1' | '16:9',
@@ -38,10 +39,18 @@ export type GenSettings = typeof DEFAULT_SETTINGS;
 
 const CINEMA = VIDEO_MODELS['sociafy-cinema-1'];
 
-/** Cinema is the default. Only options Cinema can't do move the render to Motion. */
+/** Settings Cinema can't serve, as UI copy. Empty = Cinema can take it. */
+export function cinemaBlockers(s: GenSettings): string[] {
+  return [
+    s.videoQuality === '1080p' ? '1080p' : null,
+    s.videoFast ? 'fast render' : null,
+    (CINEMA.genModes as readonly string[]).includes(s.videoMode) ? null : s.videoMode === 'reference' ? 'reference images' : 'this source',
+  ].filter((x): x is string => x !== null);
+}
+
+/** The picked model. Options Cinema can't do (1080p, fast, reference) keep the render on Motion. */
 export function videoModel(s: GenSettings): VideoModelId {
-  const cinemaCan = s.videoQuality !== '1080p' && !s.videoFast && (CINEMA.genModes as readonly string[]).includes(s.videoMode);
-  return cinemaCan ? 'sociafy-cinema-1' : 'sociafy-motion-1';
+  return s.videoModel === 'sociafy-cinema-1' && !cinemaBlockers(s).length ? 'sociafy-cinema-1' : 'sociafy-motion-1';
 }
 
 export function videoDuration(s: GenSettings): number {
