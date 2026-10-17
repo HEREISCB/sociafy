@@ -7,6 +7,7 @@ import { Icon } from '../icons';
 import { PLATFORM_LABELS } from '../../lib/ui/platforms';
 import type { Platform } from '../../lib/db/schema';
 import { Glyphs } from './glyphs';
+import { seekToPoster } from '../../lib/media/motionSeek';
 import {
   KIND_LABEL, dayKey, isVideo, itemMedia, itemPlatforms, itemText, kindOf, movable, restorable, statusLabel, toneOf, type CalItem,
 } from './model';
@@ -167,7 +168,7 @@ export function Tick() {
 /** The real media, sized by the stage's height; a text post renders as its copy. */
 function Media({ item, body }: { item: CalItem; body: string }) {
   const m = itemMedia(item);
-  if (m && isVideo(m)) return <video key={m.url} className="hr__media" src={m.url} controls muted playsInline preload="metadata" />;
+  if (m && isVideo(m)) return <video key={m.url} className="hr__media" src={m.url} controls muted playsInline preload="metadata" onLoadedMetadata={seekToPoster} />;
   // eslint-disable-next-line @next/next/no-img-element
   if (m) return <img key={m.url} className="hr__media" src={m.url} alt="" />;
   if (kindOf(item) === 'video') return <div className="hr__media hr__media--ph">Rendering video…</div>;

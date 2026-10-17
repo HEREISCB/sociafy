@@ -14,6 +14,7 @@ import {
   moveToDay, nextToReview, progress, skipMessage, statusLabel, toReview, toneOf, type Bucket, type CalItem, type ScheduledRow, type Skipped,
 } from './calendar/model';
 import { Glyphs } from './calendar/glyphs';
+import { seekToPoster } from '../lib/media/motionSeek';
 import { ReviewPanel, Tick, type PostAction } from './calendar/review';
 
 type Account = HealthAccount & { id: string; platform: Platform };
@@ -459,7 +460,7 @@ function Thumb({ item }: { item: CalItem }) {
   const k = kindOf(item);
   return (
     <span className={`thumb thumb--${k}`} aria-hidden="true">
-      {m && isVideo(m) ? <video src={`${m.url}#t=0.1`} preload="metadata" muted playsInline />
+      {m && isVideo(m) ? <video src={m.url} preload="metadata" muted playsInline onLoadedMetadata={seekToPoster} />
         // eslint-disable-next-line @next/next/no-img-element
         : m ? <img src={m.url} alt="" loading="lazy" /> : null}
       {k === 'video' && <span className="thumb__play" />}
