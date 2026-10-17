@@ -50,6 +50,10 @@
 .strip.is-dragging .dtile.is-drop.is-over { background: var(--accent-soft); box-shadow: inset 0 0 0 1.5px var(--accent); }
 .strip.is-dragging .dtile:not(.is-drop) { opacity: .45; }
 .dtile__h { font-size: var(--fs-sm); white-space: nowrap; }
+/* Buffer card title: a loading ring in the text color; static ring when motion is reduced. */
+.dtile__spin { display: block; box-sizing: border-box; width: 1em; height: 1em; margin: .15em 0; border-radius: 50%; border: 2px solid color-mix(in oklch, currentColor 22%, transparent); border-top-color: currentColor; animation: dtile-spin .8s linear infinite; }
+@keyframes dtile-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .dtile__spin { animation: none; } }
 .dtile__h b { font-weight: 600; }
 .dtile__h .tnum { margin-left: 4px; color: var(--text-3); }
 .dtile.is-today .dtile__h b, .dtile.is-today .dtile__h .tnum { color: var(--accent-ink); }

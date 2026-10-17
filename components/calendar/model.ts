@@ -37,7 +37,7 @@ export type PostGroup = {
 /** A draft awaiting review (GET /api/plan → review[]). */
 export type ReviewItem = PlanView['review'][number];
 
-/** Anything Home shows on the calendar or in the "Buffer" tray. */
+/** Anything Home shows on the calendar or in the buffer (spinner) card. */
 export type CalItem =
   | { kind: 'draft'; key: string; at: Date | null; draft: ReviewItem }
   | { kind: 'post'; key: string; at: Date; group: PostGroup };
@@ -125,11 +125,11 @@ export function moveToDay(i: CalItem, day: Date): Date {
   return d;
 }
 
-/** The strip: "Buffer" (no time, or one on a day already gone), the 7 days from
+/** The strip: the buffer/spinner card (no time, or one on a day already gone), the 7 days from
  *  today, then "Later" (beyond the week). Empty edge buckets are dropped. */
 export type Bucket = {
   key: string;
-  /** null for the "Buffer" and "Later" buckets. */
+  /** null for the buffer and "Later" buckets. */
   day: Date | null;
   items: CalItem[];
   /** The day's topic: its first titled draft. */
