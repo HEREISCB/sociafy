@@ -460,10 +460,33 @@ function Thumb({ item }: { item: CalItem }) {
   const k = kindOf(item);
   return (
     <span className={`thumb thumb--${k}`} aria-hidden="true">
-      {m && isVideo(m) ? <video src={m.url} preload="metadata" muted playsInline onLoadedMetadata={seekToPoster} />
+      {m && isVideo(m) ? <VideoThumb url={m.url} />
         // eslint-disable-next-line @next/next/no-img-element
         : m ? <img src={m.url} alt="" loading="lazy" /> : null}
       {k === 'video' && <span className="thumb__play" />}
+    </span>
+  );
+}
+
+/**
+ * Video frame for a card. A strip can hold 30+ videos; mounting them all at once starves Chrome's
+ * per-host media connections, so some sit at readyState 0/1 with their seek pending and paint blank.
+ * Only load once the card nears the viewport, and re-run the (idempotent) seek on metadata, data and mount.
+ */
+function VideoThumb({ url }: { url: string }) {
+  const [near, setNear] = useState(false);
+  const box = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    const el = box.current;
+    if (!el || typeof IntersectionObserver === 'undefined') { setNear(true); return; }
+    const io = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) { setNear(true); io.disconnect(); } }, { rootMargin: '300px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+  return (
+    <span ref={box} className="thumb__vid">
+      {near && <video src={url} preload="metadata" muted playsInline onLoadedMetadata={seekToPoster} onLoadedData={seekToPoster}
+        ref={(v) => { if (v && v.readyState >= 1) seekToPoster({ currentTarget: v }); }} />}
     </span>
   );
 }

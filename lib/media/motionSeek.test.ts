@@ -13,9 +13,10 @@ describe('segmentSeekSec', () => {
 });
 
 describe('posterSeekSec', () => {
-  it('short clips (motion graphics) seek 60% in', () => {
-    expect(posterSeekSec(10)).toBeCloseTo(6);
-    expect(posterSeekSec(20)).toBeCloseTo(12);
+  it('short clips (motion graphics) seek to the end card, 0.8 s before the end', () => {
+    expect(posterSeekSec(10)).toBeCloseTo(9.2);
+    expect(posterSeekSec(20)).toBeCloseTo(19.2);
+    expect(posterSeekSec(0.5)).toBe(0);
   });
   it('long footage seeks to 1 s', () => {
     expect(posterSeekSec(20.5)).toBe(1);
