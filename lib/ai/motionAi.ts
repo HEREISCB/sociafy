@@ -62,7 +62,35 @@ export function submitMotionAi(args: SubmitMotionAiArgs): Promise<{ callId: stri
   return call('motion-ai/submit', { method: 'POST', body: args });
 }
 
-/** Same result shape as the template engine. */
-export function getMotionAiResult(callId: string): Promise<MotionResult> {
+/** One beat of the composition, as the worker reports it — the edit UI's timeline. */
+export type MotionSegment = {
+  id: string;
+  label: string;
+  startSec: number;
+  endSec: number;
+  onScreenText: string;
+  suggestions: string[];
+};
+
+/** The template engine's result, plus the composition's segments once done (and the parent for an edit). */
+export type MotionAiResult = MotionResult & { segments?: MotionSegment[]; parentCallId?: string };
+
+export function getMotionAiResult(callId: string): Promise<MotionAiResult> {
   return call(`motion-ai/result?callId=${encodeURIComponent(callId)}`, { method: 'GET', timeoutMs: 15_000 });
+}
+
+export type EditMotionAiArgs = {
+  /** callId of the render being edited. */
+  parentCallId: string;
+  /** Omitted = the whole video. */
+  segmentId?: string;
+  /** 1–1000 chars. */
+  instruction: string;
+  videoKey: string;
+  posterKey: string;
+};
+
+/** Revise a finished render. 404 `parent_not_found` throws like any non-2xx. Polls via getMotionAiResult. */
+export function editMotionAi(args: EditMotionAiArgs): Promise<{ callId: string }> {
+  return call('motion-ai/edit', { method: 'POST', body: args });
 }

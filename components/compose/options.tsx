@@ -65,9 +65,9 @@ function Slot({ label, url, kind, onPick, onClear }: { label: string; url: strin
 }
 
 /** The primary action at the foot of a media panel. */
-function GenerateButton({ what, busy, cost, disabled, onClick }: { what: 'image' | 'video' | 'motion graphic'; busy: boolean; cost: number | null; disabled: boolean; onClick: () => void }) {
+function GenerateButton({ what, busy, cost, disabled, onClick, reasonId }: { what: 'image' | 'video' | 'motion graphic'; busy: boolean; cost: number | null; disabled: boolean; onClick: () => void; reasonId?: string }) {
   return (
-    <button type="button" className="btn primary compose-self-start" disabled={disabled} onClick={onClick}>
+    <button type="button" className="btn primary compose-self-start" disabled={disabled} onClick={onClick} aria-describedby={reasonId}>
       <Icon name="sparkle" size={12} /> {busy ? `Making ${what}…` : `Generate ${what}`}
       <span className="compose-cost">{cost === null ? 'priced on submit' : `${cost} cr`}</span>
     </button>
@@ -160,6 +160,8 @@ export function VideoOptions({ gen, cost, disabled, onGenerate }: PanelProps) {
     ...(brand?.motion ? [{ ai: false, label: 'Templates' }] : []),
     ...(brand?.motionAi ? [{ ai: true, label: 'AI-designed' }] : []),
   ];
+  // Same readiness rules the server applies (lib/media/motionJob.ts): the warning is the reason Generate is off.
+  const brandBlocked = Boolean(motion && brand && !(aiMotion ? motionAiReady : motionReady)(brand.kit, brand.profile));
   // Templates render 9:16 / 16:9 only; square falls back to vertical.
   const pickMotion = (ai: boolean) => set({ videoMode: 'motion', motionAi: ai, ...(!ai && s.videoAspect === '1:1' ? { videoAspect: '9:16' as const } : {}) });
 
@@ -308,14 +310,14 @@ export function VideoOptions({ gen, cost, disabled, onGenerate }: PanelProps) {
               </button>
             ))}
           </div>
-          {brand && !motionReady(brand.kit, brand.profile) && (
-            <p className="compose-error">Needs your brand name, logo and main color. <Link href="/settings/brand">Open Brand kit</Link></p>
+          {brandBlocked && (
+            <p id="motion-brand-reason" className="compose-error">Needs your brand name, logo and main color. <Link href="/settings/brand">Open Brand kit</Link></p>
           )}
         </div>
       )}
 
-      {aiMotion && brand && !motionAiReady(brand.kit, brand.profile) && (
-        <p className="compose-error">Needs your brand name and main color. <Link href="/settings/brand">Open Brand kit</Link></p>
+      {aiMotion && brandBlocked && (
+        <p id="motion-brand-reason" className="compose-error">Needs your brand name and main color. <Link href="/settings/brand">Open Brand kit</Link></p>
       )}
 
       <div className="compose-grid">
@@ -371,7 +373,10 @@ export function VideoOptions({ gen, cost, disabled, onGenerate }: PanelProps) {
           : motion ? `Renders on ${MOTION_GRAPHICS.name} from your brand kit — silent, usually under two minutes.`
           : `Renders on ${model.name}${model.nativeAudio ? ' — with sound' : ' — silent'}${s.videoFast && s.videoQuality !== '1080p' ? ', fast render' : ''}.`}
       </p>
-      <GenerateButton what={motion ? 'motion graphic' : 'video'} busy={gen.busy === 'video'} cost={cost} disabled={disabled} onClick={onGenerate} />
+      <GenerateButton
+        what={motion ? 'motion graphic' : 'video'} busy={gen.busy === 'video'} cost={cost}
+        disabled={disabled || brandBlocked} onClick={onGenerate} reasonId={brandBlocked ? 'motion-brand-reason' : undefined}
+      />
     </div>
   );
 }

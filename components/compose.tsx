@@ -15,6 +15,7 @@ import { genCosts, RenderStatus, useMediaGen } from './compose/generate';
 import { ImageOptions, PRESETS, VideoOptions, WritingOptions } from './compose/options';
 import { Preview } from './compose/preview';
 import { AvatarCropModal } from './compose/avatar-crop';
+import { MotionEditor } from './compose/motion-editor';
 
 /** Hard caption limits per platform (mirrors PLATFORM_LIMITS in lib/ai/compose.ts,
  *  which is server-only). */
@@ -89,6 +90,8 @@ export default function Compose({ draftId, onDone, initial }: {
     return ps?.length ? ps : null;
   });
   const [attached, setAttached] = useState<MediaItem[]>([]);
+  /** The attached motion graphic open in the editor. */
+  const [editing, setEditing] = useState<MediaItem | null>(null);
   const [when, setWhen] = useState(() => toLocalInput(future(initial?.slot) ?? nextHour()));
   const whenSet = useRef(Boolean(future(initial?.slot)));
   // Picker floor, fixed at mount; schedule() still rejects past times at submit.
@@ -269,6 +272,15 @@ export default function Compose({ draftId, onDone, initial }: {
       {gen.cropFile && (
         <AvatarCropModal file={gen.cropFile} aspect={gen.s.videoAspect} onApply={gen.applyFace} onCancel={() => gen.setCropFile(null)} />
       )}
+      {editing?.id && (
+        <MotionEditor
+          id={editing.id}
+          onClose={() => setEditing(null)}
+          onCredits={(e) => { setCreditError(e); refreshCredits(); }}
+          onCharged={refreshCredits}
+          onUse={(item) => { setAttached((cur) => cur.map((a) => (a.id === editing.id ? item : a))); setEditing(null); }}
+        />
+      )}
       {creditError && <InsufficientCreditsBanner balance={creditError.balance} needed={creditError.needed} onDismiss={() => setCreditError(null)} />}
 
       <div className="compose-editor">
@@ -281,7 +293,7 @@ export default function Compose({ draftId, onDone, initial }: {
           placeholder="Write your post — or describe it and let AI draft it"
           rows={7}
         />
-        <Attachments attached={attached} onChange={setAttached} onNotice={setNotice}>
+        <Attachments attached={attached} onChange={setAttached} onNotice={setNotice} onEdit={setEditing}>
           <span className="compose-spacer" />
           <button type="button" className="btn ghost sm" disabled={!body.trim() || busy !== null} onClick={write}>
             <Icon name="sparkle" size={12} /> {busy === 'write' ? 'Writing…' : variants.length ? 'Rewrite' : 'Write it for me'} <span className="compose-cost">{writeCost} cr</span>

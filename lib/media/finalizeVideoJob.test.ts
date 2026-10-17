@@ -22,6 +22,7 @@ const state = vi.hoisted(() => ({
   cueRender: { status: 'done' } as { status: string; error?: string },
   motionConfigured: true,
   motionAiConfigured: true,
+  saved: [] as { job: Record<string, unknown>; r: Record<string, unknown> }[],
   motionAiResult: { status: 'done', videoKey: 'users/user_1/motion-ai.mp4', sizeBytes: 456 } as Record<string, unknown>,
   motionResult: { status: 'done', videoKey: 'users/user_1/motion.mp4', sizeBytes: 123 } as Record<string, unknown>,
   task: { status: 'completed', videoUrl: 'https://cdn.piapi/x.mp4' } as
@@ -119,6 +120,9 @@ vi.mock('../ai/motionAi', () => ({
   motionAiConfigured: () => state.motionAiConfigured,
   getMotionAiResult: () => Promise.resolve(state.motionAiResult),
 }));
+vi.mock('./motionVersions', () => ({
+  saveMotionResult: (job: Record<string, unknown>, r: Record<string, unknown>) => { state.saved.push({ job, r }); return Promise.resolve(); },
+}));
 vi.mock('../storage/r2', () => ({
   makeMediaKey: (u: string, n: string) => `users/${u}/${n}`,
   publicUrlFor: (k: string) => `https://cdn.test/${k}`,
@@ -167,6 +171,7 @@ beforeEach(() => {
   state.cueRender = { status: 'done' };
   state.motionConfigured = true;
   state.motionAiConfigured = true;
+  state.saved = [];
   state.motionAiResult = { status: 'done', videoKey: 'users/user_1/motion-ai.mp4', sizeBytes: 456 };
   state.motionResult = { status: 'done', videoKey: 'users/user_1/motion.mp4', sizeBytes: 123 };
 });
@@ -437,6 +442,23 @@ describe('finalizeVideoJob — AI-designed motion graphics', () => {
     expect((await finalizeVideoJob(aiJob())).status).toBe('failed');
     expect(state.assets).toHaveLength(0);
     expect(state.refunds).toHaveLength(1);
+  });
+
+  it('stores the segments of a finished render — original or edit — and only once it is claimed', async () => {
+    const segments = [{ id: 's1', label: 'Hook', startSec: 0, endSec: 3, onScreenText: 'Hi', suggestions: ['Bigger'] }];
+    state.motionAiResult = { status: 'done', videoKey: 'users/user_1/motion-ai.mp4', posterKey: 'users/user_1/p.jpg', segments };
+    expect((await finalizeVideoJob(aiJob({ genMode: 'motion-ai-edit' }))).status).toBe('completed');
+    expect(state.saved).toEqual([{ job: expect.objectContaining({ id: 'job_1' }), r: expect.objectContaining({ segments, posterKey: 'users/user_1/p.jpg' }) }]);
+
+    state.saved = [];
+    state.motionAiResult = { status: 'failed', error: 'x' };
+    await finalizeVideoJob(aiJob());
+    expect(state.saved).toHaveLength(0);
+  });
+
+  it('stores no segments for template motion graphics', async () => {
+    await finalizeVideoJob(job({ provider: 'motion-hf', providerTaskId: 'm-1', durationSec: 15, genMode: 'motion-stat' }));
+    expect(state.saved).toHaveLength(0);
   });
 
   it('stays pending, touching nothing, when the worker is unconfigured', async () => {

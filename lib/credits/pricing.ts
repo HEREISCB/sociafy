@@ -41,6 +41,7 @@ export type CreditAction =
   | 'video_cinema'
   | 'video_motion_graphics'
   | 'video_motion_ai'
+  | 'video_motion_ai_edit'
   | 'text_chat';
 
 /** Single source-of-truth credit cost per action. */
@@ -116,6 +117,10 @@ export const CREDIT_PRICES: Record<CreditAction, number> = {
   // for 6s, 30 cr for 15s, 40 cr for 20s. The authoring compute, not the
   // render, is most of the cost — owner to confirm the rate.
   video_motion_ai: 2,
+  // An edit of an AI-designed motion graphic ("make the logo bigger"): the
+  // worker revises the existing composition and re-renders. Per second of the
+  // video being edited, half the from-scratch rate (priceForMotionAiEdit).
+  video_motion_ai_edit: 1,
   // POST /api/v1/chat/completions. Metered per call from the provider's actual
   // token usage by priceForChat() below; this number is only the per-call floor.
   text_chat: 1,
@@ -270,6 +275,14 @@ export function priceForMotionAi(durationSec: number): { action: CreditAction; c
   return { action, credits: CREDIT_PRICES[action] * sec };
 }
 
+/** CREDIT_PRICES.video_motion_ai_edit per second of the video being edited, clamped to 6–20s. */
+export function priceForMotionAiEdit(durationSec: number): { action: CreditAction; credits: number } {
+  const action: CreditAction = 'video_motion_ai_edit';
+  const { min, max } = MOTION_AI.durationSec;
+  const sec = Math.min(max, Math.max(min, Math.round(durationSec) || min));
+  return { action, credits: CREDIT_PRICES[action] * sec };
+}
+
 // =====================================================
 // Text-post price helper
 // =====================================================
@@ -401,6 +414,7 @@ export const ACTION_LABELS: Record<CreditAction, string> = {
   video_cinema: 'Video · Cinema (sound-on)',
   video_motion_graphics: 'Video · Motion graphic',
   video_motion_ai: 'Video · AI-designed motion graphic',
+  video_motion_ai_edit: 'Video · Motion graphic edit',
   text_chat: 'API chat / vision',
 };
 

@@ -12,6 +12,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import type { BrandKit } from '../brand/kit';
+import type { MotionSegment } from '../ai/motionAi';
 
 export const PLATFORMS = ['x', 'linkedin', 'instagram', 'facebook', 'tiktok', 'youtube', 'reddit'] as const;
 export type Platform = (typeof PLATFORMS)[number];
@@ -520,6 +521,31 @@ export const videoJobs = pgTable(
     index('video_jobs_user_idx').on(t.userId),
     index('video_jobs_task_idx').on(t.providerTaskId),
   ],
+);
+
+// =====================================================
+// motion_versions — the edit history of AI-designed motion graphics.
+//
+// One row per motion-claude video job: the original (root_job_id = itself)
+// and every edit of it (parent_job_id = the version it revised). `segments`
+// is the worker's beat list for that render — the edit UI's timeline.
+// Its own table, not a video_jobs column: drizzle selects every column it
+// knows about, so a new video_jobs column would break every video poll until
+// the migration (0020) runs.
+// =====================================================
+export const motionVersions = pgTable(
+  'motion_versions',
+  {
+    videoJobId: uuid('video_job_id').primaryKey(),
+    rootJobId: uuid('root_job_id').notNull(),
+    parentJobId: uuid('parent_job_id'),
+    segmentId: text('segment_id'),
+    instruction: text('instruction'),
+    segments: jsonb('segments').$type<MotionSegment[]>(),
+    posterKey: text('poster_key'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index('motion_versions_root_idx').on(t.rootJobId)],
 );
 
 // =====================================================

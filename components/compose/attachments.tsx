@@ -11,13 +11,15 @@ export type MediaItem = {
   uploading?: boolean;
   /** CSS aspect ratio ("9/16") when known — the preview uses it. */
   aspect?: string;
+  /** An AI-designed motion graphic — offers Edit. */
+  motionAi?: boolean;
 };
 
 /** Mirrors the drafts schema cap (lib/validation.ts media .max(20)). */
 export const MAX_ATTACHED = 20;
 const LIBRARY_PAGE = 40;
 
-type LibraryRow = { id: string; publicUrl: string; mimeType: string; label: string | null; width: number | null; height: number | null; createdAt: string };
+type LibraryRow = { id: string; publicUrl: string; mimeType: string; label: string | null; width: number | null; height: number | null; createdAt: string; motionAi?: boolean };
 
 const toItem = (r: LibraryRow): MediaItem => ({
   id: r.id,
@@ -25,6 +27,7 @@ const toItem = (r: LibraryRow): MediaItem => ({
   mimeType: r.mimeType,
   label: r.label ?? 'Media',
   aspect: r.width && r.height ? `${r.width}/${r.height}` : undefined,
+  ...(r.motionAi ? { motionAi: true } : {}),
 });
 
 const isVideo = (m: MediaItem) => Boolean(m.mimeType?.startsWith('video/'));
@@ -44,11 +47,14 @@ export function Attachments({
   attached,
   onChange,
   onNotice,
+  onEdit,
   children,
 }: {
   attached: MediaItem[];
   onChange: (next: (cur: MediaItem[]) => MediaItem[]) => void;
   onNotice: (msg: string) => void;
+  /** Open the editor for an AI-designed motion graphic. */
+  onEdit?: (m: MediaItem) => void;
   children?: React.ReactNode;
 }) {
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -121,6 +127,9 @@ export function Attachments({
           {attached.map((m) => (
             <li key={m.id ?? m.label} className="compose-thumb">
               <Thumb m={m} />
+              {m.motionAi && m.id && onEdit && (
+                <button type="button" className="compose-thumb-edit" aria-label={`Edit ${m.label}`} onClick={() => onEdit(m)}>Edit</button>
+              )}
               {!m.uploading && (
                 <button type="button" className="compose-thumb-x" aria-label={`Remove ${m.label}`} onClick={() => onChange((cur) => cur.filter((a) => a !== m))}>
                   <Icon name="x" size={10} />

@@ -80,7 +80,7 @@ const PHASE_LABEL: Record<ClipPhase, string> = {
 };
 const ORDER: ClipPhase[] = ['queued', 'rendering', 'storing', 'done', 'failed'];
 /** `usual` / `slowAfterSec` override the default wait copy (2–4 min, slow after 4). */
-type Render = { startedAt: number; phases: ClipPhase[]; usual?: string; slowAfterSec?: number };
+export type Render = { startedAt: number; phases: ClipPhase[]; usual?: string; slowAfterSec?: number };
 
 export type GenReport = {
   added: (items: MediaItem[]) => void;
@@ -97,7 +97,7 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Poll a job URL until it settles or `maxMs` passes. `onSlow` fires when a
  *  single poll hangs — for video that IS the storing phase. */
-async function pollJob(url: string, maxMs: number, step: [number, number, number], onPoll?: (pd: JobPoll) => void, onSlow?: () => void) {
+export async function pollJob(url: string, maxMs: number, step: [number, number, number], onPoll?: (pd: JobPoll) => void, onSlow?: () => void) {
   const started = Date.now();
   let interval = step[0];
   while (Date.now() - started < maxMs) {
@@ -133,7 +133,9 @@ function failCopy(status: number, data: Record<string, unknown>, what: string): 
   return `${what} failed. Try again.`;
 }
 
-const toItem = (a: Asset, aspect?: string): MediaItem => ({ id: a.id, url: a.publicUrl, mimeType: a.mimeType, label: a.label || 'Generated', aspect });
+const toItem = (a: Asset, aspect?: string, motionAi?: boolean): MediaItem => ({
+  id: a.id, url: a.publicUrl, mimeType: a.mimeType, label: a.label || 'Generated', aspect, ...(motionAi ? { motionAi } : {}),
+});
 
 export function useMediaGen(report: GenReport) {
   const [s, setS] = useState<GenSettings>(DEFAULT_SETTINGS);
@@ -248,7 +250,7 @@ export function useMediaGen(report: GenReport) {
         setPhase(i, 'asset' in out ? 'done' : 'failed');
         return out;
       }));
-      const added = settled.flatMap((o) => ('asset' in o && o.asset ? [toItem(o.asset, aspect)] : []));
+      const added = settled.flatMap((o) => ('asset' in o && o.asset ? [toItem(o.asset, aspect, motionAi)] : []));
       if (added.length) report.added(added);
       report.videoSettled({ added: added.length, total: jobs.length, failed: settled.flatMap((o) => ('failed' in o && o.failed ? [o.failed] : [])) });
     } catch {

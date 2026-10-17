@@ -239,6 +239,55 @@ li.compose-thumb { cursor: default; }
 }
 .compose-crop-actions { justify-content: flex-end; flex-wrap: wrap; }
 
+/* Motion-graphic editor: player, segment timeline, instruction. */
+.compose-thumb-edit {
+  position: absolute; left: 2px; bottom: 2px;
+  padding: 1px 6px;
+  border-radius: var(--r-sm);
+  background: var(--text); color: var(--bg);
+  font-size: 10px; font-weight: 500;
+  cursor: pointer;
+}
+.motion-edit { width: min(92vw, 560px); display: flex; flex-direction: column; gap: var(--s-3); }
+.motion-edit-head { flex-wrap: wrap; gap: var(--s-2); justify-content: space-between; }
+.motion-edit h3 { margin: 0; font-size: var(--fs-md); font-weight: 600; }
+.motion-edit-player {
+  display: block;
+  width: 100%; max-height: 46dvh;
+  object-fit: contain;
+  border-radius: var(--r-sm);
+  background: var(--text);
+}
+.motion-edit-parts { display: flex; align-items: center; gap: var(--s-2); }
+.motion-edit-timeline {
+  position: relative; flex: 1;
+  height: 32px;
+  border-radius: var(--r-sm);
+  background: var(--subtle);
+}
+.motion-edit-seg {
+  position: absolute; top: 0; bottom: 0;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  font-size: var(--fs-xs); color: var(--ink-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  cursor: pointer;
+}
+@media (hover: hover) and (pointer: fine) { .motion-edit-seg:hover { background: var(--subtle); } }
+.motion-edit-seg[aria-pressed="true"] { background: var(--text); color: var(--bg); border-color: var(--text); z-index: 1; }
+.motion-edit-text {
+  width: 100%;
+  padding: var(--s-2) var(--s-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  font: inherit; font-size: var(--fs-sm); color: var(--text);
+  resize: vertical;
+}
+.motion-edit-text:focus { outline: 0; border-color: var(--accent); }
+
 @media (max-width: 900px) {
   .compose { gap: var(--s-4); }
   .compose-actions > .btn { flex: 1; justify-content: center; }

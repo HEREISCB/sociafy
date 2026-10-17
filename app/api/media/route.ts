@@ -1,8 +1,9 @@
 import { NextRequest } from 'next/server';
-import { and, desc, eq, lt, notInArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, lt, notInArray } from 'drizzle-orm';
 import { withUser } from '../../../lib/api';
 import { db } from '../../../lib/db';
-import { mediaAssets } from '../../../lib/db/schema';
+import { mediaAssets, videoJobs } from '../../../lib/db/schema';
+import { MOTION_AI } from '../../../lib/ai/models';
 import { BRAND_ONLY_MIMES } from '../../../lib/brand/assets';
 
 export const runtime = 'nodejs';
@@ -42,6 +43,12 @@ export async function GET(req: NextRequest) {
       .where(before && !Number.isNaN(before.getTime()) ? and(scope, lt(mediaAssets.createdAt, before)) : scope)
       .orderBy(desc(mediaAssets.createdAt))
       .limit(limit);
-    return { items: rows };
+    // Flag AI-designed motion graphics so the composer can offer Edit on them.
+    const videoIds = rows.filter((r) => r.mimeType.startsWith('video/')).map((r) => r.id);
+    const editable = new Set(videoIds.length
+      ? (await db().select({ id: videoJobs.mediaAssetId }).from(videoJobs)
+          .where(and(eq(videoJobs.userId, user.id), eq(videoJobs.provider, MOTION_AI.backend), inArray(videoJobs.mediaAssetId, videoIds)))).map((r) => r.id)
+      : []);
+    return { items: rows.map((r) => (editable.has(r.id) ? { ...r, motionAi: true } : r)) };
   }, req);
 }

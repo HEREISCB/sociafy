@@ -4,7 +4,8 @@ import { videoJobs, mediaAssets } from '../db/schema';
 import { getSeedanceTask } from '../ai/piapi';
 import { CueError, deleteCueRender, downloadCueRender, getCueRender } from '../ai/cue';
 import { getMotionResult, motionConfigured } from '../ai/motion';
-import { getMotionAiResult, motionAiConfigured } from '../ai/motionAi';
+import { getMotionAiResult, motionAiConfigured, type MotionAiResult } from '../ai/motionAi';
+import { saveMotionResult } from './motionVersions';
 import { makeMediaKey, publicUrlFor, uploadBuffer } from '../storage/r2';
 import { downloadToBuffer } from './finalize';
 import { refund } from '../credits/ledger';
@@ -273,7 +274,7 @@ async function finalizeCinemaJob(job: VideoJob): Promise<FinalizeVideoResult> {
 async function finalizeMotionJob(
   job: VideoJob,
   configured: () => boolean,
-  getResult: (callId: string) => ReturnType<typeof getMotionResult>,
+  getResult: (callId: string) => Promise<MotionAiResult>,
 ): Promise<FinalizeVideoResult> {
   if (!configured()) return { status: 'pending', pollError: 'video_provider_not_configured' };
   const ageMs = Date.now() - job.createdAt.getTime();
@@ -301,7 +302,11 @@ async function finalizeMotionJob(
   if (r.status === 'failed') return failAndRefund(job, `motion_failed: ${r.error ?? 'unknown'}`);
   // Only a key inside this user's prefix — never let a result point the asset elsewhere.
   if (!r.videoKey?.startsWith(`users/${job.userId}/`)) return failAndRefund(job, 'store_failed: bad_motion_key');
-  return claimAsset(job, r.videoKey, 'video/mp4', r.sizeBytes ?? null);
+  const claimed = await claimAsset(job, r.videoKey, 'video/mp4', r.sizeBytes ?? null);
+  // AI-designed renders (originals and edits) keep their segments for the edit
+  // timeline. Best-effort and idempotent, so the race loser re-writing is fine.
+  if (claimed.status === 'completed' && job.provider === 'motion-claude') await saveMotionResult(job, r);
+  return claimed;
 }
 
 async function loadAsset(id: string): Promise<MediaAsset | undefined> {

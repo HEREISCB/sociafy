@@ -4,9 +4,10 @@ import { agentSettings, brandKits, videoJobs } from '../db/schema';
 import { motionAiReady, motionReady, motionVariables, type BrandKit, type BrandProfile } from '../brand/kit';
 import { MOTION_AI, MOTION_GRAPHICS, MOTION_TEMPLATES, type MotionTemplate } from '../ai/models';
 import { submitMotion } from '../ai/motion';
-import { submitMotionAi, type MotionAiBrand } from '../ai/motionAi';
+import { editMotionAi, submitMotionAi, type MotionAiBrand } from '../ai/motionAi';
+import { recordEdit, rootOf } from './motionVersions';
 import { writeMotionCopy } from '../ai/motionCopy';
-import { priceForMotion, priceForMotionAi, type CreditAction } from '../credits/pricing';
+import { priceForMotion, priceForMotionAi, priceForMotionAiEdit, type CreditAction } from '../credits/pricing';
 import { charge, ensureBalance, refund, InsufficientCreditsError } from '../credits/ledger';
 import { makeMediaKey } from '../storage/r2';
 
@@ -113,12 +114,48 @@ export async function submitMotionAiVideo(args: {
   });
 }
 
+/**
+ * Edit a finished AI-designed motion graphic ("make the logo bigger"): the
+ * worker revises the parent's composition and renders a NEW asset — the parent
+ * stays in the library. Same money semantics as submitMotionAiVideo, priced
+ * per second of the video being edited. The caller has checked `parent` is
+ * this user's completed motion-claude job.
+ */
+export async function submitMotionAiEdit(args: {
+  userId: string;
+  parent: Pick<typeof videoJobs.$inferSelect, 'id' | 'providerTaskId' | 'durationSec' | 'aspect'>;
+  segmentId?: string;
+  instruction: string;
+}): Promise<{ job: typeof videoJobs.$inferSelect; creditsCharged: number }> {
+  const { userId, parent, instruction } = args;
+  const price = priceForMotionAiEdit(parent.durationSec);
+  const pre = await ensureBalance(userId, price.credits);
+  if (!pre.ok) throw new InsufficientCreditsError(pre.balance, pre.needed);
+  const rootJobId = await rootOf(parent.id);
+
+  return startJob({
+    userId, price,
+    row: { provider: MOTION_AI.backend, prompt: instruction, rewrittenPrompt: null, durationSec: parent.durationSec, aspect: parent.aspect, genMode: 'motion-ai-edit' },
+    meta: { template: 'ai-edit', parentJobId: parent.id, aspect: parent.aspect, durationSec: parent.durationSec, via: 'compose' },
+    afterInsert: (jobId) => recordEdit({ jobId, rootJobId, parentJobId: parent.id, segmentId: args.segmentId ?? null, instruction }),
+    submit: () => editMotionAi({
+      parentCallId: parent.providerTaskId,
+      segmentId: args.segmentId,
+      instruction,
+      videoKey: makeMediaKey(userId, 'motion-ai-edit.mp4'),
+      posterKey: makeMediaKey(userId, 'motion-ai-edit-poster.jpg'),
+    }),
+  });
+}
+
 /** row → charge → submit; refund on a definitive submit failure, leave an ambiguous one to the sweeper. */
 async function startJob(a: {
   userId: string;
   price: { action: CreditAction; credits: number };
   row: { provider: string; prompt: string; rewrittenPrompt: string | null; durationSec: number; aspect: string; genMode: string };
   meta: Record<string, unknown>;
+  /** Runs before the charge; a throw fails the row uncharged. */
+  afterInsert?: (jobId: string) => Promise<void>;
   submit: () => Promise<{ callId: string }>;
 }): Promise<{ job: typeof videoJobs.$inferSelect; creditsCharged: number }> {
   const { userId, price } = a;
@@ -126,6 +163,15 @@ async function startJob(a: {
     .insert(videoJobs)
     .values({ ...a.row, userId, providerTaskId: '', status: 'pending', prompt: a.row.prompt.slice(0, 2_000), quality: '1080p' })
     .returning();
+
+  if (a.afterInsert) {
+    try {
+      await a.afterInsert(row.id);
+    } catch (e) {
+      await db().update(videoJobs).set({ status: 'failed', error: 'prepare_failed', updatedAt: new Date() }).where(eq(videoJobs.id, row.id));
+      throw e;
+    }
+  }
 
   let charged;
   try {

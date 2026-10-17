@@ -10,6 +10,9 @@ const st = vi.hoisted(() => ({
   refunds: [] as Record<string, unknown>[],
   submit: null as null | (() => Promise<{ callId: string }>),
   submitted: [] as Record<string, unknown>[],
+  /** Order of side effects, to prove the parent link precedes the charge. */
+  log: [] as string[],
+  edits: [] as Record<string, unknown>[],
 }));
 
 vi.mock('../db', () => {
@@ -46,6 +49,11 @@ vi.mock('../ai/motion', () => ({
 }));
 vi.mock('../ai/motionAi', () => ({
   submitMotionAi: (a: Record<string, unknown>) => { st.submitted.push(a); return st.submit!(); },
+  editMotionAi: (a: Record<string, unknown>) => { st.log.push('submit'); st.submitted.push(a); return st.submit!(); },
+}));
+vi.mock('./motionVersions', () => ({
+  rootOf: (id: string) => Promise.resolve(id === 'parent_v2' ? 'parent_v1' : id),
+  recordEdit: (a: Record<string, unknown>) => { st.log.push('record'); st.edits.push(a); return Promise.resolve(); },
 }));
 vi.mock('../credits/ledger', () => {
   class InsufficientCreditsError extends Error {
@@ -54,18 +62,18 @@ vi.mock('../credits/ledger', () => {
   return {
     InsufficientCreditsError,
     ensureBalance: (_u: string, n: number) => Promise.resolve(st.balance >= n ? { ok: true, balance: st.balance } : { ok: false, balance: st.balance, needed: n }),
-    charge: (a: Record<string, unknown>) => { st.charges.push(a); return Promise.resolve({ ledgerId: 'led_1', balanceAfter: 0 }); },
+    charge: (a: Record<string, unknown>) => { st.log.push('charge'); st.charges.push(a); return Promise.resolve({ ledgerId: 'led_1', balanceAfter: 0 }); },
     refund: (a: Record<string, unknown>) => { st.refunds.push(a); return Promise.resolve({ refunded: true }); },
   };
 });
 
-import { MotionNotReady, autopilotTemplate, submitMotionAiVideo, submitMotionVideo } from './motionJob';
+import { MotionNotReady, autopilotTemplate, submitMotionAiEdit, submitMotionAiVideo, submitMotionVideo } from './motionJob';
 
 const READY = { logo: { primary: { id: 'l', url: 'https://cdn/logo.svg', mime: 'image/svg+xml' } }, colors: { primary: '#5B5EF2' }, facts: ['12 languages'] };
 const go = () => submitMotionVideo({ userId: 'u1', template: 'stat', aspect: '9:16', topic: 'Hindi support is live', via: 'compose' });
 
 beforeEach(() => {
-  st.kit = READY; st.balance = 100; st.rows = []; st.charges = []; st.refunds = []; st.submitted = [];
+  st.kit = READY; st.balance = 100; st.rows = []; st.charges = []; st.refunds = []; st.submitted = []; st.log = []; st.edits = [];
   st.submit = () => Promise.resolve({ callId: 'fc-1' });
 });
 
@@ -148,5 +156,50 @@ describe('submitMotionAiVideo', () => {
     await expect(ai()).rejects.toThrow('motion_ai_503');
     expect(st.rows[0]).toMatchObject({ status: 'failed' });
     expect(st.refunds).toEqual([expect.objectContaining({ ledgerId: 'led_1', meta: { videoJobId: 'job_1' } })]);
+  });
+});
+
+describe('submitMotionAiEdit', () => {
+  const parent = { id: 'parent_v2', providerTaskId: 'call-v2', durationSec: 15, aspect: '9:16' };
+  const edit = (over: Record<string, unknown> = {}) =>
+    submitMotionAiEdit({ userId: 'u1', parent: { ...parent, ...over }, segmentId: 'seg-2', instruction: 'Make the logo bigger' });
+
+  it('links the parent, charges 1 cr/s, then submits against the PARENT callId into the user prefix', async () => {
+    const { job, creditsCharged } = await edit();
+    expect(creditsCharged).toBe(15);
+    expect(st.log).toEqual(['record', 'charge', 'submit']);
+    expect(st.charges[0]).toMatchObject({ action: 'video_motion_ai_edit', credits: 15, meta: { videoJobId: 'job_1', parentJobId: 'parent_v2' } });
+    expect(st.edits[0]).toEqual({ jobId: 'job_1', rootJobId: 'parent_v1', parentJobId: 'parent_v2', segmentId: 'seg-2', instruction: 'Make the logo bigger' });
+    expect(job).toMatchObject({ provider: 'motion-claude', genMode: 'motion-ai-edit', providerTaskId: 'fc-1', durationSec: 15, aspect: '9:16', prompt: 'Make the logo bigger' });
+    const sent = st.submitted[0] as Record<string, string>;
+    expect(sent).toMatchObject({ parentCallId: 'call-v2', segmentId: 'seg-2', instruction: 'Make the logo bigger' });
+    expect(sent.videoKey).toMatch(/^users\/u1\/.*\.mp4$/);
+    expect(sent.posterKey).toMatch(/^users\/u1\/.*\.jpg$/);
+  });
+
+  it('prices by the length of the video being edited: 6 / 20 → 6 / 20', async () => {
+    expect((await edit({ durationSec: 6 })).creditsCharged).toBe(6);
+    expect((await edit({ durationSec: 20 })).creditsCharged).toBe(20);
+  });
+
+  it('refuses a short balance before writing anything', async () => {
+    st.balance = 10;
+    await expect(edit()).rejects.toThrow('insufficient');
+    expect(st.rows).toHaveLength(0);
+    expect(st.charges).toHaveLength(0);
+  });
+
+  it('refunds a definitive rejection (parent gone) and fails the row', async () => {
+    st.submit = () => Promise.reject(new Error('motion_ai_404: {"error":"parent_not_found"}'));
+    await expect(edit()).rejects.toThrow('motion_ai_404');
+    expect(st.rows[0]).toMatchObject({ status: 'failed' });
+    expect(st.refunds).toEqual([expect.objectContaining({ ledgerId: 'led_1', meta: { videoJobId: 'job_1' } })]);
+  });
+
+  it('leaves an ambiguous submit pending for the sweeper, unrefunded', async () => {
+    st.submit = () => Promise.reject(Object.assign(new Error('signal timed out'), { name: 'TimeoutError' }));
+    const { job } = await edit();
+    expect(job.status).toBe('pending');
+    expect(st.refunds).toHaveLength(0);
   });
 });
