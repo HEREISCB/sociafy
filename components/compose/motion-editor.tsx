@@ -5,6 +5,7 @@ import { priceForMotionAiEdit } from '../../lib/credits/pricing';
 import type { MotionAudio, MotionSegment } from '../../lib/ai/motionAi';
 import { pollJob, RenderStatus, type Render } from './generate';
 import type { MediaItem } from './attachments';
+import { segmentSeekSec } from '../../lib/media/motionSeek';
 
 type Version = { jobId: string; version: number; status: string; instruction: string | null; assetId: string | null; videoUrl: string | null; posterUrl: string | null };
 export type MotionEditData = {
@@ -117,7 +118,7 @@ export function MotionEditor({
 
   const pick = (s: MotionSegment | null) => {
     setSel(s?.id ?? null);
-    if (s && video.current) video.current.currentTime = s.startSec;
+    if (s && video.current) video.current.currentTime = segmentSeekSec(s.startSec, s.endSec);
   };
 
   const cur = data?.versions.find((v) => v.jobId === data.jobId);
