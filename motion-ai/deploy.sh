@@ -8,7 +8,7 @@ node --test lib.test.mjs >/dev/null
 
 ssh "$BOX" 'mkdir -p ~/motionai/app ~/motionai/home/.claude/skills'
 rsync -a --delete --exclude deploy.sh ./ "$BOX":motionai/app/
-for s in hyperframes hyperframes-core hyperframes-animation hyperframes-cli hyperframes-creative hyperframes-keyframes hyperframes-registry general-video media-use; do
+for s in hyperframes hyperframes-core hyperframes-animation hyperframes-cli hyperframes-creative hyperframes-keyframes hyperframes-registry general-video media-use hyperframes-audio; do
   rsync -a --delete ~/.claude/skills/$s "$BOX":motionai/home/.claude/skills/
 done
 

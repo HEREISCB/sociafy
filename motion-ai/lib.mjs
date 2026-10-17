@@ -30,7 +30,26 @@ export function parseSubmit(b) {
       fontDisplayUrl: url(br.fontDisplayUrl), fontBodyUrl: url(br.fontBodyUrl),
       style: br.style === 'bold' ? 'bold' : 'soft',
     },
+    audio: parseAudio(b.audio),
   };
+}
+
+// submit.audio → {narration, sfx, music, voice, language}. Missing/odd fields fall back to defaults.
+export function parseAudio(a) {
+  const o = a && typeof a === 'object' ? a : {};
+  const flag = (v, d) => (typeof v === 'boolean' ? v : d);
+  const voice = typeof o.voice === 'string' && /^[A-Za-z0-9 ._'-]{1,60}$/.test(o.voice.trim()) ? o.voice.trim() : '';
+  const language = typeof o.language === 'string' && /^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})?$/.test(o.language.trim()) ? o.language.trim() : '';
+  return { narration: flag(o.narration, false), sfx: flag(o.sfx, false), music: flag(o.music, false), voice, language };
+}
+
+// What the render actually carries → result.audio. `added` = kinds whose files the final index.html uses.
+export function audioResult(requested, added) {
+  const r = { narration: added.has('narration'), sfx: added.has('sfx'), music: added.has('music') };
+  const want = ['narration', 'sfx', 'music'].filter((k) => requested?.[k]);
+  if (want.length && !want.some((k) => r[k])) r.warning = 'audio_unavailable';
+  else if (want.some((k) => !r[k])) r.warning = 'audio_partial';
+  return r;
 }
 
 // segments.json from Claude → validated manifest, or a single whole-video segment.
@@ -49,6 +68,7 @@ export function parseSegments(raw, dur) {
     id: str(g.id, 20) || `s${i + 1}`, label: str(g.label, 60),
     startSec: i === 0 ? 0 : s[i - 1].endSec, endSec: i === s.length - 1 ? dur : g.endSec,
     onScreenText: str(g.onScreenText, 400),
+    ...(str(g.narration, 400) && { narration: str(g.narration, 400) }),
     suggestions: (Array.isArray(g.suggestions) ? g.suggestions : []).map((x) => str(x, 120)).filter(Boolean).slice(0, 3),
   }));
 }

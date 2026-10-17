@@ -39,6 +39,8 @@ fi
 
 # Pinned copy of the Claude Code binary (bound read-only into the sandbox)
 cp -f "$(readlink -f "$HOME/.local/bin/claude")" bin/claude
+# The one audio CLI Claude may run (ElevenLabs; key comes in via env per job)
+install -m 755 app/motion-audio.mjs bin/motion-audio
 
 # Subscription token copy, readable only by us
 install -m 600 "$HOME/.claude-oauth-token" oauth-token

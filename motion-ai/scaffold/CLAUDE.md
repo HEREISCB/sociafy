@@ -39,6 +39,42 @@ Before finishing, write `segments.json` in this folder describing your timeline:
 3–6 contiguous segments in order: the first starts at 0, each `startSec` equals the previous
 `endSec`, the last ends at exactly {{DUR}}. `onScreenText` is the text visible in that segment.
 `suggestions` holds 2–3 short, concrete edits a user could click to improve that segment.
+When narration is on, add `"narration": "…"` to each segment with the exact words spoken in it.
+
+## Audio (only the kinds `BRIEF.md` → Audio turns on)
+
+Generate sound only with `motion-audio` (ElevenLabs). Each call prints one JSON line:
+`{"ok":true,"file":"assets/audio/<id>.mp3","durationSec":1.9}` or `{"ok":false,"error":…}`.
+On `ok:false` leave that sound out and carry on (if the first call fails with
+`audio_unavailable`, skip all audio): the video must work silent. Never reference a file that
+wasn't written. Every call spends credits: no test calls, at most 2 regenerations per job.
+
+- **Narration**: one short line per segment (skip the end card or keep it to the brand name),
+  in the BRIEF's language, written for the ear, ≤ 2.3 words per second of segment time.
+  `motion-audio tts n1 "Three days. Gone." --voice "<voice>" --lang <lang>` (omit flags BRIEF leaves
+  empty). If `durationSec` doesn't fit its segment with 0.3 s spare, shorten the words and
+  regenerate (or `--speed 1.1`). Start each line ~0.2 s into its segment; all narration ends
+  ≥ 0.8 s before {{DUR}}. Time the on-screen beats to the voice.
+- **SFX**: 2–4 subtle hits on real visual beats (transition whoosh, headline impact, end-card
+  chime): `motion-audio sfx w1 "soft airy whoosh" --dur 0.8` (0.5–3 s).
+- **Music**: one bed: `motion-audio music bed "<mood>, <tempo>, minimal" --dur {{DUR}}`.
+
+Place them as HyperFrames `<audio>` elements (every one needs a unique `id`, no `crossorigin`),
+at the end of `#root`, never inside a `.clip`. `data-start`/`data-duration` in seconds; the
+duration must not exceed the file's `durationSec` or run past {{DUR}}:
+
+```html
+<audio id="vo-n1" src="assets/audio/n1.mp3" data-start="0.2" data-duration="2.1" data-track-index="20" data-volume="1" data-audio-group="voiceover"></audio>
+<audio id="sfx-w1" src="assets/audio/w1.mp3" data-start="3.1" data-duration="0.8" data-track-index="21" data-volume="0.35"></audio>
+<audio id="music" src="assets/audio/bed.mp3" data-start="0" data-duration="{{DUR}}" data-track-index="23" data-volume="1"
+  data-automation='{"version":1,"lanes":[{"target":"volume","points":[{"t":0,"v":0},{"t":0.5,"v":0.4},{"t":0.6,"v":0.12},{"t":2.4,"v":0.12},{"t":2.7,"v":0.4},{"t":11,"v":0.4},{"t":12,"v":0}]}]}'></audio>
+```
+
+Mix: narration at 1.0; SFX 0.25–0.5 (≤ 0.3 while a voice line plays; overlapping SFX go on track
+22); the bed fades in over ~0.5 s and out over the last ~1 s, sits at ~0.4 and **ducks to ~0.12
+during every narration line** (0.15–0.3 s ramps) via its `volume` lane (`t` is seconds from the
+bed's start). No GSAP tweens on audio. The worker normalises loudness and trims to {{DUR}}.
+Mixing reference if needed: `~/.claude/skills/hyperframes-audio/references/attributes.md`.
 
 ## How
 
@@ -49,8 +85,9 @@ Before finishing, write `segments.json` in this folder describing your timeline:
      `~/.claude/skills/motion-graphics/references/motion-vocabulary.md` (if present)
    - `~/.claude/skills/hyperframes-animation/SKILL.md` and only the 2–4 rules you actually use.
    Skip the skills' interactive steps: no subagents, no `hyperframes init`, no preview, no
-   render, no media sourcing, no approval questions. Work fast; you have a few minutes.
+   render, no media sourcing other than `motion-audio`, no approval questions. Work fast; you have a few minutes.
 3. Write `index.html`.
 4. Run `npx hyperframes@0.8.141 check` and fix **every error** until it passes. Re-run after each fix.
    Do not run `render`; the worker renders after you exit.
+   (Audio first if enabled: generate it right after reading BRIEF.md so the timing can follow the voice.)
 5. Write `segments.json`, then reply with one line: what you made.

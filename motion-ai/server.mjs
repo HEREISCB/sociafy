@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { SIZES, parseSubmit, parseSegments, parseEdit } from './lib.mjs';
+import { SIZES, parseSubmit, parseSegments, parseEdit, parseAudio, audioResult } from './lib.mjs';
 
 const BASE = process.env.MOTIONAI_BASE;
 const SECRET = process.env.ENGINE_SECRET || '';
@@ -17,7 +17,7 @@ const MIN = 60_000;
 const LIMIT = { claude: 8 * MIN, check: 2 * MIN, render: 5 * MIN, job: 15 * MIN };
 const CONCURRENCY = 2;
 const KEEP_MS = 30 * 24 * 3600_000; // project dirs are kept for the future /edit endpoint
-const TOOLS = 'Read,Write,Edit,Glob,Grep,Skill,Bash(npx hyperframes*),Bash(npm run *),Bash(ls*)';
+const TOOLS = 'Read,Write,Edit,Glob,Grep,Skill,Bash(npx hyperframes*),Bash(npm run *),Bash(ls*),Bash(motion-audio *)';
 const TASK = 'Follow CLAUDE.md in this folder exactly: build the motion graphic described in BRIEF.md into index.html, ' +
   `make \`npx ${HF} check\` pass, and write segments.json. Work autonomously; never ask questions.`;
 const TASK_EDIT = 'This folder holds a finished HyperFrames motion graphic (index.html, segments.json, BRIEF.md). ' +
@@ -25,6 +25,7 @@ const TASK_EDIT = 'This folder holds a finished HyperFrames motion graphic (inde
   'The hard requirements in CLAUDE.md still apply. Change only what EDIT.md targets: when it names a segment, only change what is ' +
   'on screen during that time range (if a style is shared, e.g. a CSS variable, scope the change to that segment\'s elements). ' +
   'Keep the total duration, canvas, brand, and every other segment\'s content and timing unchanged unless the request explicitly requires otherwise. ' +
+  'Keep the existing audio (assets/audio, <audio> elements) unless the request asks to change it (e.g. a calmer voice, no whoosh, new music): then use motion-audio as CLAUDE.md describes and keep the mix rules. ' +
   'Then update segments.json (same ids for segments that persist, refreshed onScreenText, fresh suggestions), ' +
   `make \`npx ${HF} check\` pass, and reply with one line: what you changed. Work autonomously; never ask questions.`;
 const STUB_MARK = '<h1 id="title">TODO</h1>';
@@ -120,6 +121,9 @@ flow: autonomous
 - Safe area: keep text and logo clear of ${safe}
 - Style: ${b.style === 'bold' ? 'bold: punchy, high contrast, fast snappy moves, heavy weights, big scale changes' : 'soft: calm confident easing, airy spacing, gentle fades/slides, rounded shapes'}
 
+## Audio
+${audioBrief(j.input.audio)}
+
 ## Brand
 - Name: ${b.brandName || '(none; use no brand name)'}
 - Tagline: ${b.tagline || '(none)'}
@@ -135,6 +139,38 @@ ${j.input.prompt}
 POST>>>
 `);
   return proj;
+}
+
+function audioBrief(a = parseAudio()) {
+  const on = (k) => (a[k] ? 'on' : 'off');
+  return `- Narration: ${on('narration')}${a.narration ? `; voice: ${a.voice || '(default)'}; language: ${a.language || 'the post\'s language'}` : ''}
+- SFX: ${on('sfx')}
+- Music bed: ${on('music')}`;
+}
+
+// Final MP4: if the render carries the generated audio, two-pass loudnorm to -16 LUFS / -1.5 dBTP,
+// AAC 48 kHz, trimmed to the exact duration (video copied). Returns the audio kinds really in it.
+async function finishAudio(j, proj, out, dir, signal) {
+  let ledger = [];
+  try { ledger = JSON.parse(fs.readFileSync(`${proj}/assets/audio/ledger.json`, 'utf8')); } catch {}
+  const html = fs.readFileSync(`${proj}/index.html`, 'utf8');
+  const kinds = new Set(ledger.filter((x) => html.includes(x.file) && fs.existsSync(`${proj}/${x.file}`)).map((x) => x.kind));
+  j.audioCost = ledger.reduce((n, x) => n + (x.cost || 0), 0);
+  if (!kinds.size) return kinds;
+  const dur = String(j.input.durationSec), LN = 'loudnorm=I=-16:TP=-1.5:LRA=11';
+  const m = await run('ffmpeg', ['-hide_banner', '-nostats', '-i', out, '-t', dur, '-vn', '-af', `${LN}:print_format=json`, '-f', 'null', '-'],
+    { timeout: MIN, signal, out: `${dir}/loudnorm.log` });
+  let ms = null;
+  try { ms = JSON.parse(fs.readFileSync(`${dir}/loudnorm.log.err`, 'utf8').match(/\{[^{}]*"input_i"[^{}]*\}/)[0]); } catch {}
+  if (m.code !== 0 || !ms || !Number.isFinite(Number(ms.input_i))) { j.log.push('no audible audio in render'); return new Set(); }
+  const tmp = `${dir}/mixed.mp4`;
+  const f = await run('ffmpeg', ['-y', '-loglevel', 'error', '-i', out, '-t', dur, '-map', '0:v:0', '-map', '0:a:0', '-c:v', 'copy',
+    '-af', `${LN}:measured_I=${ms.input_i}:measured_TP=${ms.input_tp}:measured_LRA=${ms.input_lra}:measured_thresh=${ms.input_thresh}:offset=${ms.target_offset}:linear=true`,
+    '-ar', '48000', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', tmp], { timeout: 2 * MIN, signal });
+  if (f.code !== 0) throw fail('render_failed', 'audio mix');
+  fs.renameSync(tmp, out);
+  j.loudness = { inputLufs: Number(ms.input_i) };
+  return kinds;
 }
 
 // Edit job: start from the parent's project (never its renders) plus EDIT.md.
@@ -197,7 +233,11 @@ async function runJob(j) {
     step('claude');
     const token = fs.readFileSync(`${BASE}/oauth-token`, 'utf8').trim();
     const c = await sandbox(dir, `${BASE}/bin/claude`, ['-p', j.input.edit ? TASK_EDIT : TASK, '--output-format', 'json', '--max-turns', '60', '--allowedTools', TOOLS],
-      { timeout: LIMIT.claude, signal, env: { CLAUDE_CODE_OAUTH_TOKEN: token }, out: `${dir}/claude.json` });
+      { timeout: LIMIT.claude, signal, out: `${dir}/claude.json`, env: {
+        CLAUDE_CODE_OAUTH_TOKEN: token, ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY || '',
+        // Fresh jobs may only spend credits on the kinds asked for; edits may change audio on request.
+        MOTION_AUDIO_KINDS: j.input.edit ? 'narration,sfx,music' : ['narration', 'sfx', 'music'].filter((k) => j.input.audio?.[k]).join(','),
+      } });
     lap('claude');
     try {
       const o = JSON.parse(fs.readFileSync(`${dir}/claude.json`, 'utf8'));
@@ -224,6 +264,8 @@ async function runJob(j) {
     j.probe = pr;
     if (!pr || pr.w !== W || pr.h !== H) throw fail('render_failed', `bad output ${JSON.stringify(pr)}`);
     if (Math.abs(pr.d - j.input.durationSec) > 0.5) j.log.push(`duration ${pr.d} vs ${j.input.durationSec}`);
+    const audio = audioResult(j.input.audio, await finishAudio(j, proj, out, dir, signal));
+    lap('audio');
     // Poster = the settled end card, 0.8 s before the end (same as the template engine).
     const pp = await run('ffmpeg', ['-y', '-loglevel', 'error', '-sseof', '-0.8', '-i', out, '-frames:v', '1', '-q:v', '3', poster], { timeout: MIN, signal });
     if (pp.code !== 0) throw fail('render_failed', 'poster');
@@ -238,7 +280,7 @@ async function runJob(j) {
     lap('upload');
     Object.assign(j, {
       status: 'done', videoKey: j.input.videoKey, posterKey: j.input.posterKey, videoUrl, posterUrl,
-      sizeBytes: fs.statSync(out).size, segments,
+      sizeBytes: fs.statSync(out).size, segments, audio,
     });
     fs.rmSync(out); fs.rmSync(poster); // they live in R2 now; the project stays for /edit
   } catch (e) {
@@ -300,8 +342,8 @@ http.createServer(async (req, res) => {
       const j = jobs.get(u.searchParams.get('callId') || '');
       if (!j) return send(res, 404, { status: 'failed', error: 'not_found' });
       if (j.status === 'done') {
-        const { videoKey, posterKey, videoUrl, posterUrl, sizeBytes, segments, parentCallId } = j;
-        return send(res, 200, { status: 'done', videoKey, posterKey, videoUrl, posterUrl, sizeBytes, segments, ...(parentCallId && { parentCallId }) });
+        const { videoKey, posterKey, videoUrl, posterUrl, sizeBytes, segments, audio, parentCallId } = j;
+        return send(res, 200, { status: 'done', videoKey, posterKey, videoUrl, posterUrl, sizeBytes, segments, audio, ...(parentCallId && { parentCallId }) });
       }
       return send(res, 200, j.status === 'failed' ? { status: 'failed', error: j.error } : { status: 'pending' });
     }
