@@ -37,7 +37,7 @@ export const DEFAULT_SETTINGS = {
   /** Under videoMode 'motion': AI-designed instead of a template. */
   motionAi: false,
   motionAiDuration: MOTION_AI.durationSec.default as number,
-  /** AI-designed audio. Voiceover or music add 1 cr/s; sound effects are free. */
+  /** AI-designed audio. Voiceover or music add 4 cr/s; sound effects are free. */
   motionAiVoiceover: false,
   motionAiSfx: true,
   motionAiMusic: false,

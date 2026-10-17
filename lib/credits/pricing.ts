@@ -44,6 +44,30 @@ export type CreditAction =
   | 'video_motion_ai_edit'
   | 'text_chat';
 
+/**
+ * Credits we charge per dollar the video backend charges us.
+ *
+ * Pinned to the basis the rest of this file already uses: 8s/720p/Quality is
+ * 315 cr against a $2.80 provider cost, i.e. 112.5 cr per provider dollar at
+ * $0.012/credit (the Business rate). Cinema is priced off a live quote rather
+ * than a bucket, so it needs the ratio stated rather than baked into a
+ * constant — change this one number to move Cinema's margin, and nothing else.
+ */
+export const CREDITS_PER_PROVIDER_USD = 112.5;
+
+/** Round UP. A render that costs a fraction of a credit still costs us money. */
+export function creditsFromProviderUsd(usd: number): number {
+  return Math.max(1, Math.ceil(usd * CREDITS_PER_PROVIDER_USD));
+}
+
+/**
+ * Every motion graphic is priced like Seedance 2.0 Fast at 720p: PiAPI $0.16/s
+ * (COSTS.md, "Video generation") × CREDITS_PER_PROVIDER_USD = 18 cr/s. Rounded
+ * per second, then multiplied, so float error can't round a job up.
+ */
+const SEEDANCE_FAST_720P_USD_PER_SEC = 0.16;
+export const MOTION_PER_SEC = creditsFromProviderUsd(SEEDANCE_FAST_720P_USD_PER_SEC);
+
 /** Single source-of-truth credit cost per action. */
 export const CREDIT_PRICES: Record<CreditAction, number> = {
   text_post: 1,
@@ -104,25 +128,22 @@ export const CREDIT_PRICES: Record<CreditAction, number> = {
   // which quotes the backend per request. `charge()` takes credits as an
   // argument, not from this table, so the two never disagree on the bill.
   video_cinema: 33,
-  // Sociafy Motion Graphics: brand-kit templates rendered headless on a CPU
-  // container (2 cores, ~2 GiB). Worst case incl. cold start + idle tail ≈ 200
-  // billed seconds ≈ $0.006, plus ~$0.002 for the copy-writing call. Priced
-  // per started 8s of output (see priceForMotion): 5 cr for a 7s sting, 10 cr
-  // for a 15–16s stat/showcase → $0.06–0.12 @business, >85% margin, and still
-  // an order of magnitude under a generated clip.
-  video_motion_graphics: 5,
-  // AI-designed motion graphics: a model authors the composition on a GPU box
-  // (several minutes of agent + render compute per job, retries included),
-  // then renders it. Priced PER SECOND of output (see priceForMotionAi): 12 cr
-  // for 6s, 30 cr for 15s, 40 cr for 20s. The authoring compute, not the
-  // render, is most of the cost — owner to confirm the rate. A voiceover or
-  // music bed adds MOTION_AI_AUDIO_PER_SEC (generated audio has a real cost);
-  // sound effects are free.
-  video_motion_ai: 2,
+  // Motion graphics (templates AND AI-designed) are priced like a Seedance 2.0
+  // Fast 720p clip: PiAPI $0.16/s × CREDITS_PER_PROVIDER_USD = 18 cr per second
+  // of output (COSTS.md). An owner decision, priced to the value of the clip
+  // rather than our cost: templates render on a CPU container for ~$0.008 a
+  // job, AI-designed ones spend a few minutes of agent + GPU render compute,
+  // so either way the margin is far above the Fast clip's. The numbers here are
+  // per-second rates; see priceForMotion / priceForMotionAi / priceForMotionAiEdit.
+  // Templates: sting 7s = 126, stat 15s = 270, showcase 16s = 288.
+  video_motion_graphics: MOTION_PER_SEC,
+  // AI-designed: 6s = 108, 15s = 270, 20s = 360. A voiceover or music bed adds
+  // MOTION_AI_AUDIO_PER_SEC (generated audio has a real cost); SFX are free.
+  video_motion_ai: MOTION_PER_SEC,
   // An edit of an AI-designed motion graphic ("make the logo bigger"): the
   // worker revises the existing composition and re-renders. Per second of the
-  // video being edited, half the from-scratch rate (priceForMotionAiEdit).
-  video_motion_ai_edit: 1,
+  // video being edited, half the from-scratch rate: 6s = 54, 15s = 135, 20s = 180.
+  video_motion_ai_edit: MOTION_PER_SEC / 2,
   // POST /api/v1/chat/completions. Metered per call from the provider's actual
   // token usage by priceForChat() below; this number is only the per-call floor.
   text_chat: 1,
@@ -263,14 +284,14 @@ export function priceForAvatar(
 // Motion-graphics price helper
 // =====================================================
 
-/** Flat per render: CREDIT_PRICES.video_motion_graphics per started 8s. */
+/** CREDIT_PRICES.video_motion_graphics per second of the template's length, rounded up. */
 export function priceForMotion(durationSec: number): { action: CreditAction; credits: number } {
   const action: CreditAction = 'video_motion_graphics';
-  return { action, credits: CREDIT_PRICES[action] * Math.max(1, Math.ceil(durationSec / 8)) };
+  return { action, credits: CREDIT_PRICES[action] * Math.max(1, Math.ceil(durationSec)) };
 }
 
 /** Per-second surcharge when a voiceover or music bed is mixed in — once, even with both. Sound effects are free. */
-export const MOTION_AI_AUDIO_PER_SEC = 1;
+export const MOTION_AI_AUDIO_PER_SEC = 4;
 
 /**
  * CREDIT_PRICES.video_motion_ai per second of output, length clamped to 6–20s,
@@ -311,22 +332,6 @@ export function priceForCompose(args: {
     credits: base + surcharge,
     surcharge,
   };
-}
-
-/**
- * Credits we charge per dollar the video backend charges us.
- *
- * Pinned to the basis the rest of this file already uses: 8s/720p/Quality is
- * 315 cr against a $2.80 provider cost, i.e. 112.5 cr per provider dollar at
- * $0.012/credit (the Business rate). Cinema is priced off a live quote rather
- * than a bucket, so it needs the ratio stated rather than baked into a
- * constant — change this one number to move Cinema's margin, and nothing else.
- */
-export const CREDITS_PER_PROVIDER_USD = 112.5;
-
-/** Round UP. A render that costs a fraction of a credit still costs us money. */
-export function creditsFromProviderUsd(usd: number): number {
-  return Math.max(1, Math.ceil(usd * CREDITS_PER_PROVIDER_USD));
 }
 
 // =====================================================

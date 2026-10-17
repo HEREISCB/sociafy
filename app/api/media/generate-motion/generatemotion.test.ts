@@ -18,7 +18,7 @@ vi.mock('../../../../lib/ai/motion', () => ({ motionConfigured: () => st.motion 
 vi.mock('../../../../lib/ai/motionAi', () => ({ motionAiConfigured: () => st.motionAi }));
 vi.mock('../../../../lib/credits/ledger', () => ({ InsufficientCreditsError: class extends Error {}, insufficientCreditsResponse: () => ({ status: 402 }) }));
 vi.mock('../../../../lib/media/motionJob', () => {
-  const job = (a: Record<string, unknown>) => ({ job: { id: 'job_1', status: 'pending', durationSec: a.durationSec ?? 15, aspect: a.aspect }, creditsCharged: 30 });
+  const job = (a: Record<string, unknown>) => ({ job: { id: 'job_1', status: 'pending', durationSec: a.durationSec ?? 15, aspect: a.aspect }, creditsCharged: 270 });
   return {
     MotionNotReady: class extends Error {},
     submitMotionAiVideo: (a: Record<string, unknown>) => { st.ai.push(a); return Promise.resolve(job(a)); },

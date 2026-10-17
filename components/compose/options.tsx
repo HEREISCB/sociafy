@@ -359,7 +359,7 @@ export function VideoOptions({ gen, cost, disabled, onGenerate }: PanelProps) {
           <span className="compose-label">Sound</span>
           <label className="compose-check">
             <input type="checkbox" checked={s.motionAiVoiceover} onChange={(e) => set({ motionAiVoiceover: e.target.checked })} />
-            Voiceover <span className="compose-note">{s.motionAiMusic ? 'no extra with music' : '+1 cr/s'}</span>
+            Voiceover <span className="compose-note">{s.motionAiMusic ? 'no extra with music' : '+4 cr/s'}</span>
           </label>
           {s.motionAiVoiceover && (
             <select className="input compose-self-start" aria-label="Voiceover language" value={s.motionAiLanguage} onChange={(e) => set({ motionAiLanguage: e.target.value as typeof s.motionAiLanguage })}>
@@ -373,7 +373,7 @@ export function VideoOptions({ gen, cost, disabled, onGenerate }: PanelProps) {
           </label>
           <label className="compose-check">
             <input type="checkbox" checked={s.motionAiMusic} onChange={(e) => set({ motionAiMusic: e.target.checked })} />
-            Music <span className="compose-note">{s.motionAiVoiceover ? 'no extra with voiceover' : '+1 cr/s'}</span>
+            Music <span className="compose-note">{s.motionAiVoiceover ? 'no extra with voiceover' : '+4 cr/s'}</span>
           </label>
         </div>
       )}

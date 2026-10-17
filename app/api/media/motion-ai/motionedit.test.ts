@@ -26,7 +26,7 @@ vi.mock('../../../../lib/media/motionJob', () => ({
   submitMotionAiEdit: (a: Record<string, unknown>) => {
     st.calls.push(a);
     if (st.fail) return Promise.reject(st.fail);
-    return Promise.resolve({ job: { id: 'edit_1', status: 'pending', durationSec: 15, aspect: '9:16' }, creditsCharged: 15 });
+    return Promise.resolve({ job: { id: 'edit_1', status: 'pending', durationSec: 15, aspect: '9:16' }, creditsCharged: 135 });
   },
 }));
 
@@ -43,7 +43,7 @@ describe('POST /api/media/motion-ai/[jobId]/edit', () => {
   it('submits the edit against the parent job and answers 202', async () => {
     const r = await post(J1, { instruction: '  Make the logo bigger ', segmentId: 'seg-2' });
     expect(r.status).toBe(202);
-    expect(await r.json()).toMatchObject({ job: { id: 'edit_1', creditsCharged: 15 } });
+    expect(await r.json()).toMatchObject({ job: { id: 'edit_1', creditsCharged: 135 } });
     expect(st.calls[0]).toMatchObject({ userId: 'user_1', instruction: 'Make the logo bigger', segmentId: 'seg-2', parent: { id: J1, providerTaskId: 'call-1' } });
   });
 

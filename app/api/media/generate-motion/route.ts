@@ -21,7 +21,7 @@ const bodySchema = z.object({
   aspect: z.enum(MOTION_AI.aspects).default('9:16'),
   /** 'ai' only; templates have fixed lengths. */
   durationSec: z.number().int().min(MOTION_AI.durationSec.min).max(MOTION_AI.durationSec.max).default(MOTION_AI.durationSec.default),
-  /** 'ai' only. Omitted = silent. Voiceover or music adds 1 cr/s (priceForMotionAi). */
+  /** 'ai' only. Omitted = silent. Voiceover or music adds 4 cr/s (priceForMotionAi). */
   audio: z.object({
     narration: z.boolean().default(false),
     sfx: z.boolean().default(false),

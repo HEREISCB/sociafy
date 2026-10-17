@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 const st = vi.hoisted(() => ({
   kit: {} as Record<string, unknown>,
   profile: { companyName: 'IndusLabs', website: 'https://induslabs.in' } as Record<string, unknown>,
-  balance: 100,
+  balance: 1000,
   rows: [] as Record<string, unknown>[],
   charges: [] as Record<string, unknown>[],
   refunds: [] as Record<string, unknown>[],
@@ -73,15 +73,15 @@ const READY = { logo: { primary: { id: 'l', url: 'https://cdn/logo.svg', mime: '
 const go = () => submitMotionVideo({ userId: 'u1', template: 'stat', aspect: '9:16', topic: 'Hindi support is live', via: 'compose' });
 
 beforeEach(() => {
-  st.kit = READY; st.balance = 100; st.rows = []; st.charges = []; st.refunds = []; st.submitted = []; st.log = []; st.edits = [];
+  st.kit = READY; st.balance = 1000; st.rows = []; st.charges = []; st.refunds = []; st.submitted = []; st.log = []; st.edits = [];
   st.submit = () => Promise.resolve({ callId: 'fc-1' });
 });
 
 describe('submitMotionVideo', () => {
   it('writes the row, charges the flat price, submits into the user prefix', async () => {
     const { job, creditsCharged } = await go();
-    expect(creditsCharged).toBe(10);
-    expect(st.charges[0]).toMatchObject({ action: 'video_motion_graphics', credits: 10, meta: { videoJobId: 'job_1', template: 'stat', via: 'compose' } });
+    expect(creditsCharged).toBe(270);
+    expect(st.charges[0]).toMatchObject({ action: 'video_motion_graphics', credits: 270, meta: { videoJobId: 'job_1', template: 'stat', via: 'compose' } });
     expect(job).toMatchObject({ provider: 'motion-hf', providerTaskId: 'fc-1', creditLedgerId: 'led_1', durationSec: 15, genMode: 'motion-stat' });
     const sent = st.submitted[0] as { videoKey: string; posterKey: string; vars: Record<string, unknown> };
     expect(sent.videoKey).toMatch(/^users\/u1\//);
@@ -128,8 +128,8 @@ describe('submitMotionAiVideo', () => {
 
   it('charges by length, then submits the post text + brand into the user prefix', async () => {
     const { job, creditsCharged } = await ai();
-    expect(creditsCharged).toBe(30);
-    expect(st.charges[0]).toMatchObject({ action: 'video_motion_ai', credits: 30, meta: { videoJobId: 'job_1', template: 'ai', durationSec: 15 } });
+    expect(creditsCharged).toBe(270);
+    expect(st.charges[0]).toMatchObject({ action: 'video_motion_ai', credits: 270, meta: { videoJobId: 'job_1', template: 'ai', durationSec: 15 } });
     expect(job).toMatchObject({ provider: 'motion-claude', genMode: 'motion-ai', providerTaskId: 'fc-1', creditLedgerId: 'led_1', durationSec: 15, aspect: '1:1' });
     const sent = st.submitted[0] as { prompt: string; durationSec: number; videoKey: string; posterKey: string; brand: Record<string, unknown> };
     expect(sent).toMatchObject({ prompt: 'Hindi support is live', aspect: '1:1', durationSec: 15 });
@@ -141,17 +141,17 @@ describe('submitMotionAiVideo', () => {
   it('charges the voiceover surcharge and sends the audio choice to the worker', async () => {
     const audio = { narration: true, sfx: true, music: false, language: 'hi' };
     const { creditsCharged } = await submitMotionAiVideo({ userId: 'u1', aspect: '9:16', durationSec: 15, topic: 'Hindi support is live', via: 'compose', audio });
-    expect(creditsCharged).toBe(45);
-    expect(st.charges[0]).toMatchObject({ credits: 45, meta: { audio } });
+    expect(creditsCharged).toBe(330);
+    expect(st.charges[0]).toMatchObject({ credits: 330, meta: { audio } });
     expect(st.submitted[0]).toMatchObject({ audio });
     st.charges = []; st.submitted = []; st.rows = [];
-    await expect(ai()).resolves.toMatchObject({ creditsCharged: 30 });
+    await expect(ai()).resolves.toMatchObject({ creditsCharged: 270 });
     expect(st.submitted[0]).not.toHaveProperty('audio');
   });
 
   it('runs without a logo, but not without a main color — refusing before any charge', async () => {
     st.kit = { colors: { primary: '#5B5EF2' } };
-    await expect(ai(6)).resolves.toMatchObject({ creditsCharged: 12 });
+    await expect(ai(6)).resolves.toMatchObject({ creditsCharged: 108 });
     expect((st.submitted[0] as { brand: Record<string, unknown> }).brand.logoUrl).toBeUndefined();
     st.rows = []; st.charges = [];
     st.kit = { logo: READY.logo };
@@ -175,11 +175,11 @@ describe('submitMotionAiEdit', () => {
   const edit = (over: Record<string, unknown> = {}) =>
     submitMotionAiEdit({ userId: 'u1', parent: { ...parent, ...over }, segmentId: 'seg-2', instruction: 'Make the logo bigger' });
 
-  it('links the parent, charges 1 cr/s, then submits against the PARENT callId into the user prefix', async () => {
+  it('links the parent, charges 9 cr/s, then submits against the PARENT callId into the user prefix', async () => {
     const { job, creditsCharged } = await edit();
-    expect(creditsCharged).toBe(15);
+    expect(creditsCharged).toBe(135);
     expect(st.log).toEqual(['record', 'charge', 'submit']);
-    expect(st.charges[0]).toMatchObject({ action: 'video_motion_ai_edit', credits: 15, meta: { videoJobId: 'job_1', parentJobId: 'parent_v2' } });
+    expect(st.charges[0]).toMatchObject({ action: 'video_motion_ai_edit', credits: 135, meta: { videoJobId: 'job_1', parentJobId: 'parent_v2' } });
     expect(st.edits[0]).toEqual({ jobId: 'job_1', rootJobId: 'parent_v1', parentJobId: 'parent_v2', segmentId: 'seg-2', instruction: 'Make the logo bigger' });
     expect(job).toMatchObject({ provider: 'motion-claude', genMode: 'motion-ai-edit', providerTaskId: 'fc-1', durationSec: 15, aspect: '9:16', prompt: 'Make the logo bigger' });
     const sent = st.submitted[0] as Record<string, string>;
@@ -188,9 +188,9 @@ describe('submitMotionAiEdit', () => {
     expect(sent.posterKey).toMatch(/^users\/u1\/.*\.jpg$/);
   });
 
-  it('prices by the length of the video being edited: 6 / 20 → 6 / 20', async () => {
-    expect((await edit({ durationSec: 6 })).creditsCharged).toBe(6);
-    expect((await edit({ durationSec: 20 })).creditsCharged).toBe(20);
+  it('prices by the length of the video being edited: 6 / 20 → 54 / 180', async () => {
+    expect((await edit({ durationSec: 6 })).creditsCharged).toBe(54);
+    expect((await edit({ durationSec: 20 })).creditsCharged).toBe(180);
   });
 
   it('refuses a short balance before writing anything', async () => {
