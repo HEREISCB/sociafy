@@ -48,7 +48,7 @@ export function Preview({ platforms, textFor, media, authorFor }: {
         {hero && (
           <div className="compose-post-media" style={hero.aspect ? { aspectRatio: hero.aspect } : undefined}>
             {hero.mimeType?.startsWith('video/')
-              ? <video src={hero.url} controls playsInline preload="metadata" />
+              ? <video src={hero.url} poster={hero.posterUrl} controls playsInline preload="metadata" />
               // eslint-disable-next-line @next/next/no-img-element
               : <img src={hero.url} alt={hero.label} />}
             {media.length > 1 && <span className="badge compose-post-count">1/{media.length}</span>}

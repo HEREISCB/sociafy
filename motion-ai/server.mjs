@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { SIZES, parseSubmit, parseSegments, parseEdit, parseAudio, audioResult } from './lib.mjs';
+import { SIZES, parseSubmit, parseSegments, parseEdit, parseAudio, audioResult, posterTimeSec } from './lib.mjs';
 
 const BASE = process.env.MOTIONAI_BASE;
 const SECRET = process.env.ENGINE_SECRET || '';
@@ -331,13 +331,14 @@ async function runJob(j) {
     if (Math.abs(pr.d - j.input.durationSec) > 0.5) j.log.push(`duration ${pr.d} vs ${j.input.durationSec}`);
     const audio = audioResult(j.input.audio, await finishAudio(j, proj, out, dir, signal));
     lap('audio');
-    // Poster = the settled end card, 0.8 s before the end (same as the template engine).
-    const pp = await run('ffmpeg', ['-y', '-loglevel', 'error', '-sseof', '-0.8', '-i', out, '-frames:v', '1', '-q:v', '3', poster], { timeout: MIN, signal });
-    if (pp.code !== 0) throw fail('render_failed', 'poster');
-
     let seg = null;
     try { seg = JSON.parse(fs.readFileSync(`${proj}/segments.json`, 'utf8')); } catch { j.log.push('segments.json missing/invalid'); }
     const segments = parseSegments(seg, j.input.durationSec);
+
+    // Poster = the first headline fully on screen (the end card is mostly blank at thumbnail size).
+    const at = String(posterTimeSec(segments, pr.d || j.input.durationSec));
+    const pp = await run('ffmpeg', ['-y', '-loglevel', 'error', '-ss', at, '-i', out, '-frames:v', '1', '-q:v', '3', poster], { timeout: MIN, signal });
+    if (pp.code !== 0) throw fail('render_failed', 'poster');
 
     step('upload');
     const videoUrl = await upload(out, j.input.videoKey, 'video/mp4', signal);

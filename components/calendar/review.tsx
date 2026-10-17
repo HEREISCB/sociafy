@@ -168,7 +168,8 @@ export function Tick() {
 /** The real media, sized by the stage's height; a text post renders as its copy. */
 function Media({ item, body }: { item: CalItem; body: string }) {
   const m = itemMedia(item);
-  if (m && isVideo(m)) return <video key={m.url} className="hr__media" src={m.url} controls muted playsInline preload="metadata" onLoadedMetadata={seekToPoster} />;
+  // A poster is the real thumbnail; seeking would replace it with a guessed frame.
+  if (m && isVideo(m)) return <video key={m.url} className="hr__media" src={m.url} poster={m.posterUrl} controls muted playsInline preload="metadata" onLoadedMetadata={m.posterUrl ? undefined : seekToPoster} />;
   // eslint-disable-next-line @next/next/no-img-element
   if (m) return <img key={m.url} className="hr__media" src={m.url} alt="" />;
   if (kindOf(item) === 'video') return <div className="hr__media hr__media--ph">Rendering video…</div>;

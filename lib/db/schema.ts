@@ -248,6 +248,8 @@ export type DraftMedia = {
   mimeType: string;
   width?: number;
   height?: number;
+  /** Read-only: added on read from media_posters (lib/media/posters.ts), never stored. */
+  posterUrl?: string;
 };
 
 export type DraftStatus = 'draft' | 'scheduled' | 'published' | 'archived';
@@ -483,6 +485,15 @@ export const mediaAssets = pgTable(
   },
   (t) => [index('media_user_idx').on(t.userId)],
 );
+
+// media_posters — a still frame per video asset (0022), for thumbnails.
+// Its own table, not a media_assets column: drizzle selects every column it
+// knows about. Read via lib/media/posters.ts (best-effort).
+export const mediaPosters = pgTable('media_posters', {
+  assetId: uuid('asset_id').primaryKey(),
+  posterKey: text('poster_key').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
 
 // =====================================================
 // video_jobs — async video generation tasks (PiAPI Seedance)

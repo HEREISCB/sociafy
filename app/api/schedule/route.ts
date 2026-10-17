@@ -14,6 +14,7 @@ import {
 import { scheduleCreateSchema, parseBody } from '../../../lib/validation';
 import { postKind, supportsKind, unsupportedReason } from '../../../lib/platforms/capabilities';
 import { postText } from '../../../lib/agent/publish';
+import { withPosters } from '../../../lib/media/posters';
 
 export async function GET(req: NextRequest) {
   return withUser(async (user) => {
@@ -29,7 +30,7 @@ export async function GET(req: NextRequest) {
       .where(and(...conditions))
       .orderBy(desc(scheduledPosts.scheduledAt))
       .limit(500);
-    return rows;
+    return withPosters(user.id, rows);
   });
 }
 

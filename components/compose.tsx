@@ -165,7 +165,7 @@ export default function Compose({ draftId, onDone, initial }: {
         variants: (Variant & { perPlatform?: Partial<Record<Platform, string>> })[];
         selectedVariantLabel: string | null; targetPlatforms: Platform[];
         perPlatformText: Partial<Record<Platform, string>> | null;
-        media: { id: string; url: string; mimeType: string }[] | null;
+        media: { id: string; url: string; mimeType: string; posterUrl?: string }[] | null;
       };
       if (cancelled) return;
       setSavedId(d.id);
@@ -175,7 +175,7 @@ export default function Compose({ draftId, onDone, initial }: {
       setVariants(d.variants ?? []);
       setChosen(d.selectedVariantLabel);
       setPicked(d.targetPlatforms?.length ? d.targetPlatforms : null);
-      setAttached((d.media ?? []).map((m) => ({ id: m.id, url: m.url, mimeType: m.mimeType, label: m.url.split('/').pop() || 'Media' })));
+      setAttached((d.media ?? []).map((m) => ({ id: m.id, url: m.url, mimeType: m.mimeType, label: m.url.split('/').pop() || 'Media', ...(m.posterUrl && { posterUrl: m.posterUrl }) })));
       // Copy the agent wrote is a suggestion; only text that differs from it
       // (and from the body) is something the user customized.
       const snap = d.variants?.[0]?.perPlatform ?? {};

@@ -24,7 +24,9 @@ Hard requirements (the worker rejects the job otherwise):
 - Use the brand colors from `BRIEF.md`. Text must be legible (strong contrast), never cut off,
   never overlapping. Keep important text inside the safe area given in `BRIEF.md`.
 - Final beat: a brand end card (logo if provided, else brand name; tagline/CTA if provided)
-  fully settled and **held still for at least the last 1.5 s**. The poster is taken 0.8 s before the end.
+  fully settled and **held still for at least the last 1.5 s**.
+- The poster (the thumbnail) is taken 0.4 s before the end of the first segment with `onScreenText`
+  (60% in, for a segment under 1 s): have that headline fully on screen and legible by then.
 - Don't paste the whole post on screen. Distill it into 3–5 short, punchy on-screen lines
   (hook → key point(s) → payoff → end card). Big type, strong hierarchy, purposeful motion.
 - Only create/edit files inside this folder. Do not touch `node_modules`, `package.json` or `hyperframes.json`.

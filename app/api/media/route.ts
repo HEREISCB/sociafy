@@ -5,6 +5,7 @@ import { db } from '../../../lib/db';
 import { mediaAssets, videoJobs } from '../../../lib/db/schema';
 import { MOTION_AI } from '../../../lib/ai/models';
 import { BRAND_ONLY_MIMES } from '../../../lib/brand/assets';
+import { posterUrls } from '../../../lib/media/posters';
 
 export const runtime = 'nodejs';
 
@@ -45,10 +46,14 @@ export async function GET(req: NextRequest) {
       .limit(limit);
     // Flag AI-designed motion graphics so the composer can offer Edit on them.
     const videoIds = rows.filter((r) => r.mimeType.startsWith('video/')).map((r) => r.id);
-    const editable = new Set(videoIds.length
-      ? (await db().select({ id: videoJobs.mediaAssetId }).from(videoJobs)
-          .where(and(eq(videoJobs.userId, user.id), eq(videoJobs.provider, MOTION_AI.backend), inArray(videoJobs.mediaAssetId, videoIds)))).map((r) => r.id)
-      : []);
-    return { items: rows.map((r) => (editable.has(r.id) ? { ...r, motionAi: true } : r)) };
+    const [editable, posters] = await Promise.all([
+      videoIds.length
+        ? db().select({ id: videoJobs.mediaAssetId }).from(videoJobs)
+            .where(and(eq(videoJobs.userId, user.id), eq(videoJobs.provider, MOTION_AI.backend), inArray(videoJobs.mediaAssetId, videoIds)))
+            .then((rs) => new Set(rs.map((r) => r.id)))
+        : new Set<string | null>(),
+      posterUrls(user.id, videoIds),
+    ]);
+    return { items: rows.map((r) => ({ ...r, ...(editable.has(r.id) && { motionAi: true }), ...(posters.has(r.id) && { posterUrl: posters.get(r.id) }) })) };
   }, req);
 }

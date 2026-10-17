@@ -120,7 +120,10 @@ parent's segments), `bad_instruction` (empty or > 1000 chars), `bad_key`.
   brand assets), then `claude -p … --output-format json --max-turns 60 --allowedTools "Read,Write,Edit,Glob,Grep,Skill,Bash(npx hyperframes*),Bash(npm run *),Bash(ls*),Bash(motion-audio *)"`.
   Edit jobs instead copy the parent's `project/` (no renders), add `EDIT.md` (instruction + target
   segment) and run Claude with an edit task (same tools, sandbox and timeouts).
-  Then the worker (not Claude) runs `hyperframes check`, `render`, ffmpeg poster (0.8 s before the end), and the R2 upload.
+  Then the worker (not Claude) runs `hyperframes check`, `render`, ffmpeg poster, and the R2 upload.
+  Poster frame = the first headline fully on screen: in the first segment with `onScreenText` (else the
+  hook) at `max(start + 0.6 × (end − start), end − 0.4)`; without a valid segments.json, 35% in
+  (`posterTimeSec` in lib.mjs). The end card is mostly blank at thumbnail size, so it is not the poster.
 - Every job step runs in a `bwrap` sandbox: `/home` is hidden except the shared toolchain
   (read-only), the worker HOME (`~/motionai/home`: skills, fonts, npm cache) and the job dir. R2
   creds and `.env` are never visible to Claude or the renderer.

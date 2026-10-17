@@ -8,6 +8,7 @@ import { getMotionAiResult, motionAiConfigured, type MotionAiResult, type Motion
 import { cleanAudio, saveMotionResult, savedAudioWarning } from './motionVersions';
 import { makeMediaKey, publicUrlFor, uploadBuffer } from '../storage/r2';
 import { downloadToBuffer } from './finalize';
+import { posterUrls, savePoster } from './posters';
 import { refund } from '../credits/ledger';
 import { isStubMode } from '../env';
 
@@ -30,7 +31,7 @@ export type MediaAsset = typeof mediaAssets.$inferSelect;
 
 export type FinalizeVideoResult =
   | { status: 'pending'; providerStatus?: string; pollError?: string }
-  | { status: 'completed'; asset?: MediaAsset; rewrittenPrompt?: string | null; /** AI-designed motion: asked-for audio that didn't make it in. */ audioWarning?: MotionAudio['warning'] }
+  | { status: 'completed'; asset?: MediaAsset & { posterUrl?: string }; rewrittenPrompt?: string | null; /** AI-designed motion: asked-for audio that didn't make it in. */ audioWarning?: MotionAudio['warning'] }
   | { status: 'failed'; error: string };
 
 /** A submit whose socket died has no task id to poll. PiAPI may or may not
@@ -312,7 +313,12 @@ async function finalizeMotionJob(
   if (r.status === 'failed') return failAndRefund(job, `motion_failed: ${r.error ?? 'unknown'}`);
   // Only a key inside this user's prefix — never let a result point the asset elsewhere.
   if (!r.videoKey?.startsWith(`users/${job.userId}/`)) return failAndRefund(job, 'store_failed: bad_motion_key');
-  const claimed = await claimAsset(job, r.videoKey, 'video/mp4', r.sizeBytes ?? null);
+  let claimed = await claimAsset(job, r.videoKey, 'video/mp4', r.sizeBytes ?? null);
+  // The worker's poster is the thumbnail. Idempotent, so the race loser re-writing is fine.
+  if (claimed.status === 'completed' && claimed.asset) {
+    const posterUrl = await savePoster(job.userId, claimed.asset.id, r.posterKey);
+    if (posterUrl) claimed = { ...claimed, asset: { ...claimed.asset, posterUrl } };
+  }
   // AI-designed renders (originals and edits) keep their segments for the edit
   // timeline. Best-effort and idempotent, so the race loser re-writing is fine.
   if (claimed.status !== 'completed' || job.provider !== 'motion-claude') return claimed;
@@ -321,9 +327,10 @@ async function finalizeMotionJob(
   return audioWarning ? { ...claimed, audioWarning } : claimed;
 }
 
-async function loadAsset(id: string): Promise<MediaAsset | undefined> {
+async function loadAsset(id: string): Promise<(MediaAsset & { posterUrl?: string }) | undefined> {
   const [asset] = await db().select().from(mediaAssets).where(eq(mediaAssets.id, id)).limit(1);
-  return asset;
+  const posterUrl = asset && (await posterUrls(asset.userId, [asset.id])).get(asset.id);
+  return posterUrl ? { ...asset, posterUrl } : asset;
 }
 
 /**

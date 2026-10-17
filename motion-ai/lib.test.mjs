@@ -96,3 +96,18 @@ test('segments keep the footage flag', () => {
   assert.equal(s[0].footage, true);
   assert.ok(!('footage' in s[1]) && !('footage' in s[2]));
 });
+
+test('poster = first headline fully on screen', async () => {
+  const { posterTimeSec } = await import('./lib.mjs');
+  const seg = (a, b, t) => ({ startSec: a, endSec: b, onScreenText: t });
+  // first segment with text: max(2 + 0.6*3, 5 - 0.4) = 4.6
+  assert.equal(posterTimeSec([seg(0, 2, ''), seg(2, 5, 'Big idea'), seg(5, 10, 'End')], 10), 4.6);
+  // short segment: 0.6 rule wins over end − 0.4 (max(0.6, 0.6)), long one: max(6, 9.6)
+  assert.equal(posterTimeSec([seg(0, 1, 'Hook'), seg(1, 10, '')], 10), 0.6);
+  assert.equal(posterTimeSec([seg(0, 10, 'Hook'), seg(10, 12, '')], 12), 9.6);
+  // no text anywhere → the hook
+  assert.equal(posterTimeSec([seg(0, 3, ''), seg(3, 8, '')], 8), 2.6);
+  // no manifest (single fallback segment) / nothing → 35%
+  assert.equal(posterTimeSec([seg(0, 10, '')], 10), 3.5);
+  assert.equal(posterTimeSec(null, 8), 2.8);
+});

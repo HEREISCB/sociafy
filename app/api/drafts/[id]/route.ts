@@ -4,6 +4,7 @@ import { withUser, jsonError } from '../../../../lib/api';
 import { db } from '../../../../lib/db';
 import { drafts } from '../../../../lib/db/schema';
 import { draftUpdateSchema, parseBody } from '../../../../lib/validation';
+import { withPosters } from '../../../../lib/media/posters';
 
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
@@ -14,7 +15,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
       .where(and(eq(drafts.id, id), eq(drafts.userId, user.id)))
       .limit(1);
     if (!row) return jsonError('not_found', 404);
-    return row;
+    return (await withPosters(user.id, [row]))[0];
   });
 }
 

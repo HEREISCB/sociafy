@@ -469,15 +469,15 @@ function PostCard({ item, bucket, on, just, dragged, onClick, onDrag }: {
   );
 }
 
-/** Card thumbnail: the image, a video's first frame, or ruled lines for a text post. */
+/** Card thumbnail: the image, a video's poster (else a representative frame), or ruled lines for a text post. */
 function Thumb({ item }: { item: CalItem }) {
   const m = itemMedia(item);
   const k = kindOf(item);
   return (
     <span className={`thumb thumb--${k}`} aria-hidden="true">
-      {m && isVideo(m) ? <VideoThumb url={m.url} />
+      {m && isVideo(m) && !m.posterUrl ? <VideoThumb url={m.url} />
         // eslint-disable-next-line @next/next/no-img-element
-        : m ? <img src={m.url} alt="" loading="lazy" /> : null}
+        : m ? <img src={m.posterUrl ?? m.url} alt="" loading="lazy" /> : null}
       {k === 'video' && <span className="thumb__play" />}
     </span>
   );

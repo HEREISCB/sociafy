@@ -15,13 +15,15 @@ export type MediaItem = {
   motionAi?: boolean;
   /** A short honest caveat about this item (e.g. audio that couldn't be added). */
   note?: string;
+  /** A video's still (media_posters) — shown instead of mounting the video. */
+  posterUrl?: string;
 };
 
 /** Mirrors the drafts schema cap (lib/validation.ts media .max(20)). */
 export const MAX_ATTACHED = 20;
 const LIBRARY_PAGE = 40;
 
-type LibraryRow = { id: string; publicUrl: string; mimeType: string; label: string | null; width: number | null; height: number | null; createdAt: string; motionAi?: boolean };
+type LibraryRow = { id: string; publicUrl: string; mimeType: string; label: string | null; width: number | null; height: number | null; createdAt: string; motionAi?: boolean; posterUrl?: string };
 
 const toItem = (r: LibraryRow): MediaItem => ({
   id: r.id,
@@ -30,6 +32,7 @@ const toItem = (r: LibraryRow): MediaItem => ({
   label: r.label ?? 'Media',
   aspect: r.width && r.height ? `${r.width}/${r.height}` : undefined,
   ...(r.motionAi ? { motionAi: true } : {}),
+  ...(r.posterUrl ? { posterUrl: r.posterUrl } : {}),
 });
 
 const isVideo = (m: MediaItem) => Boolean(m.mimeType?.startsWith('video/'));
@@ -37,7 +40,7 @@ const isVideo = (m: MediaItem) => Boolean(m.mimeType?.startsWith('video/'));
 function Thumb({ m }: { m: MediaItem }) {
   if (!m.url) return <span className="compose-thumb-empty"><Icon name="refresh" size={14} /></span>;
   // eslint-disable-next-line @next/next/no-img-element
-  if (!isVideo(m)) return <img src={m.url} alt={m.label} />;
+  if (!isVideo(m) || m.posterUrl) return <img src={m.posterUrl ?? m.url} alt={m.label} />;
   // AI motion graphics open on an empty frame; park the thumbnail near the end (where the poster is taken).
   const onMeta = m.motionAi ? (e: React.SyntheticEvent<HTMLVideoElement>) => { const v = e.currentTarget; if (v.duration > 1) v.currentTime = v.duration - 0.8; } : undefined;
   return <video src={m.url} muted playsInline preload="metadata" onLoadedMetadata={onMeta} />;

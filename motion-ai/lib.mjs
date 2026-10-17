@@ -106,3 +106,13 @@ export function parseEdit(b) {
   if (!validKey(b.videoKey) || !validKey(b.posterKey)) return { error: 'bad_key' };
   return { parentCallId: b.parentCallId, segmentId: b.segmentId ?? null, instruction, videoKey: b.videoKey, posterKey: b.posterKey };
 }
+
+// Poster frame (seconds): the moment the first headline is fully on screen — 60% into the first
+// segment with on-screen text (the hook if none has text), but no later than 0.4 s before it ends.
+// A single segment is parseSegments' "no manifest" fallback: no timing to trust, so 35% in.
+export function posterTimeSec(segments, dur) {
+  const s = Array.isArray(segments) && segments.length > 1 ? segments : [];
+  const g = s.find((x) => String(x?.onScreenText || '').trim()) || s[0];
+  const t = g ? Math.max(g.startSec + 0.6 * (g.endSec - g.startSec), g.endSec - 0.4) : dur * 0.35;
+  return Math.round(Math.min(Math.max(t, 0), Math.max(dur - 0.1, 0)) * 100) / 100;
+}

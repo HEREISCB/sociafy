@@ -128,7 +128,7 @@ export type GenReport = {
   videoSettled: (r: { added: number; total: number; failed: string[]; notes?: string[] }) => void;
 };
 
-type Asset = { id: string; publicUrl: string; mimeType: string; label?: string };
+type Asset = { id: string; publicUrl: string; mimeType: string; label?: string; posterUrl?: string };
 type JobPoll = { status?: 'pending' | 'completed' | 'failed'; providerStatus?: string; asset?: Asset; error?: string; audioWarning?: string };
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -179,7 +179,7 @@ export function audioNote(warning: string | undefined): string | undefined {
 }
 
 const toItem = (a: Asset, aspect?: string, motionAi?: boolean, note?: string): MediaItem => ({
-  id: a.id, url: a.publicUrl, mimeType: a.mimeType, label: a.label || 'Generated', aspect, ...(motionAi ? { motionAi } : {}), ...(note ? { note } : {}),
+  id: a.id, url: a.publicUrl, mimeType: a.mimeType, label: a.label || 'Generated', aspect, ...(motionAi ? { motionAi } : {}), ...(note ? { note } : {}), ...(a.posterUrl ? { posterUrl: a.posterUrl } : {}),
 });
 
 export function useMediaGen(report: GenReport) {
