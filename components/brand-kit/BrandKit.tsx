@@ -218,9 +218,9 @@ function LogoEditor({ kit, saveKit, upload }: Ctx) {
             {a ? (
               <div className="bk-swatches">
                 {/* eslint-disable-next-line @next/next/no-img-element -- user's logo from our bucket, not an LCP image */}
-                <span className="bk-swatch"><img src={a.url} alt={`${label} logo on light`} /></span>
+                <span className="bk-swatch"><img src={a.url} alt={`${label} logo on light`} loading="lazy" decoding="async" /></span>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <span className="bk-swatch bk-swatch--dark"><img src={a.url} alt={`${label} logo on dark`} /></span>
+                <span className="bk-swatch bk-swatch--dark"><img src={a.url} alt={`${label} logo on dark`} loading="lazy" decoding="async" /></span>
               </div>
             ) : (
               <div className="bk-swatches bk-swatches--empty"><span className="set-hint">No file yet</span></div>
@@ -446,7 +446,7 @@ function ScreenshotsEditor({ kit, saveKit, upload }: Ctx) {
           {shots.map((s) => (
             <li key={s.id}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={s.url} alt={s.name ?? 'Product image'} />
+              <img src={s.url} alt={s.name ?? 'Product image'} loading="lazy" decoding="async" />
               <button type="button" className="icon-btn bk-shot-x" aria-label={`Remove ${s.name ?? 'image'}`} onClick={() => saveKit({ screenshots: shots.filter((x) => x.id !== s.id) })}>
                 <Icon name="trash" size={12} />
               </button>

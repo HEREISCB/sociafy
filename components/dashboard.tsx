@@ -14,6 +14,7 @@ import {
   moveToDay, nextToReview, progress, skipMessage, statusLabel, toReview, toneOf, type Bucket, type CalItem, type ScheduledRow, type Skipped,
 } from './calendar/model';
 import { Glyphs } from './calendar/glyphs';
+import { ThumbImg } from './thumb-img';
 import { seekToPoster } from '../lib/media/motionSeek';
 import { ReviewPanel, Tick, type PostAction } from './calendar/review';
 
@@ -476,8 +477,7 @@ function Thumb({ item }: { item: CalItem }) {
   return (
     <span className={`thumb thumb--${k}`} aria-hidden="true">
       {m && isVideo(m) && !m.posterUrl ? <VideoThumb url={m.url} />
-        // eslint-disable-next-line @next/next/no-img-element
-        : m ? <img src={m.posterUrl ?? m.url} alt="" loading="lazy" /> : null}
+        : m ? <ThumbImg src={m.posterUrl ?? m.url} alt="" size={48} /> : null}
       {k === 'video' && <span className="thumb__play" />}
     </span>
   );

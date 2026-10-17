@@ -55,7 +55,15 @@ const securityHeaders = [
   },
 ];
 
+// Media lives on the R2 public bucket; let the image optimizer resize it for thumbnails
+// (components/thumb-img.tsx). Only our own bucket, never all of *.r2.dev.
+const r2Base = (process.env.NEXT_PUBLIC_R2_PUBLIC_URL_BASE || '').replace(/\/$/, '');
+
 const nextConfig: NextConfig = {
+  images: {
+    remotePatterns: r2Base ? [new URL(`${r2Base}/**`)] : [],
+  },
+
   // Next.js 16 blocks dev resources (HMR, fonts, chunks) when the origin isn't
   // localhost. Tunnels and ngrok URLs need to be allowlisted explicitly.
   allowedDevOrigins: [

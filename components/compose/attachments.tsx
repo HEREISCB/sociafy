@@ -2,6 +2,7 @@
 
 import React, { useRef, useState } from 'react';
 import { Icon } from '../icons';
+import { ThumbImg } from '../thumb-img';
 
 export type MediaItem = {
   id?: string;
@@ -39,8 +40,7 @@ const isVideo = (m: MediaItem) => Boolean(m.mimeType?.startsWith('video/'));
 
 function Thumb({ m }: { m: MediaItem }) {
   if (!m.url) return <span className="compose-thumb-empty"><Icon name="refresh" size={14} /></span>;
-  // eslint-disable-next-line @next/next/no-img-element
-  if (!isVideo(m) || m.posterUrl) return <img src={m.posterUrl ?? m.url} alt={m.label} />;
+  if (!isVideo(m) || m.posterUrl) return <ThumbImg src={m.posterUrl ?? m.url} alt={m.label} size={96} />;
   // AI motion graphics open on an empty frame; park the thumbnail near the end (where the poster is taken).
   const onMeta = m.motionAi ? (e: React.SyntheticEvent<HTMLVideoElement>) => { const v = e.currentTarget; if (v.duration > 1) v.currentTime = v.duration - 0.8; } : undefined;
   return <video src={m.url} muted playsInline preload="metadata" onLoadedMetadata={onMeta} />;

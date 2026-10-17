@@ -8,6 +8,7 @@ import { priceForImage } from '../../lib/credits/pricing';
 import { MOTION_AI, MOTION_GRAPHICS, MOTION_TEMPLATE_IDS, MOTION_TEMPLATES, VIDEO_MODELS, VIDEO_MODEL_IDS, type VideoModelId } from '../../lib/ai/models';
 import { motionAiReady, motionReady, type BrandKit, type BrandProfile } from '../../lib/brand/kit';
 import { useApi } from '../../lib/ui/fetcher';
+import { ThumbImg } from '../thumb-img';
 import { cinemaBlockers, videoDuration, videoModel, type Anchor, type MediaGen, type VideoMode } from './generate';
 
 /** The presets /api/compose/variants understands (PRESET_KEYS in its route). */
@@ -251,8 +252,7 @@ export function VideoOptions({ gen, cost, disabled, onGenerate }: PanelProps) {
           <div className="compose-strip">
             {s.refImages.map((u, i) => (
               <div key={u + i} className="compose-thumb">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={u} alt={`Reference ${i + 1}`} />
+                <ThumbImg src={u} alt={`Reference ${i + 1}`} size={96} />
                 <button type="button" className="compose-thumb-x" aria-label={`Remove reference ${i + 1}`} onClick={() => set({ refImages: s.refImages.filter((_, j) => j !== i) })}>
                   <Icon name="x" size={10} />
                 </button>
