@@ -300,6 +300,17 @@ export default function Compose({ draftId, onDone, initial }: {
       )}
       {creditError && <InsufficientCreditsBanner balance={creditError.balance} needed={creditError.needed} onDismiss={() => setCreditError(null)} />}
 
+      <FromWebsite
+        length={videoLength}
+        platforms={connected.filter((p) => selected.includes(p) && supportsKind(p, 'video'))}
+        onUse={(text, items) => {
+          setBody(text);
+          setAttached((cur) => [...cur, ...items].slice(0, MAX_ATTACHED));
+        }}
+        onCredits={(e) => { setCreditError(e); refreshCredits(); }}
+        onCharged={() => { setCreditError(null); refreshCredits(); }}
+      />
+
       <div className="compose-editor">
         <label htmlFor="compose-text" className="sr-only">Post</label>
         <textarea
@@ -365,18 +376,6 @@ export default function Compose({ draftId, onDone, initial }: {
             attachedImages={readyImages.length}
             disabled={!body.trim() || gen.busy !== null}
             onGenerate={() => gen.generateImage(body.trim(), readyImages.map((m) => m.url!))}
-          />
-        )}
-        {media === 'video' && (
-          <FromWebsite
-            length={videoLength}
-            platforms={connected.filter((p) => selected.includes(p) && supportsKind(p, 'video'))}
-            onUse={(text, items) => {
-              setBody(text);
-              setAttached((cur) => [...cur, ...items].slice(0, MAX_ATTACHED));
-            }}
-            onCredits={(e) => { setCreditError(e); refreshCredits(); }}
-            onCharged={() => { setCreditError(null); refreshCredits(); }}
           />
         )}
         {media === 'video' && gen.s.videoSmart && (
