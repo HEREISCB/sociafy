@@ -43,7 +43,7 @@ function RenderCard({ d }: { d: MadeDraft }) {
     <li className="fromsite-card fromsite-made">
       <div className="fromsite-video">
         {state.phase === 'done'
-          ? <video src={state.url} poster={state.poster} controls playsInline preload="metadata" />
+          ? <video src={state.poster ? state.url : `${state.url}#t=0.5`} poster={state.poster} controls playsInline preload="metadata" />
           : <div className={`fromsite-video-wait${state.phase === 'rendering' ? ' sk' : ''}`} role="status">{state.phase === 'rendering' ? 'Making the video… about 2–3 min' : 'The video didn’t render — credits were refunded. The post is saved as text.'}</div>}
       </div>
       <div className="fromsite-made-foot">
