@@ -16,7 +16,7 @@ import { ImageOptions, PRESETS, VideoOptions, WritingOptions } from './compose/o
 import { Preview } from './compose/preview';
 import { AvatarCropModal } from './compose/avatar-crop';
 import { MotionEditor } from './compose/motion-editor';
-import { LENGTHS, SmartVideo } from './compose/smart';
+import { SmartVideo } from './compose/smart';
 import { FromWebsite } from './compose/from-website';
 import { ComposeChat } from './compose/chat';
 
@@ -312,6 +312,18 @@ export default function Compose({ draftId, onDone, initial }: {
         />
         <Attachments attached={attached} onChange={setAttached} onNotice={setNotice} onEdit={setEditing}>
           <span className="compose-spacer" />
+          <label className="compose-duration" title="0 = the AI decides the length">
+            Video length
+            <input
+              type="number" className="input" inputMode="numeric" min={0} max={20} step={1}
+              value={videoLength ?? 0} aria-describedby="compose-duration-hint"
+              onChange={(e) => {
+                const n = Math.round(Number(e.target.value));
+                setVideoLength(Number.isFinite(n) && n > 0 ? Math.min(20, n) : null);
+              }}
+            />
+            <span id="compose-duration-hint">{videoLength ? 's' : 's · AI decides'}</span>
+          </label>
           <button type="button" className="btn ghost sm" disabled={!body.trim() || busy !== null} onClick={write}>
             <Icon name="sparkle" size={12} /> {busy === 'write' ? 'Writing…' : variants.length ? 'Rewrite' : 'Write it for me'} <span className="compose-cost">{writeCost} cr</span>
           </button>
@@ -356,16 +368,6 @@ export default function Compose({ draftId, onDone, initial }: {
             disabled={!body.trim() || gen.busy !== null}
             onGenerate={() => gen.generateImage(body.trim(), readyImages.map((m) => m.url!))}
           />
-        )}
-        {media === 'video' && gen.s.videoSmart && (
-          <div className="compose-chips" role="group" aria-label="Video length">
-            <span className="compose-label">Length</span>
-            {[null, ...LENGTHS].map((n) => (
-              <button key={n ?? 'auto'} type="button" className={`prompt-chip${videoLength === n ? ' active' : ''}`} aria-pressed={videoLength === n} onClick={() => setVideoLength(n)}>
-                {n ? `${n}s` : 'Auto'}
-              </button>
-            ))}
-          </div>
         )}
         {media === 'video' && (
           <FromWebsite

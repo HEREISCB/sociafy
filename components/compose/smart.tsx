@@ -16,8 +16,6 @@ const FORMAT: Record<VideoFormat, string> = {
 };
 const SHAPE: Record<string, string> = { '9:16': 'Vertical', '1:1': 'Square', '16:9': 'Wide' };
 const MIN_CHARS = 15;
-/** Lengths the user can pick; the engine clamps to what the chosen format supports (shown in the meta row). */
-export const LENGTHS = [6, 8, 10, 12, 15, 20];
 
 type Override = { format: Exclude<VideoFormat, 'none'> } | { cheapest: true };
 // Keyed by planKeys().full (post + override), same as every request and response.

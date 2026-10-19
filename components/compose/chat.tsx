@@ -7,13 +7,11 @@ import type { Platform } from '../../lib/db/schema';
 import { RenderStatus, type Render } from './generate';
 import type { MediaItem } from './attachments';
 import { EDITING, editFailCopy, followMotionEdit, startMotionEdit } from './motion-editor';
-import { LENGTHS } from './smart';
 
 /** `local` lines (errors, edit-mode turns) never go to the brief model. */
 type Msg = { role: 'user' | 'assistant'; content: string; local?: boolean };
 type Credits = { balance: number; needed: number };
 
-const snap = (n: number) => LENGTHS.reduce((a, b) => (Math.abs(b - n) < Math.abs(a - n) ? b : a));
 const BRIEF_COST = priceForCompose({ withTools: false }).credits;
 
 /**
@@ -77,7 +75,7 @@ export function ComposeChat({ body, setBody, platforms, connected, onPlatforms, 
       onCharged();
       say(d.reply);
       if (d.post) setBody(d.post);
-      if (d.durationSec) setLength(snap(d.durationSec));
+      if (d.durationSec) setLength(d.durationSec);
       const ps = d.platforms?.filter((p) => connected.includes(p)) ?? [];
       if (ps.length) onPlatforms(ps);
     } catch {

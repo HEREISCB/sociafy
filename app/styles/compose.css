@@ -380,3 +380,7 @@ li.compose-thumb { cursor: default; }
   text-decoration: underline; text-underline-offset: 2px;
 }
 .chat-link:disabled { opacity: 0.5; cursor: default; }
+
+/* Video length beside the prompt: 0 = the AI decides. */
+.compose-duration { display: inline-flex; align-items: center; gap: var(--s-2); font-size: var(--fs-sm); color: var(--text-2); }
+.compose-duration .input { width: 64px; padding-block: var(--s-1); text-align: right; font-variant-numeric: tabular-nums; }
