@@ -17,7 +17,7 @@ const FORMAT: Record<VideoFormat, string> = {
 const SHAPE: Record<string, string> = { '9:16': 'Vertical', '1:1': 'Square', '16:9': 'Wide' };
 const MIN_CHARS = 15;
 /** Lengths the user can pick; the engine clamps to what the chosen format supports (shown in the meta row). */
-const LENGTHS = [6, 8, 10, 12, 15, 20];
+export const LENGTHS = [6, 8, 10, 12, 15, 20];
 
 type Override = { format: Exclude<VideoFormat, 'none'> } | { cheapest: true };
 // Keyed by planKeys().full (post + override), same as every request and response.
@@ -35,15 +35,17 @@ const remember = (key: string, res: PlanResponse) => {
 };
 
 /** Video tab default: the planner picks the format, length and sound; one button renders it. */
-export function SmartVideo({ gen, text, platforms, attachments }: {
+export function SmartVideo({ gen, text, platforms, attachments, length, setLength }: {
   gen: MediaGen;
   text: string;
   platforms: string[];
   attachments: { url: string; mimeType: string }[];
+  /** Picked length in seconds (null = Auto). Held by Compose so its chat can set it. */
+  length: number | null;
+  setLength: (n: number | null) => void;
 }) {
   // An override belongs to the post it was picked on: new text, platforms or attachments → best fit again.
   const [picked, setPicked] = useState<{ input: string; v: Override } | null>(null);
-  const [length, setLength] = useState<number | null>(null);
   const inputKey = planKeys(text, platforms, attachments, null).input;
   const pickedFormat = picked?.input === inputKey ? picked.v : null;
   // The chosen length rides along with any format pick; it sticks across posts until set back to Auto.
