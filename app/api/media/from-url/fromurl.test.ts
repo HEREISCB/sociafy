@@ -140,4 +140,14 @@ describe('POST /api/media/from-url', () => {
     expect(r.products[0].postText).toHaveLength(600);
     expect(r.products[0].imageUrls).toEqual([]);
   });
+
+  it('modes: whole website → one video and a site prompt; topics → a content prompt; unknown mode → 400', async () => {
+    const site = await post({ url: 'https://brew.co/', mode: 'site' }) as { products: unknown[] };
+    expect(site.products).toHaveLength(1);
+    expect(String(st.calls.find((c) => c.fn === 'llm')!.args.system)).toMatch(/ONE social media video about the whole thing/);
+    st.calls = [];
+    await post({ url: 'https://brew.co/', mode: 'content' });
+    expect(String(st.calls.find((c) => c.fn === 'llm')!.args.system)).toMatch(/topics worth a video each/);
+    expect((await post({ url: 'https://brew.co/', mode: 'everything' })).status).toBe(400);
+  });
 });

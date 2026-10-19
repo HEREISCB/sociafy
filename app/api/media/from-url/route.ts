@@ -4,7 +4,7 @@ import { withUser, jsonError } from '../../../../lib/api';
 import { parseBody } from '../../../../lib/validation';
 import { rateLimit } from '../../../../lib/rate-limit';
 import { getTextAI } from '../../../../lib/ai/client';
-import { extractProducts, readSite } from '../../../../lib/ai/site-products';
+import { extractProducts, readSite, SITE_MODES } from '../../../../lib/ai/site-products';
 import { priceForCompose } from '../../../../lib/credits/pricing';
 import { charge, refund, InsufficientCreditsError, insufficientCreditsResponse } from '../../../../lib/credits/ledger';
 
@@ -12,7 +12,11 @@ export const runtime = 'nodejs';
 // Two fetch rounds (10 s each at worst) + one LLM call (45 s cap).
 export const maxDuration = 90;
 
-const bodySchema = z.object({ url: z.string().trim().min(3).max(2_000) });
+const bodySchema = z.object({
+  url: z.string().trim().min(3).max(2_000),
+  /** products = one video per product; site = one video about the whole site; content = one per section/article/feature. */
+  mode: z.enum(SITE_MODES as [string, ...string[]]).default('products'),
+});
 
 /** A bare "shop.com" means https. */
 const normalize = (raw: string) => (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`);
@@ -36,7 +40,8 @@ export async function POST(req: NextRequest) {
     const ai = getTextAI('fast');
     if (!ai) return jsonError('ai_unavailable', 503, { hint: 'Reading websites is unavailable right now. Nothing was charged.' });
 
-    const site = await readSite(normalize(parsed.data.url));
+    const mode = parsed.data.mode as (typeof SITE_MODES)[number];
+    const site = await readSite(normalize(parsed.data.url), mode);
     if ('error' in site) {
       if (site.error === 'invalid_url' || site.error === 'only_http' || site.error === 'url_required') {
         return jsonError('invalid_url', 400, { hint: 'Paste a full website address, like https://yourshop.com.' });
@@ -53,7 +58,7 @@ export async function POST(req: NextRequest) {
     const price = priceForCompose({ withTools: false });
     let charged;
     try {
-      charged = await charge({ userId: user.id, action: price.action, credits: price.credits, meta: { via: 'from_url', url: site.url.slice(0, 300) } });
+      charged = await charge({ userId: user.id, action: price.action, credits: price.credits, meta: { via: 'from_url', mode, url: site.url.slice(0, 300) } });
     } catch (e) {
       if (e instanceof InsufficientCreditsError) return insufficientCreditsResponse({ balance: e.balance, needed: e.needed });
       throw e;
@@ -61,14 +66,14 @@ export async function POST(req: NextRequest) {
 
     let result;
     try {
-      result = await extractProducts(ai, site);
+      result = await extractProducts(ai, site, mode);
     } catch (e) {
       console.error('[from-url] extract failed:', e instanceof Error ? e.message.slice(0, 300) : e);
       result = null;
     }
     if (!result) {
       await refund({ userId: user.id, ledgerId: charged.ledgerId, reason: 'from_url_extract_failed' }).catch(() => {});
-      return jsonError('no_products_found', 502, { hint: 'We couldn’t make out the products on that site. Credits were refunded — try a specific product page.' });
+      return jsonError('no_products_found', 502, { hint: 'We couldn’t make out what to make videos about on that site. Credits were refunded — try another page or option.' });
     }
     return { ...result, creditsCharged: price.credits };
   }, req);

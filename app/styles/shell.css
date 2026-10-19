@@ -3,10 +3,14 @@
   display: grid;
   grid-template-columns: 220px 1fr;
   height: 100vh;
-  width: 100vw;
-  overflow: hidden;
+  height: 100dvh;
+  width: 100%;
+  /* clip, not hidden: a hidden box can still be scrolled by focus()/scrollIntoView, which slid the whole shell up. */
+  overflow: clip;
   background: var(--bg);
 }
+/* App pages never scroll the document: only .page scrolls, and it doesn't chain past its end. */
+html:has(body .app), body:has(.app) { overflow: hidden; overscroll-behavior: none; }
 
 /* ---------- Sidebar ---------- */
 .sidebar {
@@ -124,7 +128,7 @@
 }
 
 /* ---------- Main + topbar ---------- */
-.main { display: flex; flex-direction: column; overflow: hidden; }
+.main { display: flex; flex-direction: column; overflow: clip; min-height: 0; }
 .topbar {
   height: 52px;
   border-bottom: 1px solid var(--line);
@@ -192,7 +196,9 @@
 /* Page content */
 .page {
   flex: 1;
+  min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
   padding: 28px var(--s-8) 80px;
 }
 

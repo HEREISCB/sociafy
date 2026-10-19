@@ -11,6 +11,13 @@ import type { MediaItem } from './attachments';
 type Product = { id: string; name: string; pitch: string; facts: string[]; imageUrls: string[]; postText: string };
 type Found = { site: { name: string; summary: string }; products: Product[] };
 type Estimate = { key: string; perProduct: Record<string, number> };
+type Mode = 'products' | 'site' | 'content';
+/** What one video is about, per mode: tab label, button, intro, and the found-list noun. */
+const MODES: Record<Mode, { tab: string; find: string; intro: string; one: string; many: string }> = {
+  products: { tab: 'Each product', find: 'Find products', intro: 'We find each product on the site and make a separate video post for each one.', one: 'product', many: 'products' },
+  site: { tab: 'The whole website', find: 'Plan the video', intro: 'One video about the whole site: what it is, who it’s for and why it matters.', one: 'video idea', many: 'video ideas' },
+  content: { tab: 'Pages & topics', find: 'Find topics', intro: 'We find the sections, features and articles on the site and make a video post for each one.', one: 'topic', many: 'topics' },
+};
 type LibraryRow = { id: string; publicUrl: string; mimeType: string; label: string | null };
 
 const FIND_COST = priceForCompose({ withTools: false }).credits;
@@ -41,6 +48,8 @@ export function FromWebsite({ platforms, length, onUse, onCredits, onCharged }: 
   onCharged: () => void;
 }) {
   const [url, setUrl] = useState('');
+  const [mode, setMode] = useState<Mode>('products');
+  const m = MODES[mode];
   const [found, setFound] = useState<Found | null>(null);
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<null | 'find' | 'make' | string>(null);
@@ -68,7 +77,7 @@ export function FromWebsite({ platforms, length, onUse, onCredits, onCharged }: 
     if (!url.trim() || busy) return;
     setBusy('find'); setError(null); setMade(null);
     try {
-      const r = await apiPost<Found>('/api/media/from-url', { url: url.trim() });
+      const r = await apiPost<Found>('/api/media/from-url', { url: url.trim(), mode });
       setFound(r);
       setChecked(new Set(r.products.map((p) => p.id)));
       onCharged();
@@ -133,6 +142,13 @@ export function FromWebsite({ platforms, length, onUse, onCredits, onCharged }: 
 
   return (
     <div className="compose-media-panel fromsite">
+      <div className="mode-switch" role="radiogroup" aria-label="Make videos about">
+        {(Object.keys(MODES) as Mode[]).map((id) => (
+          <button key={id} type="button" role="radio" aria-checked={mode === id} className={`opt${mode === id ? ' active' : ''}`} disabled={busy !== null} onClick={() => { setMode(id); setFound(null); setMade(null); setError(null); }}>
+            {MODES[id].tab}
+          </button>
+        ))}
+      </div>
       <form className="fromsite-row" onSubmit={find}>
         <label className="compose-label" htmlFor="fromsite-url">From a website</label>
         <input
@@ -140,17 +156,17 @@ export function FromWebsite({ platforms, length, onUse, onCredits, onCharged }: 
           placeholder="https://yourshop.com" value={url} onChange={(e) => setUrl(e.target.value)} disabled={busy === 'find'}
         />
         <button type="submit" className="btn sm" disabled={!url.trim() || busy !== null}>
-          {busy === 'find' ? 'Reading the site…' : 'Find products'} <span className="compose-cost">{FIND_COST} cr</span>
+          {busy === 'find' ? 'Reading the site…' : m.find} <span className="compose-cost">{FIND_COST} cr</span>
         </button>
       </form>
-      {!found && !made && <p className="compose-note">Paste your product or company site. We find each product and make a separate video post for each one.</p>}
+      {!found && !made && <p className="compose-note">Paste a website. {m.intro}</p>}
 
       {error && <p className="compose-note compose-error" role="alert">{error}</p>}
 
       {found && (
         <>
           <p className="compose-note">
-            {found.products.length === 1 ? 'Found 1 product' : `Found ${found.products.length} products`}{found.site.name ? ` on ${found.site.name}` : ''}. Each one you keep becomes its own post with its own video.
+            {found.products.length === 1 ? `Found 1 ${m.one}` : `Found ${found.products.length} ${m.many}`}{found.site.name ? ` on ${found.site.name}` : ''}. Each one you keep becomes its own post with its own video.
           </p>
           <ul className="fromsite-list">
             {found.products.map((p) => (
