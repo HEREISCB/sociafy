@@ -396,3 +396,5 @@ li.compose-thumb { cursor: default; }
 .fromsite-video-wait { aspect-ratio: 4 / 5; display: grid; place-items: center; padding: var(--s-4); text-align: center; font-size: var(--fs-sm); color: var(--text-2); }
 .fromsite-made-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); }
 .fromsite-made-foot .fromsite-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fromsite-when { display: flex; flex-direction: column; gap: var(--s-2); }
+.fromsite-when .input { width: 100%; }

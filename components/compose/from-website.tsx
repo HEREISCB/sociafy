@@ -26,7 +26,16 @@ const FIND_COST = priceForCompose({ withTools: false }).credits;
 type MadeDraft = { id: string; name: string; videoJobId: string | null; estimatedCredits?: number };
 
 /** One post being made from the site: live render status, then the video right here, then open it to schedule/post. */
-function RenderCard({ d }: { d: MadeDraft }) {
+const pad = (n: number) => String(n).padStart(2, '0');
+const localInput = (t: Date) => `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}T${pad(t.getHours())}:${pad(t.getMinutes())}`;
+type Sent = { kind: 'scheduled'; at: Date; platforms: string[] } | { kind: 'posted'; ok: string[]; failed: string[] };
+
+function RenderCard({ d, platforms }: { d: MadeDraft; platforms: Platform[] }) {
+  // Empty on purpose: the user decides when this post goes out.
+  const [when, setWhen] = useState('');
+  const [sending, setSending] = useState<null | 'schedule' | 'post'>(null);
+  const [sent, setSent] = useState<Sent | null>(null);
+  const [sendError, setSendError] = useState<string | null>(null);
   const [state, setState] = useState<{ phase: 'rendering' } | { phase: 'done'; url: string; poster?: string } | { phase: 'failed' }>(
     d.videoJobId ? { phase: 'rendering' } : { phase: 'failed' },
   );
@@ -39,6 +48,25 @@ function RenderCard({ d }: { d: MadeDraft }) {
     });
     return () => { live = false; };
   }, [d.videoJobId]);
+
+  const ready = state.phase === 'done' && platforms.length > 0;
+  const schedule = async () => {
+    const at = new Date(when);
+    if (Number.isNaN(at.getTime()) || at.getTime() < Date.now()) { setSendError('Pick a time in the future.'); return; }
+    setSending('schedule'); setSendError(null);
+    try {
+      const r = await apiPost<{ scheduled: { platform: string }[] }>('/api/schedule', { draftId: d.id, scheduledAt: at.toISOString(), platforms });
+      setSent({ kind: 'scheduled', at, platforms: r.scheduled.map((x) => x.platform) });
+    } catch (e) { setSendError(friendlyApiError(e)); } finally { setSending(null); }
+  };
+  const postNow = async () => {
+    setSending('post'); setSendError(null);
+    try {
+      const r = await apiPost<{ results?: { platform: string; ok: boolean }[] }>('/api/publish', { draftId: d.id, platforms }, { timeoutMs: 180_000 });
+      const rows = r.results ?? [];
+      setSent({ kind: 'posted', ok: rows.filter((x) => x.ok).map((x) => x.platform), failed: rows.filter((x) => !x.ok).map((x) => x.platform) });
+    } catch (e) { setSendError(friendlyApiError(e)); } finally { setSending(null); }
+  };
   return (
     <li className="fromsite-card fromsite-made">
       <div className="fromsite-video">
@@ -47,11 +75,28 @@ function RenderCard({ d }: { d: MadeDraft }) {
           : <div className={`fromsite-video-wait${state.phase === 'rendering' ? ' sk' : ''}`} role="status">{state.phase === 'rendering' ? 'Making the video… about 2–3 min' : 'The video didn’t render — credits were refunded. The post is saved as text.'}</div>}
       </div>
       <div className="fromsite-made-foot">
-        <span className="fromsite-name">{d.name}</span>
-        <Link className={`btn sm${state.phase === 'done' ? ' primary' : ''}`} href={`/compose?draft=${d.id}`}>
-          {state.phase === 'rendering' ? 'Edit text' : 'Edit & post'}
-        </Link>
+        <span className="fromsite-name" title={d.name}>{d.name}</span>
+        <Link className="btn ghost sm" href={`/compose?draft=${d.id}`}>Edit</Link>
       </div>
+      {sent ? (
+        <p className="compose-note" role="status">
+          {sent.kind === 'scheduled'
+            ? `Scheduled for ${sent.at.toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })} on ${sent.platforms.join(', ')}.`
+            : `${sent.ok.length ? `Posted to ${sent.ok.join(', ')}.` : ''}${sent.failed.length ? ` Couldn’t post to ${sent.failed.join(', ')} — open Edit to retry.` : ''}`}
+        </p>
+      ) : (
+        <div className="fromsite-when">
+          <label className="sr-only" htmlFor={`when-${d.id}`}>When to post {d.name}</label>
+          <input id={`when-${d.id}`} className="input" type="datetime-local" value={when} min={localInput(new Date())} onChange={(e) => setWhen(e.target.value)} disabled={sending !== null} />
+          <div className="row">
+            <button type="button" className="btn primary sm" disabled={!ready || !when || sending !== null} onClick={schedule}>{sending === 'schedule' ? 'Scheduling…' : 'Schedule'}</button>
+            <button type="button" className="btn ghost sm" disabled={!ready || sending !== null} onClick={postNow}>{sending === 'post' ? 'Posting…' : 'Post now'}</button>
+          </div>
+          {!ready && <p className="compose-note">{state.phase === 'rendering' ? 'Pick a time now — Schedule unlocks when the video is ready.' : 'Open Edit to add media or post it as text.'}</p>}
+          {ready && !when && <p className="compose-note">Pick a date and time, or post now.</p>}
+          {sendError && <p className="compose-note compose-error" role="alert">{sendError}</p>}
+        </div>
+      )}
     </li>
   );
 }
@@ -136,7 +181,6 @@ export function FromWebsite({ platforms, length, onUse, onCredits, onCharged }: 
         products: picked.map(({ name, postText, imageUrls }) => ({ name, postText, imageUrls })),
         platforms,
         ...(length ? { durationSec: length } : {}),
-        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       }, { timeoutMs: 300_000 });
       setMade({ drafts: r.drafts, failed: r.failed });
       setFound(null);
@@ -232,11 +276,11 @@ export function FromWebsite({ platforms, length, onUse, onCredits, onCharged }: 
       {made && (
         <>
           <p className="compose-note" role="status">
-            {made.drafts.length === 1 ? 'Your video is being made below.' : `Your ${made.drafts.length} videos are being made below — each is its own post.`} You can keep working; they’re saved, so nothing is lost if you leave.
+            {made.drafts.length === 1 ? 'Your video is being made below.' : `Your ${made.drafts.length} videos are being made below — each is its own post.`} Pick when each one posts — nothing goes out until you do. They’re saved, so nothing is lost if you leave.
             {made.failed.map((f) => ` ${f.name} didn’t start: ${f.hint ?? 'try it again.'}`).join('')}
           </p>
           <ul className="fromsite-made-grid">
-            {made.drafts.map((d) => <RenderCard key={d.id} d={d} />)}
+            {made.drafts.map((d) => <RenderCard key={d.id} d={d} platforms={platforms} />)}
           </ul>
         </>
       )}

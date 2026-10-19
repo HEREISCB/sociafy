@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { withUser, jsonError } from '../../../../../lib/api';
-import { parseBody, planSpreadSchema } from '../../../../../lib/validation';
+import { parseBody } from '../../../../../lib/validation';
 import { rateLimit } from '../../../../../lib/rate-limit';
 import { isStubMode } from '../../../../../lib/env';
 import { db } from '../../../../../lib/db';
@@ -10,7 +10,6 @@ import { planVideo, type Attachment } from '../../../../../lib/ai/videoBrain';
 import { brainContext } from '../../../../../lib/media/autoVideo';
 import { planSubmitError, submitPlan } from '../../../../../lib/media/submitPlan';
 import { MAX_PRODUCTS } from '../../../../../lib/ai/site-products';
-import { spreadDrafts } from '../../../../../lib/agent/plan';
 import { InsufficientCreditsError, insufficientCreditsResponse } from '../../../../../lib/credits/ledger';
 
 export const runtime = 'nodejs';
@@ -28,14 +27,13 @@ const bodySchema = z.object({
   /** Plan and price only: nothing is charged or created. */
   dryRun: z.boolean().optional(),
   /** For placing the new posts on Home's plan (the user's slots). */
-  timeZone: planSpreadSchema.shape.timeZone.optional(),
 });
 
 // The product photos only feed the planner and the footage; what they really are is checked when fetched.
 const attachmentsOf = (urls: string[]): Attachment[] => urls.map((url) => ({ url, mimeType: 'image/*' }));
 
 /**
- * POST /api/media/from-url/videos { products: [{ name, postText, imageUrls }], platforms, durationSec?, dryRun?, timeZone? }
+ * POST /api/media/from-url/videos { products: [{ name, postText, imageUrls }], platforms, durationSec?, dryRun? }
  *   dryRun → 200 { plans: [{ name, format, summary, estimatedCredits }], totalCredits, balance, affordable }
  *   else   → 202 { drafts: [{ id, name, videoJobId, estimatedCredits }], failed: [{ name, error, hint? }] }
  *
@@ -51,7 +49,7 @@ export async function POST(req: NextRequest) {
     if (isStubMode.r2()) return jsonError('r2_not_configured', 503);
     const parsed = parseBody(bodySchema, await req.json().catch(() => ({})));
     if (!parsed.ok) return parsed.response;
-    const { products, platforms, durationSec, dryRun, timeZone } = parsed.data;
+    const { products, platforms, durationSec, dryRun } = parsed.data;
     const rl = rateLimit(dryRun ? 'videoPlan' : 'agentRun', `${dryRun ? 'fromurl-plan' : 'fromurl-vid'}:${user.id}`);
     if (!rl.ok) return jsonError('rate_limited', 429, { retryAfterSec: rl.retryAfterSec });
 
@@ -84,7 +82,7 @@ export async function POST(req: NextRequest) {
         const r = await submitPlan({ userId: user.id, plan, text: p.postText, attachments: attachmentsOf(p.imageUrls) });
         if ('job' in r) {
           try {
-            // planned_at = now puts it on Home's review list at once; spreadDrafts below gives it a real slot.
+            // planned_at = now lists it on Home for review; it isn't scheduled until the user picks a time.
             const [d] = await db().insert(drafts).values({
               userId: user.id, title: p.name, body: p.postText, targetPlatforms: platforms,
               videoJobId: r.job.id, plannedAt: start, source: 'user',
@@ -108,11 +106,7 @@ export async function POST(req: NextRequest) {
     }
     if (!made.length && firstFailure) return firstFailure;
 
-    if (made.length && timeZone) {
-      await spreadDrafts(user.id, timeZone, new Date(), made.map((d) => d.id)).catch((e) => {
-        console.warn('[from-url/videos] placing drafts failed:', e instanceof Error ? e.message.slice(0, 200) : e);
-      });
-    }
+    // No time is picked for the user: they choose when each post goes out (Compose's per-video Schedule).
     return new Response(JSON.stringify({ drafts: made, failed }), { status: 202, headers: { 'content-type': 'application/json' } });
   }, req);
 }

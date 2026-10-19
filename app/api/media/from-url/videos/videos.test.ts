@@ -78,7 +78,7 @@ describe('POST /api/media/from-url/videos', () => {
   });
 
   it('one render + one draft per product, linked by videoJobId and placed on Home', async () => {
-    const r = await post({ products: PRODUCTS, platforms: ['instagram', 'tiktok'], durationSec: 12, timeZone: 'Asia/Kolkata' });
+    const r = await post({ products: PRODUCTS, platforms: ['instagram', 'tiktok'], durationSec: 12 });
     expect(r.status).toBe(202);
     const body = await r.json();
     expect(body).toEqual({
@@ -95,7 +95,8 @@ describe('POST /api/media/from-url/videos', () => {
       videoJobId: 'job_0', source: 'user', plannedAt: expect.any(Date),
     });
     expect(st.drafts[1]).toMatchObject({ videoJobId: 'job_1', title: 'Pour-over kettle' });
-    expect(st.spread).toEqual([['user_1', 'Asia/Kolkata', expect.any(Date), ['draft_1', 'draft_2']]]);
+    // The user picks each post's time; nothing is slotted for them.
+    expect(st.spread).toEqual([]);
   });
 
   it('insufficient credits for the whole batch → 402 with balance/needed, nothing charged or created', async () => {
