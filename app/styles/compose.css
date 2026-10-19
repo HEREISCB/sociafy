@@ -388,7 +388,7 @@ li.compose-thumb { cursor: default; }
 .compose-duration-val { min-width: 7ch; color: var(--text); font-variant-numeric: tabular-nums; }
 
 /* From a website: the videos being made, right in Compose. */
-.fromsite-made-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--s-3); }
+.fromsite-made-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--s-3); align-items: start; }
 .fromsite-made { flex-direction: column; align-items: stretch; padding: var(--s-2); }
 /* The video keeps its own shape (9:16, 1:1 or 16:9); the waiting box is a neutral 4:5. */
 .fromsite-video { border-radius: var(--r-sm); overflow: hidden; background: var(--subtle); }
