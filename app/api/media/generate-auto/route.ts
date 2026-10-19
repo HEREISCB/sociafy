@@ -6,12 +6,9 @@ import { rateLimit } from '../../../../lib/rate-limit';
 import { isStubMode } from '../../../../lib/env';
 import { draftFromPlan, finalizePlan, type Plan } from '../../../../lib/ai/videoBrain';
 import { priceCinemaRender } from '../../../../lib/ai/cue';
-import { ensureAudioLine } from '../../../../lib/ai/prompt-rewriter';
 import { attachmentSchema, brainContext } from '../../../../lib/media/autoVideo';
-import { MotionNotReady, submitMotionAiVideo, submitMotionVideo } from '../../../../lib/media/motionJob';
-import { startHybrid } from '../../../../lib/media/hybridJob';
-import { InsufficientCreditsError, insufficientCreditsResponse } from '../../../../lib/credits/ledger';
-import { fetchReferenceImages, rehostReferences, submitVideo, SubmitFailure } from '../../v1/shared';
+import { insufficientCreditsResponse } from '../../../../lib/credits/ledger';
+import { planSubmitError, submitPlan } from '../../../../lib/media/submitPlan';
 
 export const runtime = 'nodejs';
 // Image-to-video fetches and re-hosts the stills before submitting (as generate-video).
@@ -47,8 +44,6 @@ const bodySchema = z.object({
   platforms: z.array(z.string().trim().max(20)).max(10).default([]),
   attachments: z.array(attachmentSchema).max(9).default([]),
 });
-
-type JobOut = { id: string; status: string; durationSec: number; aspect: string; creditsCharged: number };
 
 /**
  * POST /api/media/generate-auto → 202 { kind, jobs: [{ id, status, durationSec, aspect, creditsCharged }], creditsChargedTotal }
@@ -91,57 +86,15 @@ export async function POST(req: NextRequest) {
     if (fresh.estimatedCredits > balance) return insufficientCreditsResponse({ balance, needed: fresh.estimatedCredits });
 
     try {
-      // Stills for image-to-video / reference footage: fetched, checked and re-hosted before any charge.
-      let imageUrls: string[] | undefined;
-      const f = fresh.footage;
-      if (f && f.mode !== 'text') {
-        const images = attachments.filter((a) => a.mimeType.startsWith('image/')).map((a) => a.url);
-        const fetched = await fetchReferenceImages(images.slice(0, f.mode === 'image-to-video' ? 1 : 9));
-        if (!fetched.ok) return fetched.response;
-        imageUrls = await rehostReferences(user.id, fetched.files);
-      }
-
-      let job: JobOut;
-      if (fresh.format === 'ai_video' && f) {
-        const cinema = f.engine === 'cinema-1';
-        const r = await submitVideo({
-          auth: { userId: user.id },
-          model: cinema ? 'sociafy-cinema-1' : 'sociafy-motion-1',
-          prompt: cinema ? ensureAudioLine(f.prompt) : f.prompt,
-          durationSec: f.seconds, quality: f.quality, aspect: fresh.aspect, fast: f.engine === 'motion-1-fast',
-          genMode: f.mode, imageUrls, source: null, via: 'compose',
-        });
-        job = out(r.job, r.creditsCharged);
-      } else if (fresh.format === 'hybrid') {
-        const r = await startHybrid({ userId: user.id, plan: fresh, topic: text, imageUrls, via: 'compose' });
-        job = { ...out(r.job, r.creditsCharged), status: 'pending' };
-      } else if (fresh.graphics?.engine === 'template' && fresh.graphics.template) {
-        const r = await submitMotionVideo({ userId: user.id, template: fresh.graphics.template, aspect: fresh.aspect as '9:16' | '16:9', topic: text.slice(0, 2_000), via: 'compose' });
-        job = out(r.job, r.creditsCharged);
-      } else {
-        const r = await submitMotionAiVideo({ userId: user.id, aspect: fresh.aspect, durationSec: fresh.durationSec, topic: text, audio: fresh.audio, via: 'compose' });
-        job = out(r.job, r.creditsCharged);
-      }
+      const r = await submitPlan({ userId: user.id, plan: fresh, text, attachments });
+      if ('response' in r) return r.response;
       return new Response(
-        JSON.stringify({ kind: fresh.format, jobs: [job], creditsChargedTotal: job.creditsCharged }),
+        JSON.stringify({ kind: fresh.format, jobs: [r.job], creditsChargedTotal: r.job.creditsCharged }),
         { status: 202, headers: { 'content-type': 'application/json' } },
       );
     } catch (e) {
-      if (e instanceof MotionNotReady) {
-        return jsonError('brand_kit_incomplete', 400, { hint: 'Add your brand name and main color in Brand kit first. Nothing was charged.' });
-      }
-      if (e instanceof InsufficientCreditsError) return insufficientCreditsResponse({ balance: e.balance, needed: e.needed });
-      if (e instanceof SubmitFailure && e.code === 'at_capacity') {
-        return jsonError('video_at_capacity', 503, { hint: 'Video rendering is busy right now. Nothing was charged — try again in a few minutes.' });
-      }
-      if (e instanceof SubmitFailure && e.code === 'prompt_rejected') return jsonError('prompt_rejected', 400);
-      // White-label: engine detail goes to the log only. Any charge was refunded by the submit path.
-      console.error('[generate-auto] submit failed:', e instanceof Error ? e.message.slice(0, 400) : e);
-      return jsonError('video_submit_failed', 502);
+      return planSubmitError(e, 'generate-auto');
     }
   }, req);
 }
 
-const out = (j: { id: string; status: string; durationSec: number; aspect: string }, creditsCharged: number): JobOut => ({
-  id: j.id, status: j.status, durationSec: j.durationSec, aspect: j.aspect, creditsCharged,
-});

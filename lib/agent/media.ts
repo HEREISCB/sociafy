@@ -203,7 +203,7 @@ export async function submitQueuedVideos(): Promise<number> {
 }
 
 /**
- * Finish autopilot video drafts whose render has ended: attach the clip and
+ * Finish video drafts (autopilot's, and Compose's "From a website") whose render has ended: attach the clip and
  * run the normal schedule-or-hold decision, or fall back to a text draft when
  * the render failed (finalizeVideoJob has already refunded it).
  * Runs after the video sweeper, every five minutes.
@@ -248,7 +248,9 @@ export async function attachFinishedVideos(): Promise<number> {
     const [settings] = await db().select().from(agentSettings).where(eq(agentSettings.userId, draft.userId)).limit(1);
     // Approved while rendering: the user already said yes — schedule it, don't re-review.
     if (isApproved(updated)) await queueApprovedRender(updated, settings?.quietHours);
-    else if (settings) await publishOrHold(settings, updated, draft.variants?.[0]?.score ?? 0);
+    // A post the user made (e.g. Compose's "From a website") waits on Home for their review;
+    // the autopilot schedule-or-hold decision is only for autopilot's own drafts.
+    else if (settings && draft.source !== 'user') await publishOrHold(settings, updated, draft.variants?.[0]?.score ?? 0);
   }
   return rows.length;
 }

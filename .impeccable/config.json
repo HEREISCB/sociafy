@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "lib/ai/site-products.ts"
+        ],
+        "createdAt": "2026-10-19T08:09:38.293Z",
+        "reason": "agent: server-side regex matching <img> tags in fetched HTML, not rendered markup"
+      }
+    ]
+  }
+}

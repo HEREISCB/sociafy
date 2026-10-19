@@ -23,9 +23,9 @@ export function pageText(html: string): string {
   ].filter(Boolean).join('\n');
 }
 
-/** Up to 2 same-origin links worth reading besides the homepage: the first
- *  link per pattern, in EXTRA_PAGES order. Off-origin links are never followed. */
-export function pickExtraPages(html: string, base: string): string[] {
+/** Up to `max` same-origin links worth reading besides the homepage: the first
+ *  link per pattern, in `patterns` order. Off-origin links are never followed. */
+export function pickExtraPages(html: string, base: string, patterns: RegExp[] = EXTRA_PAGES, max = 2): string[] {
   const origin = new URL(base).origin;
   const links: URL[] = [];
   for (const m of html.matchAll(/<a\s[^>]*href=["']([^"']+)["']/gi)) {
@@ -37,10 +37,10 @@ export function pickExtraPages(html: string, base: string): string[] {
     }
   }
   const picked: string[] = [];
-  for (const re of EXTRA_PAGES) {
+  for (const re of patterns) {
     const hit = links.find((u) => re.test(u.pathname) && !picked.includes(u.origin + u.pathname));
     if (hit) picked.push(hit.origin + hit.pathname);
-    if (picked.length === 2) break;
+    if (picked.length === max) break;
   }
   return picked;
 }

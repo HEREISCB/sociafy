@@ -17,6 +17,7 @@ import { Preview } from './compose/preview';
 import { AvatarCropModal } from './compose/avatar-crop';
 import { MotionEditor } from './compose/motion-editor';
 import { SmartVideo } from './compose/smart';
+import { FromWebsite } from './compose/from-website';
 
 /** Hard caption limits per platform (mirrors PLATFORM_LIMITS in lib/ai/compose.ts,
  *  which is server-only). */
@@ -341,6 +342,17 @@ export default function Compose({ draftId, onDone, initial }: {
             attachedImages={readyImages.length}
             disabled={!body.trim() || gen.busy !== null}
             onGenerate={() => gen.generateImage(body.trim(), readyImages.map((m) => m.url!))}
+          />
+        )}
+        {media === 'video' && (
+          <FromWebsite
+            platforms={connected.filter((p) => selected.includes(p) && supportsKind(p, 'video'))}
+            onUse={(text, items) => {
+              setBody(text);
+              setAttached((cur) => [...cur, ...items].slice(0, MAX_ATTACHED));
+            }}
+            onCredits={(e) => { setCreditError(e); refreshCredits(); }}
+            onCharged={() => { setCreditError(null); refreshCredits(); }}
           />
         )}
         {media === 'video' && gen.s.videoSmart && (

@@ -272,8 +272,9 @@ export async function skipDraft(userId: string, draftId: string): Promise<boolea
  * Only planned_at changes — it stays a draft to review; nothing is approved or
  * queued. Approved-while-rendering drafts keep theirs. Drafts that don't fit
  * (the horizon is full) stay unscheduled. Returns the old times for undo.
+ * `only`: place just these drafts (e.g. ones just made), leaving the rest as they are.
  */
-export async function spreadDrafts(userId: string, timeZone: string, now = new Date()) {
+export async function spreadDrafts(userId: string, timeZone: string, now = new Date(), only?: string[]) {
   const [s] = await db().select().from(agentSettings).where(eq(agentSettings.userId, userId)).limit(1);
   const [rows, planned, pending] = await Promise.all([
     db().select().from(drafts).where(and(inReview(userId), or(isNull(drafts.plannedAt), lt(drafts.plannedAt, now)))).orderBy(asc(drafts.createdAt)),
@@ -284,7 +285,7 @@ export async function spreadDrafts(userId: string, timeZone: string, now = new D
       .where(and(eq(scheduledPosts.userId, userId), inArray(scheduledPosts.status, ['pending', 'publishing']), gte(scheduledPosts.scheduledAt, now))),
   ]);
   const kind = (d: Draft) => (d.videoJobId ? 'video' : postKind(d.media));
-  const loose = rows.filter((d) => !isApproved(d));
+  const loose = rows.filter((d) => !isApproved(d) && (!only || only.includes(d.id)));
   const posts = new Map(pending.map((p) => [p.draftId, p])); // one per post, not per platform row
   const placed = autoPlace({
     items: loose.map((d) => ({ id: d.id, kind: kind(d), group: similarKey(d.title) })),

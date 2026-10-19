@@ -203,4 +203,14 @@ describe('attachFinishedVideos', () => {
     expect(publishOrHold).toHaveBeenCalledTimes(1);
     expect(queueApprovedRender).not.toHaveBeenCalled();
   });
+
+  it('attaches the clip to a user-made draft but leaves the post for the user to review', async () => {
+    land([]);
+    state.drafts[0].source = 'user';
+    state.joined[0].draft.source = 'user';
+    await attachFinishedVideos();
+    expect(state.drafts[0]).toMatchObject({ videoJobId: null, media: [{ id: 'a1' }] });
+    expect(publishOrHold).not.toHaveBeenCalled();
+    expect(queueApprovedRender).not.toHaveBeenCalled();
+  });
 });
