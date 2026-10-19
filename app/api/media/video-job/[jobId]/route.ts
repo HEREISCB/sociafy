@@ -5,6 +5,7 @@ import { db } from '../../../../../lib/db';
 import { videoJobs } from '../../../../../lib/db/schema';
 import { isStubMode } from '../../../../../lib/env';
 import { finalizeVideoJob, HYBRID_WAITING } from '../../../../../lib/media/finalizeVideoJob';
+import { attachFinishedVideos } from '../../../../../lib/agent/media';
 import { advanceHybrid } from '../../../../../lib/media/hybridJob';
 // The same mapping /api/v1/videos uses. Imported, not copied: two mappings mean
 // one failure eventually gets described two different ways.
@@ -49,6 +50,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ jobId: stri
     }
 
     const result = await finalizeVideoJob(job);
+    // A post waiting on this clip (Compose's "From a website", autopilot) gets it now, not at the next cron sweep.
+    if (result.status === 'completed' || result.status === 'failed') await attachFinishedVideos(job.id).catch((e) => console.warn('[video-job] attach failed:', e instanceof Error ? e.message : e));
     // Same invariant the /api/v1 readers enforce: never announce a completion we
     // cannot hand over. Completion is atomic now, so this only fires if the asset
     // row was deleted out from under the job — in which case "still working" is

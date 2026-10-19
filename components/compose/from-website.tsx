@@ -7,6 +7,7 @@ import { apiPost, friendlyApiError } from '../../lib/ui/fetcher';
 import { priceForCompose } from '../../lib/credits/pricing';
 import type { Platform } from '../../lib/db/schema';
 import type { MediaItem } from './attachments';
+import { pollJob } from './generate';
 
 type Product = { id: string; name: string; pitch: string; facts: string[]; imageUrls: string[]; postText: string };
 type Found = { site: { name: string; summary: string }; products: Product[] };
@@ -21,6 +22,39 @@ const MODES: Record<Mode, { tab: string; find: string; intro: string; one: strin
 type LibraryRow = { id: string; publicUrl: string; mimeType: string; label: string | null };
 
 const FIND_COST = priceForCompose({ withTools: false }).credits;
+
+type MadeDraft = { id: string; name: string; videoJobId: string | null; estimatedCredits?: number };
+
+/** One post being made from the site: live render status, then the video right here, then open it to schedule/post. */
+function RenderCard({ d }: { d: MadeDraft }) {
+  const [state, setState] = useState<{ phase: 'rendering' } | { phase: 'done'; url: string; poster?: string } | { phase: 'failed' }>(
+    d.videoJobId ? { phase: 'rendering' } : { phase: 'failed' },
+  );
+  useEffect(() => {
+    if (!d.videoJobId) return;
+    let live = true;
+    pollJob(`/api/media/video-job/${d.videoJobId}`, 30 * 60_000, [5_000, 1_000, 10_000]).then((out) => {
+      if (!live) return;
+      setState('asset' in out && out.asset ? { phase: 'done', url: out.asset.publicUrl, poster: out.asset.posterUrl } : { phase: 'failed' });
+    });
+    return () => { live = false; };
+  }, [d.videoJobId]);
+  return (
+    <li className="fromsite-card fromsite-made">
+      <div className="fromsite-video">
+        {state.phase === 'done'
+          ? <video src={state.url} poster={state.poster} controls playsInline preload="metadata" />
+          : <div className={`fromsite-video-wait${state.phase === 'rendering' ? ' sk' : ''}`} role="status">{state.phase === 'rendering' ? 'Making the video… about 2–3 min' : 'The video didn’t render — credits were refunded. The post is saved as text.'}</div>}
+      </div>
+      <div className="fromsite-made-foot">
+        <span className="fromsite-name">{d.name}</span>
+        <Link className={`btn sm${state.phase === 'done' ? ' primary' : ''}`} href={`/compose?draft=${d.id}`}>
+          {state.phase === 'rendering' ? 'Edit text' : 'Edit & post'}
+        </Link>
+      </div>
+    </li>
+  );
+}
 
 /** apiPost throws "<status>: <body>". */
 function errBody(e: unknown): { status: number; body: Record<string, unknown> } | null {
@@ -54,7 +88,7 @@ export function FromWebsite({ platforms, length, onUse, onCredits, onCharged }: 
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<null | 'find' | 'make' | string>(null);
   const [error, setError] = useState<string | null>(null);
-  const [made, setMade] = useState<{ count: number; failed: { name: string; hint?: string }[] } | null>(null);
+  const [made, setMade] = useState<{ drafts: MadeDraft[]; failed: { name: string; hint?: string }[] } | null>(null);
   const [estimate, setEstimate] = useState<Estimate | null>(null);
 
   // One dry run per (products, platforms): prices every product; the total is summed from what's checked.
@@ -98,13 +132,13 @@ export function FromWebsite({ platforms, length, onUse, onCredits, onCharged }: 
     if (!picked.length || busy) return;
     setBusy('make'); setError(null);
     try {
-      const r = await apiPost<{ drafts: unknown[]; failed: { name: string; hint?: string }[] }>('/api/media/from-url/videos', {
+      const r = await apiPost<{ drafts: MadeDraft[]; failed: { name: string; hint?: string }[] }>('/api/media/from-url/videos', {
         products: picked.map(({ name, postText, imageUrls }) => ({ name, postText, imageUrls })),
         platforms,
         ...(length ? { durationSec: length } : {}),
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       }, { timeoutMs: 300_000 });
-      setMade({ count: r.drafts.length, failed: r.failed });
+      setMade({ drafts: r.drafts, failed: r.failed });
       setFound(null);
       onCharged();
     } catch (err) {
@@ -196,10 +230,15 @@ export function FromWebsite({ platforms, length, onUse, onCredits, onCharged }: 
       )}
 
       {made && (
-        <p className="compose-note" role="status">
-          {made.count === 1 ? '1 video is rendering' : `${made.count} videos are rendering`} — they&rsquo;ll appear on <Link href="/dashboard">Home</Link> for review.
-          {made.failed.map((f) => ` ${f.name} didn’t start: ${f.hint ?? 'try it again.'}`).join('')}
-        </p>
+        <>
+          <p className="compose-note" role="status">
+            {made.drafts.length === 1 ? 'Your video is being made below.' : `Your ${made.drafts.length} videos are being made below — each is its own post.`} You can keep working; they’re saved, so nothing is lost if you leave.
+            {made.failed.map((f) => ` ${f.name} didn’t start: ${f.hint ?? 'try it again.'}`).join('')}
+          </p>
+          <ul className="fromsite-made-grid">
+            {made.drafts.map((d) => <RenderCard key={d.id} d={d} />)}
+          </ul>
+        </>
       )}
     </div>
   );

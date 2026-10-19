@@ -208,12 +208,13 @@ export async function submitQueuedVideos(): Promise<number> {
  * the render failed (finalizeVideoJob has already refunded it).
  * Runs after the video sweeper, every five minutes.
  */
-export async function attachFinishedVideos(): Promise<number> {
+/** `onlyJobId`: attach just that job's clip now (the video-job poll), instead of the cron's sweep. */
+export async function attachFinishedVideos(onlyJobId?: string): Promise<number> {
   const rows = await db()
     .select({ draft: drafts, job: videoJobs })
     .from(drafts)
     .innerJoin(videoJobs, eq(drafts.videoJobId, videoJobs.id))
-    .where(inArray(videoJobs.status, ['completed', 'failed']))
+    .where(and(inArray(videoJobs.status, ['completed', 'failed']), onlyJobId ? eq(videoJobs.id, onlyJobId) : undefined))
     .limit(50);
 
   for (const { draft, job } of rows) {

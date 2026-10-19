@@ -15,6 +15,7 @@ const state = vi.hoisted(() => ({
   job: { id: 'job_1', userId: 'user_1' } as Record<string, unknown>,
   result: { status: 'pending' } as Record<string, unknown>,
   advanced: [] as string[],
+  attached: [] as string[],
 }));
 
 vi.mock('../../../../lib/api', () => ({
@@ -47,6 +48,9 @@ vi.mock('../../../../lib/media/finalizeVideoJob', () => ({
   HYBRID_WAITING: 'footage',
   finalizeVideoJob: () => Promise.resolve(state.result),
 }));
+vi.mock('../../../../lib/agent/media', () => ({
+  attachFinishedVideos: (id: string) => { state.attached.push(id); return Promise.resolve(1); },
+}));
 vi.mock('../../../../lib/media/hybridJob', () => ({
   advanceHybrid: (job: Record<string, unknown>) => { state.advanced.push(job.id as string); return Promise.resolve(); },
 }));
@@ -61,6 +65,7 @@ beforeEach(() => {
   state.job = { id: 'job_1', userId: 'user_1' };
   state.result = { status: 'pending' };
   state.advanced = [];
+  state.attached = [];
 });
 
 describe('GET /api/media/video-job/[jobId]', () => {
@@ -106,6 +111,17 @@ describe('GET /api/media/video-job/[jobId]', () => {
     expect(await poll()).toEqual({ status: 'pending', providerStatus: 'processing' });
     state.result = { status: 'completed', asset: { id: 'a1' } };
     expect(await poll()).toEqual({ status: 'completed', asset: { id: 'a1' } });
+  });
+
+  it('a finished job hands its clip to the post waiting on it right away; a pending one does not', async () => {
+    state.result = { status: 'pending' };
+    await poll();
+    expect(state.attached).toEqual([]);
+    state.result = { status: 'completed', asset: { id: 'a1' } };
+    await poll();
+    state.result = { status: 'failed', error: 'x' };
+    await poll();
+    expect(state.attached).toEqual(['job_1', 'job_1']);
   });
 });
 
