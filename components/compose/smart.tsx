@@ -188,16 +188,6 @@ export function SmartVideo({ gen, text, platforms, attachments, length, setLengt
           )) : <span>Silent</span>}
         </div>
       )}
-      {!none && (
-        <div className="compose-chips" role="group" aria-label="Video length">
-          <span className="compose-label">Length</span>
-          {[null, ...LENGTHS].map((n) => (
-            <button key={n ?? 'auto'} type="button" className={`prompt-chip${length === n ? ' active' : ''}`} aria-pressed={length === n} disabled={busy} onClick={() => setLength(n)}>
-              {n ? `${n}s` : 'Auto'}
-            </button>
-          ))}
-        </div>
-      )}
       {(res.alternatives?.length || pickedFormat || cheapest) && !busy ? (
         <div className="compose-chips" role="group" aria-label="Other options">
           {cheapest && (

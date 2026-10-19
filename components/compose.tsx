@@ -16,7 +16,7 @@ import { ImageOptions, PRESETS, VideoOptions, WritingOptions } from './compose/o
 import { Preview } from './compose/preview';
 import { AvatarCropModal } from './compose/avatar-crop';
 import { MotionEditor } from './compose/motion-editor';
-import { SmartVideo } from './compose/smart';
+import { LENGTHS, SmartVideo } from './compose/smart';
 import { FromWebsite } from './compose/from-website';
 import { ComposeChat } from './compose/chat';
 
@@ -357,8 +357,19 @@ export default function Compose({ draftId, onDone, initial }: {
             onGenerate={() => gen.generateImage(body.trim(), readyImages.map((m) => m.url!))}
           />
         )}
+        {media === 'video' && gen.s.videoSmart && (
+          <div className="compose-chips" role="group" aria-label="Video length">
+            <span className="compose-label">Length</span>
+            {[null, ...LENGTHS].map((n) => (
+              <button key={n ?? 'auto'} type="button" className={`prompt-chip${videoLength === n ? ' active' : ''}`} aria-pressed={videoLength === n} onClick={() => setVideoLength(n)}>
+                {n ? `${n}s` : 'Auto'}
+              </button>
+            ))}
+          </div>
+        )}
         {media === 'video' && (
           <FromWebsite
+            length={videoLength}
             platforms={connected.filter((p) => selected.includes(p) && supportsKind(p, 'video'))}
             onUse={(text, items) => {
               setBody(text);

@@ -31,9 +31,11 @@ const hintOf = (e: unknown) => {
  * video post per product (each lands on Home as its own draft, rendering).
  * Or drop one product's caption + photos into the post box to edit by hand.
  */
-export function FromWebsite({ platforms, onUse, onCredits, onCharged }: {
+export function FromWebsite({ platforms, length, onUse, onCredits, onCharged }: {
   /** Where the new posts go (the composer's platform picks that take video). */
   platforms: Platform[];
+  /** Picked video length in seconds (null = Auto). */
+  length: number | null;
   onUse: (text: string, media: MediaItem[]) => void;
   onCredits: (e: { balance: number; needed: number }) => void;
   onCharged: () => void;
@@ -47,12 +49,12 @@ export function FromWebsite({ platforms, onUse, onCredits, onCharged }: {
   const [estimate, setEstimate] = useState<Estimate | null>(null);
 
   // One dry run per (products, platforms): prices every product; the total is summed from what's checked.
-  const estKey = found ? JSON.stringify([found.products.map((p) => p.id + p.postText), platforms]) : null;
+  const estKey = found ? JSON.stringify([found.products.map((p) => p.id + p.postText), platforms, length]) : null;
   useEffect(() => {
     if (!found || !estKey) return;
     let live = true;
     apiPost<{ plans: { estimatedCredits: number }[] }>('/api/media/from-url/videos', {
-      products: found.products.map(({ name, postText, imageUrls }) => ({ name, postText, imageUrls })), platforms, dryRun: true,
+      products: found.products.map(({ name, postText, imageUrls }) => ({ name, postText, imageUrls })), platforms, dryRun: true, ...(length ? { durationSec: length } : {}),
     }).then(
       (r) => { if (live) setEstimate({ key: estKey, perProduct: Object.fromEntries(found.products.map((p, i) => [p.id, r.plans[i]?.estimatedCredits ?? 0])) }); },
       // No price → the button says so; the real request still checks the balance.
@@ -90,6 +92,7 @@ export function FromWebsite({ platforms, onUse, onCredits, onCharged }: {
       const r = await apiPost<{ drafts: unknown[]; failed: { name: string; hint?: string }[] }>('/api/media/from-url/videos', {
         products: picked.map(({ name, postText, imageUrls }) => ({ name, postText, imageUrls })),
         platforms,
+        ...(length ? { durationSec: length } : {}),
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       }, { timeoutMs: 300_000 });
       setMade({ count: r.drafts.length, failed: r.failed });
