@@ -194,22 +194,30 @@ export function FromWebsite({ platforms, length, onUse, onCredits, onCharged }: 
     }
   };
 
-  const use = async (p: Product) => {
-    if (busy) return;
-    setBusy(p.id); setError(null);
+  /** One or several items into the post box as ONE post: a single item keeps its caption; several become one combined brief. */
+  const use = async (items: Product[], key: string) => {
+    if (busy || !items.length) return;
+    setBusy(key); setError(null);
+    const one = items.length === 1;
+    const text = one ? items[0].postText : [
+      `${found?.site.name ? `${found.site.name}: ` : ''}${items.map((p) => p.name).join(', ')}`,
+      ...items.map((p) => `• ${p.name}${p.pitch ? ` — ${p.pitch}` : ''}${p.facts.length ? ` (${p.facts.slice(0, 3).join('; ')})` : ''}`),
+    ].join('\n\n').slice(0, 4_000);
+    // A single item brings all its photos; several bring each one's best photo.
+    const urls = [...new Set(one ? items[0].imageUrls : items.flatMap((p) => p.imageUrls.slice(0, 1)))].slice(0, 12);
     let media: MediaItem[] = [];
     try {
-      if (p.imageUrls.length) {
-        const r = await apiPost<{ items: LibraryRow[] }>('/api/media/from-url/import', { imageUrls: p.imageUrls, label: p.name });
-        media = r.items.map((m) => ({ id: m.id, url: m.publicUrl, mimeType: m.mimeType, label: m.label ?? p.name }));
+      for (let i = 0; i < urls.length; i += 4) {
+        const r = await apiPost<{ items: LibraryRow[] }>('/api/media/from-url/import', { imageUrls: urls.slice(i, i + 4), label: one ? items[0].name : found?.site.name || 'Website' });
+        media = media.concat(r.items.map((m) => ({ id: m.id, url: m.publicUrl, mimeType: m.mimeType, label: m.label ?? items[0].name })));
       }
     } catch (err) {
-      // The caption is still worth having; say the photos didn't come.
-      setError(`Added the caption, but not the photos: ${hintOf(err)}`);
+      // The text is still worth having; say the photos didn't (all) come.
+      setError(`Added the text, but not every photo: ${hintOf(err)}`);
     } finally {
       setBusy(null);
     }
-    onUse(p.postText, media);
+    onUse(text, media);
   };
 
   const toggle = (id: string) => setChecked((cur) => {
@@ -244,7 +252,7 @@ export function FromWebsite({ platforms, length, onUse, onCredits, onCharged }: 
       {found && (
         <>
           <p className="compose-note">
-            {found.products.length === 1 ? `Found 1 ${m.one}` : `Found ${found.products.length} ${m.many}`}{found.site.name ? ` on ${found.site.name}` : ''}. Each one you keep becomes its own post with its own video.
+            {found.products.length === 1 ? `Found 1 ${m.one}` : `Found ${found.products.length} ${m.many}`}{found.site.name ? ` on ${found.site.name}` : ''}. Tick the ones you want: make a separate video for each, or put them together in the post box as one post.
           </p>
           <ul className="fromsite-list">
             {found.products.map((p) => (
@@ -257,7 +265,7 @@ export function FromWebsite({ platforms, length, onUse, onCredits, onCharged }: 
                     {p.pitch && <span className="fromsite-pitch">{p.pitch}</span>}
                   </span>
                 </label>
-                <button type="button" className="btn ghost sm" disabled={busy !== null} onClick={() => use(p)}>
+                <button type="button" className="btn ghost sm" disabled={busy !== null} onClick={() => use([p], p.id)}>
                   {busy === p.id ? 'Adding…' : 'Use in post box'}
                 </button>
               </li>
@@ -268,6 +276,9 @@ export function FromWebsite({ platforms, length, onUse, onCredits, onCharged }: 
             <button type="button" className="btn primary" disabled={!picked.length || !platforms.length || busy !== null} onClick={make}>
               {busy === 'make' ? 'Starting videos…' : `Make ${picked.length} ${picked.length === 1 ? 'video' : 'videos'}`}
               {total != null ? <span className="compose-cost">{total} cr</span> : picked.length > 0 && <span className="compose-cost">pricing…</span>}
+            </button>
+            <button type="button" className="btn sm" disabled={!picked.length || busy !== null} onClick={() => use(picked, 'many')}>
+              {busy === 'many' ? 'Adding…' : `Use ${picked.length} in post box`}
             </button>
           </div>
         </>
