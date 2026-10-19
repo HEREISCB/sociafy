@@ -1,7 +1,7 @@
 // node --test motion-ai/
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validKey, parseSubmit, parseFootage, parseSegments, parseEdit, parseAudio, audioResult } from './lib.mjs';
+import { validKey, parseSubmit, parseFootage, parseSegments, parseEdit, parseAudio, audioResult, jobLimits, segmentRange } from './lib.mjs';
 
 test('keys stay inside users/', () => {
   assert.ok(validKey('users/abc/motion/1.mp4'));
@@ -14,7 +14,9 @@ test('submit validation', () => {
   assert.equal(r.brand.colors.primary, '#fff');
   assert.equal(r.brand.colors.text, undefined);
   assert.equal(r.brand.logoUrl, '');
-  assert.equal(parseSubmit({ ...ok, durationSec: 30 }).error, 'bad_duration');
+  assert.equal(parseSubmit({ ...ok, durationSec: 60 }).durationSec, 60);
+  assert.equal(parseSubmit({ ...ok, durationSec: 61 }).error, 'bad_duration');
+  assert.equal(parseSubmit({ ...ok, durationSec: 5 }).error, 'bad_duration');
   assert.equal(parseSubmit({ ...ok, videoKey: 'x/v.mp4' }).error, 'bad_key');
   assert.equal(parseSubmit({ ...ok, aspect: '4:5' }).error, 'bad_aspect');
 });
@@ -29,6 +31,27 @@ test('segments: valid manifest kept, bad one falls back', () => {
   fb({ segments: [seg(0, 3), seg(4, 6), seg(6, 10)] }); // gap
   fb({ segments: [seg(0, 3), seg(3, 6), seg(6, 12)] }); // past duration
   fb({ segments: [seg(0, 10)] }); // too few
+  // Long videos: about one segment per 4-6 s, so 60 s takes up to 15; 20 s still caps at 6.
+  const even = (n, dur) => ({ segments: Array.from({ length: n }, (_, i) => seg((dur * i) / n, (dur * (i + 1)) / n)) });
+  assert.equal(parseSegments(even(15, 60), 60).length, 15);
+  assert.equal(parseSegments(even(16, 60), 60).length, 1);
+  assert.equal(parseSegments(even(7, 20), 20).length, 1);
+});
+
+test('segment range and limits grow with length', () => {
+  assert.deepEqual(segmentRange(20), [3, 6]);
+  assert.deepEqual(segmentRange(45), [8, 12]);
+  assert.deepEqual(segmentRange(60), [10, 15]);
+  const MIN = 60_000;
+  // Up to 20 s: the limits that shipped before (claude 12, check 2, render 5, job 22, +5 footage).
+  assert.deepEqual(jobLimits(20), { claude: 12 * MIN, check: 2 * MIN, render: 5 * MIN, footage: 5 * MIN, job: 22 * MIN, turns: 80 });
+  assert.equal(jobLimits(12, true).job, 27 * MIN);
+  const l = jobLimits(60);
+  assert.equal(l.claude, 25 * MIN);
+  assert.equal(l.render, 10 * MIN);
+  // The app's browser poll windows add motionAiExtraMin(60) = 20 min over the 20 s budget: never less than this.
+  assert.ok(l.job - 22 * MIN <= 20 * MIN, `job ${l.job / MIN} min`);
+  for (let d = 6; d <= 60; d++) assert.ok(jobLimits(d).job - 22 * MIN <= Math.ceil(Math.max(0, d - 20) / 2) * MIN, `d=${d}`);
 });
 
 test('edit validation', () => {

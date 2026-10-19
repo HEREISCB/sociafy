@@ -18,12 +18,13 @@ describe('motion-graphics pricing', () => {
 });
 
 describe('AI-designed motion-graphics pricing', () => {
-  it('is 18 cr per second, length clamped to 6–20s', () => {
+  it('is 18 cr per second, length clamped to 6–60s', () => {
     expect(priceForMotionAi(6)).toEqual({ action: 'video_motion_ai', credits: 108 });
     expect(priceForMotionAi(15).credits).toBe(270);
     expect(priceForMotionAi(20).credits).toBe(360);
     expect(priceForMotionAi(2).credits).toBe(108);
-    expect(priceForMotionAi(60).credits).toBe(360);
+    expect(priceForMotionAi(60).credits).toBe(1080);
+    expect(priceForMotionAi(90).credits).toBe(1080);
     expect(ACTION_LABELS.video_motion_ai).toBeTruthy();
   });
 
@@ -35,7 +36,7 @@ describe('AI-designed motion-graphics pricing', () => {
     expect(priceForMotionAi(15, { ...off, music: true }).credits).toBe(330);
     expect(priceForMotionAi(15, { narration: true, sfx: true, music: true }).credits).toBe(330);
     expect(priceForMotionAi(6, { ...off, narration: true }).credits).toBe(132);
-    expect(priceForMotionAi(60, { ...off, music: true }).credits).toBe(440);
+    expect(priceForMotionAi(60, { ...off, music: true }).credits).toBe(1320);
   });
 });
 
@@ -44,6 +45,7 @@ describe('AI-designed motion-graphic edit pricing', () => {
     expect(priceForMotionAiEdit(6)).toEqual({ action: 'video_motion_ai_edit', credits: 54 });
     expect(priceForMotionAiEdit(15).credits).toBe(135);
     expect(priceForMotionAiEdit(20).credits).toBe(180);
+    expect(priceForMotionAiEdit(60).credits).toBe(540);
     expect(ACTION_LABELS.video_motion_ai_edit).toBeTruthy();
   });
 });

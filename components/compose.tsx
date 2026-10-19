@@ -9,6 +9,7 @@ import { PLATFORM_LABELS, PLATFORM_TO_SHORT, SHORT_TO_PLATFORM } from '../lib/ui
 import { postKind, supportsKind, unsupportedReason } from '../lib/platforms/capabilities';
 import { priceForCompose } from '../lib/credits/pricing';
 import { postMedia } from '../lib/ui/postMedia';
+import { MOTION_AI } from '../lib/ai/models';
 import type { Platform } from '../lib/db/schema';
 import { InsufficientCreditsBanner } from './credits';
 import { Attachments, MAX_ATTACHED, type MediaItem } from './compose/attachments';
@@ -339,11 +340,11 @@ export default function Compose({ draftId, onDone, initial }: {
           <span className="compose-spacer" />
           <label className="compose-duration">
             Video length
-            {/* Left end = the AI decides; then 6–20 s (the engines' range). */}
+            {/* Left end = the AI decides; then 6–60 s (AI motion's range; footage is clamped to its engine). */}
             <input
-              type="range" min={5} max={20} step={1} value={videoLength ?? 5}
+              type="range" min={MOTION_AI.durationSec.min - 1} max={MOTION_AI.durationSec.max} step={1} value={videoLength ?? MOTION_AI.durationSec.min - 1}
               aria-valuetext={videoLength ? `${videoLength} seconds` : 'AI decides'}
-              onChange={(e) => { const n = Number(e.target.value); setVideoLength(n > 5 ? n : null); }}
+              onChange={(e) => { const n = Number(e.target.value); setVideoLength(n >= MOTION_AI.durationSec.min ? n : null); }}
             />
             <span className="compose-duration-val">{videoLength ? `${videoLength}s` : 'AI decides'}</span>
           </label>

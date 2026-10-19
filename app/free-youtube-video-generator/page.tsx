@@ -27,7 +27,7 @@ export default function Page() {
       ]}
       faq={[
         ['What format is a YouTube video?', 'Regular YouTube videos are widescreen 16:9. For Shorts, use the vertical Reels, TikTok and Shorts generator instead.'],
-        ['How long are the free clips?', 'Free clips are 5 seconds, ideal for intros and B-roll. Inside Sociafy you can make clips up to 15 seconds in 720p and 1080p.'],
+        ['How long are the free clips?', 'Free clips are 5 seconds, ideal for intros and B-roll. Inside Sociafy you can make clips up to 30 seconds in 720p and 1080p.'],
         ['Is it free?', 'Yes. You get a free video every day without an account. An account removes the watermark and unlocks the HD download.'],
         ['Can I use the clips in monetized videos?', 'Yes. Clips you generate are yours to use, including in monetized videos.'],
         ['What else does Sociafy do for YouTube?', 'Sociafy writes titles and descriptions, and schedules your videos and Shorts alongside your other social posts.'],

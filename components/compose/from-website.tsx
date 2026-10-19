@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ThumbImg } from '../thumb-img';
 import { apiPost, friendlyApiError } from '../../lib/ui/fetcher';
 import { priceForCompose } from '../../lib/credits/pricing';
+import { MOTION_AI, motionAiExtraMin } from '../../lib/ai/models';
 import type { Platform } from '../../lib/db/schema';
 import type { MediaItem } from './attachments';
 import { pollJob } from './generate';
@@ -42,7 +43,8 @@ function RenderCard({ d, platforms }: { d: MadeDraft; platforms: Platform[] }) {
   useEffect(() => {
     if (!d.videoJobId) return;
     let live = true;
-    pollJob(`/api/media/video-job/${d.videoJobId}`, 40 * 60_000, [5_000, 1_000, 10_000]).then((out) => {
+    // Sized for the longest AI-designed video (the picked length is not on the draft).
+    pollJob(`/api/media/video-job/${d.videoJobId}`, (40 + motionAiExtraMin(MOTION_AI.durationSec.max)) * 60_000, [5_000, 1_000, 10_000]).then((out) => {
       if (!live) return;
       setState('asset' in out && out.asset ? { phase: 'done', url: out.asset.publicUrl, poster: out.asset.posterUrl } : { phase: 'failed' });
     });

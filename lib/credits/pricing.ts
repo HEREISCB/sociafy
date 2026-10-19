@@ -137,12 +137,12 @@ export const CREDIT_PRICES: Record<CreditAction, number> = {
   // per-second rates; see priceForMotion / priceForMotionAi / priceForMotionAiEdit.
   // Templates: sting 7s = 126, stat 15s = 270, showcase 16s = 288.
   video_motion_graphics: MOTION_PER_SEC,
-  // AI-designed: 6s = 108, 15s = 270, 20s = 360. A voiceover or music bed adds
+  // AI-designed: 6s = 108, 15s = 270, 60s = 1080. A voiceover or music bed adds
   // MOTION_AI_AUDIO_PER_SEC (generated audio has a real cost); SFX are free.
   video_motion_ai: MOTION_PER_SEC,
   // An edit of an AI-designed motion graphic ("make the logo bigger"): the
   // worker revises the existing composition and re-renders. Per second of the
-  // video being edited, half the from-scratch rate: 6s = 54, 15s = 135, 20s = 180.
+  // video being edited, half the from-scratch rate: 6s = 54, 15s = 135, 60s = 540.
   video_motion_ai_edit: MOTION_PER_SEC / 2,
   // POST /api/v1/chat/completions. Metered per call from the provider's actual
   // token usage by priceForChat() below; this number is only the per-call floor.
@@ -228,7 +228,9 @@ export function priceForVideo(args: {
   const { durationSec, quality, fast } = args;
   const is15 = durationSec >= 13;
   // 1080p Fast is not offered by Seedance — fall back to Quality (piapi.ts
-  // seedanceTaskType routes the render the same way).
+  // seedanceTaskType routes the render the same way). Past 12 s there is no
+  // fast price at all, so Fast's 15 s ceiling never changes a bill. 13-30 s
+  // scales linearly off the 15 s bucket (Seedance 2.5 bills per second).
   const useFast = fast && quality !== '1080p';
 
   let action: CreditAction;
@@ -294,7 +296,7 @@ export function priceForMotion(durationSec: number): { action: CreditAction; cre
 export const MOTION_AI_AUDIO_PER_SEC = 4;
 
 /**
- * CREDIT_PRICES.video_motion_ai per second of output, length clamped to 6–20s,
+ * CREDIT_PRICES.video_motion_ai per second of output, length clamped to MOTION_AI.durationSec (6–60s),
  * + MOTION_AI_AUDIO_PER_SEC per second with narration or music.
  */
 export function priceForMotionAi(
@@ -308,7 +310,7 @@ export function priceForMotionAi(
   return { action, credits: perSec * sec };
 }
 
-/** CREDIT_PRICES.video_motion_ai_edit per second of the video being edited, clamped to 6–20s. */
+/** CREDIT_PRICES.video_motion_ai_edit per second of the video being edited, clamped to MOTION_AI.durationSec (6–60s). */
 export function priceForMotionAiEdit(durationSec: number): { action: CreditAction; credits: number } {
   const action: CreditAction = 'video_motion_ai_edit';
   const { min, max } = MOTION_AI.durationSec;

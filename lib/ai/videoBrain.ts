@@ -124,6 +124,8 @@ const FOOTAGE_SEC = { min: 4, max: 8 } as const;
 /** Motion graphics and hybrids run at least this long (the 7 s sting template is the exception). */
 const MIN_GRAPHIC_SEC = 8;
 const MIN_CONFIDENCE = 0.6;
+/** Motion 1 Fast renders at most this long; longer Motion 1 footage renders on quality. */
+const FAST_MAX_SEC = VIDEO_MODELS['sociafy-motion-1'].fastMaxSec ?? 0;
 
 /** Appended to every footage prompt. Diffusion garbles words, screens and logos (rulebook §0, §3). */
 export const FOOTAGE_NEGATIVE =
@@ -398,6 +400,9 @@ export function finalizePlan(draftIn: Draft | null, input: BrainInput, opts: { r
   const fd: Draft = format === drafted ? draft : { footageEngine: hero ? 'motion-1' : 'motion-1-fast', footageMode: hero ? 'image-to-video' : 'text' };
   const footage = (seconds: number, hybrid: boolean): NonNullable<Plan['footage']> => {
     let engine: FootageEngine = fd.footageEngine === 'motion-1' || fd.footageEngine === 'cinema-1' ? fd.footageEngine : 'motion-1-fast';
+    // Fast stops at 15 s: a longer pick renders on quality (billed the same past 12 s), at most 720p as Fast would be.
+    const pastFast = engine === 'motion-1-fast' && seconds > FAST_MAX_SEC;
+    if (pastFast) engine = 'motion-1';
     // Cinema: sound/mood work only, within its deadline, never inside a hybrid (v1), never with refs.
     if (engine === 'cinema-1' && (hybrid || !av.cinema || !cinemaFits(seconds, deadline) || fd.footageMode === 'reference')) engine = 'motion-1-fast';
     if (engine !== 'cinema-1' && !av.motion1) engine = 'cinema-1';
@@ -407,7 +412,7 @@ export function finalizePlan(draftIn: Draft | null, input: BrainInput, opts: { r
     if (hybrid && engine === 'motion-1' && mode !== 'image-to-video') engine = 'motion-1-fast';
     let quality: VideoQuality = isQuality(fd.footageQuality) ? fd.footageQuality : '720p';
     if (hybrid && quality === '1080p' && mode !== 'image-to-video') quality = '720p';
-    if (engine !== 'motion-1' && quality === '1080p') quality = '720p'; // Fast and Cinema top out at 720p
+    if ((engine !== 'motion-1' || pastFast) && quality === '1080p') quality = '720p'; // Fast and Cinema top out at 720p
     const m = VIDEO_MODELS[engine === 'cinema-1' ? 'sociafy-cinema-1' : 'sociafy-motion-1'];
     return { engine, mode, quality, seconds: clamp(seconds, m.durationSec.min, m.durationSec.max), prompt: footagePrompt(draft.footagePrompt, input.text, allowFaces) };
   };
@@ -537,7 +542,11 @@ function applyLadder(start: Plan, ctx: Ctx, formatLocked: boolean): Plan {
 
   const steps: ((p: Plan) => Plan | null)[] = [
     (p) => (p.footage?.quality === '1080p' ? { ...p, footage: { ...p.footage, quality: '720p' } } : null),
-    (p) => (p.footage?.engine === 'motion-1' ? { ...p, footage: { ...p.footage, engine: 'motion-1-fast', quality: p.footage.quality === '1080p' ? '720p' : p.footage.quality } } : null),
+    (p) => {
+      if (p.footage?.engine !== 'motion-1') return null;
+      const seconds = Math.min(p.footage.seconds, FAST_MAX_SEC);
+      return { ...p, ...(p.format === 'ai_video' && { durationSec: seconds }), footage: { ...p.footage, engine: 'motion-1-fast', seconds, quality: p.footage.quality === '1080p' ? '720p' : p.footage.quality } };
+    },
     (p) => (p.format === 'ai_video' && p.footage?.engine === 'motion-1-fast' && p.footage.mode === 'text' && av.cinema && cinemaFits(p.footage.seconds, deadline)
       ? { ...p, footage: { ...p.footage, engine: 'cinema-1', quality: '720p' }, audio: { narration: false, music: true, sfx: true } } : null),
     (p) => {
@@ -736,8 +745,8 @@ export function alternativesFor(plan: Plan, input: BrainInput, draft: Draft | nu
 const SYSTEM = `You plan one short social video for a post. Choose ONE format and reply with JSON only; omit keys that don't apply.
 
 Formats:
-- motion_graphic: animated type + brand (exact colors, logo, any language). graphicsEngine "ai_motion" (custom, 6-20 s, any aspect) or "template" ("stat" 15 s for <=3 numbers, "showcase" 16 s for product screenshots, "sting" 7 s logo). Templates: Latin script only, no 1:1.
-- ai_video: generated footage, 4-15 s. It CANNOT write words, numbers, logos or UI.
+- motion_graphic: animated type + brand (exact colors, logo, any language). graphicsEngine "ai_motion" (custom, 6-60 s, any aspect) or "template" ("stat" 15 s for <=3 numbers, "showcase" 16 s for product screenshots, "sting" 7 s logo). Templates: Latin script only, no 1:1.
+- ai_video: generated footage, 4-30 s ("motion-1-fast" 4-15 s). It CANNOT write words, numbers, logos or UI.
 - hybrid: 4-8 s of AI footage inside a motion graphic with type on top. recipe H1 (hook, footage with short caption, end card: announcement + scene), H2 (stat over footage under a color scrim), H3 (product photo image-to-video, then price/spec chips, CTA), H4 (footage in a framed card beside big type, B2B).
 
 Signals: numbers/prices/dates/URLs/CTA/quotes, stats, lists/steps, opinions, non-Latin script, UI/SaaS screenshots → text need (graphics). A concrete physical scene with action and place, a product photo hero, mood/story/sound → scene need (footage). text low+scene low → motion_graphic ai_motion. text high+scene low → motion_graphic. text low+scene high → ai_video. both high → hybrid. Abstract concepts (growth, trust, AI) → motion_graphic, never vague footage.

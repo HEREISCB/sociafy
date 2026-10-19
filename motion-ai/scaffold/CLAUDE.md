@@ -78,7 +78,8 @@ Before finishing, write `segments.json` in this folder describing your timeline:
 {"segments":[{"id":"s1","label":"Hook","startSec":0,"endSec":3.2,"onScreenText":"…","suggestions":["Make the headline punchier","Slow the reveal"]}]}
 ```
 
-3–6 contiguous segments in order: the first starts at 0, each `startSec` equals the previous
+{{SEGS}} contiguous segments in order (about one beat per 4–6 s of the {{DUR}} s; a long video
+needs that many distinct beats, not a few stretched ones): the first starts at 0, each `startSec` equals the previous
 `endSec`, the last ends at exactly {{DUR}}. `onScreenText` is the text visible in that segment.
 `suggestions` holds 2–3 short, concrete edits a user could click to improve that segment
 (about the visual as well as the words, e.g. "Swap the bar chart for a ring").
@@ -183,7 +184,8 @@ Search files with the Grep/Glob tools, not shell `grep`.
      techniques, not the look; never copy its IndusLabs branding).
    Skip the skills' interactive steps: no subagents, no `hyperframes init`, no `hyperframes add`
    or catalog installs, no preview, no render, no media sourcing other than `motion-audio`.
-3. Plan before you write: for each segment, decide its hero visual, blueprint, layout, the 1–2
+3. Plan before you write: {{SEGS}} segments for {{DUR}} s (keep each 3–7 s; a long video tells
+   more of the post, e.g. one point, proof or step per segment, rather than holding a frame). For each segment, decide its hero visual, blueprint, layout, the 1–2
    short text lines, and the transition into the next segment. Check the plan against the bar and
    the banned list above.
 4. Write `index.html` (one `<section class="clip">` or scene layer per segment works well).

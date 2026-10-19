@@ -6,7 +6,7 @@ import { priceForCompose, priceForMotionAiEdit } from '../../lib/credits/pricing
 import type { Platform } from '../../lib/db/schema';
 import { RenderStatus, type Render } from './generate';
 import type { MediaItem } from './attachments';
-import { EDITING, editFailCopy, followMotionEdit, startMotionEdit } from './motion-editor';
+import { editing as editWait, editFailCopy, followMotionEdit, startMotionEdit } from './motion-editor';
 
 /** `local` lines (errors, edit-mode turns) never go to the brief model. */
 type Msg = { role: 'user' | 'assistant'; content: string; local?: boolean };
@@ -89,8 +89,9 @@ export function ComposeChat({ body, setBody, platforms, connected, onPlatforms, 
     if ('error' in out) { say(out.error, true); return; }
     onCharged();
     say('On it — editing the whole video.', true);
-    setRender({ startedAt: Date.now(), ...EDITING });
-    const res = await followMotionEdit(out.jobId);
+    const dur = info?.id === v.id ? info?.durationSec : null;
+    setRender({ startedAt: Date.now(), ...editWait(dur) });
+    const res = await followMotionEdit(out.jobId, dur);
     if (!alive.current) return;
     setRender(null);
     if ('asset' in res && res.asset) {

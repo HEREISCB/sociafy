@@ -181,8 +181,14 @@ describe('POST /api/media/generate-video — model default', () => {
     expect(state.calls).toEqual(['insert', 'charge', 'submit']);
   });
 
-  it('rejects what neither model can serve (1080p at 20s), before charging', async () => {
-    const res = await raw({ prompt: 'a coffee pour', quality: '1080p', durationSec: 20 });
+  it('serves 1080p up to 30s on Motion (Seedance 2.5 renders 4-30s)', async () => {
+    expect((await raw({ prompt: 'a coffee pour', quality: '1080p', durationSec: 30 })).status).toBe(202);
+    expect(state.cinema).toHaveLength(0);
+    expect(state.calls).toEqual(['insert', 'charge', 'submit']);
+  });
+
+  it('rejects what neither model can serve (31s), before charging', async () => {
+    const res = await raw({ prompt: 'a coffee pour', quality: '1080p', durationSec: 31 });
     expect(res.status).toBe(400);
     expect(state.cinema).toHaveLength(0);
     expect(state.calls).toEqual([]);

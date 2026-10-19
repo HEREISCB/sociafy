@@ -64,11 +64,11 @@ async function main() {
   } else if (kind === 'sfx') {
     r = await api('/sound-generation?output_format=mp3_44100_128', { text, duration_seconds: num('dur', 0.5, 10, 1.5), prompt_influence: 0.5 });
   } else {
-    const dur = num('dur', 3, 30, 12);
+    const dur = num('dur', 3, 60, 12); // up to the longest video (6–60 s)
     try { r = await api('/music?output_format=mp3_44100_128', { prompt: text, music_length_ms: Math.round(dur * 1000), model_id: 'music_v1', force_instrumental: true }); }
     catch (e) { // the music API needs a paid plan (402): a looping sound-generation bed instead
       if (!/ 40[23] /.test(e.message)) throw e;
-      r = await api('/sound-generation?output_format=mp3_44100_128', { text: `${text}, instrumental background music bed, no vocals`, duration_seconds: dur, prompt_influence: 0.5, loop: true });
+      r = await api('/sound-generation?output_format=mp3_44100_128', { text: `${text}, instrumental background music bed, no vocals`, duration_seconds: Math.min(dur, 30), prompt_influence: 0.5, loop: true }); // sound-generation caps at 30 s
     }
   }
   const buf = Buffer.from(await r.arrayBuffer());

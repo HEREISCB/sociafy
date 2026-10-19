@@ -85,11 +85,21 @@ describe('finalizePlan: policy gate', () => {
 });
 
 describe('finalizePlan: envelopes', () => {
-  it('Fast and Cinema top out at 720p; Motion 1 at 15 s', () => {
-    const p = finalizePlan(draft({ format: 'ai_video', footageEngine: 'motion-1-fast', footageQuality: '1080p', durationSec: 30 }), input());
-    expect(p.footage).toMatchObject({ engine: 'motion-1-fast', quality: '720p', seconds: 15 });
-    expect(p.durationSec).toBe(15);
+  it('Fast and Cinema top out at 720p; Fast at 15 s, Motion 1 at 30 s', () => {
+    const p = finalizePlan(draft({ format: 'ai_video', footageEngine: 'motion-1-fast', footageQuality: '1080p', durationSec: 12 }), input());
+    expect(p.footage).toMatchObject({ engine: 'motion-1-fast', quality: '720p', seconds: 12 });
     expect(p.audio).toEqual({ narration: false, music: false, sfx: false }); // Motion is mute
+    // Past Fast's 15 s the length is kept and the clip renders on quality, still 720p.
+    const long = finalizePlan(draft({ format: 'ai_video', footageEngine: 'motion-1-fast', footageQuality: '1080p', durationSec: 25 }), input());
+    expect(long.footage).toMatchObject({ engine: 'motion-1', quality: '720p', seconds: 25 });
+    const max = finalizePlan(draft({ format: 'ai_video', footageEngine: 'motion-1', durationSec: 45 }), input());
+    expect(max.footage?.seconds).toBe(30);
+    expect(max.durationSec).toBe(30);
+  });
+
+  it('the quality→Fast ladder step shortens to Fast\'s 15 s', () => {
+    const p = finalizePlan(draft({ format: 'ai_video', footageEngine: 'motion-1', durationSec: 25 }), input({ balance: 600 }));
+    expect(p.footage).toMatchObject({ engine: 'motion-1-fast', seconds: 15 });
   });
 
   it('Cinema only within its deadline, never in a hybrid, always text mode', () => {
@@ -103,8 +113,9 @@ describe('finalizePlan: envelopes', () => {
     expect(i2v.footage).toMatchObject({ engine: 'cinema-1', mode: 'text' });
   });
 
-  it('AI motion and hybrids 8–20 s; hybrid footage 4–8 s and shorter than the video', () => {
-    expect(finalizePlan(draft({ format: 'motion_graphic', durationSec: 40 }), input()).durationSec).toBe(20);
+  it('AI motion and hybrids 8–60 s; hybrid footage 4–8 s and shorter than the video', () => {
+    expect(finalizePlan(draft({ format: 'motion_graphic', durationSec: 90 }), input()).durationSec).toBe(60);
+    expect(finalizePlan(draft({ format: 'motion_graphic', durationSec: 45 }), input()).durationSec).toBe(45);
     expect(finalizePlan(draft({ format: 'motion_graphic', durationSec: 2 }), input()).durationSec).toBe(8);
     const hy = finalizePlan(draft({ format: 'hybrid', footageSeconds: 14, durationSec: 12 }), input());
     expect(hy.footage?.seconds).toBe(8);

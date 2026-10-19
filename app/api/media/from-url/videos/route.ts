@@ -7,6 +7,7 @@ import { isStubMode } from '../../../../../lib/env';
 import { db } from '../../../../../lib/db';
 import { drafts, PLATFORMS } from '../../../../../lib/db/schema';
 import { planVideo, type Attachment } from '../../../../../lib/ai/videoBrain';
+import { MOTION_AI } from '../../../../../lib/ai/models';
 import { brainContext } from '../../../../../lib/media/autoVideo';
 import { planSubmitError, submitPlan } from '../../../../../lib/media/submitPlan';
 import { MAX_PRODUCTS } from '../../../../../lib/ai/site-products';
@@ -23,7 +24,7 @@ const bodySchema = z.object({
     imageUrls: z.array(z.string().url().max(2_000).refine((u) => u.startsWith('https://'), 'https only')).max(4).default([]),
   })).min(1).max(MAX_PRODUCTS),
   platforms: z.array(z.enum(PLATFORMS)).max(PLATFORMS.length).default([]),
-  durationSec: z.number().int().min(4).max(30).optional(),
+  durationSec: z.number().int().min(4).max(MOTION_AI.durationSec.max).optional(),
   /** Plan and price only: nothing is charged or created. */
   dryRun: z.boolean().optional(),
   /** For placing the new posts on Home's plan (the user's slots). */

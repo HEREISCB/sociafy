@@ -5,6 +5,7 @@ import { parseBody } from '../../../../lib/validation';
 import { rateLimit } from '../../../../lib/rate-limit';
 import { isStubMode } from '../../../../lib/env';
 import { draftFromPlan, finalizePlan, type Plan } from '../../../../lib/ai/videoBrain';
+import { MOTION_AI } from '../../../../lib/ai/models';
 import { priceCinemaRender } from '../../../../lib/ai/cue';
 import { attachmentSchema, brainContext } from '../../../../lib/media/autoVideo';
 import { insufficientCreditsResponse } from '../../../../lib/credits/ledger';
@@ -28,7 +29,7 @@ const planSchema = z.object({
     quality: z.enum(['480p', '720p', '1080p']),
     prompt: z.string().max(2_000),
   }).nullable().optional(),
-  durationSec: z.number().int().min(1).max(30),
+  durationSec: z.number().int().min(1).max(MOTION_AI.durationSec.max),
   aspect: z.enum(['9:16', '1:1', '16:9']),
   audio: z.object({ narration: z.boolean(), music: z.boolean(), sfx: z.boolean() }).partial().optional(),
   onScreenText: z.array(z.string().max(200)).max(10).optional(),

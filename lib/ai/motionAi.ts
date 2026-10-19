@@ -50,7 +50,7 @@ export type SubmitMotionAiArgs = {
   /** The post text, ≤4000 chars. */
   prompt: string;
   aspect: '9:16' | '16:9' | '1:1';
-  /** 6–20. */
+  /** MOTION_AI.durationSec (6–60). */
   durationSec: number;
   brand: MotionAiBrand;
   /** R2 keys the worker uploads to — ours, so the asset lands in the user's prefix. */

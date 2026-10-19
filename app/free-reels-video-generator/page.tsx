@@ -27,7 +27,7 @@ export default function Page() {
       ]}
       faq={[
         ['What size is a Reel, TikTok or Short?', 'All three use vertical 9:16 video (1080×1920 at full size). This tool always makes 9:16 clips.'],
-        ['How long are the free videos?', 'Free videos are 5-second clips, perfect as a hook or B-roll. Inside Sociafy you can make videos up to 15 seconds in 720p and 1080p.'],
+        ['How long are the free videos?', 'Free videos are 5-second clips, perfect as a hook or B-roll. Inside Sociafy you can make videos up to 30 seconds in 720p and 1080p.'],
         ['Is it really free?', 'Yes. You get a free video every day without an account. An account removes the watermark and unlocks the HD download.'],
         ['Can Sociafy post to TikTok, Instagram and YouTube?', 'Yes. Connect your accounts and Sociafy schedules the same clip to Reels, TikTok and Shorts, with a caption for each.'],
         ['Does the video have sound?', 'Clips can include ambient sound from the model. Add music or a voiceover in the app you post from.'],

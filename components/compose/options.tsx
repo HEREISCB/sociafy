@@ -9,7 +9,7 @@ import { MOTION_AI, MOTION_GRAPHICS, MOTION_TEMPLATE_IDS, MOTION_TEMPLATES, VIDE
 import { motionAiReady, motionReady, type BrandKit, type BrandProfile } from '../../lib/brand/kit';
 import { useApi } from '../../lib/ui/fetcher';
 import { ThumbImg } from '../thumb-img';
-import { cinemaBlockers, videoDuration, videoModel, type Anchor, type MediaGen, type VideoMode } from './generate';
+import { cinemaBlockers, FAST_MAX_SEC, fastOn, videoDuration, videoModel, type Anchor, type MediaGen, type VideoMode } from './generate';
 
 /** The presets /api/compose/variants understands (PRESET_KEYS in its route). */
 export const PRESETS = [
@@ -381,8 +381,8 @@ export function VideoOptions({ gen, cost, disabled, onGenerate }: PanelProps) {
       {prompted && (
         <>
           <label className="compose-check">
-            <input type="checkbox" checked={s.videoFast} onChange={(e) => set({ videoFast: e.target.checked })} />
-            Fast render — quicker and cheaper{motionOnly} <span className="compose-note">480p and 720p only</span>
+            <input type="checkbox" checked={fastOn(s)} disabled={s.videoDuration > FAST_MAX_SEC} onChange={(e) => set({ videoFast: e.target.checked })} />
+            Fast render — quicker and cheaper{motionOnly} <span className="compose-note">{s.videoDuration > FAST_MAX_SEC ? `up to ${FAST_MAX_SEC}s, so this length renders on quality` : '480p and 720p only'}</span>
           </label>
           <label className="compose-check">
             <input type="checkbox" checked={s.autoEnhance} onChange={(e) => set({ autoEnhance: e.target.checked })} />
@@ -395,7 +395,7 @@ export function VideoOptions({ gen, cost, disabled, onGenerate }: PanelProps) {
         {avatar ? 'Talking avatar — lip-synced to the voice or audio you pick.'
           : aiMotion ? 'Designed from your post text and brand kit — takes a few minutes.'
           : motion ? `Renders on ${MOTION_GRAPHICS.name} from your brand kit — silent, usually under two minutes.`
-          : `Renders on ${model.name}${model.nativeAudio ? ' — with sound' : ' — silent'}${s.videoFast && s.videoQuality !== '1080p' ? ', fast render' : ''}.`}
+          : `Renders on ${model.name}${model.nativeAudio ? ' — with sound' : ' — silent'}${fastOn(s) && s.videoQuality !== '1080p' ? ', fast render' : ''}.`}
       </p>
       <GenerateButton
         what={motion ? 'motion graphic' : 'video'} busy={gen.busy === 'video'} cost={cost}

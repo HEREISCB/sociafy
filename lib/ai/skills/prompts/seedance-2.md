@@ -1,6 +1,6 @@
 # Prompting Seedance 2.0 (Bytedance)
 
-Seedance is a short-form video model (4–15s) optimized for social. Prompts should be **verb-led** and describe a single continuous beat — Seedance handles motion better when the action is concrete.
+Seedance is a short-form video model (4–30s; the fast tier 4–15s) optimized for social. Prompts should be **verb-led** and describe a single continuous beat — Seedance handles motion better when the action is concrete.
 
 ## Structure (in order)
 

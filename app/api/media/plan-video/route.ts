@@ -4,6 +4,7 @@ import { withUser, jsonError } from '../../../../lib/api';
 import { parseBody } from '../../../../lib/validation';
 import { rateLimit } from '../../../../lib/rate-limit';
 import { planVideo } from '../../../../lib/ai/videoBrain';
+import { MOTION_AI } from '../../../../lib/ai/models';
 import { attachmentSchema, brainContext } from '../../../../lib/media/autoVideo';
 
 export const runtime = 'nodejs';
@@ -19,7 +20,7 @@ const bodySchema = z.object({
     format: z.enum(['ai_video', 'motion_graphic', 'hybrid']).optional(),
     /** The "Cheapest:" chip. */
     cheapest: z.boolean().optional(),
-    durationSec: z.number().int().min(4).max(30).optional(),
+    durationSec: z.number().int().min(4).max(MOTION_AI.durationSec.max).optional(),
     aspect: aspect.optional(),
   }).strict().optional(),
 });

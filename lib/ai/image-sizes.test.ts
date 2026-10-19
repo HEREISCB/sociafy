@@ -62,7 +62,7 @@ describe('image presets satisfy the provider constraints', () => {
 describe('pricing never falls below cost', () => {
   it('bills every preset at the square tier', () => {
     for (const id of IMAGE_PRESET_IDS) {
-      const { size } = IMAGE_PRESETS[id];
+      const size: string = IMAGE_PRESETS[id].size;
       // The two legacy non-square sizes keep their original, cheaper tier.
       if (size === '1536x1024' || size === '1024x1536') continue;
       expect(priceForImage(size, 'high').action, `${id} (${size})`).toBe('image_high_1024');

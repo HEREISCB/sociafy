@@ -6,6 +6,7 @@ import { rateLimit } from '../../../../lib/rate-limit';
 import { completeText, getTextAI } from '../../../../lib/ai/client';
 import { loadBrandContext, renderBrandBlock } from '../../../../lib/ai/brand-context';
 import { PLATFORMS, type Platform } from '../../../../lib/db/schema';
+import { MOTION_AI } from '../../../../lib/ai/models';
 import { priceForCompose } from '../../../../lib/credits/pricing';
 import { charge, ensureBalance, insufficientCreditsResponse, refund } from '../../../../lib/credits/ledger';
 
@@ -38,7 +39,7 @@ Rules:
 Answer ONLY with a JSON object:
 {"reply": "1-2 short sentences to the user (or your one question)",
  "post": "the full post text" or null when you asked a question,
- "durationSec": a whole number 6-20 only if the user asked for a length, else null,
+ "durationSec": a whole number ${MOTION_AI.durationSec.min}-${MOTION_AI.durationSec.max} only if the user asked for a length, else null,
  "platforms": array from [${PLATFORMS.join(', ')}] only if the user named platforms, else null}`;
 
 /**
@@ -77,7 +78,7 @@ export async function POST(req: NextRequest) {
       const raw = await completeText(ai, { system: SYSTEM, user: prompt, json: true, maxOutputTokens: 1_500, timeoutMs: 30_000 });
       const out = replySchema.parse(JSON.parse(raw));
       const post = out.post || undefined;
-      const dur = out.durationSec != null && Number.isFinite(out.durationSec) ? Math.min(20, Math.max(6, Math.round(out.durationSec))) : undefined;
+      const dur = out.durationSec != null && Number.isFinite(out.durationSec) ? Math.min(MOTION_AI.durationSec.max, Math.max(MOTION_AI.durationSec.min, Math.round(out.durationSec))) : undefined;
       const ps = (out.platforms ?? []).map((p) => p.toLowerCase().trim()).filter((p): p is Platform => (PLATFORMS as readonly string[]).includes(p));
       return {
         reply: out.reply,

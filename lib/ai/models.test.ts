@@ -12,7 +12,7 @@ import {
 } from './models';
 import { CREDITS_PER_PROVIDER_USD, creditsFromProviderUsd } from '../credits/pricing';
 import { CINEMA_MAX_ATTACHMENT_B64, CinemaAttachmentTooLarge, encodeCinemaFrames } from './cue';
-import { seedanceTaskType } from './piapi';
+import { SEEDANCE_FAST_MAX_SEC, seedanceTaskType } from './piapi';
 
 const base = {
   durationSec: 8,
@@ -69,6 +69,16 @@ describe('the white-label boundary', () => {
     expect(seedanceTaskType(true, '1080p')).toBe('seedance-2.5');
   });
 
+  it('matches PiAPI duration limits: Motion 4-30 s, Fast only to 15 s (longer renders on 2.5)', () => {
+    expect(VIDEO_MODELS['sociafy-motion-1'].durationSec).toEqual({ min: 4, max: 30 });
+    expect(VIDEO_MODELS['sociafy-motion-1'].fastMaxSec).toBe(SEEDANCE_FAST_MAX_SEC);
+    expect(validateAgainstModel('sociafy-motion-1', { ...base, durationSec: 30 })).toBeNull();
+    expect(validateAgainstModel('sociafy-motion-1', { ...base, durationSec: 31 })?.field).toBe('duration_sec');
+    expect(seedanceTaskType(true, '720p', 15)).toBe('seedance-2-fast');
+    expect(seedanceTaskType(true, '720p', 16)).toBe('seedance-2.5');
+    expect(MOTION_AI.durationSec.max).toBe(60);
+  });
+
   it('recognises only real ids', () => {
     expect(isVideoModelId('sociafy-cinema-1')).toBe(true);
     expect(isVideoModelId('cue-h3')).toBe(false);
@@ -94,7 +104,7 @@ describe('validateAgainstModel', () => {
   });
 
   it('holds each model to its own duration range', () => {
-    expect(validateAgainstModel('sociafy-motion-1', { ...base, durationSec: 30 })?.field).toBe('duration_sec');
+    expect(validateAgainstModel('sociafy-motion-1', { ...base, durationSec: 31 })?.field).toBe('duration_sec');
     expect(validateAgainstModel('sociafy-cinema-1', { ...base, durationSec: 31 })?.field).toBe('duration_sec');
     expect(validateAgainstModel('sociafy-cinema-1', { ...base, durationSec: 3 })?.field).toBe('duration_sec');
   });

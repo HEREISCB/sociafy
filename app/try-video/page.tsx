@@ -26,7 +26,7 @@ export default function Page() {
       faq={[
         ['Is the AI video generator really free?', 'Yes. You get a free video generation every day. You can generate without an account; an account removes the watermark and unlocks the HD download.'],
         ['Why does my video have a watermark?', 'Free previews carry a Sociafy watermark. Create a Sociafy account and the clean, full-quality video downloads straight away and is saved to your media library.'],
-        ['How long are the videos?', 'Free videos are 5-second vertical 9:16 clips. Inside Sociafy you can make longer videos, up to 15 seconds, in 720p and 1080p.'],
+        ['How long are the videos?', 'Free videos are 5-second vertical 9:16 clips. Inside Sociafy you can make longer videos, up to 30 seconds, in 720p and 1080p.'],
         ['Can I use the videos commercially?', 'Yes. Videos you generate are yours to use in posts, ads and on your website.'],
         ['What else does Sociafy do?', 'Sociafy is an AI social media agent. It writes posts in your voice, makes images and videos for them, and schedules them across X, LinkedIn, Instagram, Facebook, TikTok and YouTube.'],
       ]}

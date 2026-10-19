@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { priceForAvatar, priceForImage, priceForMotion, priceForMotionAi, priceForVideo } from '../../lib/credits/pricing';
-import { DEFAULT_VIDEO_MODEL, MOTION_AI, MOTION_TEMPLATES, VIDEO_MODELS, type MotionTemplate, type VideoModelId } from '../../lib/ai/models';
+import { DEFAULT_VIDEO_MODEL, MOTION_AI, MOTION_TEMPLATES, VIDEO_MODELS, motionAiExtraMin, type MotionTemplate, type VideoModelId } from '../../lib/ai/models';
 import type { MediaItem } from './attachments';
 
 export type VideoMode = 'text' | 'image-to-video' | 'reference' | 'audio-driven' | 'avatar' | 'motion';
@@ -71,6 +71,10 @@ export type PlanResponse = {
 export const planEditable = (p: VideoPlan) => p.format === 'hybrid' || (p.format === 'motion_graphic' && p.graphics?.engine !== 'template');
 
 const CINEMA = VIDEO_MODELS['sociafy-cinema-1'];
+/** The fast tier renders up to this long; past it the toggle is disabled and the clip renders on quality. */
+export const FAST_MAX_SEC = VIDEO_MODELS['sociafy-motion-1'].fastMaxSec ?? 0;
+/** Fast as it will actually be sent: ticked and within the fast tier's length. */
+export const fastOn = (s: GenSettings) => s.videoFast && s.videoDuration <= FAST_MAX_SEC;
 
 /** The `audio` body for an AI-designed motion graphic (also what prices it). */
 export function motionAiAudio(s: GenSettings) {
@@ -84,7 +88,7 @@ export function motionAiAudio(s: GenSettings) {
 export function cinemaBlockers(s: GenSettings): string[] {
   return [
     s.videoQuality === '1080p' ? '1080p' : null,
-    s.videoFast ? 'fast render' : null,
+    fastOn(s) ? 'fast render' : null,
     (CINEMA.genModes as readonly string[]).includes(s.videoMode) ? null : s.videoMode === 'reference' ? 'reference images' : 'this source',
   ].filter((x): x is string => x !== null);
 }
@@ -108,7 +112,7 @@ export function genCosts(s: GenSettings, attachedImages: number): { image: numbe
   if (s.videoMode === 'motion') return { image, video: priceForMotion(MOTION_TEMPLATES[s.motionTemplate].durationSec).credits };
   if (videoModel(s) === 'sociafy-cinema-1') return { image, video: null };
   const refSec = s.videoMode === 'reference' ? s.refVideoSec : null;
-  const per = priceForVideo({ durationSec: videoDuration(s), quality: s.videoQuality, fast: s.videoFast, inputDurationSec: refSec ?? undefined });
+  const per = priceForVideo({ durationSec: videoDuration(s), quality: s.videoQuality, fast: fastOn(s), inputDurationSec: refSec ?? undefined });
   return { image, video: per.credits * (refSec ? 1 : s.videoCount) };
 }
 
@@ -252,16 +256,18 @@ export function useMediaGen(report: GenReport) {
 
   /** Poll video jobs to the end, showing phases, then report what landed.
    *  `motionAi` jobs (AI-designed / hybrid) are slower and open in the editor. */
-  const track = async (jobs: { id: string; aspect?: string }[], aspect: string, motionAi: boolean) => {
+  const track = async (jobs: { id: string; aspect?: string }[], aspect: string, motionAi: boolean, durationSec = 0) => {
+    // Longer AI-designed jobs get more worker time; the copy and the poll window grow with it.
+    const extra = motionAiExtraMin(durationSec);
     setRender({
       startedAt: Date.now(), phases: jobs.map(() => 'queued'),
-      ...(motionAi ? { usual: 'AI-designed motion graphics take 6–12 minutes.', slowAfterSec: 15 * 60 } : {}),
+      ...(motionAi ? { usual: `AI-designed motion graphics take ${6 + Math.round(extra / 2)}–${12 + extra} minutes.`, slowAfterSec: (15 + extra) * 60 } : {}),
     });
     const setPhase = (i: number, p: ClipPhase) => setRender((v) => (v ? { ...v, phases: v.phases.map((x, k) => (k === i ? p : x)) } : v));
     const settled = await Promise.all(jobs.map(async (j, i) => {
       const out = await pollJob(
         // AI-designed jobs queue behind a 2-wide worker, so they get longer.
-        `/api/media/video-job/${j.id}`, (motionAi ? 40 : 15) * 60_000, [4_000, 500, 8_000],
+        `/api/media/video-job/${j.id}`, (motionAi ? 40 + extra : 15) * 60_000, [4_000, 500, 8_000],
         (pd) => {
           if (pd.status === 'pending') setPhase(i, pd.providerStatus === 'processing' || pd.providerStatus === 'staged' || pd.providerStatus === 'footage' ? 'rendering' : pd.providerStatus === 'finalizing' ? 'storing' : 'queued');
         },
@@ -290,7 +296,7 @@ export function useMediaGen(report: GenReport) {
         ? await postJson('/api/media/generate-motion', { topic: prompt, template: s.motionTemplate, aspect: motionAspect })
         : await postJson('/api/media/generate-video', {
         prompt, model, durationSec: videoDuration(s), quality: s.videoQuality, aspect: s.videoAspect,
-        count: s.videoCount, caption: prompt.slice(0, 600), rawPrompt: !s.autoEnhance, fast: s.videoFast,
+        count: s.videoCount, caption: prompt.slice(0, 600), rawPrompt: !s.autoEnhance, fast: fastOn(s),
         genMode: s.videoMode,
         startFrameUrl: s.startFrame ?? undefined,
         endFrameUrl: s.endFrame ?? undefined,
@@ -302,7 +308,7 @@ export function useMediaGen(report: GenReport) {
       const jobs = (data.jobs as { id: string }[] | undefined) ?? [];
       if (!jobs.length) { report.notice('Video generation did not start. Try again.'); return; }
 
-      await track(jobs, (motion ? motionAspect : s.videoAspect).replace(':', '/'), motionAi);
+      await track(jobs, (motion ? motionAspect : s.videoAspect).replace(':', '/'), motionAi, motionAi ? s.motionAiDuration : 0);
     } catch {
       report.notice('Video generation failed. Check your connection and try again.');
     } finally {
@@ -322,7 +328,7 @@ export function useMediaGen(report: GenReport) {
       if (handled(r, data, 'Video generation')) return null;
       const jobs = (data.jobs as { id: string; aspect?: string }[] | undefined) ?? [];
       if (!jobs.length) { report.notice('Video generation did not start. Try again.'); return null; }
-      await track(jobs, body.plan.aspect.replace(':', '/'), planEditable(body.plan));
+      await track(jobs, body.plan.aspect.replace(':', '/'), planEditable(body.plan), body.plan.durationSec);
     } catch {
       report.notice('Video generation failed. Check your connection and try again.');
     } finally {

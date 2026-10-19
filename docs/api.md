@@ -122,16 +122,17 @@ curl -s https://sociafy.app/api/v1/models \
       "id": "sociafy-motion-1",
       "type": "video",
       "name": "Sociafy Motion 1",
-      "summary": "General-purpose social video up to 15s...",
+      "summary": "General-purpose social video up to 30s...",
       "default": true,
       "available": true,
       "capabilities": {
-        "duration_sec": { "min": 4, "max": 15 },
+        "duration_sec": { "min": 4, "max": 30 },
         "quality": ["480p", "720p", "1080p"],
         "aspect": ["9:16", "1:1", "16:9"],
         "gen_mode": ["text", "reference", "image-to-video"],
         "native_audio": false,
-        "fast_tier": true
+        "fast_tier": true,
+        "fast_max_sec": 15
       },
       "example": { "duration_sec": 8, "quality": "720p", "credits": 315 }
     },
@@ -148,7 +149,8 @@ curl -s https://sociafy.app/api/v1/models \
         "aspect": ["9:16", "1:1", "16:9"],
         "gen_mode": ["text"],
         "native_audio": true,
-        "fast_tier": false
+        "fast_tier": false,
+        "fast_max_sec": null
       },
       "example": { "duration_sec": 8, "quality": "720p", "credits": 33 }
     }
@@ -168,7 +170,7 @@ retrying the same one.
 
 | | `sociafy-motion-1` | `sociafy-cinema-1` |
 |---|---|---|
-| Length | 4–15s | 4–30s |
+| Length | 4–30s (`fast`: up to 15s) | 4–30s |
 | Sound | silent | **scores its own audio** |
 | Quality | 480p, 720p, 1080p | 480p, 720p |
 | Still images as input | yes | not yet |
@@ -227,10 +229,10 @@ Status codes: `200`, `401`, `500`, `503`.
     |---|---|---|---|
     | `prompt` | string, 2–2000 chars | required | Used verbatim. There is no prompt rewriting on the API — what you send is what the model sees. |
     | `model` | `sociafy-motion-1` \| `sociafy-cinema-1` | `sociafy-motion-1` | Which model renders it. Each has its own limits — see §3. |
-    | `duration_sec` | integer 4–30 | `8` | Motion caps at 15, Cinema at 30. Priced pro-rata on Motion; quoted per request on Cinema. See §6. |
+    | `duration_sec` | integer 4–30 | `8` | Both models render up to 30. Priced pro-rata on Motion; quoted per request on Cinema. See §6. |
     | `quality` | `480p` \| `720p` \| `1080p` | `720p` | 1080p costs ~5× 480p, and is Motion only. |
     | `aspect` | `9:16` \| `1:1` \| `16:9` | `9:16` | |
-    | `fast` | boolean | `false` | Cheaper and quicker, slightly lower fidelity. Ignored at 1080p, which has no fast tier — you are billed the quality price. |
+    | `fast` | boolean | `false` | Cheaper and quicker, slightly lower fidelity. Ignored at 1080p and above 15s (`fast_max_sec`), which have no fast tier — you are billed the quality price. |
     | `gen_mode` | `text` \| `reference` \| `image-to-video` | `text` | Which still images, if any, the clip is built from. See below. Cinema takes `text` and `image-to-video`; `reference` is Motion only. |
     | `reference_images` | array of 1–9 `https` URLs | omitted | **`gen_mode: "reference"` only, and required by it.** Photos of the real subject, so the clip shows *your* product rather than an approximation of it. |
     | `start_frame` | `https` URL | omitted | **`gen_mode: "image-to-video"` only, and required by it.** The clip's first frame. |
@@ -705,7 +707,7 @@ Status codes: `200`, `401`, `500`, `503`.
     | 720p | 145 | 315 |
     | 1080p | — | 720 |
 
-    **Video, 13–15 s** (scaled pro-rata from the 15 s price; no fast tier):
+    **Video, 13–30 s** (scaled pro-rata from the 15 s price, e.g. 30 s at 720p = `591 × 2` = 1182; no fast tier):
 
     | Quality | Credits |
     |---|---|

@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { priceForMotionAiEdit } from '../../lib/credits/pricing';
+import { motionAiExtraMin } from '../../lib/ai/models';
 import type { MotionAudio, MotionSegment } from '../../lib/ai/motionAi';
 import { pollJob, RenderStatus, type Render } from './generate';
 import type { MediaItem } from './attachments';
@@ -31,7 +32,11 @@ function audioChips(a: MotionAudio | null | undefined): string[] {
   ].filter((x): x is string => x !== null);
 }
 
-export const EDITING: Omit<Render, 'startedAt'> = { phases: ['rendering'], usual: 'Editing — usually 3–8 minutes.', slowAfterSec: 10 * 60 };
+/** Edit wait copy; longer videos get more worker time (motionAiExtraMin). */
+export const editing = (durationSec?: number | null): Omit<Render, 'startedAt'> => {
+  const extra = motionAiExtraMin(durationSec ?? 0);
+  return { phases: ['rendering'], usual: `Editing — usually 3–${8 + extra} minutes.`, slowAfterSec: (10 + extra) * 60 };
+};
 
 /** Start an edit of a finished AI motion graphic (`id` = job or asset id; no segment = whole video). */
 export async function startMotionEdit(id: string, instruction: string, segmentId?: string | null):
@@ -54,7 +59,8 @@ export async function startMotionEdit(id: string, instruction: string, segmentId
 }
 
 /** Poll an edit job to the end. */
-export const followMotionEdit = (jobId: string) => pollJob(`/api/media/video-job/${jobId}`, 30 * 60_000, [4_000, 500, 8_000]);
+export const followMotionEdit = (jobId: string, durationSec?: number | null) =>
+  pollJob(`/api/media/video-job/${jobId}`, (30 + motionAiExtraMin(durationSec ?? 0)) * 60_000, [4_000, 500, 8_000]);
 
 export const editFailCopy = (failed: string) => failed === 'poll_timeout'
   ? 'Still editing — the new version will land in your library.'
@@ -100,11 +106,11 @@ export function MotionEditor({
     }
   }, []);
 
-  const follow = useCallback(async (jobId: string) => {
+  const follow = useCallback(async (jobId: string, durationSec?: number) => {
     if (following.current) return;
     following.current = jobId;
-    setRender({ startedAt: Date.now(), ...EDITING });
-    const out = await followMotionEdit(jobId);
+    setRender({ startedAt: Date.now(), ...editing(durationSec) });
+    const out = await followMotionEdit(jobId, durationSec);
     following.current = null;
     if (!alive.current) return;
     setRender(null);
@@ -115,7 +121,7 @@ export function MotionEditor({
   useEffect(() => {
     void load(id).then((d) => {
       const pending = d?.versions.find((v) => v.status === 'pending');
-      if (pending) void follow(pending.jobId); // an edit still rendering from before
+      if (pending) void follow(pending.jobId, d?.durationSec); // an edit still rendering from before
     });
   }, [id, load, follow]);
 
@@ -126,7 +132,7 @@ export function MotionEditor({
     if ('credits' in out) { onCredits(out.credits); return; }
     if ('error' in out) { setNotice(out.error); return; }
     onCharged();
-    void follow(out.jobId);
+    void follow(out.jobId, data.durationSec);
   };
 
   const pick = (s: MotionSegment | null) => {

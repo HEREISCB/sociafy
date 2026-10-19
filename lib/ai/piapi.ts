@@ -96,8 +96,8 @@ export type CreateSeedanceTaskArgs = {
   videoUrls?: string[];
   audioUrls?: string[];
   /** "seedance-2.5" (quality) or "seedance-2-fast" (fast). Default quality.
-   *  Fast has no 1080p, so a 1080p fast request renders on quality — the
-   *  price already falls back the same way (priceForVideo). */
+   *  Fast has no 1080p and stops at 15 s (2.5 goes to 30), so those fast
+   *  requests render on quality — priced as quality already (priceForVideo). */
   fast?: boolean;
   /**
    * Opt-in push notification (https://piapi.ai/docs/unified-webhook). PiAPI
@@ -117,13 +117,16 @@ type PiapiCreateResponse = {
   message: string;
 };
 
-export const seedanceTaskType = (fast: boolean | undefined, resolution: SeedanceQuality) =>
-  fast && resolution !== '1080p' ? 'seedance-2-fast' : 'seedance-2.5';
+/** Seedance 2.0 Fast renders 4-15 s; 2.5 renders 4-30 s (piapi.ai/docs/seedance-api). */
+export const SEEDANCE_FAST_MAX_SEC = 15;
+
+export const seedanceTaskType = (fast: boolean | undefined, resolution: SeedanceQuality, durationSec = 0) =>
+  fast && resolution !== '1080p' && durationSec <= SEEDANCE_FAST_MAX_SEC ? 'seedance-2-fast' : 'seedance-2.5';
 
 export async function createSeedanceTask(args: CreateSeedanceTaskArgs & { apiKey: string }): Promise<string> {
   const body = {
     model: 'seedance',
-    task_type: seedanceTaskType(args.fast, args.resolution),
+    task_type: seedanceTaskType(args.fast, args.resolution, args.durationSec),
     input: {
       prompt: args.prompt,
       mode: args.mode,

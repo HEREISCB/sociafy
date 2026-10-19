@@ -50,6 +50,10 @@ export type VideoModel = {
   nativeAudio: boolean;
   /** True when `fast` changes anything. */
   supportsFast: boolean;
+  /** Longest clip the fast tier renders, or null when there is no fast tier.
+   *  A longer `fast` request renders on quality, like 1080p does — and is
+   *  billed the same either way (priceForVideo has no fast tier past 12 s). */
+  fastMaxSec: number | null;
   /**
    * True when the model can render from a CLOSING frame alone, with no
    * start_frame — "end here, work out how to arrive."
@@ -77,13 +81,16 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModel> = {
     id: 'sociafy-motion-1',
     name: 'Sociafy Motion 1',
     summary:
-      'General-purpose social video up to 15s. Takes product stills as references and can open and close on frames you supply. Renders without sound.',
-    durationSec: { min: 4, max: 15 },
+      'General-purpose social video up to 30s. Takes product stills as references and can open and close on frames you supply. Renders without sound.',
+    // PiAPI: Seedance 2.5 takes any integer 4-30 s; 2.0 Fast only 4-15 s
+    // (piapi.ai/docs/seedance-api/seedance-25 and .../seedance-2).
+    durationSec: { min: 4, max: 30 },
     qualities: ['480p', '720p', '1080p'],
     aspects: ASPECTS,
     genModes: ['text', 'reference', 'image-to-video'],
     nativeAudio: false,
     supportsFast: true,
+    fastMaxSec: 15,
     endFrameAlone: false,
     matchFrameAspect: false,
   },
@@ -105,6 +112,7 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModel> = {
     genModes: ['text', 'image-to-video'],
     nativeAudio: true,
     supportsFast: false,
+    fastMaxSec: null,
     // Verified against the backend: a render with last_frame and no first_frame
     // is accepted and completes (mode i2v, has_first false, has_last true).
     endFrameAlone: true,
@@ -132,9 +140,16 @@ export const MOTION_GRAPHICS = { backend: 'motion-hf', name: 'Sociafy Motion Gra
 export const MOTION_AI = {
   backend: 'motion-claude',
   name: 'AI-designed motion graphic',
-  durationSec: { min: 6, max: 20, default: 15 },
+  durationSec: { min: 6, max: 60, default: 15 },
   aspects: ['9:16', '16:9', '1:1'],
 } as const satisfies { backend: VideoBackend; name: string; durationSec: { min: number; max: number; default: number }; aspects: readonly string[] };
+
+/**
+ * Extra minutes an AI-designed job longer than 20 s may take: the worker grows
+ * its own limits with length (motion-ai/lib.mjs jobLimits, +19 min at 60 s) and
+ * browser poll windows and wait copy add this much so they never give up first.
+ */
+export const motionAiExtraMin = (durationSec = 0) => Math.ceil(Math.max(0, durationSec - 20) / 2);
 
 /** Templates and their fixed lengths (motion/README.md). 9:16 and 16:9 only. */
 export const MOTION_TEMPLATES = {

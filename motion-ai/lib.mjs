@@ -1,6 +1,21 @@
 // Pure helpers for server.mjs (validated by lib.test.mjs).
 
 export const SIZES = { '9:16': [1080, 1920], '16:9': [1920, 1080], '1:1': [1080, 1080] };
+export const DURATION = { min: 6, max: 60 }; // the app's MOTION_AI.durationSec
+
+// Segment count for a length: 3–6 up to 20 s, then about one per 4–6 s (10–15 at 60 s).
+export const segmentRange = (dur) => [Math.max(3, Math.round(dur / 6)), Math.max(6, Math.ceil(dur / 4))];
+
+// Per-step limits in ms. Up to 20 s: claude 12 min, check 2, render 5, job 22 (+5 with footage).
+// Longer: claude +20 s per extra second (cap 25 min), render 10 s per second, check +1 s per second,
+// so 60 s gets claude 25, check 2.7, render 10, job ~41 min. The app's motionAiExtraMin must stay >= job - 22.
+export function jobLimits(dur, footage = false) {
+  const MIN = 60_000, over = Math.max(0, dur - 20);
+  const claude = Math.min(25 * MIN, 12 * MIN + over * 20_000);
+  const check = 2 * MIN + over * 1_000;
+  const render = Math.max(5 * MIN, dur * 10_000);
+  return { claude, check, render, footage: 5 * MIN, job: claude + check + render + 3 * MIN + (footage ? 5 * MIN : 0), turns: dur > 20 ? 120 : 80 };
+}
 const HEX = /^#[0-9a-fA-F]{3,8}$/;
 
 // Keys go straight into the R2 URL path: only a user's prefix, no dot segments, no odd chars.
@@ -16,7 +31,7 @@ export function parseSubmit(b) {
   if (!prompt || b.prompt.length > 4000) return { error: 'bad_prompt' };
   if (!SIZES[b.aspect]) return { error: 'bad_aspect' };
   const durationSec = Number(b.durationSec);
-  if (!Number.isFinite(durationSec) || durationSec < 6 || durationSec > 20) return { error: 'bad_duration' };
+  if (!Number.isFinite(durationSec) || durationSec < DURATION.min || durationSec > DURATION.max) return { error: 'bad_duration' };
   if (!validKey(b.videoKey) || !validKey(b.posterKey)) return { error: 'bad_key' };
   const footage = parseFootage(b.footage, durationSec);
   if (!footage) return { error: 'bad_footage' };
@@ -78,7 +93,7 @@ export function audioResult(requested, added) {
 export function parseSegments(raw, dur) {
   const fallback = [{ id: 's1', label: 'Full video', startSec: 0, endSec: dur, onScreenText: '', suggestions: [] }];
   const s = raw?.segments;
-  if (!Array.isArray(s) || s.length < 3 || s.length > 6) return fallback;
+  if (!Array.isArray(s) || s.length < 3 || s.length > segmentRange(dur)[1]) return fallback;
   let t = 0;
   for (const g of s) {
     if (typeof g?.startSec !== 'number' || typeof g?.endSec !== 'number') return fallback;

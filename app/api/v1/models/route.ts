@@ -51,6 +51,7 @@ export async function GET(req: NextRequest) {
             gen_mode: m.genModes,
             native_audio: m.nativeAudio,
             fast_tier: m.supportsFast,
+            fast_max_sec: m.fastMaxSec,
             end_frame_alone: m.endFrameAlone,
             match_frame_aspect: m.matchFrameAspect,
           },

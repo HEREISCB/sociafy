@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { SIZES, parseSubmit, parseSegments, parseEdit, parseAudio, audioResult, posterTimeSec } from './lib.mjs';
+import { SIZES, parseSubmit, parseSegments, parseEdit, parseAudio, audioResult, posterTimeSec, jobLimits, segmentRange } from './lib.mjs';
 
 const BASE = process.env.MOTIONAI_BASE;
 const SECRET = process.env.ENGINE_SECRET || '';
@@ -14,7 +14,6 @@ const JOBS = `${BASE}/jobs`;
 const APP = path.dirname(new URL(import.meta.url).pathname);
 const HF = 'hyperframes@0.8.141';
 const MIN = 60_000;
-const LIMIT = { claude: 12 * MIN, check: 2 * MIN, render: 5 * MIN, job: 22 * MIN, footage: 5 * MIN }; // footage jobs get job + footage
 const FOOTAGE_MAX = 200 * 1024 * 1024;
 const CONCURRENCY = 2;
 const KEEP_MS = 30 * 24 * 3600_000; // project dirs are kept for the future /edit endpoint
@@ -176,7 +175,8 @@ async function scaffold(j, signal) {
   const footage = j.input.footage ? await fetchFootage(j, proj, signal) : null;
   const safe = aspect === '9:16' ? 'top 220px, bottom 380px, sides 80px (platform UI overlays)' : 'an 80px margin on every side';
   const workflow = dur > 10 || j.input.audio?.narration ? 'general-video' : 'motion-graphics'; // the skills' own split
-  const fill = (s) => s.replaceAll('{{SKILLS}}', SKILLS).replaceAll('{{WORKFLOW}}', workflow).replaceAll('{{W}}', W).replaceAll('{{H}}', H).replaceAll('{{DUR}}', dur).replaceAll('{{BG}}', c.background).replaceAll('{{TEXT}}', c.text);
+  const [segLo, segHi] = segmentRange(dur);
+  const fill = (s) => s.replaceAll('{{SEGS}}', `${segLo}–${segHi}`).replaceAll('{{SKILLS}}', SKILLS).replaceAll('{{WORKFLOW}}', workflow).replaceAll('{{W}}', W).replaceAll('{{H}}', H).replaceAll('{{DUR}}', dur).replaceAll('{{BG}}', c.background).replaceAll('{{TEXT}}', c.text);
   for (const f of ['CLAUDE.md', 'index.html', 'hyperframes.json']) fs.writeFileSync(`${proj}/${f}`, fill(fs.readFileSync(`${proj}/${f}`, 'utf8')));
   fs.writeFileSync(`${proj}/BRIEF.md`, `---
 workflow: ${workflow}
@@ -295,7 +295,8 @@ function probe(file) {
 async function runJob(j) {
   const dir = `${JOBS}/${j.id}`, t0 = Date.now();
   const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), LIMIT.job + (j.input.footage ? LIMIT.footage : 0));
+  const LIMIT = jobLimits(j.input.durationSec, !!j.input.footage); // grows with length
+  const timer = setTimeout(() => ctl.abort(), LIMIT.job);
   const signal = ctl.signal;
   const lap = (k) => (j.timings[k] = Math.round((Date.now() - t0) / 1000));
   const step = (s) => { j.step = s; save(j); };
@@ -307,7 +308,7 @@ async function runJob(j) {
 
     step('claude');
     const token = fs.readFileSync(`${BASE}/oauth-token`, 'utf8').trim();
-    const c = await sandbox(dir, `${BASE}/bin/claude`, ['-p', j.input.edit ? TASK_EDIT : TASK, '--model', 'opus', '--output-format', 'json', '--max-turns', '80', '--allowedTools', TOOLS],
+    const c = await sandbox(dir, `${BASE}/bin/claude`, ['-p', j.input.edit ? TASK_EDIT : TASK, '--model', 'opus', '--output-format', 'json', '--max-turns', String(LIMIT.turns), '--allowedTools', TOOLS],
       { timeout: LIMIT.claude, signal, out: `${dir}/claude.json`, env: {
         CLAUDE_CODE_OAUTH_TOKEN: token, ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY || '',
         // Fresh jobs may only spend credits on the kinds asked for; edits may change audio on request.
