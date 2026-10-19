@@ -37,12 +37,12 @@ export const DEFAULT_SETTINGS = {
   avatarAudioMode: 'voice' as 'voice' | 'audio',
   motionTemplate: 'stat' as MotionTemplate,
   /** Under videoMode 'motion': AI-designed instead of a template. */
-  motionAi: false,
+  motionAi: true,
   motionAiDuration: MOTION_AI.durationSec.default as number,
   /** AI-designed audio. Voiceover or music add 4 cr/s; sound effects are free. */
-  motionAiVoiceover: false,
+  motionAiVoiceover: true,
   motionAiSfx: true,
-  motionAiMusic: false,
+  motionAiMusic: true,
   motionAiLanguage: 'en' as 'en' | 'hi',
 };
 export type GenSettings = typeof DEFAULT_SETTINGS;

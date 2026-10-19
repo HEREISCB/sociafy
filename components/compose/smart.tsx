@@ -16,6 +16,8 @@ const FORMAT: Record<VideoFormat, string> = {
 };
 const SHAPE: Record<string, string> = { '9:16': 'Vertical', '1:1': 'Square', '16:9': 'Wide' };
 const MIN_CHARS = 15;
+/** Lengths the user can pick; the engine clamps to what the chosen format supports (shown in the meta row). */
+const LENGTHS = [6, 8, 10, 12, 15, 20];
 
 type Override = { format: Exclude<VideoFormat, 'none'> } | { cheapest: true };
 // Keyed by planKeys().full (post + override), same as every request and response.
@@ -41,13 +43,16 @@ export function SmartVideo({ gen, text, platforms, attachments }: {
 }) {
   // An override belongs to the post it was picked on: new text, platforms or attachments → best fit again.
   const [picked, setPicked] = useState<{ input: string; v: Override } | null>(null);
+  const [length, setLength] = useState<number | null>(null);
   const inputKey = planKeys(text, platforms, attachments, null).input;
-  const override = picked?.input === inputKey ? picked.v : null;
+  const pickedFormat = picked?.input === inputKey ? picked.v : null;
+  // The chosen length rides along with any format pick; it sticks across posts until set back to Auto.
+  const override = pickedFormat || length ? { ...pickedFormat, ...(length ? { durationSec: length } : {}) } : null;
   const keys = planKeys(text, platforms, attachments, override);
   const key = keys.full;
   const setOverride = (v: Override | null) => setPicked(v && { input: keys.input, v });
   /** The last plan that arrived, with the exact inputs (and override) it was planned for. */
-  const [last, setLast] = useState<(Keyed<PlanResponse> & { override: Override | null }) | null>(null);
+  const [last, setLast] = useState<(Keyed<PlanResponse> & { override: typeof override }) | null>(null);
   // Exactly these inputs (cache or response), else this post's last plan while re-planning; never another post's.
   const shown = shownPlan(keys, recall(key), last);
   const res = shown.res;
@@ -144,6 +149,7 @@ export function SmartVideo({ gen, text, platforms, attachments }: {
   const updating = !shown.current;
   // The label describes the plan on screen: while a re-plan is in flight that's still the last one.
   const shownOverride = updating ? last?.override : override;
+  const formatPicked = shownOverride && ('format' in shownOverride || 'cheapest' in shownOverride);
   const sound = [
     plan.audio?.narration && { icon: 'mic' as const, label: 'Voiceover' },
     plan.audio?.music && { icon: 'waveform' as const, label: 'Music' },
@@ -164,7 +170,7 @@ export function SmartVideo({ gen, text, platforms, attachments }: {
   return (
     <div className={`compose-media-panel smart-card${updating ? ' is-updating' : ''}`} aria-busy={updating}>
       <div className="smart-head">
-        <span className="compose-label">{shownOverride ? 'Your pick' : 'Best fit for this post'}</span>
+        <span className="compose-label">{formatPicked ? 'Your pick' : 'Best fit for this post'}</span>
         <h3 className="smart-format">{FORMAT[plan.format] ?? 'Video'}</h3>
         {summary && <p className="smart-summary">{summary}</p>}
       </div>
@@ -180,7 +186,17 @@ export function SmartVideo({ gen, text, platforms, attachments }: {
           )) : <span>Silent</span>}
         </div>
       )}
-      {(res.alternatives?.length || override || cheapest) && !busy ? (
+      {!none && (
+        <div className="compose-chips" role="group" aria-label="Video length">
+          <span className="compose-label">Length</span>
+          {[null, ...LENGTHS].map((n) => (
+            <button key={n ?? 'auto'} type="button" className={`prompt-chip${length === n ? ' active' : ''}`} aria-pressed={length === n} disabled={busy} onClick={() => setLength(n)}>
+              {n ? `${n}s` : 'Auto'}
+            </button>
+          ))}
+        </div>
+      )}
+      {(res.alternatives?.length || pickedFormat || cheapest) && !busy ? (
         <div className="compose-chips" role="group" aria-label="Other options">
           {cheapest && (
             <button type="button" className="prompt-chip" title={cheapest.summary} disabled={updating} onClick={() => setOverride({ cheapest: true })}>
@@ -192,7 +208,7 @@ export function SmartVideo({ gen, text, platforms, attachments }: {
               {a.label ?? FORMAT[a.format]} · {a.estimatedCredits} cr
             </button>
           ))}
-          {override && <button type="button" className="btn ghost sm" disabled={updating} onClick={() => setOverride(null)}>Back to the best fit</button>}
+          {pickedFormat && <button type="button" className="btn ghost sm" disabled={updating} onClick={() => setOverride(null)}>Back to the best fit</button>}
         </div>
       ) : null}
 

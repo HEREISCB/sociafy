@@ -109,14 +109,15 @@ and user overrides.
      Cinema  if sound/mood is central OR duration > 15 s, AND deadline ≥ 3 × the render time in §0 (8 s → 20 min), AND no reference images are needed.
      2.5     if footage is the unobscured hero (product image-to-video, close faces, 1080p asked) or refs are needed.
      Fast    otherwise (default for b-roll under overlays).
-6. DURATION: LinkedIn 8–12 s, Reels/TikTok 10–15 s, sting 7 s. Hybrid footage 4–8 s.
+6. DURATION: the user's pick (Length chips, 6–20 s, clamped to the engine) wins. Otherwise LinkedIn 8–12 s,
+   Reels/TikTok 10–15 s, sting 7 s. Hybrid footage 4–8 s.
    Motion graphics and hybrids are never under 8 s (only the sting is), and always carry 2–4 short
    on-screen lines (≤ 48 chars) from the post: the model's, else split from the post text. A policy-gated
    post becomes kinetic type of its message with SFX on (text allowed, no footage or likeness).
-7. AUDIO: Reels/TikTok → music on (or Cinema audio). Narration only for explainers (S15) and never LinkedIn-only.
-   LinkedIn → SFX only.
+7. AUDIO: every motion graphic and hybrid gets narration, music and SFX (owner call, 2026-10-19). Templates and
+   Motion 1 footage stay silent, so best fit uses AI motion over templates; Cinema scores its own sound.
 8. COST: estimate credits (footage s × engine rate + total s × 18 + audio s × 4; Cinema by live quote).
-   ceiling = min(balance, max(0.25 × balance, cheapest viable option), user per-post cap if set).
+   ceiling = balance (owner call, 2026-10-19: full quality whenever the user can afford it).
    Above the ceiling → downgrade in order: 1080p→720p, 2.5→Fast, Fast→Cinema (if the deadline allows),
    shorten to the platform minimum, hybrid→motion_graphic, AI motion→sting template (126 cr).
    Only when the balance covers the cheapest viable option (the bottom of this ladder). If even that is
@@ -127,7 +128,7 @@ and user overrides.
 9. TIE-BREAKS (in order): legible text > brand fidelity > policy safety > cost > latency > visual novelty.
    LinkedIn breaks ties toward graphics; Reels/TikTok/Shorts toward footage.
 10. SAFE DEFAULT (confidence < 0.6 or a parse failure): motion_graphic via AI motion, 12 s,
-    platform aspect, SFX on, narration and music off (216 cr). It is deterministic in brand, cannot be refused, edits per segment, and renders in about 2 min.
+    platform aspect, narration, music and SFX on (264 cr). It is deterministic in brand, cannot be refused, edits per segment, and renders in about 2 min.
 ```
 
 Output schema:

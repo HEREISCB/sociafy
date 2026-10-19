@@ -117,7 +117,9 @@ describe('POST /api/media/generate-auto', () => {
     const ai = planFor({ format: 'motion_graphic', durationSec: 12, audio: { music: false } });
     expect((await post({ text: TEXT, plan: ai, platforms: ['instagram'] })).status).toBe(202);
     expect(st.calls[0]).toMatchObject({ fn: 'motionAi', args: { aspect: '9:16', durationSec: 12, audio: ai.audio, topic: TEXT } });
-    const tpl = planFor({ format: 'motion_graphic', graphicsEngine: 'template', template: 'stat' });
+    // Best fit never picks a template now; an approved one (the ladder's sting, say) still runs as a template.
+    const tpl = finalizePlan({ confidence: 0.9, format: 'motion_graphic', graphicsEngine: 'template', template: 'stat' },
+      { text: TEXT, platforms: ['instagram'], attachments: [], availability: st.av as never, balance: 100_000 }, { revalidate: true });
     expect((await post({ text: TEXT, plan: tpl, platforms: ['instagram'] })).status).toBe(202);
     expect(st.calls[1]).toMatchObject({ fn: 'template', args: { template: 'stat', aspect: '9:16' } });
   });

@@ -306,7 +306,6 @@ const primaryAspect = (platforms: string[]): PlanAspect => {
   return '1:1';
 };
 const feedOnly = (platforms: string[]) => platforms.length > 0 && platforms.every((p) => FEED.has(p));
-const anyVertical = (platforms: string[]) => platforms.some((p) => VERTICAL.has(p) || p === 'youtube');
 /** Platform duration window (rulebook §4 step 6). */
 const platformWindow = (platforms: string[]) => (feedOnly(platforms) ? { min: 8, def: 10, max: 12 } : { min: 10, def: 12, max: 15 });
 
@@ -327,7 +326,7 @@ type Ctx = BrainInput & { signals: Signals; revalidate: boolean; notes: string[]
 /** The safe default (rulebook §4 step 10), as a draft for the post-pass. */
 const SAFE_DEFAULT: Draft = {
   format: 'motion_graphic', graphicsEngine: 'ai_motion', durationSec: SAFE_DEFAULT_SEC,
-  audio: { narration: false, music: false, sfx: true }, confidence: 1,
+  audio: { narration: true, music: true, sfx: true }, confidence: 1,
 };
 
 /**
@@ -371,19 +370,16 @@ export function finalizePlan(draftIn: Draft | null, input: BrainInput, opts: { r
     format = 'ai_video';
   }
 
-  // AUDIO (step 7): feed-only → SFX only; narration only for explainers, never feed-only.
-  // Models sometimes answer "upbeat" for music: any non-empty value means on.
-  const on = (v: unknown, d: boolean) => (v == null ? d : !!v);
-  const audio: PlanAudio = {
-    narration: on(draft.audio?.narration, false),
-    music: on(draft.audio?.music, anyVertical(input.platforms)),
-    // Policy-gated posts are pure kinetic type: give them sound.
-    sfx: on(draft.audio?.sfx, true) || !videoAllowed,
-  };
-  if (feedOnly(input.platforms)) Object.assign(audio, { narration: false, music: false, sfx: true });
+  // AUDIO (step 7): every graphic and hybrid carries voiceover, music and sound effects, whatever the draft said.
+  // An approved plan keeps its audio: the ladder may have dropped it to fit the balance.
+  const audio: PlanAudio = ctx.revalidate && draft.audio
+    ? { narration: !!draft.audio.narration, music: !!draft.audio.music, sfx: !!draft.audio.sfx }
+    : { narration: true, music: true, sfx: true };
 
   const win = platformWindow(input.platforms);
   const wantSec = ov.durationSec ?? draft.durationSec ?? win.def;
+  // A length the user picked is honored down to the engine minimum; the brain's own picks stay ≥ 8 s.
+  const minGraphic = ov.durationSec ? MOTION_AI.durationSec.min : MIN_GRAPHIC_SEC;
   const onScreenText = (draft.onScreenText ?? []).filter((t) => typeof t === 'string').map((t) => t.slice(0, 120)).slice(0, 6);
   const llmCopy = ctx.notes.includes('default') ? null : draftIn;
 
@@ -422,7 +418,7 @@ export function finalizePlan(draftIn: Draft | null, input: BrainInput, opts: { r
     // Motion 1 is mute; Cinema scores its own sound.
     plan.audio = plan.footage.engine === 'cinema-1' ? { narration: false, music: true, sfx: true } : { narration: false, music: false, sfx: false };
   } else if (format === 'hybrid') {
-    plan.durationSec = clamp(wantSec, MIN_GRAPHIC_SEC, MOTION_AI.durationSec.max);
+    plan.durationSec = clamp(wantSec, minGraphic, MOTION_AI.durationSec.max);
     const want = fd.footageSeconds ?? Math.round(plan.durationSec / 2);
     plan.footage = footage(clamp(want, FOOTAGE_SEC.min, Math.min(FOOTAGE_SEC.max, plan.durationSec - 2)), true);
     const recipe = (['H1', 'H2', 'H3', 'H4'] as const).find((r) => r === draft.recipe);
@@ -434,7 +430,7 @@ export function finalizePlan(draftIn: Draft | null, input: BrainInput, opts: { r
       plan.durationSec = MOTION_TEMPLATES[plan.graphics.template!].durationSec;
       plan.audio = { narration: false, music: false, sfx: false }; // templates ship no audio
     } else {
-      plan.durationSec = clamp(wantSec, MIN_GRAPHIC_SEC, MOTION_AI.durationSec.max);
+      plan.durationSec = clamp(wantSec, minGraphic, MOTION_AI.durationSec.max);
     }
   }
   // Every graphic gets 2–4 short lines from the post: the model's, else derived from the text.
@@ -506,7 +502,8 @@ function graphicsFor(draft: Draft, ctx: Ctx, aspect: PlanAspect): NonNullable<Pl
   // ₹ isn't S14 (it's not a script) but template fonts still lack the glyph. The sting sets no post text
   // (the ladder offers it for any post), so the font gate doesn't apply to it.
   const fits = t && av.templates && (t === 'sting' || (!ctx.signals.S14 && !ctx.text.includes('₹'))) && (t !== 'showcase' || (av.kitScreenshots ?? 0) >= 2) && !(aspect === '1:1' && av.aiMotion);
-  if (draft.graphicsEngine === 'template' && fits) return { engine: 'template', template: t };
+  // Templates ship no audio: only a template the user already approved (revalidate) or no AI motion.
+  if (draft.graphicsEngine === 'template' && fits && (ctx.revalidate || !av.aiMotion)) return { engine: 'template', template: t };
   if (av.aiMotion) return { engine: 'ai_motion', template: null };
   // AI motion unavailable, templates are: stat is the general-purpose one.
   return { engine: 'template', template: t && fits ? t : 'stat' };
@@ -526,7 +523,7 @@ function none(ctx: Ctx, aspect: PlanAspect): Plan {
 
 /**
  * Cost ceiling + downgrade ladder (rulebook §4 step 8):
- * ceiling = min(balance, max(25% of balance, cheapest viable option)).
+ * ceiling = the balance: a plan the user can afford runs at full quality.
  * Steps, in order: 1080p→720p, quality→Fast, Fast→Cinema (deadline permitting),
  * shorten to the platform minimum, hybrid/ai_video→motion graphic, drop the
  * audio surcharge, AI motion→sting template. A user-chosen format is never changed.
@@ -534,12 +531,8 @@ function none(ctx: Ctx, aspect: PlanAspect): Plan {
 function applyLadder(start: Plan, ctx: Ctx, formatLocked: boolean): Plan {
   const av = ctx.availability;
   const win = platformWindow(ctx.platforms);
-  const cheapest = Math.min(
-    av.templates ? priceForMotion(MOTION_TEMPLATES.sting.durationSec).credits : Infinity,
-    av.aiMotion ? priceForMotionAi(Math.max(MOTION_AI.durationSec.min, win.min)).credits : Infinity,
-    av.motion1 ? priceForVideo({ durationSec: 4, quality: '720p', fast: true }).credits : Infinity,
-  );
-  const ceiling = Math.min(ctx.balance, Math.max(0.25 * ctx.balance, cheapest));
+  // Full quality: only a plan the balance can't cover is downgraded.
+  const ceiling = ctx.balance;
   const deadline = ctx.deadlineMin ?? DEFAULT_DEADLINE_MIN;
 
   const steps: ((p: Plan) => Plan | null)[] = [
@@ -683,7 +676,6 @@ function reasonsFor(p: Plan, ctx: Ctx, llm?: string[]): string[] {
     if (r && (FOOTAGE_SIGNALS.has(k) ? p.footage : p.graphics)) out.push(r);
   }
   if (p.format === 'hybrid') out.push(FORMAT_REASON.hybrid);
-  if (feedOnly(ctx.platforms) && p.format !== 'ai_video') out.push('Feed autoplay is muted, so sound effects only.');
   out.push(...notes);
   if (out.length < 2) out.push(FORMAT_REASON[p.format]);
   return Array.from(new Set(out)).filter(Boolean).slice(0, 5);
@@ -752,7 +744,7 @@ Signals: numbers/prices/dates/URLs/CTA/quotes, stats, lists/steps, opinions, non
 Policy: an identifiable real person, celebrity, politician, minor/child, or another company's brand → videoAllowed false, and plan a motion_graphic of kinetic type about the post's message (sfx on).
 Footage engine: "cinema-1" only when sound/atmosphere is central; "motion-1" when the footage is the unobscured hero (product photo, close-up, 1080p); else "motion-1-fast".
 footagePrompt (<=40 words, ALWAYS include it, even for motion_graphic: it is used if the user switches to video): start with the PHYSICAL scene; describe the scene, subject, action, camera move and light only. Never ask for text, signs, screens, UI, holograms or logos. Prefer hands, silhouettes, back views or wide shots over faces.
-Platforms: LinkedIn/X → graphics, 8-12 s, muted (sfx only). Instagram/TikTok/Facebook → 9:16, footage hook, 10-15 s, music on. Narration only for explainers, never LinkedIn-only.
+Platforms: LinkedIn/X → graphics, 8-12 s, muted (sfx only). Instagram/TikTok/Facebook → 9:16, footage hook, 10-15 s, music on. Every motion_graphic and hybrid has narration, music and sfx on.
 
 JSON keys: format, recipe (H1-H4 or null), graphicsEngine, template (or null), footageEngine, footageMode ("text"|"image-to-video"), footageSeconds, footageQuality ("720p"|"1080p"), footagePrompt, allowFaces (bool), videoAllowed (bool), durationSec (motion_graphic/hybrid >= 8), aspect ("9:16"|"1:1"|"16:9"), audio {narration, music, sfx} (booleans), onScreenText (motion_graphic/hybrid: 2-4 short lines, <=40 chars each, taken from the post; ai_video: []), summary (<=120 chars: one plain sentence saying what the viewer sees in THIS video: the actual scene and the actual words that animate, e.g. "Coffee waiting at the counter, then '₹99 first order' and 'Order ahead' animate on top." Never mention length, aspect, sound, credits or tool names. motion_graphic has NO footage: describe only the animated type, numbers, logo and brand colors, never a place, scene or camera), reasons (2-3 strings, <=90 chars each: why this format suits THIS post, citing what it says; never about platforms, sound, length or price; say "AI footage", never "real footage"), confidence (0-1), signals (e.g. ["S1","S5"]: S1 must-show text, S2 stats, S3 list, S4 opinion, S5 scene, S6 product photo, S7 UI, S8 announcement, S9 abstract, S10 mood, S11 real person/brand, S12 platform, S13 brand strict, S14 non-Latin, S15 explainer).`;
 

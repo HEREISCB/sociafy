@@ -113,31 +113,46 @@ describe('finalizePlan: envelopes', () => {
     expect(short.durationSec).toBe(8);
   });
 
-  it('templates: fixed length, silent, no 1:1 (→ AI motion, or a wide template when AI motion is off)', () => {
-    const t = finalizePlan(draft({ format: 'motion_graphic', graphicsEngine: 'template', template: 'stat', durationSec: 9 }), input({ platforms: ['instagram'] }));
+  it('best fit never picks a template while AI motion is available', () => {
+    const p = finalizePlan(draft({ format: 'motion_graphic', graphicsEngine: 'template', template: 'stat', durationSec: 9 }), input({ platforms: ['instagram'] }));
+    expect(p.graphics).toEqual({ engine: 'ai_motion', template: null });
+    expect(p.audio).toEqual({ narration: true, music: true, sfx: true });
+  });
+
+  it('templates (approved or no AI motion): fixed length, silent, no 1:1 (→ AI motion, or a wide template when AI motion is off)', () => {
+    const t = finalizePlan(draft({ format: 'motion_graphic', graphicsEngine: 'template', template: 'stat', durationSec: 9 }), input({ platforms: ['instagram'] }), { revalidate: true });
     expect(t).toMatchObject({ graphics: { engine: 'template', template: 'stat' }, durationSec: 15, estimatedCredits: 270 });
     expect(t.audio).toEqual({ narration: false, music: false, sfx: false });
-    const sq = finalizePlan(draft({ format: 'motion_graphic', graphicsEngine: 'template', template: 'stat' }), input({ platforms: ['linkedin'] }));
+    const sq = finalizePlan(draft({ format: 'motion_graphic', graphicsEngine: 'template', template: 'stat' }), input({ platforms: ['linkedin'] }), { revalidate: true });
     expect(sq).toMatchObject({ aspect: '1:1', graphics: { engine: 'ai_motion' } });
     const wide = finalizePlan(draft({ format: 'motion_graphic', graphicsEngine: 'template', template: 'stat' }), input({ platforms: ['linkedin'], availability: { ...ALL, aiMotion: false } }));
     expect(wide).toMatchObject({ aspect: '16:9', graphics: { engine: 'template', template: 'stat' } });
   });
 
-  it('showcase needs kit screenshots; non-Latin text needs AI motion', () => {
-    expect(finalizePlan(draft({ format: 'motion_graphic', graphicsEngine: 'template', template: 'showcase' }), input()).graphics?.engine).toBe('ai_motion');
-    expect(finalizePlan(draft({ format: 'motion_graphic', graphicsEngine: 'template', template: 'showcase' }), input({ availability: { ...ALL, kitScreenshots: 3 } })).graphics?.template).toBe('showcase');
-    expect(finalizePlan(draft({ format: 'motion_graphic', graphicsEngine: 'template', template: 'stat' }), input({ text: 'Cold brew ₹199 this weekend' })).graphics?.engine).toBe('ai_motion');
+  it('showcase needs kit screenshots; non-Latin text needs AI motion (approved templates)', () => {
+    const rv = { revalidate: true };
+    expect(finalizePlan(draft({ format: 'motion_graphic', graphicsEngine: 'template', template: 'showcase' }), input(), rv).graphics?.engine).toBe('ai_motion');
+    expect(finalizePlan(draft({ format: 'motion_graphic', graphicsEngine: 'template', template: 'showcase' }), input({ availability: { ...ALL, kitScreenshots: 3 } }), rv).graphics?.template).toBe('showcase');
+    expect(finalizePlan(draft({ format: 'motion_graphic', graphicsEngine: 'template', template: 'stat' }), input({ text: 'Cold brew ₹199 this weekend' }), rv).graphics?.engine).toBe('ai_motion');
   });
 
-  it('image modes need an image; feed-only platforms are muted to SFX', () => {
+  it('image modes need an image; graphics get full audio even on feed-only platforms', () => {
     expect(finalizePlan(draft({ format: 'ai_video', footageMode: 'image-to-video' }), input()).footage?.mode).toBe('text');
     expect(finalizePlan(draft({ format: 'ai_video', footageEngine: 'motion-1', footageMode: 'image-to-video' }), input({ attachments: PHOTO })).footage?.mode).toBe('image-to-video');
-    const li = finalizePlan(draft({ format: 'motion_graphic', audio: { narration: true, music: true } }), input({ platforms: ['linkedin', 'x'] }));
-    expect(li.audio).toEqual({ narration: false, music: false, sfx: true });
+    const li = finalizePlan(draft({ format: 'motion_graphic', audio: { narration: false, music: false, sfx: false } }), input({ platforms: ['linkedin', 'x'] }));
+    expect(li.audio).toEqual({ narration: true, music: true, sfx: true });
+    const hy = finalizePlan(draft({ format: 'hybrid', audio: { music: false } }), input({ platforms: ['linkedin'] }));
+    expect(hy.audio).toEqual({ narration: true, music: true, sfx: true });
   });
 
   it("recomputes the price, never trusting the draft's number", () => {
     const p = finalizePlan({ ...draft({ format: 'motion_graphic', durationSec: 12, audio: { music: false } }), estimatedCredits: 1 } as Draft, input());
+    expect(p.estimatedCredits).toBe(264);
+  });
+
+  it('revalidating an approved plan keeps its audio and price', () => {
+    const p = finalizePlan(draft({ format: 'motion_graphic', graphicsEngine: 'ai_motion', durationSec: 12, audio: { narration: false, music: false, sfx: true } }), input(), { revalidate: true });
+    expect(p.audio).toEqual({ narration: false, music: false, sfx: true });
     expect(p.estimatedCredits).toBe(216);
   });
 
@@ -170,7 +185,7 @@ describe('finalizePlan: cost ceiling and downgrade ladder', () => {
   const pricey = draft({ format: 'hybrid', footageEngine: 'motion-1', footageQuality: '1080p', footageSeconds: 6, durationSec: 15, audio: { music: true } });
 
   it('a small balance walks the ladder down to the sting template', () => {
-    const p = finalizePlan(pricey, input({ balance: 400 }));
+    const p = finalizePlan(pricey, input({ balance: 150 }));
     expect(p).toMatchObject({ format: 'motion_graphic', graphics: { engine: 'template', template: 'sting' }, estimatedCredits: 126 });
     expect(p.reasons).toContain('Scaled down to fit your credit balance.');
   });
@@ -187,10 +202,10 @@ describe('finalizePlan: cost ceiling and downgrade ladder', () => {
     const hero = draft({ ...pricey, footageMode: 'image-to-video' });
     const rich = finalizePlan(hero, input({ attachments: PHOTO }));
     expect(rich.footage).toMatchObject({ engine: 'motion-1', quality: '1080p' });
-    // ceiling = 25% of 4000 = 1000; 6 s 1080p (540) + 15 s music (330) = 870 fits; no step needed.
-    expect(finalizePlan(hero, input({ attachments: PHOTO, balance: 4_000 })).footage?.quality).toBe('1080p');
-    // 25% of 3000 = 750 < 870 → one step (720p: 236 + 330 = 566) is enough.
-    expect(finalizePlan(hero, input({ attachments: PHOTO, balance: 3_000 })).footage).toMatchObject({ engine: 'motion-1', quality: '720p' });
+    // ceiling = balance; 6 s 1080p (540) + 15 s audio (330) = 870 fits exactly; no step needed.
+    expect(finalizePlan(hero, input({ attachments: PHOTO, balance: 870 })).footage?.quality).toBe('1080p');
+    // 869 < 870 → one step (720p: 236 + 330 = 566) is enough.
+    expect(finalizePlan(hero, input({ attachments: PHOTO, balance: 869 })).footage).toMatchObject({ engine: 'motion-1', quality: '720p' });
   });
 
   it('hybrid b-roll under overlays is Fast 720p even when the planner asks for 1080p quality', () => {
@@ -220,10 +235,10 @@ describe('finalizePlan: safe default', () => {
   it.each([
     ['low confidence', draft({ format: 'ai_video', confidence: 0.3 })],
     ['parse failure', null],
-  ])('%s → AI motion, 12 s, platform aspect, SFX only, 216 cr', (_n, d) => {
+  ])('%s → AI motion, 12 s, platform aspect, all audio on, 264 cr', (_n, d) => {
     const p = finalizePlan(d, input({ platforms: ['tiktok'] }));
-    expect(p).toMatchObject({ format: 'motion_graphic', graphics: { engine: 'ai_motion' }, durationSec: 12, aspect: '9:16', estimatedCredits: 216 });
-    expect(p.audio).toEqual({ narration: false, music: false, sfx: true });
+    expect(p).toMatchObject({ format: 'motion_graphic', graphics: { engine: 'ai_motion' }, durationSec: 12, aspect: '9:16', estimatedCredits: 264 });
+    expect(p.audio).toEqual({ narration: true, music: true, sfx: true });
   });
 });
 
@@ -242,7 +257,7 @@ describe('heuristicDraft', () => {
     expect(p).toMatchObject({ format: 'hybrid', recipe: 'H3', footage: { engine: 'motion-1', mode: 'image-to-video' } });
   });
   it('nothing clear → safe default', () => {
-    expect(plan('Thinking about what comes next.')).toMatchObject({ format: 'motion_graphic', durationSec: 12, estimatedCredits: 216 });
+    expect(plan('Thinking about what comes next.')).toMatchObject({ format: 'motion_graphic', durationSec: 12, estimatedCredits: 264 });
   });
 });
 
@@ -491,9 +506,11 @@ describe('thin plans get real content (v13 posts 4 and 5)', () => {
     expect(p.onScreenText.length).toBeLessThanOrEqual(4);
     for (const l of p.onScreenText) expect(l.length).toBeLessThanOrEqual(48);
   });
-  it('only the logo sting may run under 8 s', () => {
-    expect(finalizePlan(draft({ format: 'motion_graphic', graphicsEngine: 'template', template: 'sting' }), input({ text: V13.hotTake })).durationSec).toBe(7);
-    expect(finalizePlan(draft({ format: 'motion_graphic', durationSec: 6 }), input({ text: V13.hotTake, overrides: { durationSec: 6 } })).durationSec).toBe(8);
+  it('under 8 s only for the logo sting or a length the user picked (down to 6 s)', () => {
+    expect(finalizePlan(draft({ format: 'motion_graphic', graphicsEngine: 'template', template: 'sting' }), input({ text: V13.hotTake }), { revalidate: true }).durationSec).toBe(7);
+    expect(finalizePlan(draft({ format: 'motion_graphic', durationSec: 6 }), input({ text: V13.hotTake })).durationSec).toBe(8);
+    expect(finalizePlan(draft({ format: 'motion_graphic', durationSec: 6 }), input({ text: V13.hotTake, overrides: { durationSec: 6 } })).durationSec).toBe(6);
+    expect(finalizePlan(draft({ format: 'motion_graphic', durationSec: 4 }), input({ text: V13.hotTake, overrides: { durationSec: 4 } })).durationSec).toBe(6);
   });
   it('toLines: clause breaks, word-wrapped, no URLs or hashtags', () => {
     expect(toLines(['Q3 numbers are in: revenue up 42%, churn down to 1.8%. #growth https://x.co'])).toEqual(['Q3 numbers are in', 'revenue up 42%, churn down to 1.8%']);
@@ -528,10 +545,10 @@ describe('override views (v14 post 3)', () => {
 
   it('picked AI video: honest tradeoff reasons, grounded in the post', async () => {
     const { plan: p, reasons } = await plan({ format: 'ai_video' });
-    // Live prices: AI video 181 vs the best fit's 180, so no "Cheaper".
-    expect([p.estimatedCredits, (await plan()).estimatedCredits]).toEqual([181, 180]);
+    // Live prices: AI video 181 vs the best fit's 220 (10 s, all audio on), so "Cheaper, but".
+    expect([p.estimatedCredits, (await plan()).estimatedCredits]).toEqual([181, 220]);
     expect(reasons).toEqual([
-      "The ₹99 offer won't appear as readable text.",
+      "Cheaper, but the ₹99 offer won't appear as readable text.",
       'Footage only — add the offer in your caption.',
       'Our pick for this post: Motion graphic.',
     ]);
