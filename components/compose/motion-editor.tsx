@@ -31,7 +31,7 @@ function audioChips(a: MotionAudio | null | undefined): string[] {
   ].filter((x): x is string => x !== null);
 }
 
-export const EDITING: Omit<Render, 'startedAt'> = { phases: ['rendering'], usual: 'Editing — usually 1–5 minutes.', slowAfterSec: 6 * 60 };
+export const EDITING: Omit<Render, 'startedAt'> = { phases: ['rendering'], usual: 'Editing — usually 3–8 minutes.', slowAfterSec: 10 * 60 };
 
 /** Start an edit of a finished AI motion graphic (`id` = job or asset id; no segment = whole video). */
 export async function startMotionEdit(id: string, instruction: string, segmentId?: string | null):
@@ -54,7 +54,7 @@ export async function startMotionEdit(id: string, instruction: string, segmentId
 }
 
 /** Poll an edit job to the end. */
-export const followMotionEdit = (jobId: string) => pollJob(`/api/media/video-job/${jobId}`, 15 * 60_000, [4_000, 500, 8_000]);
+export const followMotionEdit = (jobId: string) => pollJob(`/api/media/video-job/${jobId}`, 30 * 60_000, [4_000, 500, 8_000]);
 
 export const editFailCopy = (failed: string) => failed === 'poll_timeout'
   ? 'Still editing — the new version will land in your library.'

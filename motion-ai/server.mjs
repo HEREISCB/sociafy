@@ -14,13 +14,20 @@ const JOBS = `${BASE}/jobs`;
 const APP = path.dirname(new URL(import.meta.url).pathname);
 const HF = 'hyperframes@0.8.141';
 const MIN = 60_000;
-const LIMIT = { claude: 8 * MIN, check: 2 * MIN, render: 5 * MIN, job: 15 * MIN, footage: 5 * MIN }; // footage jobs get job + footage
+const LIMIT = { claude: 12 * MIN, check: 2 * MIN, render: 5 * MIN, job: 22 * MIN, footage: 5 * MIN }; // footage jobs get job + footage
 const FOOTAGE_MAX = 200 * 1024 * 1024;
 const CONCURRENCY = 2;
 const KEEP_MS = 30 * 24 * 3600_000; // project dirs are kept for the future /edit endpoint
 const TOOLS = 'Read,Write,Edit,Glob,Grep,Skill,Bash(npx hyperframes*),Bash(npm run *),Bash(ls*),Bash(motion-audio *)';
-const TASK = 'Follow CLAUDE.md in this folder exactly: build the motion graphic described in BRIEF.md into index.html, ' +
-  `make \`npx ${HF} check\` pass, and write segments.json. Work autonomously; never ask questions.`;
+const SKILLS = `${BASE}/home/.claude/skills`;
+const READ_FIRST = `${SKILLS}/hyperframes-animation/blueprints-index.md plus the 2-3 blueprints/<id>.md you choose, ` +
+  `${SKILLS}/hyperframes-animation/techniques.md, ${SKILLS}/hyperframes-animation/adapters/gsap.md, ` +
+  `${SKILLS}/motion-graphics/catalog-map.md (plus categories/stat/module.md or categories/charts/module.md when the post has numbers) and reference/helpers.js`;
+const LOOK = `Then run \`npx ${HF} snapshot --at <middle of each segment> --describe false\`, Read snapshots/contact-sheet.jpg, and fix what you see`;
+const TASK = `Read CLAUDE.md and BRIEF.md, then with the Read tool read ${READ_FIRST} before designing. ` +
+  'Follow CLAUDE.md exactly: build a real motion-graphics video (a hero non-text visual in every segment but the end card) into index.html, ' +
+  `make \`npx ${HF} check\` pass. ${LOOK} (at most 2 passes). Write segments.json. ` +
+  'Create files with the Write tool, never shell redirection. Work autonomously; never ask questions.';
 const TASK_EDIT = 'This folder holds a finished HyperFrames motion graphic (index.html, segments.json, BRIEF.md). ' +
   'Apply the edit request in EDIT.md by revising the existing index.html in place; do not rebuild it from scratch. ' +
   'The hard requirements in CLAUDE.md still apply. Change only what EDIT.md targets: when it names a segment, only change what is ' +
@@ -28,7 +35,9 @@ const TASK_EDIT = 'This folder holds a finished HyperFrames motion graphic (inde
   'Keep the total duration, canvas, brand, and every other segment\'s content and timing unchanged unless the request explicitly requires otherwise. ' +
   'Keep the existing audio (assets/audio, <audio> elements) unless the request asks to change it (e.g. a calmer voice, no whoosh, new music): then use motion-audio as CLAUDE.md describes and keep the mix rules. ' +
   'Then update segments.json (same ids for segments that persist, refreshed onScreenText, fresh suggestions), ' +
-  `make \`npx ${HF} check\` pass, and reply with one line: what you changed. Work autonomously; never ask questions.`;
+  `If the change needs a new visual, read the relevant files from: ${READ_FIRST}. ` +
+  `Make \`npx ${HF} check\` pass. ${LOOK} at the middle of the changed segment(s) and one neighbour (at most 1 pass). ` +
+  'Create files with the Write tool, never shell redirection. Reply with one line: what you changed. Work autonomously; never ask questions.';
 const STUB_MARK = '<h1 id="title">TODO</h1>';
 
 if (!BASE || SECRET.length < 32) throw new Error('MOTIONAI_BASE and ENGINE_SECRET are required');
@@ -166,17 +175,18 @@ async function scaffold(j, signal) {
   }
   const footage = j.input.footage ? await fetchFootage(j, proj, signal) : null;
   const safe = aspect === '9:16' ? 'top 220px, bottom 380px, sides 80px (platform UI overlays)' : 'an 80px margin on every side';
-  const fill = (s) => s.replaceAll('{{W}}', W).replaceAll('{{H}}', H).replaceAll('{{DUR}}', dur).replaceAll('{{BG}}', c.background).replaceAll('{{TEXT}}', c.text);
-  for (const f of ['CLAUDE.md', 'index.html']) fs.writeFileSync(`${proj}/${f}`, fill(fs.readFileSync(`${proj}/${f}`, 'utf8')));
+  const workflow = dur > 10 || j.input.audio?.narration ? 'general-video' : 'motion-graphics'; // the skills' own split
+  const fill = (s) => s.replaceAll('{{SKILLS}}', SKILLS).replaceAll('{{WORKFLOW}}', workflow).replaceAll('{{W}}', W).replaceAll('{{H}}', H).replaceAll('{{DUR}}', dur).replaceAll('{{BG}}', c.background).replaceAll('{{TEXT}}', c.text);
+  for (const f of ['CLAUDE.md', 'index.html', 'hyperframes.json']) fs.writeFileSync(`${proj}/${f}`, fill(fs.readFileSync(`${proj}/${f}`, 'utf8')));
   fs.writeFileSync(`${proj}/BRIEF.md`, `---
-workflow: motion-graphics
+workflow: ${workflow}
 flow: autonomous
 ---
 # Motion graphic brief
 
 - Canvas: ${W}×${H} (${aspect}), 30 fps, exactly ${dur} s
 - Safe area: keep text and logo clear of ${safe}
-- Style: ${b.style === 'bold' ? 'bold: punchy, high contrast, fast snappy moves, heavy weights, big scale changes' : 'soft: calm confident easing, airy spacing, gentle fades/slides, rounded shapes'}
+- Style: ${b.style === 'bold' ? 'bold: punchy, high contrast, fast snappy moves, heavy weights, big scale changes' : 'soft: calm confident easing (no overshoot), airy spacing, generous negative space, refined thin strokes, light shadows; still rich, illustrated visuals'}
 
 ## Audio
 ${audioBrief(j.input.audio)}
@@ -242,8 +252,8 @@ function copyParent(j) {
   if (!fs.existsSync(`${src}/index.html`)) throw fail('parent_not_found');
   fs.rmSync(proj, { recursive: true, force: true });
   fs.cpSync(src, proj, { recursive: true, filter: (f) => {
-    const rel = path.relative(src, f); // keep hybrid footage; drop renders
-    return rel.startsWith('assets/footage') || !/(^|\/)(node_modules|renders?)$|\.(mp4|webm|mov)$/.test(rel);
+    const rel = path.relative(src, f); // keep hybrid footage; drop renders and stale snapshots
+    return rel.startsWith('assets/footage') || !/(^|\/)(node_modules|renders?|snapshots)$|\.(mp4|webm|mov)$/.test(rel);
   } });
   fs.symlinkSync(`${BASE}/hf/node_modules`, `${proj}/node_modules`);
   const target = segment
@@ -297,7 +307,7 @@ async function runJob(j) {
 
     step('claude');
     const token = fs.readFileSync(`${BASE}/oauth-token`, 'utf8').trim();
-    const c = await sandbox(dir, `${BASE}/bin/claude`, ['-p', j.input.edit ? TASK_EDIT : TASK, '--output-format', 'json', '--max-turns', '60', '--allowedTools', TOOLS],
+    const c = await sandbox(dir, `${BASE}/bin/claude`, ['-p', j.input.edit ? TASK_EDIT : TASK, '--model', 'opus', '--output-format', 'json', '--max-turns', '80', '--allowedTools', TOOLS],
       { timeout: LIMIT.claude, signal, out: `${dir}/claude.json`, env: {
         CLAUDE_CODE_OAUTH_TOKEN: token, ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY || '',
         // Fresh jobs may only spend credits on the kinds asked for; edits may change audio on request.

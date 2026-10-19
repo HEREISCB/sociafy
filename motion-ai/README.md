@@ -115,9 +115,9 @@ parent's segments), `bad_instruction` (empty or > 1000 chars), `bad_key`.
   runs a two-pass `loudnorm` (−16 LUFS integrated, −1.5 dBTP), AAC 192k 48 kHz, trimmed to exactly
   the duration with the video stream copied. `ELEVENLABS_API_KEY` lives in `~/motionai/.env` and
   is passed as an env var into the Claude step's sandbox only (never written into the project).
-- Concurrency 2, FIFO queue. Timeouts: Claude 8 min, check 2 min, render 5 min, whole job 15 min.
+- Concurrency 2, FIFO queue. Timeouts: Claude 12 min, check 2 min, render 5 min, whole job 22 min.
 - Per job (`~/motionai/jobs/<callId>/`): scaffold `project/` (scaffold/ + BRIEF.md + downloaded
-  brand assets), then `claude -p … --output-format json --max-turns 60 --allowedTools "Read,Write,Edit,Glob,Grep,Skill,Bash(npx hyperframes*),Bash(npm run *),Bash(ls*),Bash(motion-audio *)"`.
+  brand assets), then `claude -p … --model opus --output-format json --max-turns 80 --allowedTools "Read,Write,Edit,Glob,Grep,Skill,Bash(npx hyperframes*),Bash(npm run *),Bash(ls*),Bash(motion-audio *)"`.
   Edit jobs instead copy the parent's `project/` (no renders), add `EDIT.md` (instruction + target
   segment) and run Claude with an edit task (same tools, sandbox and timeouts).
   Then the worker (not Claude) runs `hyperframes check`, `render`, ffmpeg poster, and the R2 upload.
@@ -137,7 +137,7 @@ parent's segments), `bad_instruction` (empty or > 1000 chars), `bad_key`.
 | `server.mjs` | node:http server, queue, job pipeline |
 | `lib.mjs`, `lib.test.mjs` | input, footage, audio + segments validation (`node --test motion-ai/`) |
 | `motion-audio.mjs` | the ElevenLabs audio CLI Claude may run inside the sandbox (tts / sfx / music / voices) |
-| `scaffold/` | per-job project template (CLAUDE.md with the strict rules, index.html stub, local GSAP) |
+| `scaffold/` | per-job project template (CLAUDE.md with the strict rules + design bar + snapshot self-review loop, index.html stub, local GSAP, grain.png, `reference/` helpers.js + example.html) |
 | `motionai.service` | systemd **user** unit (`@BASE@` filled by install.sh) |
 | `motionai-tunnel.service` | systemd user unit: reverse SSH tunnel to prod (see Box notes) |
 | `install.sh` | idempotent box install: node 22, Chrome headless shell 152.0.7977.30, hyperframes@0.8.141, Noto fonts, claude binary copy, token copy, secret |

@@ -3,5 +3,5 @@
   "registry": "https://raw.githubusercontent.com/heygen-com/hyperframes/main/registry",
   "paths": { "blocks": "compositions", "components": "compositions/components", "assets": "assets" },
   "media": { "autoProxy": true },
-  "authoringSkill": "motion-graphics"
+  "authoringSkill": "{{WORKFLOW}}"
 }

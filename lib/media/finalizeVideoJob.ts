@@ -278,9 +278,9 @@ async function finalizeCinemaJob(job: VideoJob): Promise<FinalizeVideoResult> {
  * R2 key we chose at submit (inside the user's prefix) and echoes it back, so
  * there are no bytes to move — only the claim.
  *
- * MAX_AGE_MS (2h) is the give-up window for both. AI-designed jobs take 3–10
- * min and the worker runs 2 at a time, so a queue of them needs well over the
- * ~20 min one job takes; 2h covers that without holding credits for long.
+ * MAX_AGE_MS (2h) is the give-up window for both. AI-designed jobs take 6–12
+ * min (22 min worker cap) and the worker runs 2 at a time, so a queue of them
+ * needs well over one job's time; 2h covers that without holding credits for long.
  */
 async function finalizeMotionJob(
   job: VideoJob,

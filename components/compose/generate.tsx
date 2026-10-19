@@ -255,13 +255,13 @@ export function useMediaGen(report: GenReport) {
   const track = async (jobs: { id: string; aspect?: string }[], aspect: string, motionAi: boolean) => {
     setRender({
       startedAt: Date.now(), phases: jobs.map(() => 'queued'),
-      ...(motionAi ? { usual: 'AI-designed motion graphics take 3–10 minutes.', slowAfterSec: 12 * 60 } : {}),
+      ...(motionAi ? { usual: 'AI-designed motion graphics take 6–12 minutes.', slowAfterSec: 15 * 60 } : {}),
     });
     const setPhase = (i: number, p: ClipPhase) => setRender((v) => (v ? { ...v, phases: v.phases.map((x, k) => (k === i ? p : x)) } : v));
     const settled = await Promise.all(jobs.map(async (j, i) => {
       const out = await pollJob(
         // AI-designed jobs queue behind a 2-wide worker, so they get longer.
-        `/api/media/video-job/${j.id}`, (motionAi ? 25 : 15) * 60_000, [4_000, 500, 8_000],
+        `/api/media/video-job/${j.id}`, (motionAi ? 40 : 15) * 60_000, [4_000, 500, 8_000],
         (pd) => {
           if (pd.status === 'pending') setPhase(i, pd.providerStatus === 'processing' || pd.providerStatus === 'staged' || pd.providerStatus === 'footage' ? 'rendering' : pd.providerStatus === 'finalizing' ? 'storing' : 'queued');
         },

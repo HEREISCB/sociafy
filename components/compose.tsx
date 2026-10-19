@@ -39,7 +39,7 @@ const VIDEO_FAIL_COPY: Record<string, string> = {
   submit_unconfirmed: 'We never got confirmation the clip was accepted. Credits are refunded automatically — try again.',
   duplicate_request: 'That request was already running, so it was not charged twice.',
   generation_rejected: 'The request was rejected before rendering started. Credits were refunded.',
-  poll_timeout: 'Still rendering after 15 minutes — it will appear in your library once it lands, and nothing extra is charged.',
+  poll_timeout: 'Still rendering — it will appear in your library once it lands, and nothing extra is charged.',
 };
 const videoFailCopy = (code: string) => VIDEO_FAIL_COPY[code] ?? 'The clip failed to render. Credits were refunded.';
 
