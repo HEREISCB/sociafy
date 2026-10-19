@@ -109,7 +109,7 @@ export default function Compose({ draftId, onDone, initial }: {
   }, []);
   const [preset, setPreset] = useState('announcement');
   const [research, setResearch] = useState(false);
-  const [media, setMedia] = useState<'text' | 'image' | 'video'>('text');
+  const [media, setMedia] = useState<'text' | 'image' | 'video'>('video');
   const [savedId, setSavedId] = useState<string | null>(null);
   const [busy, setBusy] = useState<null | 'write' | 'schedule' | 'post'>(null);
   const lock = useRef(false);
@@ -325,7 +325,7 @@ export default function Compose({ draftId, onDone, initial }: {
 
       <section className="compose-media" aria-label="Media">
         <div className="mode-switch" role="radiogroup" aria-label="Add media">
-          {([['text', 'Text only', 'edit'], ['image', 'Image', 'image'], ['video', 'Video', 'play']] as const).map(([id, name, icon]) => (
+          {([['video', 'Video', 'play'], ['image', 'Image', 'image'], ['text', 'Text only', 'edit']] as const).map(([id, name, icon]) => (
             <button key={id} type="button" role="radio" aria-checked={media === id} className={`opt${media === id ? ' active' : ''}`} onClick={() => setMedia(id)}>
               <Icon name={icon} size={12} /> {name}
             </button>
