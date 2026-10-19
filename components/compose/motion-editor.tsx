@@ -31,7 +31,34 @@ function audioChips(a: MotionAudio | null | undefined): string[] {
   ].filter((x): x is string => x !== null);
 }
 
-const EDITING: Omit<Render, 'startedAt'> = { phases: ['rendering'], usual: 'Editing — usually 1–5 minutes.', slowAfterSec: 6 * 60 };
+export const EDITING: Omit<Render, 'startedAt'> = { phases: ['rendering'], usual: 'Editing — usually 1–5 minutes.', slowAfterSec: 6 * 60 };
+
+/** Start an edit of a finished AI motion graphic (`id` = job or asset id; no segment = whole video). */
+export async function startMotionEdit(id: string, instruction: string, segmentId?: string | null):
+  Promise<{ jobId: string } | { credits: { balance: number; needed: number } } | { error: string }> {
+  try {
+    const r = await fetch(`/api/media/motion-ai/${id}/edit`, {
+      method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ instruction, ...(segmentId ? { segmentId } : {}) }),
+    });
+    const body = (await r.json().catch(() => ({}))) as Record<string, unknown>;
+    if (r.status === 402 && body.error === 'insufficient_credits') return { credits: { balance: Number(body.balance ?? 0), needed: Number(body.needed ?? 0) } };
+    const jobId = (body.job as { id?: string } | undefined)?.id;
+    if (r.status !== 202 || !jobId) {
+      return { error: typeof body.hint === 'string' ? body.hint : r.status === 429 ? 'Too many requests — wait a minute and try again.' : 'The edit did not start. Try again.' };
+    }
+    return { jobId };
+  } catch {
+    return { error: 'The edit did not start. Check your connection and try again.' };
+  }
+}
+
+/** Poll an edit job to the end. */
+export const followMotionEdit = (jobId: string) => pollJob(`/api/media/video-job/${jobId}`, 15 * 60_000, [4_000, 500, 8_000]);
+
+export const editFailCopy = (failed: string) => failed === 'poll_timeout'
+  ? 'Still editing — the new version will land in your library.'
+  : 'That edit could not be made. Your credits were returned — try wording it differently.';
 
 /**
  * "Edit like you'd ask an editor": play the motion graphic, pick a segment on
@@ -77,14 +104,12 @@ export function MotionEditor({
     if (following.current) return;
     following.current = jobId;
     setRender({ startedAt: Date.now(), ...EDITING });
-    const out = await pollJob(`/api/media/video-job/${jobId}`, 15 * 60_000, [4_000, 500, 8_000]);
+    const out = await followMotionEdit(jobId);
     following.current = null;
     if (!alive.current) return;
     setRender(null);
     if ('asset' in out && out.asset) { setText(''); await load(jobId); return; }
-    setNotice(out.failed === 'poll_timeout'
-      ? 'Still editing — the new version will land in your library.'
-      : 'That edit could not be made. Your credits were returned — try wording it differently.');
+    setNotice(editFailCopy(out.failed));
   }, [load]);
 
   useEffect(() => {
@@ -97,23 +122,11 @@ export function MotionEditor({
   const apply = async () => {
     if (!data || !text.trim() || render) return;
     setNotice(null);
-    try {
-      const r = await fetch(`/api/media/motion-ai/${data.jobId}/edit`, {
-        method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ instruction: text.trim(), ...(sel ? { segmentId: sel } : {}) }),
-      });
-      const body = (await r.json().catch(() => ({}))) as Record<string, unknown>;
-      if (r.status === 402 && body.error === 'insufficient_credits') { onCredits({ balance: Number(body.balance ?? 0), needed: Number(body.needed ?? 0) }); return; }
-      const jobId = (body.job as { id?: string } | undefined)?.id;
-      if (r.status !== 202 || !jobId) {
-        setNotice(typeof body.hint === 'string' ? body.hint : r.status === 429 ? 'Too many requests — wait a minute and try again.' : 'The edit did not start. Try again.');
-        return;
-      }
-      onCharged();
-      void follow(jobId);
-    } catch {
-      setNotice('The edit did not start. Check your connection and try again.');
-    }
+    const out = await startMotionEdit(data.jobId, text.trim(), sel);
+    if ('credits' in out) { onCredits(out.credits); return; }
+    if ('error' in out) { setNotice(out.error); return; }
+    onCharged();
+    void follow(out.jobId);
   };
 
   const pick = (s: MotionSegment | null) => {

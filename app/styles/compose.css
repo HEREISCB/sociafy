@@ -319,3 +319,35 @@ li.compose-thumb { cursor: default; }
 .smart-sk--title { height: 20px; width: 40%; }
 .smart-sk--short { width: 55%; }
 @media (prefers-reduced-motion: reduce) { .smart-card { transition: none; } .smart-sk { animation: none; } }
+
+/* Compose chat (components/compose/chat.tsx) */
+.chat { display: flex; flex-direction: column; gap: var(--s-2); }
+.chat-panel {
+  display: flex; flex-direction: column; gap: var(--s-3);
+  padding: var(--s-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface);
+}
+.chat-log {
+  display: flex; flex-direction: column; gap: var(--s-2);
+  max-height: 280px; overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.chat-msg {
+  margin: 0; max-width: 85%;
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-sm); line-height: 1.45;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.chat-msg--user { align-self: flex-end; background: var(--accent-soft); color: var(--text); }
+.chat-msg--assistant { align-self: flex-start; background: var(--bg-sunk); color: var(--text); }
+.chat-input { display: flex; gap: var(--s-2); align-items: flex-end; }
+.chat-input .input { flex: 1; resize: vertical; min-height: 0; font: inherit; font-size: var(--fs-sm); }
+.chat-link {
+  padding: 0; border: 0; background: none; cursor: pointer;
+  font: inherit; color: var(--text); font-weight: 500;
+  text-decoration: underline; text-underline-offset: 2px;
+}
+.chat-link:disabled { opacity: 0.5; cursor: default; }

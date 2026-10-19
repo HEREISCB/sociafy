@@ -17,6 +17,7 @@ import { Preview } from './compose/preview';
 import { AvatarCropModal } from './compose/avatar-crop';
 import { MotionEditor } from './compose/motion-editor';
 import { SmartVideo } from './compose/smart';
+import { ComposeChat } from './compose/chat';
 
 /** Hard caption limits per platform (mirrors PLATFORM_LIMITS in lib/ai/compose.ts,
  *  which is server-only). */
@@ -93,6 +94,9 @@ export default function Compose({ draftId, onDone, initial }: {
   const [attached, setAttached] = useState<MediaItem[]>([]);
   /** The attached motion graphic open in the editor. */
   const [editing, setEditing] = useState<MediaItem | null>(null);
+  /** The last video rendered in this session (chat edits it) and the smart card's Length (chat sets it). */
+  const [rendered, setRendered] = useState<MediaItem | null>(null);
+  const [videoLength, setVideoLength] = useState<number | null>(null);
   // Local wall-clock times are the browser's: computed on the server (UTC) they'd mismatch hydration,
   // so both are set after mount.
   const [when, setWhen] = useState('');
@@ -124,6 +128,7 @@ export default function Compose({ draftId, onDone, initial }: {
       // A batch of images becomes a carousel; of several clips, the first is attached and the rest wait in the library.
       const take = items[0]?.mimeType?.startsWith('video/') ? items.slice(0, 1) : items;
       setAttached((cur) => [...cur, ...take].slice(0, MAX_ATTACHED));
+      if (take[0]?.mimeType?.startsWith('video/')) setRendered(take[0]);
       setCreditError(null);
       refreshCredits();
     },
@@ -289,7 +294,7 @@ export default function Compose({ draftId, onDone, initial }: {
           onClose={() => setEditing(null)}
           onCredits={(e) => { setCreditError(e); refreshCredits(); }}
           onCharged={refreshCredits}
-          onUse={(item) => { setAttached((cur) => cur.map((a) => (a.id === editing.id ? item : a))); setEditing(null); }}
+          onUse={(item) => { setAttached((cur) => cur.map((a) => (a.id === editing.id ? item : a))); setRendered((r) => (r?.id === editing.id ? item : r)); setEditing(null); }}
         />
       )}
       {creditError && <InsufficientCreditsBanner balance={creditError.balance} needed={creditError.needed} onDismiss={() => setCreditError(null)} />}
@@ -311,6 +316,14 @@ export default function Compose({ draftId, onDone, initial }: {
           </button>
         </Attachments>
       </div>
+
+      <ComposeChat
+        body={body} setBody={setBody} platforms={targets} connected={connected} onPlatforms={setPicked} setLength={setVideoLength}
+        video={rendered && attached.some((a) => a.id === rendered.id) ? rendered : null}
+        onSwap={(old, item) => { setAttached((cur) => cur.map((a) => (a.id === old.id ? item : a))); setRendered(item); }}
+        onCredits={(e) => { setCreditError(e); refreshCredits(); }}
+        onCharged={refreshCredits}
+      />
 
       {variants.length > 1 && (
         <div className="compose-chips" role="group" aria-label="AI versions">
@@ -349,6 +362,8 @@ export default function Compose({ draftId, onDone, initial }: {
             text={body}
             platforms={targets}
             attachments={ready.flatMap((m) => (m.url && m.mimeType ? [{ url: m.url, mimeType: m.mimeType }] : []))}
+            length={videoLength}
+            setLength={setVideoLength}
           />
         )}
         {media === 'video' && !gen.s.videoSmart && (
