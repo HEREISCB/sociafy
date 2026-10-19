@@ -75,7 +75,15 @@ async function main() {
   fs.mkdirSync(DIR, { recursive: true });
   const file = `${DIR}/${id}.mp3`;
   fs.writeFileSync(file, buf);
-  const durationSec = Number(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', file]).toString().trim());
+  const probe = () => Number(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', file]).toString().trim());
+  let durationSec = probe();
+  const want = kind === 'music' ? num('dur', 3, 60, 12) : 0;
+  if (durationSec < want) { // the fallback bed caps at 30 s (and mp3 framing can land short): loop to the full length + 0.5 s, fade the tail
+    const tmp = `${DIR}/${id}.loop.mp3`;
+    execFileSync('ffmpeg', ['-v', 'error', '-y', '-stream_loop', '-1', '-i', file, '-t', String(want + 0.5), '-af', `afade=t=out:st=${Math.max(0, want - 1)}:d=1.5`, '-c:a', 'libmp3lame', '-b:a', '128k', tmp]);
+    fs.renameSync(tmp, file);
+    durationSec = probe();
+  }
   const ledgerFile = `${DIR}/ledger.json`;
   let ledger = [];
   try { ledger = JSON.parse(fs.readFileSync(ledgerFile, 'utf8')); } catch {}
