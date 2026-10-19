@@ -43,11 +43,21 @@ export function pageImages(html: string, base: string): SiteImage[] {
 
 export type SiteRead = { url: string; text: string; images: SiteImage[] } | { error: string };
 
+// Many shops (Shopify, Vercel) block datacenter IPs with 429/403. A public reader fetches the
+// page from its own network; only for hosts that already passed our public-host check.
+const BLOCKED = /^(?:http_(?:401|403|429|503)|fetch_failed)$/;
+async function fetchHtml(url: string): ReturnType<typeof fetchPage> {
+  const page = await fetchPage(url);
+  if (!('error' in page) || !BLOCKED.test(page.error)) return page;
+  const viaReader = await fetchPage(`https://r.jina.ai/${url}`, { 'X-Return-Format': 'html' });
+  return 'error' in viaReader ? page : { ...viaReader, url };
+}
+
 /** Homepage + up to 3 product-ish pages, all through fetchPage (the SSRF boundary). */
 export async function readSite(url: string): Promise<SiteRead> {
-  const home = await fetchPage(url);
+  const home = await fetchHtml(url);
   if ('error' in home) return { error: home.error };
-  const extras = await Promise.all(pickExtraPages(home.html, home.url, PRODUCT_PAGES, 3).map((u) => fetchPage(u)));
+  const extras = await Promise.all(pickExtraPages(home.html, home.url, PRODUCT_PAGES, 3).map((u) => fetchHtml(u)));
   const pages = [home, ...extras].flatMap((p) => ('error' in p ? [] : [p]));
   const text = pages.map((p) => pageText(p.html)).join('\n\n').slice(0, MAX_PAGE_TEXT);
   const images = new Map<string, SiteImage>();

@@ -61,7 +61,7 @@ type FetchedPage =
  * isPublicHost resolves DNS before judging, so a public name pointing at a
  * private IP is refused too (rebinding caveat documented there).
  */
-export async function fetchPage(url: unknown): Promise<FetchedPage> {
+export async function fetchPage(url: unknown, headers: Record<string, string> = {}): Promise<FetchedPage> {
   if (!url || typeof url !== 'string') return { error: 'url_required' };
   let parsed: URL;
   try {
@@ -86,6 +86,7 @@ export async function fetchPage(url: unknown): Promise<FetchedPage> {
         headers: {
           'User-Agent': UA,
           Accept: 'text/html,text/plain,application/xhtml+xml;q=0.9,*/*;q=0.5',
+          ...headers,
         },
         signal: controller.signal,
         redirect: 'manual',
