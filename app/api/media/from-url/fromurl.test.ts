@@ -30,7 +30,8 @@ vi.mock('../../../../lib/ai/skills/fetch-url', async (orig) => {
     ...real,
     fetchPage: async (url: string) => {
       st.fetched.push(url);
-      const html = st.pages[url];
+      // The public-reader fallback never leaves the test process.
+      const html = url.startsWith('https://r.jina.ai/') ? null : st.pages[url];
       if (html === null) return { error: 'fetch_failed' };
       return html === undefined ? real.fetchPage(url) : { url, contentType: 'text/html', bytes: html.length, html };
     },
@@ -67,7 +68,7 @@ const post = (body: unknown) =>
 const fns = () => st.calls.map((c) => c.fn);
 
 beforeEach(() => {
-  st.pages = { 'https://brew.co': HOME, 'https://brew.co/': HOME, 'https://brew.co/shop': SHOP, 'https://down.example/': null };
+  st.pages = { 'https://brew.co': HOME, 'https://brew.co/': HOME, 'https://brew.co/shop': SHOP, 'https://brew.co/about': SHOP, 'https://down.example/': null };
   st.fetched = []; st.calls = []; st.balance = 100;
   st.completion = JSON.stringify({
     site: { name: 'Brew Co', summary: 'Coffee gear.' },
