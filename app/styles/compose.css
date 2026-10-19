@@ -322,6 +322,7 @@ li.compose-thumb { cursor: default; }
 
 /* Video tab: "From a website" — URL → products → one video post each. */
 .fromsite { gap: var(--s-3); }
+.fromsite > .mode-switch { align-self: flex-start; }
 .fromsite-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
 .fromsite-row .compose-label { flex: 0 0 auto; }
 .fromsite-row .input { flex: 1 1 220px; width: auto; }

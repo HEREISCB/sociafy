@@ -104,12 +104,22 @@ export function SmartVideo({ gen, text, platforms, attachments, length, setLengt
   const chooseMyself = (
     <button type="button" className="btn ghost sm compose-self-start" onClick={() => gen.set({ videoSmart: false })}>Choose myself</button>
   );
+  /** Generate is always on screen; before a plan exists it is disabled and says why. */
+  const waitingActions = (why: string) => (
+    <div className="row smart-actions">
+      <button type="button" className="btn primary" disabled aria-describedby="smart-wait">
+        <Icon name="sparkle" size={12} /> Generate
+      </button>
+      {chooseMyself}
+      <span id="smart-wait" className="sr-only">{why}</span>
+    </div>
+  );
 
   if (tooShort) {
     return (
       <div className="compose-media-panel">
-        {text.trim() && <p className="compose-note">Write a little more and we’ll pick the best kind of video for it.</p>}
-        {chooseMyself}
+        <p className="compose-note">{text.trim() ? 'Write a little more and we’ll pick the best kind of video for it.' : 'We’ll pick the best format once the post box has a description.'}</p>
+        {waitingActions('Write the post first')}
       </div>
     );
   }
@@ -133,7 +143,7 @@ export function SmartVideo({ gen, text, platforms, attachments, length, setLengt
         <div className="sk smart-sk smart-sk--title" />
         <div className="sk smart-sk" />
         <div className="sk smart-sk smart-sk--short" />
-        {chooseMyself}
+        {waitingActions('Planning the video')}
       </div>
     );
   }
