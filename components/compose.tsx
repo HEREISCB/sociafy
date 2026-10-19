@@ -8,12 +8,13 @@ import { apiPatch, apiPost, friendlyApiError, useApi } from '../lib/ui/fetcher';
 import { PLATFORM_LABELS, PLATFORM_TO_SHORT, SHORT_TO_PLATFORM } from '../lib/ui/platforms';
 import { postKind, supportsKind, unsupportedReason } from '../lib/platforms/capabilities';
 import { priceForCompose } from '../lib/credits/pricing';
+import { postMedia } from '../lib/ui/postMedia';
 import type { Platform } from '../lib/db/schema';
 import { InsufficientCreditsBanner } from './credits';
 import { Attachments, MAX_ATTACHED, type MediaItem } from './compose/attachments';
 import { genCosts, RenderStatus, useMediaGen } from './compose/generate';
 import { ImageOptions, PRESETS, VideoOptions, WritingOptions } from './compose/options';
-import { Preview } from './compose/preview';
+import { Preview, type VideoSlot } from './compose/preview';
 import { AvatarCropModal } from './compose/avatar-crop';
 import { MotionEditor } from './compose/motion-editor';
 import { SmartVideo } from './compose/smart';
@@ -98,6 +99,8 @@ export default function Compose({ draftId, onDone, initial }: {
   /** The last video rendered in this session (chat edits it) and the smart card's Length (chat sets it). */
   const [rendered, setRendered] = useState<MediaItem | null>(null);
   const [videoLength, setVideoLength] = useState<number | null>(null);
+  /** The smart card's plan on screen — the preview's placeholder until the video exists. */
+  const [planSlot, setPlanSlot] = useState<Omit<VideoSlot, 'rendering'> | null>(null);
   // Local wall-clock times are the browser's: computed on the server (UTC) they'd mismatch hydration,
   // so both are set after mount.
   const [when, setWhen] = useState('');
@@ -147,7 +150,9 @@ export default function Compose({ draftId, onDone, initial }: {
   const { data: plan } = useApi<{ nextEmptySlot?: string }>('/api/plan');
   const connected = useMemo(() => [...new Set((accounts ?? []).map((a) => a.platform))], [accounts]);
   const ready = attached.filter((m) => !m.uploading);
-  const kind = postKind(ready);
+  /** What actually gets posted: in Video mode only the clip — the other attachments are its references. */
+  const out = postMedia(media, ready);
+  const kind = media === 'video' ? 'video' : postKind(out);
   const selected = picked ?? connected;
   const targets = connected.filter((p) => selected.includes(p) && supportsKind(p, kind));
   const textFor = (p: Platform) => custom[p] ?? body;
@@ -181,6 +186,7 @@ export default function Compose({ draftId, onDone, initial }: {
       setVariants(d.variants ?? []);
       setChosen(d.selectedVariantLabel);
       setPicked(d.targetPlatforms?.length ? d.targetPlatforms : null);
+      setMedia(postKind(d.media));
       setAttached((d.media ?? []).map((m) => ({ id: m.id, url: m.url, mimeType: m.mimeType, label: m.url.split('/').pop() || 'Media', ...(m.posterUrl && { posterUrl: m.posterUrl }) })));
       // Copy the agent wrote is a suggestion; only text that differs from it
       // (and from the body) is something the user customized.
@@ -243,7 +249,7 @@ export default function Compose({ draftId, onDone, initial }: {
       selectedVariantLabel: chosen,
       targetPlatforms: targets,
       perPlatformText: Object.fromEntries(targets.filter((p) => custom[p] && custom[p] !== body).map((p) => [p, custom[p]!])),
-      media: ready.filter((m) => m.id && m.url && m.mimeType).map((m) => ({ id: m.id!, url: m.url!, mimeType: m.mimeType! })),
+      media: out.filter((m) => m.id && m.url && m.mimeType).map((m) => ({ id: m.id!, url: m.url!, mimeType: m.mimeType! })),
       preset,
     };
     const d = savedId ? await apiPatch<{ id: string }>(`/api/drafts/${savedId}`, payload) : await apiPost<{ id: string }>('/api/drafts', payload);
@@ -267,9 +273,10 @@ export default function Compose({ draftId, onDone, initial }: {
     setResult({ kind: 'published', rows: r.results ?? [] });
   });
 
-  const empty = !body.trim() && ready.length === 0;
+  const empty = !body.trim() && out.length === 0;
   const blocker = attached.some((m) => m.uploading) ? 'Waiting for the upload to finish.'
     : empty ? null
+    : media === 'video' && !out.length ? (gen.busy === 'video' ? 'Wait for the video to finish rendering.' : 'Generate the video first — or switch to Image or Text only to post without one.')
     : !connected.length ? null
     : !targets.length ? 'Pick at least one platform that takes this kind of post.'
     : over.length ? `Too long for ${over.map((p) => `${label(p)} (${textFor(p).length}/${LIMIT[p]})`).join(', ')}.`
@@ -283,6 +290,13 @@ export default function Compose({ draftId, onDone, initial }: {
     ? result.rows.filter((r) => !r.ok && !r.error?.startsWith('already_publishing') && !r.error?.startsWith('platform_not_connected')).map((r) => r.platform)
     : [];
   const customizable = targets.filter((p) => custom[p] === undefined);
+  const stripNote = ready.length === out.length ? null
+    : media === 'video' ? 'References for the video — only the video is posted'
+    : media === 'text' ? 'Not posted — Text only posts no media'
+    : 'Only the images are posted';
+  const videoSlot: VideoSlot | null = media === 'video' && !out.length
+    ? { ...((gen.s.videoSmart && planSlot) || { aspect: gen.s.videoAspect }), rendering: gen.busy === 'video' }
+    : null;
 
   return (
     <div className="compose">
@@ -321,7 +335,7 @@ export default function Compose({ draftId, onDone, initial }: {
           placeholder="Write your post — or describe it and let AI draft it"
           rows={7}
         />
-        <Attachments attached={attached} onChange={setAttached} onNotice={setNotice} onEdit={setEditing}>
+        <Attachments attached={attached} onChange={setAttached} onNotice={setNotice} onEdit={setEditing} note={stripNote}>
           <span className="compose-spacer" />
           <label className="compose-duration">
             Video length
@@ -386,6 +400,7 @@ export default function Compose({ draftId, onDone, initial }: {
             attachments={ready.flatMap((m) => (m.url && m.mimeType ? [{ url: m.url, mimeType: m.mimeType }] : []))}
             length={videoLength}
             setLength={setVideoLength}
+            onPlan={setPlanSlot}
           />
         )}
         {media === 'video' && !gen.s.videoSmart && (
@@ -526,12 +541,10 @@ export default function Compose({ draftId, onDone, initial }: {
         <WritingOptions preset={preset} setPreset={setPreset} research={research} setResearch={setResearch} />
       </details>
 
-      {!empty && targets.length > 0 && (
-        <details className="compose-more">
-          <summary>Preview</summary>
-          <Preview platforms={targets} textFor={textFor} media={ready} authorFor={(p) => accounts?.find((a) => a.platform === p)} />
-        </details>
-      )}
+      <details className="compose-more" open>
+        <summary>Preview</summary>
+        <Preview platforms={targets} textFor={textFor} media={out} videoSlot={videoSlot} authorFor={(p) => accounts?.find((a) => a.platform === p)} />
+      </details>
     </div>
   );
 }

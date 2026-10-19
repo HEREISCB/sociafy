@@ -190,6 +190,16 @@ li.compose-thumb { cursor: default; }
 .compose-post-media img,
 .compose-post-media video { width: 100%; height: 100%; object-fit: contain; display: block; }
 .compose-post-count { position: absolute; top: var(--s-2); right: var(--s-2); }
+/* A Video post before its clip exists: the frame the video will fill. */
+.compose-post-slot {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: var(--s-2);
+  padding: var(--s-4);
+  border: 1px dashed var(--line);
+  text-align: center;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
 
 /* Video render status. The bar is indeterminate on purpose: nothing in the
    pipeline reports progress. */

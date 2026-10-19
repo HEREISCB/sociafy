@@ -7,6 +7,7 @@ import { useApi } from '../../lib/ui/fetcher';
 import { planKeys, shownPlan, type Keyed } from '../../lib/ui/planKey';
 import type { CreditsPayload } from '../credits';
 import type { MediaGen, PlanResponse, VideoFormat } from './generate';
+import type { VideoSlot } from './preview';
 
 const FORMAT: Record<VideoFormat, string> = {
   motion_graphic: 'Motion graphic',
@@ -33,7 +34,7 @@ const remember = (key: string, res: PlanResponse) => {
 };
 
 /** Video tab default: the planner picks the format, length and sound; one button renders it. */
-export function SmartVideo({ gen, text, platforms, attachments, length, setLength }: {
+export function SmartVideo({ gen, text, platforms, attachments, length, setLength, onPlan }: {
   gen: MediaGen;
   text: string;
   platforms: string[];
@@ -41,6 +42,8 @@ export function SmartVideo({ gen, text, platforms, attachments, length, setLengt
   /** Picked length in seconds (null = Auto). Held by Compose so its chat can set it. */
   length: number | null;
   setLength: (n: number | null) => void;
+  /** The plan on screen (format, length, shape) for the preview's video placeholder. */
+  onPlan?: (slot: Omit<VideoSlot, 'rendering'> | null) => void;
 }) {
   // An override belongs to the post it was picked on: new text, platforms or attachments → best fit again.
   const [picked, setPicked] = useState<{ input: string; v: Override } | null>(null);
@@ -67,6 +70,14 @@ export function SmartVideo({ gen, text, platforms, attachments, length, setLengt
   useEffect(() => { live.current = key; }, [key]);
 
   const tooShort = text.trim().length < MIN_CHARS;
+  const shownPlanFor = tooShort ? null : res?.plan ?? null;
+  useEffect(() => {
+    onPlan?.(shownPlanFor && shownPlanFor.format !== 'none'
+      ? { aspect: shownPlanFor.aspect, durationSec: shownPlanFor.durationSec, label: FORMAT[shownPlanFor.format] }
+      : null);
+    // onPlan is a state setter from Compose; the plan object is what changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shownPlanFor]);
 
   useEffect(() => {
     if (tooShort || recall(key)) return;

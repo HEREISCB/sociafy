@@ -56,6 +56,7 @@ export function Attachments({
   onChange,
   onNotice,
   onEdit,
+  note,
   children,
 }: {
   attached: MediaItem[];
@@ -63,6 +64,8 @@ export function Attachments({
   onNotice: (msg: string) => void;
   /** Open the editor for an AI-designed motion graphic. */
   onEdit?: (m: MediaItem) => void;
+  /** What the strip is for when it isn't all posted (e.g. "References for the video"). */
+  note?: string | null;
   children?: React.ReactNode;
 }) {
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -130,8 +133,9 @@ export function Attachments({
 
   return (
     <>
+      {attached.length > 0 && note && <p className="compose-label" id="compose-strip-note">{note}</p>}
       {attached.length > 0 && (
-        <ul className="compose-strip" aria-label="Attached media">
+        <ul className="compose-strip" aria-label="Attached media" aria-describedby={note ? 'compose-strip-note' : undefined}>
           {attached.map((m) => (
             <li key={m.id ?? m.label} className="compose-thumb">
               <Thumb m={m} />
