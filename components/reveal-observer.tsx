@@ -41,20 +41,22 @@ export function RevealObserver() {
     });
     mo.observe(document.body, { childList: true, subtree: true });
 
-    // Scroll-spy: a heading counts as "being read" once it passes the top quarter.
+    // Scroll-spy: the section being read is the last heading above the top
+    // quarter (the first one before any has passed). The observer only says
+    // "something crossed"; positions decide, so a jump back to the top resets it.
     const links = [...document.querySelectorAll<HTMLAnchorElement>('nav[data-spy] a[href^="#"]')];
+    const heads = [...new Set(links.map((a) => a.hash))]
+      .map((h) => document.getElementById(decodeURIComponent(h.slice(1))))
+      .filter((t): t is HTMLElement => !!t);
     const spy = new IntersectionObserver(
-      (entries) => {
-        const hit = entries.find((e) => e.isIntersecting);
-        if (!hit) return;
-        for (const a of links) a.toggleAttribute('aria-current', a.hash === `#${hit.target.id}`);
+      () => {
+        let cur = heads[0];
+        for (const h of heads) if (h.getBoundingClientRect().top <= innerHeight / 4) cur = h;
+        for (const a of links) a.toggleAttribute('aria-current', a.hash === `#${cur.id}`);
       },
       { rootMargin: '0px 0px -75% 0px' },
     );
-    new Set(links.map((a) => a.hash)).forEach((h) => {
-      const t = document.getElementById(decodeURIComponent(h.slice(1)));
-      if (t) spy.observe(t);
-    });
+    heads.forEach((t) => spy.observe(t));
 
     const onClick = (e: MouseEvent) => {
       const b = (e.target as Element).closest?.('[data-copy-code]');
