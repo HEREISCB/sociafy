@@ -3,6 +3,7 @@ import { PLATFORM_LABELS } from '../../lib/ui/platforms';
 import type { DraftMedia, Platform } from '../../lib/db/schema';
 import type { PlanView } from '../../lib/agent/plan';
 import { postText, type PostTextDraft } from '../../lib/agent/postText';
+import { supportsKind } from '../../lib/platforms/capabilities';
 
 export type ScheduledStatus = 'pending' | 'publishing' | 'published' | 'failed' | 'canceled';
 
@@ -109,6 +110,20 @@ export function kindOf(i: CalItem): Kind {
   return m ? 'image' : 'text';
 }
 export const KIND_LABEL: Record<Kind, string> = { video: 'Video', image: 'Image', text: 'Text' };
+
+/**
+ * A draft narrowed to where it can actually go: platforms with a connected account (healthy
+ * or needing a reconnect) whose API takes this kind of post — the rule approve applies
+ * (lib/agent/publish.ts queueDraft). Everything Home shows (tabs, dots, the approve line)
+ * reads this. Queued posts keep their rows: those are what was really scheduled.
+ */
+export function postable(i: CalItem, connected: Platform[]): CalItem {
+  if (i.kind !== 'draft') return i;
+  const all = itemPlatforms(i);
+  const k = kindOf(i);
+  const ps = all.filter((p) => connected.includes(p) && supportsKind(p, k));
+  return ps.length === all.length ? i : { ...i, draft: { ...i.draft, targetPlatforms: ps } };
+}
 
 /** Still waiting on the user. An approved-while-rendering draft is not. */
 export const toReview = (i: CalItem) => i.kind === 'draft' && !i.draft.approved;

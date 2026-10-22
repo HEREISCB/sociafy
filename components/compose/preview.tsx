@@ -36,6 +36,7 @@ export function Preview({ platforms, active, onActive, textFor, media, authorFor
 }) {
   const [more, setMore] = useState(false);
   const [clamped, setClamped] = useState(false);
+  const [brokenAvatar, setBrokenAvatar] = useState<string | null>(null);
   const cap = useRef<HTMLParagraphElement | null>(null);
   const text = active ? textFor(active) : '';
   useLayoutEffect(() => {
@@ -75,9 +76,10 @@ export function Preview({ platforms, active, onActive, textFor, media, authorFor
 
       <article className="compose-post" aria-label={active ? `${PLATFORM_LABELS[active] ?? active} preview` : 'Preview'}>
         <header className="compose-post-head">
-          {a?.avatarUrl
+          {a?.avatarUrl && brokenAvatar !== a.avatarUrl
+            // Expired CDN links 403: fall back to the platform glyph rather than a broken image.
             // eslint-disable-next-line @next/next/no-img-element
-            ? <img className="compose-post-avatar" src={a.avatarUrl} alt="" referrerPolicy="no-referrer" />
+            ? <img className="compose-post-avatar" src={a.avatarUrl} alt="" referrerPolicy="no-referrer" onError={() => setBrokenAvatar(a.avatarUrl)} />
             : active ? <Pglyph p={PLATFORM_TO_SHORT[active]} size="lg" /> : <span className="compose-post-avatar" />}
           <div>
             <div className="compose-post-name">{name}</div>

@@ -381,24 +381,24 @@ export default function Compose({ draftId, initial, title, onNew }: {
     ? `Write a brief above — it’s what the ${media} is made from.`
     : null;
 
-  /** One chip per connected account, here and on the From a website tab. */
-  const platformChips = (k: typeof kind) => (
+  /** One chip per connected account that takes this kind of post, here and on the From a website tab. */
+  const platformChips = (k: typeof kind) => {
+    const cant = connected.filter((p) => !supportsKind(p, k));
+    return (
     <>
       {accounts && !connected.length ? (
         <p className="compose-note">No accounts connected. <Link href="/settings/connections">Connect one</Link> to post.</p>
       ) : (
         <div className="compose-chips" role="group" aria-label="Post to">
-          {connected.map((p) => {
-            const ok = supportsKind(p, k);
+          {connected.filter((p) => supportsKind(p, k)).map((p) => {
             const acct = accounts?.find((a) => a.platform === p);
-            const on = ok && selected.includes(p);
+            const on = selected.includes(p);
             return (
               <button
                 key={p}
                 type="button"
                 className={`prompt-chip${on ? ' active' : ''}`}
                 aria-pressed={on}
-                disabled={!ok}
                 onClick={() => setPicked(on ? selected.filter((x) => x !== p) : [...selected, p])}
               >
                 <Pglyph p={PLATFORM_TO_SHORT[p]} /> {label(p)}
@@ -408,11 +408,15 @@ export default function Compose({ draftId, initial, title, onNew }: {
           })}
         </div>
       )}
-      {connected.filter((p) => !supportsKind(p, k)).map((p) => (
-        <p key={p} className="compose-note">{unsupportedReason(p, k)}</p>
-      ))}
+      {/* Only where this post can go; one line says where it can't (and why) instead of a dead chip each. */}
+      {cant.length > 0 && (
+        <p className="compose-note" title={cant.map((p) => unsupportedReason(p, k)).join(' ')}>
+          {new Intl.ListFormat('en').format(cant.map(label))} {cant.length > 1 ? 'don’t' : 'doesn’t'} take {k} posts.
+        </p>
+      )}
     </>
-  );
+    );
+  };
 
   const resultTitle = !result ? ''
     : result.kind === 'scheduled' ? (done ? 'Scheduled' : 'Nothing was scheduled')

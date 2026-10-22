@@ -12,8 +12,8 @@ import { PLATFORM_LABELS } from '../lib/ui/platforms';
 import type { PlanView } from '../lib/agent/plan';
 import type { Platform } from '../lib/db/schema';
 import {
-  agenda, agendaOrder, calendarItems, dayKey, firstAtRisk, fmtSlot, groupRows, idOf, itemPlatforms, moveToDay, needsTime, nextToReview,
-  overLimit, progress, restorable, restorePatch, sameText, skipMessage, soonestToReview, statusLabel, textsOf, textsPatch, toReview, toneOf, weekFiled,
+  agenda, agendaOrder, calendarItems, dayKey, firstAtRisk, fmtSlot, groupRows, idOf, itemPlatforms, KIND_LABEL, kindOf, moveToDay, needsTime, nextToReview,
+  overLimit, postable, progress, restorable, restorePatch, sameText, skipMessage, soonestToReview, statusLabel, textsOf, textsPatch, toReview, toneOf, weekFiled,
   type CalItem, type ScheduledRow, type Skipped, type TextsPatch,
 } from './calendar/model';
 import { ReviewPanel, Tick, slotLabel, type Author, type PostAction } from './calendar/review';
@@ -96,7 +96,9 @@ export default function Dashboard() {
   const plan = planApi.data;
   const schedKey = today ? `/api/schedule?from=${today.toISOString()}&to=${addDays(today, 7).toISOString()}` : null;
   const schedApi = useApi<ScheduledRow[]>(schedKey, { refreshInterval: pollMs(plan) });
-  const { data: accounts } = useApi<Account[]>('/api/accounts');
+  const { data: accounts, error: accountsError } = useApi<Account[]>('/api/accounts');
+  /** Platforms with an account, healthy or not. null until known (or if it can't load: then nothing is narrowed). */
+  const connected = useMemo(() => (accounts ? [...new Set(accounts.map((a) => a.platform))] : null), [accounts]);
   const { data: credits } = useApi<{ balance: number }>('/api/credits');
 
   const { mutate } = useSWRConfig();
@@ -131,8 +133,10 @@ export default function Dashboard() {
     const review = (plan?.review ?? [])
       .filter((d) => acted.get(d.id) !== 'skipped')
       .map((d) => (acted.get(d.id) === 'approved' ? { ...d, approved: true } : d));
-    return calendarItems(review, groupRows(schedApi.data ?? []));
-  }, [plan, schedApi.data, acted]);
+    const all = calendarItems(review, groupRows(schedApi.data ?? []));
+    // Only where each draft can go: a connected account that takes its kind of post.
+    return connected ? all.map((i) => postable(i, connected)) : all;
+  }, [plan, schedApi.data, acted, connected]);
   const ag = useMemo(() => (today ? agenda(items, today, now) : null), [items, today, now]);
   const order = useMemo(() => (ag ? agendaOrder(ag) : []), [ag]);
   const generating = !!plan?.generating;
@@ -467,7 +471,7 @@ export default function Dashboard() {
   const planN = Math.min(plan?.counts.missing ?? 0, 30);
 
   const range = today && `${format(today, isSameMonth(today, addDays(today, 6)) ? 'd' : 'd MMM')}–${format(addDays(today, 6), 'd MMM')}`;
-  const loading = !today || !plan || !schedApi.data || !ag;
+  const loading = !today || !plan || !schedApi.data || !ag || (accounts === undefined && !accountsError);
   const mode: 'error' | 'loading' | 'empty' | 'filed' | 'review' =
     planApi.error ? 'error' : loading ? 'loading' : !items.length ? 'empty' : filed ? 'filed' : 'review';
   const view = mode === 'filed' ? 'filed' : urlPost ? 'post' : 'list';
@@ -517,6 +521,9 @@ export default function Dashboard() {
     else if (!selLive.length && selGone.length) {
       line = <>Can’t approve: {plats(selGone)} need{selGone.length > 1 ? '' : 's'} reconnecting first. <Link href="/settings/connections">Reconnect</Link></>; lineTone = 'warn';
     }
+    else if (!selLive.length) {
+      line = <>Can’t approve: no connected account takes a {KIND_LABEL[kindOf(sel)].toLowerCase()} post. <Link href={`/compose?draft=${d.id}`}>Open in Compose</Link></>; lineTone = 'warn';
+    }
     else if (d.rendering && !d.media.length) line = `Approve now: it posts when the video lands.${goneNote}`;
     else if (needsTime(sel, now)) line = `Approving gives it the next free slot${plan?.nextEmptySlot ? `, ≈ ${slotLabel(new Date(plan.nextEmptySlot), today!)}` : ''}, on ${plats(selLive)}.${goneNote}`;
     else line = `Approving schedules it for ${slotLabel(sel.at!, today!)} on ${plats(selLive)}.${goneNote}`;
@@ -545,7 +552,7 @@ export default function Dashboard() {
     }
   } else line = 'Pick a post to review it.';
   const whyNot = canAct ? undefined : mode === 'review' && sel ? 'Already decided' : 'Nothing to review';
-  const approveWhy = whyNot ?? (selOver.length ? 'Too long: trim it first' : !selLive.length ? 'Reconnect first' : undefined);
+  const approveWhy = whyNot ?? (selOver.length ? 'Too long: trim it first' : !selLive.length ? (selGone.length ? 'Reconnect first' : 'No connected account takes it') : undefined);
 
   const needN = ag?.need.length ?? 0;
   const spreadWhy = !needN ? 'Nothing needs a time' : left && left >= needN ? 'No free slots left this week' : busy && !spreading ? 'Busy' : undefined;

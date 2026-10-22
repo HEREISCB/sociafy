@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  agenda, agendaOrder, asPostText, calendarItems, firstAtRisk, groupRows, idOf, kindOf, overLimit, restorePatch, sameText, soonestToReview, textsOf, textsPatch,
+  agenda, agendaOrder, asPostText, calendarItems, firstAtRisk, groupRows, idOf, itemPlatforms, kindOf, overLimit, postable, restorePatch, sameText, soonestToReview, textsOf, textsPatch,
   weekFiled, moveToDay, nextToReview, progress, statusLabel, toneOf,
   type ReviewItem, type ScheduledRow,
 } from '../../../../components/calendar/model';
@@ -194,5 +194,25 @@ describe('home model', () => {
     const items = calendarItems([draft({ id: 'a', plannedAt: at(2), targetPlatforms: ['linkedin'] }), draft({ id: 'b', plannedAt: at(3) })], []);
     expect(idOf(firstAtRisk(items, ['x'], today.getTime())!)).toBe('b');
     expect(firstAtRisk(items, ['instagram'], today.getTime())).toBeNull();
+  });
+});
+
+describe('postable', () => {
+  const vid = { id: 'm', url: 'u', mimeType: 'video/mp4' } as ReviewItem['media'][number];
+  const all: Platform[] = ['x', 'youtube', 'instagram', 'facebook', 'linkedin'];
+  it('keeps only connected platforms that take the post\'s kind', () => {
+    const [text] = calendarItems([draft({ targetPlatforms: all })], []);
+    expect(itemPlatforms(postable(text, ['youtube', 'instagram', 'linkedin']))).toEqual(['linkedin']);
+    const [video] = calendarItems([draft({ targetPlatforms: all, media: [vid] })], []);
+    expect(itemPlatforms(postable(video, ['x', 'youtube', 'instagram', 'linkedin']))).toEqual(['youtube', 'instagram', 'linkedin']);
+    // A clip still rendering is a video post.
+    const [rendering] = calendarItems([draft({ targetPlatforms: all, rendering: true })], []);
+    expect(itemPlatforms(postable(rendering, ['youtube', 'x']))).toEqual(['youtube']);
+  });
+  it('leaves queued posts and already-narrow drafts as they are', () => {
+    const [post] = calendarItems([], groupRows([row({ platform: 'x' })]));
+    expect(postable(post, [])).toBe(post);
+    const [d] = calendarItems([draft({ targetPlatforms: ['linkedin'] })], []);
+    expect(postable(d, ['linkedin'])).toBe(d);
   });
 });

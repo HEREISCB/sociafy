@@ -1,9 +1,9 @@
 import { and, asc, eq, gte, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
 import { db } from '../db';
-import { agentSettings, drafts, scheduledPosts, activityLog, type DraftMedia, type DraftVariant, type Platform } from '../db/schema';
+import { agentSettings, connectedAccounts, drafts, scheduledPosts, activityLog, type DraftMedia, type DraftVariant, type Platform } from '../db/schema';
 import { nextFreeSlot } from '../schedule/slots';
 import { autoPlace, similarKey, DEFAULT_PER_DAY } from '../schedule/autoPlace';
-import { postKind } from '../platforms/capabilities';
+import { postKind, supportsKind } from '../platforms/capabilities';
 import { PLATFORM_LIMITS } from '../ai/compose';
 import { getBalance } from '../credits/ledger';
 import { draftCost } from '../credits/estimator';
@@ -196,8 +196,13 @@ export async function approveDrafts(
   // undated ones go last.
   const ordered = rows.sort((a, b) => (wanted(a)?.getTime() ?? Infinity) - (wanted(b)?.getTime() ?? Infinity));
 
+  // Too long only counts where it would post: a platform with no account, or that can't take
+  // this kind of post, is left out by queueDraft anyway (and Home doesn't show it).
+  const have = new Set((await db().select({ platform: connectedAccounts.platform }).from(connectedAccounts).where(eq(connectedAccounts.userId, userId))).map((a) => a.platform));
+  const goesTo = (d: Draft, p: Platform) => have.has(p) && supportsKind(p, d.videoJobId ? 'video' : postKind(d.media as DraftMedia[] | null));
+
   for (let d of ordered) {
-    const long = tooLong(d);
+    const long = tooLong(d).filter((p) => goesTo(d, p));
     if (long.length) { out.skipped.push({ draftId: d.id, reason: 'too_long', platforms: long }); continue; }
     if (d.videoJobId) {
       const when = wanted(d);

@@ -97,8 +97,9 @@
 .pd i.x, .pd i.tiktok { background: var(--text); }
 .pd i.reddit { background: var(--rd); }
 .sd { display: grid; place-items: center; width: 10px; height: 10px; color: var(--ok-ink); }
-.row.is-review .sd::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
-.row.is-review.is-long .sd::before, .row.is-failed .sd::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--err); }
+/* To review: an empty ring (the tick fills it once approved). Colour only where it means something: red, or a render in progress. */
+.row.is-review .sd::before { content: ""; width: 8px; height: 8px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--text-3); }
+.row.is-review.is-long .sd::before, .row.is-failed .sd::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--err); box-shadow: none; }
 .row.is-review.is-rend .sd::before { background: none; box-shadow: inset 0 0 0 1.5px var(--accent); animation: home-pulse 1.1s ease-in-out infinite; }
 .row.is-canceled .sd::before { content: ""; width: 8px; height: 1.5px; border-radius: 2px; background: var(--text-3); }
 .sd .tick { width: 10px; height: 10px; }
@@ -141,11 +142,16 @@
   transition: color var(--dur-primary) var(--ease-primary);
 }
 .ptab .pglyph { width: 16px; height: 16px; flex-basis: 16px; }
-.ptab .c { font-family: var(--mono); font-size: 10.5px; font-weight: 400; color: var(--text-3); }
-.ptab .c.over { color: var(--err-ink); font-weight: 500; }
-.ptab .ed { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+.ptab .c { font-family: var(--mono); font-size: 10.5px; font-weight: 500; color: var(--err-ink); }
 .ptab .wn { display: grid; color: var(--warn-ink); }
 .ptab[aria-selected="true"] { color: var(--text); }
+/* Connected but needs reconnecting: still a tab (its text is real), muted, with its warning. */
+.ptab.is-gone { color: var(--text-3); }
+.ptab.is-gone[aria-selected="true"] { color: var(--text-2); }
+.ptab.is-gone .pglyph { opacity: .45; }
+@media (hover: hover) and (pointer: fine) { .ptab:not([aria-selected="true"]):hover { color: var(--text); } }
+/* .tabs scrolls sideways, which clips a ring drawn outside the tab to a lone bar on its right edge: draw it inside. */
+.ptab:focus-visible { outline-offset: -2px; border-radius: 8px; }
 .ptab::after { content: ""; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2px; border-radius: 2px; background: var(--text); transform: scaleX(0); transition: transform var(--dur-transition) var(--ease-transition); }
 .ptab[aria-selected="true"]::after { transform: none; }
 .same {
@@ -160,7 +166,7 @@
 .same:disabled { opacity: .5; cursor: not-allowed; }
 .same .short { display: none; }
 @container rv (max-width: 560px) {
-  .ptab:not([aria-selected="true"]) .nm, .ptab:not([aria-selected="true"]) .c:not(.over) { display: none; }
+  .ptab:not([aria-selected="true"]) .nm { display: none; }
   .same .long, .rv-kind span { display: none; }
   .same .short { display: inline; }
 }

@@ -178,6 +178,15 @@ describe('approve', () => {
     expect(posts()).toEqual([]);
   });
 
+  it('ignores the limit of a platform the post would not go to (no account, or wrong kind)', async () => {
+    // X has no account here; YouTube can't take a text post. LinkedIn takes it.
+    state.accounts = [{ id: 'acc-li', platform: 'linkedin' }, { id: 'acc-yt', platform: 'youtube' }];
+    state.drafts = [draft('d-1', { body: 'x'.repeat(281), variants: [], targetPlatforms: ['x', 'youtube', 'linkedin'], plannedAt: new Date(NOW.getTime() + DAY) })];
+    const res = await approveDrafts('u1', { all: true }, NOW);
+    expect(res.skipped).toEqual([]);
+    expect(posts().map((p) => p.platform)).toEqual(['linkedin']);
+  });
+
   it('a double-click queues the post once', async () => {
     state.drafts = [draft('d-1', { plannedAt: new Date(NOW.getTime() + DAY) })];
     await approveDrafts('u1', { all: true }, NOW);

@@ -66,7 +66,6 @@ export function ReviewPanel(props: Props) {
   const text = (tab ? texts[tab] : draft?.body) ?? '';
   const limit = tab ? limits[tab] : undefined;
   const over = (p: Platform) => (texts[p] ?? '').length > (limits[p] ?? Infinity);
-  const edited = (p: Platform) => !!draft?.machine && texts[p] !== (draft.machine.perPlatform[p] ?? draft.machine.text);
   const sameWhy = !editable ? 'Approved posts are locked' : platforms.length < 2 ? 'Only one platform' : undefined;
   const a = tab ? authorFor(tab) : undefined;
   const when = item.at && !passed ? slotLabel(item.at, today) : 'next free slot';
@@ -118,16 +117,20 @@ export function ReviewPanel(props: Props) {
 
       <div className="ptabs">
         <div className="tabs" role="tablist" aria-label="What each platform posts">
-          {platforms.map((p) => (
-            <button key={p} type="button" role="tab" className="ptab" aria-selected={p === tab} onClick={() => onTab(p)}>
-              <Pglyph p={PLATFORM_TO_SHORT[p]} />
-              <span className="nm">{label(p)}</span>
-              {gone.includes(p) && <span className="wn" title={`${label(p)} needs reconnecting`}><Icon name="alert" size={12} /></span>}
-              {edited(p) && <span className="ed" title="Edited by you" />}
-              <span className={`c tnum${over(p) ? ' over' : ''}`}>{n((texts[p] ?? '').length)}</span>
-            </button>
-          ))}
-          {!platforms.length && <span className="rv-note">No platforms. Open in Compose to pick some.</span>}
+          {/* A tab carries a mark only when it means something: needs reconnecting, or over the limit (by how much). */}
+          {platforms.map((p) => {
+            const why = gone.includes(p) ? 'needs reconnecting' : over(p) ? `${n((texts[p] ?? '').length - limits[p])} characters over the limit` : undefined;
+            return (
+              <button key={p} type="button" role="tab" className={`ptab${gone.includes(p) ? ' is-gone' : ''}`} aria-selected={p === tab}
+                aria-label={why ? `${label(p)}: ${why}` : label(p)} title={why && `${label(p)}: ${why}`} onClick={() => onTab(p)}>
+                <Pglyph p={PLATFORM_TO_SHORT[p]} />
+                <span className="nm">{label(p)}</span>
+                {gone.includes(p) && <span className="wn"><Icon name="alert" size={12} /></span>}
+                {over(p) && <span className="c over tnum">{n((texts[p] ?? '').length - limits[p])} over</span>}
+              </button>
+            );
+          })}
+          {!platforms.length && <span className="rv-note">No connected account takes this post. Open in Compose to change it.</span>}
         </div>
         <button type="button" className="same" role="switch" aria-checked={same} disabled={!!sameWhy} title={sameWhy} onClick={onSame}>
           <span className="sw" aria-hidden="true" /><span className="long">Same text everywhere</span><span className="short">Same text</span>
@@ -172,7 +175,7 @@ export function ReviewPanel(props: Props) {
         </article>
 
         <div className="rv-aside">
-          <div><p className="k">Goes to</p><p>{platforms.length ? platforms.map(label).join(', ') : '—'}</p></div>
+          <div><p className="k">Goes to</p><p>{platforms.length ? platforms.map((p) => (gone.includes(p) ? `${label(p)} (after you reconnect)` : label(p))).join(', ') : '—'}</p></div>
           {draft?.rationale && (
             <details>
               <summary>Why this {draft.score != null && <span className="score tnum">{draft.score}</span>}<Icon name="chevron_down" size={12} /></summary>
