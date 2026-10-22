@@ -22,6 +22,13 @@ const KEYWORDS: Record<string, string[]> = {
   fintech: ['fintech', 'embedded finance', 'payments', 'stablecoin'],
   media: ['podcast', 'video editing', 'vertical video', 'media business'],
   community: ['community building', 'discord moderation', 'cohort course'],
+  // Small-business starters (lib/agent/topics.ts).
+  'food-drink': ['restaurant', 'cafe', 'coffee', 'food trends'],
+  'local-business': ['small business', 'local business', 'shop local'],
+  retail: ['retail', 'ecommerce', 'd2c brand'],
+  'health-fitness': ['fitness', 'wellness', 'nutrition'],
+  education: ['education', 'edtech', 'online learning'],
+  travel: ['travel', 'tourism', 'hospitality'],
 };
 
 // Reddit subs per niche — for richer signal. Always paired with our HN + dev.to layer.
@@ -35,6 +42,12 @@ const REDDIT_SUBS: Record<string, string[]> = {
   fintech: ['fintech', 'CryptoCurrency'],
   media: ['videography', 'podcasting'],
   community: ['CommunityManager', 'discordapp'],
+  'food-drink': ['food', 'Cooking', 'Coffee'],
+  'local-business': ['smallbusiness'],
+  retail: ['ecommerce', 'retail'],
+  'health-fitness': ['Fitness', 'nutrition'],
+  education: ['education', 'Teachers'],
+  travel: ['travel'],
 };
 
 const UA = 'sociafy/0.1 (+https://sociafy.app; trend-ingest)';

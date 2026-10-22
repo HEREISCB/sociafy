@@ -1,4 +1,4 @@
-/* Connections list (shared by onboarding + Settings → Connections) and onboarding. */
+/* Connections list (shared by onboarding + Settings → Connections). Onboarding's own layout is in agent.css. */
 
 /* ---------- Connections list ---------- */
 
@@ -79,76 +79,7 @@
 .conn-support { margin: var(--s-6) 0 0; font-size: var(--fs-xs); color: var(--text-2); }
 .conn-support a { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
 
-/* ---------- Onboarding ---------- */
-.onboard { min-height: 100vh; background: var(--bg); }
-.onboard-inner {
-  max-width: 600px;
-  margin: 0 auto;
-  padding: var(--s-16) var(--s-6) var(--s-12);
-}
-.onboard-brand { padding: 0; margin-bottom: var(--s-12); }
-
-.onboard-steps {
-  display: flex;
-  gap: var(--s-6);
-  list-style: none;
-  margin: 0 0 var(--s-8);
-  padding: 0;
-  font-size: var(--fs-xs);
-  color: var(--text-3);
-}
-.onboard-steps li.is-done { color: var(--text-2); }
-.onboard-steps li.is-current { color: var(--text); font-weight: 600; }
-
-.onboard h1 {
-  margin: 0 0 var(--s-2);
-  font-size: var(--fs-xl);
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  line-height: 1.15;
-}
-.onboard .lede {
-  margin: 0 0 var(--s-8);
-  font-size: var(--fs-md);
-  color: var(--text-2);
-  line-height: 1.5;
-}
-.onboard-inner > .conn-banner { margin-top: var(--s-6); }
-
-.topic-chips { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-bottom: var(--s-4); }
-.topic-chip {
-  padding: 6px 14px;
-  border: 1px solid var(--line);
-  border-radius: var(--r-pill);
-  background: var(--surface);
-  font-size: var(--fs-sm);
-  color: var(--text);
-  cursor: pointer;
-  transition: background 0.12s, border-color 0.12s;
-}
-@media (hover: hover) and (pointer: fine) { .topic-chip:hover { border-color: var(--line-strong); } }
-.topic-chip[aria-pressed="true"] { background: var(--text); border-color: var(--text); color: var(--bg); }
-
-.onboard-field { margin-bottom: var(--s-6); }
-.onboard-label { display: block; margin-bottom: var(--s-2); font-size: var(--fs-sm); font-weight: 500; }
-.onboard-label span { font-weight: 400; color: var(--text-2); }
-
-.onboard-foot {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: var(--s-3);
-  margin-top: var(--s-8);
-  padding-top: var(--s-6);
-  border-top: 1px solid var(--line);
-}
-.onboard-skip { color: var(--text-2); }
-
 @media (max-width: 900px) {
-  .onboard-inner { padding: var(--s-8) var(--s-4) var(--s-12); }
-  .onboard-brand { margin-bottom: var(--s-8); }
-  .onboard h1 { font-size: var(--fs-lg); }
-  .onboard .lede { margin-bottom: var(--s-6); }
   .conn-row__main { padding: var(--s-3); }
   .conn-row__details { padding: 0 var(--s-3) var(--s-3); }
 }
