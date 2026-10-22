@@ -3,37 +3,38 @@ import { db } from '../db';
 import { agentSettings, drafts, scheduledPosts, connectedAccounts, activityLog, type Platform, type DraftMedia } from '../db/schema';
 import { nextPostingWindow } from '../schedule/windows';
 import { postKind, supportsKind, unsupportedReason } from '../platforms/capabilities';
+import { getAdapter } from '../platforms/registry';
+import { cantPost } from '../ui/health';
+import { postText } from './postText';
+
+export { postText };
 
 type Settings = typeof agentSettings.$inferSelect;
 type Draft = typeof drafts.$inferSelect;
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
-/**
- * The text a draft posts to `p`. Autopilot writes per-platform copy next to the
- * body (and snapshots it on variant A). Once the user edits the body, that
- * machine copy is stale: the edited body goes out — unless the user rewrote
- * this platform's copy too. Hand-made drafts (no snapshot) keep the old rule:
- * per-platform text if set, else the body.
- */
-export function postText(draft: Pick<Draft, 'body' | 'perPlatformText' | 'variants'>, p: Platform): string {
-  const own = draft.perPlatformText?.[p];
-  const machine = draft.variants?.[0]?.perPlatform;
-  if (!machine || !own) return own ?? draft.body;
-  const bodyEdited = draft.body !== draft.variants?.[0]?.text;
-  return bodyEdited && own === machine[p] ? draft.body : own;
-}
+/** Same verdict as the dashboard's "Reconnect" chip (lib/ui/health.ts), from the db row. */
+const disconnected = (a: typeof connectedAccounts.$inferSelect) =>
+  cantPost({
+    isStub: a.isStub,
+    tokenExpiresAt: a.tokenExpiresAt ? new Date(a.tokenExpiresAt).toISOString() : null,
+    autoRefresh: !!getAdapter(a.platform as Platform).refresh && a.refreshToken !== null && !a.isStub,
+    lastRefreshError: a.lastRefreshError,
+  }, Date.now());
 
 export type QueueResult = { queued: Platform[]; skipped: Platform[]; reasons: Record<string, string> };
 
 /**
  * Turn a draft into scheduled posts at `at` — one per target platform that has
  * an account and whose API takes this kind of post (the same checks as
- * POST /api/schedule). `caps` = autopilot's per-platform weekly limits, counted
+ * POST /api/schedule). `skipDisconnected` (the user's Approve) also leaves out
+ * accounts that need reconnecting: the cron would fail those posts for good at
+ * their slot (lib/cron/publish.ts) and never retries them after a reconnect. `caps` = autopilot's per-platform weekly limits, counted
  * over the 7 days up to `at`. Marks the draft scheduled only if something was
  * queued, and only if it was still a draft — a double-approve queues once.
  */
-export async function queueDraft(draft: Draft, at: Date, caps?: Partial<Record<Platform, number>>): Promise<QueueResult> {
+export async function queueDraft(draft: Draft, at: Date, caps?: Partial<Record<Platform, number>>, skipDisconnected = false): Promise<QueueResult> {
   const userId = draft.userId;
   const media = (draft.media ?? []) as DraftMedia[];
   const kind = postKind(media);
@@ -58,7 +59,9 @@ export async function queueDraft(draft: Draft, at: Date, caps?: Partial<Record<P
   const take: Platform[] = [];
   for (const p of (draft.targetPlatforms ?? []) as Platform[]) {
     const cap = caps?.[p];
-    if (!accountByPlatform.has(p)) reasons[p] = `No connected account for ${p}. Connect it first, then schedule.`;
+    const acct = accountByPlatform.get(p);
+    if (!acct) reasons[p] = `No connected account for ${p}. Connect it first, then schedule.`;
+    else if (skipDisconnected && disconnected(acct)) reasons[p] = 'disconnected';
     else if (!supportsKind(p, kind)) reasons[p] = unsupportedReason(p, kind);
     else if (typeof cap === 'number' && (used.get(p) ?? 0) >= cap) reasons[p] = `Autopilot's weekly limit for ${p} is reached.`;
     else take.push(p);

@@ -1,13 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import {
-  buckets, calendarItems, firstAtRisk, firstOfDay, groupRows, idOf, kindOf, textFor, tightestLimit, weekFiled, moveToDay, nextToReview, progress, statusLabel, toneOf, LATER, NO_TIME,
+  agenda, agendaOrder, asPostText, calendarItems, firstAtRisk, groupRows, idOf, kindOf, overLimit, restorePatch, sameText, soonestToReview, textsOf, textsPatch,
+  weekFiled, moveToDay, nextToReview, progress, statusLabel, toneOf,
   type ReviewItem, type ScheduledRow,
 } from '../../../../components/calendar/model';
+import { postText } from '../../../../lib/agent/postText';
+import type { Platform } from '../../../../lib/db/schema';
 
 const row = (o: Partial<ScheduledRow>): ScheduledRow => ({
   id: 'r', draftId: 'd1', accountId: 'a', platform: 'x', scheduledAt: '2026-11-01T09:00:00.000Z', status: 'pending', text: 'hi', ...o,
 });
-const draft = (o: Partial<ReviewItem>) => ({ id: 'd', title: null, body: 'b', perPlatformText: {}, targetPlatforms: ['x'], media: [], plannedAt: null, overdue: false, rendering: false, approved: false, tooLong: [], score: null, rationale: null, source: 'agent', createdAt: '', ...o }) as ReviewItem;
+const draft = (o: Partial<ReviewItem>) => ({ id: 'd', title: null, body: 'b', perPlatformText: {}, machine: null, texts: {}, targetPlatforms: ['x'], media: [], plannedAt: null, overdue: false, rendering: false, approved: false, tooLong: [], score: null, rationale: null, source: 'agent', createdAt: '', ...o }) as ReviewItem;
 const at = (day: number, h = 9) => new Date(2026, 10, day, h).toISOString();
 
 describe('calendar groupRows', () => {
@@ -59,23 +62,38 @@ describe('home model', () => {
     expect([v, i, t, r].map(kindOf)).toEqual(['video', 'image', 'text', 'video']);
   });
 
-  it('buckets the week: needs-a-time (untimed or a past day), 7 days, later; with topic and review counts', () => {
+  it('agenda: needs-a-time (untimed, a past day, or passed today), the 7 days kept even when empty, then later', () => {
+    const now = new Date(2026, 10, 1, 12).getTime();
     const items = calendarItems([
       draft({ id: 'u' }),
       draft({ id: 'past', plannedAt: at(0 /* Oct 31 */) }),
-      draft({ id: 'a', plannedAt: at(1), title: 'Launch day' }),
-      draft({ id: 'b', plannedAt: at(1, 15), approved: true }),
+      draft({ id: 'passedToday', plannedAt: at(1, 9) }),
+      draft({ id: 'a', plannedAt: at(1, 15), title: 'Launch day' }),
+      draft({ id: 'rend', plannedAt: at(1, 8), approved: true, rendering: true }),
       draft({ id: 'far', plannedAt: at(9) }),
     ], groupRows([row({ draftId: 'p', scheduledAt: at(3) })]));
-    const bs = buckets(items, today);
-    expect(bs.map((b) => b.key)).toEqual([NO_TIME, '2026-11-01', '2026-11-02', '2026-11-03', '2026-11-04', '2026-11-05', '2026-11-06', '2026-11-07', LATER]);
-    expect(bs[0].items.map(idOf)).toEqual(['u', 'past']);
-    expect(bs[1]).toMatchObject({ topic: 'Launch day', toReview: 1 });
-    expect(bs[1].items).toHaveLength(2);
-    expect(bs[3]).toMatchObject({ topic: null, toReview: 0 });
-    expect(bs[8].items.map(idOf)).toEqual(['far']);
-    // Empty edge buckets drop out; the 7 days always stay.
-    expect(buckets([], today)).toHaveLength(7);
+    const ag = agenda(items, today, now);
+    expect(ag.need.map(idOf)).toEqual(['u', 'past', 'passedToday']);
+    // An approved-while-rendering draft isn't waiting on the user, so it stays on its day.
+    expect(ag.days[0].items.map(idOf)).toEqual(['rend', 'a']);
+    expect(ag.days[2].items.map(idOf)).toEqual(['p']);
+    expect(ag.later.map(idOf)).toEqual(['far']);
+    expect(ag.days).toHaveLength(7);
+    expect(agenda([], today, now).days.every((d) => d.items.length === 0)).toBe(true);
+    expect(agendaOrder(ag).map(idOf)).toEqual(['u', 'past', 'passedToday', 'rend', 'a', 'p', 'far']);
+  });
+
+  it('opens on the soonest timed post to review, not the needs-a-time pile', () => {
+    const now = new Date(2026, 10, 1, 12).getTime();
+    const items = calendarItems([
+      draft({ id: 'u' }),
+      draft({ id: 'ok', plannedAt: at(1, 13), approved: true, rendering: true }),
+      draft({ id: 'b', plannedAt: at(2, 9) }),
+      draft({ id: 'a', plannedAt: at(1, 18) }),
+    ], []);
+    expect(idOf(soonestToReview(agenda(items, today, now))!)).toBe('a');
+    expect(idOf(soonestToReview(agenda(calendarItems([draft({ id: 'u' })], []), today, now))!)).toBe('u');
+    expect(soonestToReview(agenda([], today, now))).toBeNull();
   });
 
   it('counts progress over everything but canceled posts', () => {
@@ -106,13 +124,6 @@ describe('home model', () => {
     expect(moveToDay({ kind: 'draft', key: 'x', at: null, draft: draft({}) }, day)).toEqual(new Date(2026, 10, 5, 10, 0));
   });
 
-  it('a day click lands on its first post to review, else its first post; empty day → null', () => {
-    const items = calendarItems([draft({ id: 'a', plannedAt: at(1, 9), approved: true, rendering: true }), draft({ id: 'b', plannedAt: at(1, 12) })], []);
-    const [day] = buckets(items, today);
-    expect(idOf(firstOfDay(day)!)).toBe('b');
-    expect(firstOfDay(buckets([], today)[0])).toBeNull();
-  });
-
   it('the week is filed only when nothing waits on review and nothing failed', () => {
     expect(weekFiled([])).toBe(false);
     expect(weekFiled(calendarItems([], groupRows([row({})])))).toBe(true);
@@ -120,18 +131,63 @@ describe('home model', () => {
     expect(weekFiled(calendarItems([], groupRows([row({ status: 'failed' })])))).toBe(false);
   });
 
-  it('counts the caption against the tightest platform', () => {
-    expect(tightestLimit(['instagram', 'x'], { instagram: 2200, x: 280 } as never)).toEqual({ platform: 'x', limit: 280 });
-    expect(tightestLimit([], {} as never)).toBeNull();
+  it('per-platform text: what each tab shows is postText, the publisher’s rule', () => {
+    const machine = { text: 'orig body', perPlatform: { linkedin: 'li machine', facebook: 'fb machine' } };
+    const d = draft({ body: 'orig body', perPlatformText: { linkedin: 'li machine', facebook: 'fb machine' }, machine, targetPlatforms: ['linkedin', 'facebook'] });
+    const [it] = calendarItems([d], []);
+    expect(textsOf(it)).toEqual({ linkedin: 'li machine', facebook: 'fb machine' });
+    // The body was edited elsewhere (Compose): stale machine copy gives way to the body.
+    const [edited] = calendarItems([{ ...d, body: 'new body' }], []);
+    expect(textsOf(edited)).toEqual({ linkedin: 'new body', facebook: 'new body' });
+    const [p] = calendarItems([], groupRows([row({ text: 'on x' }), row({ id: '2', platform: 'linkedin', text: 'on li' })]));
+    expect(textsOf(p)).toEqual({ x: 'on x', linkedin: 'on li' });
   });
 
-  it('previews each platform\'s own copy until the caption is edited here', () => {
-    const [d] = calendarItems([draft({ body: 'b', texts: { x: 'x copy' } })], []);
-    expect(textFor(d, 'x', 'b')).toBe('x copy');
-    expect(textFor(d, 'linkedin', 'b')).toBe('b');
-    expect(textFor(d, 'x', 'edited')).toBe('edited');
-    const [p] = calendarItems([], groupRows([row({ text: 'on x' }), row({ id: '2', platform: 'linkedin', text: 'on li' })]));
-    expect(textFor(p, 'linkedin', '')).toBe('on li');
+  const PL: Platform[] = ['linkedin', 'facebook'];
+  const machine = { text: 'orig body', perPlatform: { linkedin: 'li machine', facebook: 'fb machine', youtube: 'yt machine' } };
+  const base = draft({ body: 'orig body', perPlatformText: { ...machine.perPlatform }, machine, targetPlatforms: PL });
+  const posts = (d: ReviewItem, patch: object) => Object.fromEntries(PL.map((p) => [p, postText({ ...asPostText(d), ...patch }, p)]));
+
+  it('saving typed texts: every platform posts exactly what was typed, body edited or not', () => {
+    const typed = { linkedin: 'my li', facebook: 'fb machine' };
+    expect(posts(base, textsPatch(base, typed, PL, false))).toEqual(typed);
+    const bodyEdited = { ...base, body: 'edited body' };
+    expect(posts(bodyEdited, textsPatch(bodyEdited, { linkedin: 'my li', facebook: 'my fb' }, PL, false))).toEqual({ linkedin: 'my li', facebook: 'my fb' });
+    // A hand-made draft (no snapshot) too.
+    const hand = draft({ body: 'b', targetPlatforms: PL });
+    expect(posts(hand, textsPatch(hand, { linkedin: 'one', facebook: 'two' }, PL, false))).toEqual({ linkedin: 'one', facebook: 'two' });
+  });
+
+  it('saving keeps per-platform copy for platforms the draft doesn\'t target', () => {
+    expect(textsPatch(base, { linkedin: 'x', facebook: 'y' }, PL, false).perPlatformText.youtube).toBe('yt machine');
+  });
+
+  it('same text everywhere: the body, posted on every platform', () => {
+    const patch = textsPatch(base, { linkedin: 'shared', facebook: 'shared' }, PL, true);
+    expect(patch).toEqual({ body: 'shared', perPlatformText: {} });
+    expect(posts(base, patch)).toEqual({ linkedin: 'shared', facebook: 'shared' });
+  });
+
+  it('edge: retyping Autopilot\'s exact copy after the body was edited posts the body (postText), and the tab then shows that', () => {
+    const bodyEdited = { ...base, body: 'edited body' };
+    const patch = textsPatch(bodyEdited, { linkedin: 'li machine', facebook: 'mine' }, PL, false);
+    expect(posts(bodyEdited, patch)).toEqual({ linkedin: 'edited body', facebook: 'mine' });
+    const [after] = calendarItems([{ ...bodyEdited, ...patch }], []);
+    expect(textsOf(after).linkedin).toBe('edited body');
+  });
+
+  it('restoring Autopilot\'s versions posts the machine copy again', () => {
+    const same = { ...base, ...textsPatch(base, { linkedin: 'shared', facebook: 'shared' }, PL, true) };
+    const r = restorePatch(same)!;
+    expect(posts(same, r)).toEqual({ linkedin: 'li machine', facebook: 'fb machine' });
+    expect(restorePatch(draft({}))).toBeNull();
+  });
+
+  it('same-text and over-limit checks', () => {
+    expect(sameText({ linkedin: 'a', facebook: 'a' }, PL)).toBe(true);
+    expect(sameText({ linkedin: 'a', facebook: 'b' }, PL)).toBe(false);
+    expect(sameText({ linkedin: 'a' }, ['linkedin'])).toBe(true);
+    expect(overLimit({ x: 'x'.repeat(281), linkedin: 'ok' }, ['x', 'linkedin'], { x: 280, linkedin: 3000 })).toEqual(['x']);
   });
 
   it('names the first upcoming post on a disconnected platform', () => {

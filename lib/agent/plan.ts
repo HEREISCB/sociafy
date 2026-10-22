@@ -8,7 +8,8 @@ import { PLATFORM_LIMITS } from '../ai/compose';
 import { getBalance } from '../credits/ledger';
 import { draftCost } from '../credits/estimator';
 import { weeklyTarget } from './status';
-import { queueDraft, postText } from './publish';
+import { queueDraft } from './publish';
+import { postText } from './postText';
 
 type Draft = typeof drafts.$inferSelect;
 type QuietHours = (typeof agentSettings.$inferSelect)['quietHours'];
@@ -100,6 +101,8 @@ export async function getPlan(userId: string, now = new Date(), days?: 7 | 30) {
       title: d.title,
       body: d.body,
       perPlatformText: d.perPlatformText ?? {},
+      /** Autopilot's original copy (variant A), read-only: lets the client run postText itself and restore these versions. */
+      machine: d.variants?.[0]?.perPlatform ? { text: d.variants[0].text, perPlatform: d.variants[0].perPlatform } : null,
       /** What each target platform would post right now (postText): the preview's tabs. */
       texts: Object.fromEntries(((d.targetPlatforms ?? []) as Platform[]).map((p) => [p, postText(d, p)])) as Partial<Record<Platform, string>>,
       targetPlatforms: d.targetPlatforms,
@@ -217,7 +220,7 @@ export async function approveDrafts(
     let at = wanted(d);
     const reslotted = !at || at.getTime() < now.getTime() + SOON_MS;
     if (reslotted) at = nextFreeSlot(now, s?.quietHours, taken);
-    const r = await queueDraft(d, at!);
+    const r = await queueDraft(d, at!, undefined, true);
     if (r.queued.length === 0) {
       out.skipped.push({ draftId: d.id, reason: r.reasons.draft ?? 'no_platforms', reasons: r.reasons });
       continue;
@@ -246,7 +249,7 @@ export async function queueApprovedRender(draft: Draft, quiet: QuietHours | unde
     .where(and(eq(scheduledPosts.userId, draft.userId), eq(scheduledPosts.status, 'pending'), gte(scheduledPosts.scheduledAt, now)));
   const planned = draft.plannedAt ? new Date(draft.plannedAt) : null;
   const at = planned && planned.getTime() >= now.getTime() + SOON_MS ? planned : nextFreeSlot(now, quiet, pending.map((p) => new Date(p.at)));
-  const r = await queueDraft(draft, at);
+  const r = await queueDraft(draft, at, undefined, true);
   if (r.queued.length) {
     await db().insert(activityLog).values({
       userId: draft.userId,

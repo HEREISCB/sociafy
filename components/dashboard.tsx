@@ -2,27 +2,26 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { useSWRConfig } from 'swr';
 import { addDays, addHours, addMinutes, format, isSameMonth, startOfDay, startOfHour } from 'date-fns';
 import { Icon } from './icons';
 import { apiDelete, apiPatch, apiPost, fetcher, friendlyApiError, useApi } from '../lib/ui/fetcher';
-import { healthFor, type HealthAccount } from '../lib/ui/health';
+import { cantPost, type HealthAccount } from '../lib/ui/health';
 import { PLATFORM_LABELS } from '../lib/ui/platforms';
 import type { PlanView } from '../lib/agent/plan';
 import type { Platform } from '../lib/db/schema';
 import {
-  KIND_LABEL, LATER, NO_TIME, buckets, calendarItems, dayKey, firstAtRisk, firstOfDay, fmtSlot, groupRows, idOf, isVideo, itemMedia, itemPlatforms,
-  itemText, kindOf, movable, moveToDay, nextToReview, progress, restorable, skipMessage, statusLabel, toReview, toneOf, weekFiled,
-  type Bucket, type CalItem, type ScheduledRow, type Skipped,
+  agenda, agendaOrder, calendarItems, dayKey, firstAtRisk, fmtSlot, groupRows, idOf, itemPlatforms, moveToDay, needsTime, nextToReview,
+  overLimit, progress, restorable, restorePatch, sameText, skipMessage, soonestToReview, statusLabel, textsOf, textsPatch, toReview, toneOf, weekFiled,
+  type CalItem, type ScheduledRow, type Skipped, type TextsPatch,
 } from './calendar/model';
-import { Glyphs } from './calendar/glyphs';
-import { ThumbImg } from './thumb-img';
-import { seekToPoster } from '../lib/media/motionSeek';
-import { ReviewPanel, Tick, type Author, type PostAction } from './calendar/review';
+import { ReviewPanel, Tick, slotLabel, type Author, type PostAction } from './calendar/review';
+import { Agenda, type DropProps } from './calendar/agenda';
 import { Button, Empty, PinBar, Skeleton as Skel, useToast } from './ui';
 
 type Account = HealthAccount & Author & { id: string; platform: Platform };
-type Approved = { draftId: string; scheduledAt: string | null; reslotted: boolean; rendering?: true };
+type Approved = { draftId: string; scheduledAt: string | null; platforms: Platform[]; reslotted: boolean; rendering?: true };
 type Unapproved = { restored: string[]; skipped: { draftId: string; reason: string }[] };
 
 /** generate's 409 reasons (lib/agent/run.ts) → the one place that fixes each. */
@@ -40,7 +39,9 @@ const SOON_MS = 5 * 60_000;
 /** Wall clock for event handlers (the render path uses the ticking `now`). */
 const clock = () => Date.now();
 const reduced = () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-const plats = (ps: Platform[]) => ps.map((p) => PLATFORM_LABELS[p] ?? p).join(', ');
+const label = (p: Platform) => PLATFORM_LABELS[p] ?? p;
+const plats = (ps: Platform[]) => ps.map(label).join(', ');
+const isPhone = () => window.matchMedia('(max-width: 900px)').matches;
 const typing = (t: EventTarget | null) => t instanceof Element && !!t.closest('input, textarea, select, [contenteditable]');
 /** Compose opens on that day at 10 AM (it ignores a time already gone). */
 const composeFor = (day: Date | null) => (day ? `/compose?slot=${encodeURIComponent(new Date(day.getFullYear(), day.getMonth(), day.getDate(), 10).toISOString())}` : '/compose');
@@ -77,29 +78,16 @@ function useCountUp(to: number) {
   return shown;
 }
 
-/** The approved card files itself into its day tile (a ghost flies and shrinks away). Skipped when the tile is scrolled out of view. */
-function fileAway(id: string, day: string) {
-  if (reduced()) return;
-  const card = document.querySelector(`[data-post="${CSS.escape(id)}"]`);
-  const tile = document.querySelector(`[data-day="${CSS.escape(day)}"]`);
-  const strip = tile?.parentElement;
-  if (!card || !tile || !strip) return;
-  const a = card.getBoundingClientRect(), b = tile.getBoundingClientRect(), s = strip.getBoundingClientRect();
-  if (b.left < s.left - 1 || b.right > s.right + 1) return;
-  const g = document.createElement('div');
-  g.className = 'home-ghost';
-  Object.assign(g.style, { left: `${a.left}px`, top: `${a.top}px`, width: `${a.width}px`, height: `${a.height}px` });
-  document.body.appendChild(g);
-  const dx = b.left + b.width / 2 - (a.left + a.width / 2), dy = b.top + b.height / 2 - (a.top + a.height / 2);
-  g.animate([{ transform: 'none', opacity: 0.9 }, { transform: `translate(${dx}px, ${dy}px) scale(.25)`, opacity: 0 }],
-    { duration: 420, easing: 'cubic-bezier(.65,0,.35,1)' }).onfinish = () => g.remove();
-}
-
-type Flash = { ids: string[]; days: string[] };
+type DraftItem = Extract<CalItem, { kind: 'draft' }>;
+/** Text typed into the post, not saved yet: what each target platform would post. */
+type Edit = { id: string; texts: Partial<Record<Platform, string>> };
 
 export default function Dashboard() {
   const now = useNow(60_000);
   const today = useMemo(() => (now ? startOfDay(new Date(now)) : null), [now]);
+  const params = useSearchParams();
+  /** Phone only: ?post=<id> is the review screen (pushState, so the back gesture returns to the list). */
+  const urlPost = params.get('post');
 
   const planKey = '/api/plan?days=7';
   // Poll while a plan run drafts (4 s) or a clip renders (10 s); otherwise sit still.
@@ -131,13 +119,13 @@ export default function Dashboard() {
   const [acted, setActed] = useState<Map<string, 'approved' | 'skipped'>>(new Map());
   const act = (ids: string[], v: 'approved' | 'skipped' | null) =>
     setActed((m) => { const n = new Map(m); for (const id of ids) { if (v) n.set(id, v); else n.delete(id); } return n; });
-  /** Just approved: the card's tick draws, its day tile gets a brief wash. */
-  const [flash, setFlash] = useState<Flash>({ ids: [], days: [] });
+  /** Just approved: the row's tick draws. */
+  const [just, setJust] = useState<string[]>([]);
   useEffect(() => {
-    if (!flash.ids.length && !flash.days.length) return;
-    const t = setTimeout(() => setFlash({ ids: [], days: [] }), 1200);
+    if (!just.length) return;
+    const t = setTimeout(() => setJust([]), 1200);
     return () => clearTimeout(t);
-  }, [flash]);
+  }, [just]);
 
   const items = useMemo(() => {
     const review = (plan?.review ?? [])
@@ -145,23 +133,11 @@ export default function Dashboard() {
       .map((d) => (acted.get(d.id) === 'approved' ? { ...d, approved: true } : d));
     return calendarItems(review, groupRows(schedApi.data ?? []));
   }, [plan, schedApi.data, acted]);
-  const strip = useMemo(() => (today ? buckets(items, today) : []), [items, today]);
-  const order = useMemo(() => strip.flatMap((b) => b.items), [strip]);
+  const ag = useMemo(() => (today ? agenda(items, today, now) : null), [items, today, now]);
+  const order = useMemo(() => (ag ? agendaOrder(ag) : []), [ag]);
   const generating = !!plan?.generating;
 
-  // While a plan run drafts, a day tile develops the moment its first draft lands.
-  const [devDays, setDevDays] = useState<string[]>([]);
-  const seen = useRef<Map<string, number> | null>(null);
-  useEffect(() => {
-    const was = seen.current;
-    seen.current = new Map(strip.map((b) => [b.key, b.items.length]));
-    const fresh = was && generating ? strip.filter((b) => b.items.length && !was.get(b.key)).map((b) => b.key) : [];
-    if (!fresh.length) return;
-    setDevDays(fresh);
-    setTimeout(() => setDevDays([]), 1000);
-  }, [strip, generating]);
-
-  // A clip that was rendering has landed (the 10 s poll): its frame and thumb develop in.
+  // A clip that was rendering has landed (the 10 s poll): its frame develops in.
   const [developed, setDeveloped] = useState<string[]>([]);
   const renderingIds = useRef<Set<string> | null>(null);
   useEffect(() => {
@@ -177,46 +153,68 @@ export default function Dashboard() {
 
   const [selId, setSelId] = useState<string | null>(null);
   const [dir, setDir] = useState(0);
-  /** A day tile picked that has no posts: show it empty. */
-  const [dayPick, setDayPick] = useState<string | null>(null);
   /** "Look over a post" from the filed state (any explicit pick does the same). */
   const [lookOver, setLookOver] = useState(false);
-  // Default: the first post to review on a day ("No time yet" waits its turn).
-  const sel = order.find((i) => idOf(i) === selId)
-    ?? strip.filter((b) => b.day).flatMap((b) => b.items).find(toReview) ?? order.find(toReview) ?? order[0] ?? null;
+  /** null until the user opens or closes it: then it follows whether the selection needs a time. */
+  const [needOpen, setNeedOpen] = useState<boolean | null>(null);
+  const pushed = useRef(false);
+  const want = urlPost ?? selId;
+  // Default: the soonest timed post still to review (it goes out first); the needs-a-time pile waits.
+  const sel = order.find((i) => idOf(i) === want) ?? (ag ? soonestToReview(ag) : null);
   const selIndex = sel ? order.indexOf(sel) : -1;
-  const shownKey = dayPick ?? strip.find((b) => sel && b.items.includes(sel))?.key ?? strip.find((b) => b.day)?.key ?? null;
-  const shown = strip.find((b) => b.key === shownKey) ?? null;
   const filed = weekFiled(items) && !lookOver;
 
-  /** The caption as typed; Home owns it so the decision bar approves exactly what's in the box. */
-  const [edit, setEdit] = useState<{ id: string; body: string } | null>(null);
+  // ---- the text, per platform ----
+  const [edit, setEdit] = useState<Edit | null>(null);
+  const editRef = useRef<Edit | null>(null);
+  useEffect(() => { editRef.current = edit; }, [edit]);
+  /** Same text everywhere: an explicit on/off per draft, else whether its platforms already share one text. */
+  const [modes, setModes] = useState<Record<string, boolean>>({});
+  const [tab, setTab] = useState<{ id: string; p: Platform } | null>(null);
   const capRef = useRef<HTMLTextAreaElement>(null);
-  const bodyOf = (it: CalItem) => (edit?.id === idOf(it) ? edit.body : itemText(it));
-  const body = sel ? bodyOf(sel) : '';
-  const overOf = (it: CalItem, b: string) =>
-    it.kind !== 'draft' || it.draft.approved ? [] : b !== it.draft.body ? itemPlatforms(it).filter((p) => b.length > (plan?.limits[p] ?? Infinity)) : it.draft.tooLong;
-  const over = sel ? overOf(sel, body) : [];
+  const shownTexts = (it: CalItem) => (edit?.id === idOf(it) ? edit.texts : textsOf(it));
+  const sameOf = (it: CalItem) => modes[idOf(it)] ?? sameText(textsOf(it), itemPlatforms(it));
+  const overOf = (it: CalItem) => (toReview(it) ? overLimit(shownTexts(it), itemPlatforms(it), plan?.limits ?? {}) : []);
 
-  const select = (it: CalItem, d?: number) => {
+  const unhealthy = now ? (accounts ?? []).filter((a) => cantPost(a, now)) : [];
+  const gone = [...new Set(unhealthy.map((a) => a.platform))];
+  const liveOf = (it: CalItem) => itemPlatforms(it).filter((p) => !gone.includes(p));
+
+  const show = (it: CalItem, d?: number) => {
+    const id = idOf(it);
     setDir(d ?? (order.indexOf(it) >= selIndex ? 1 : -1));
-    setSelId(idOf(it));
-    setDayPick(null);
+    setSelId(id);
     setLookOver(true);
+    if (ag?.need.includes(it)) setNeedOpen(true);
+    // Desktop selection leaves the URL alone; the phone's review screen is a history entry.
+    if (urlPost) window.history.replaceState(null, '', `?post=${id}`);
+    else if (isPhone()) { pushed.current = true; window.history.pushState(null, '', `?post=${id}`); }
   };
-  const step = (n: 1 | -1) => { if (order.length) select(order[(selIndex + n + order.length) % order.length], n); };
+  const step = (n: 1 | -1) => { if (order.length) show(order[(selIndex + n + order.length) % order.length], n); };
+  const back = () => {
+    if (pushed.current) { pushed.current = false; window.history.back(); }
+    else window.history.replaceState(null, '', window.location.pathname);
+  };
   const advance = (next: CalItem | null) => {
-    if (next) setTimeout(() => select(next, 1), reduced() ? 0 : 340);
-    else setLookOver(false); // nothing left: the week is filed
+    if (next) setTimeout(() => show(next, 1), reduced() ? 0 : 340);
+    else { setLookOver(false); if (urlPost) back(); } // nothing left: the week is filed
   };
-  const pickDay = (b: Bucket) => { const f = firstOfDay(b); if (f) select(f); else { setDayPick(b.key); setLookOver(true); } };
+
+  // Keep the selected row in view as ←/→ walk the agenda (desktop: the agenda scrolls on its own).
+  const selKey = sel ? idOf(sel) : null;
+  useEffect(() => {
+    if (!selKey || isPhone()) return;
+    document.querySelector(`.row[data-id="${CSS.escape(selKey)}"]`)?.scrollIntoView({ block: 'nearest' });
+  }, [selKey, needOpen]);
 
   const { done, total } = progress(items);
   const count = useCountUp(done);
-  const approvable = items.filter((i): i is Extract<CalItem, { kind: 'draft' }> => toReview(i) && i.kind === 'draft' && !i.draft.tooLong.length);
-  const needTrim = items.filter((i) => toReview(i) && i.kind === 'draft' && i.draft.tooLong.length).length;
+  const approvable = items.filter((i): i is DraftItem => toReview(i) && i.kind === 'draft' && !overOf(i).length && liveOf(i).length > 0);
+  const needTrim = items.filter((i) => toReview(i) && overOf(i).length).length;
 
   const [busy, setBusy] = useState(false);
+  const [spreading, setSpreading] = useState(false);
+  const [left, setLeft] = useState<number | null>(null);
   const [drafting, setDrafting] = useState<number | null>(null);
   const [blocked, setBlocked] = useState<string | null>(null);
   // "3 of 8 drafted": drafts in review now minus those there when the run started.
@@ -246,6 +244,77 @@ export default function Dashboard() {
       else if (!r.ok && j.status !== 'running') throw new Error(`${r.status}: ${JSON.stringify(j)}`);
     });
 
+  /** PATCH a draft's text fields; Undo puts the previous ones back exactly (postText then gives what it gave before). */
+  const patchText = async (d: DraftItem['draft'], patch: TextsPatch, msg: string) => {
+    const prev = { body: d.body, perPlatformText: d.perPlatformText };
+    await apiPatch(`/api/drafts/${d.id}`, patch);
+    notice(msg, () => run(async () => {
+      await apiPatch(`/api/drafts/${d.id}`, prev);
+      setEdit(null);
+      setModes((m) => { const n = { ...m }; delete n[d.id]; return n; });
+      notice('Text restored.');
+    }));
+    await refresh();
+  };
+
+  /** Save what was typed (blur, tab switch, and before approving). Resolves false if the save failed. */
+  const saving = useRef<Promise<boolean> | null>(null);
+  const flush = async (it: CalItem): Promise<boolean> => {
+    if (saving.current) await saving.current;
+    const e = editRef.current;
+    if (it.kind !== 'draft' || !e || e.id !== it.draft.id) return true;
+    const ps = itemPlatforms(it);
+    const changed = ps.filter((p) => e.texts[p] !== textsOf(it)[p]);
+    if (!changed.length) { setEdit((c) => (c === e ? null : c)); return true; }
+    const same = sameOf(it);
+    const job = (async () => {
+      try {
+        await patchText(it.draft, textsPatch(it.draft, e.texts, ps, same), same && ps.length > 1 ? `Saved for ${plats(ps)}.` : `${plats(changed)} text saved.`);
+        // The refetch has the server's texts (postText); drop the local copy unless more was typed meanwhile.
+        setEdit((c) => (c === e ? null : c));
+        return true;
+      } catch (err) {
+        failure(`Text not saved. ${friendlyApiError(err)}`);
+        return false;
+      }
+    })();
+    saving.current = job;
+    try { return await job; } finally { saving.current = null; }
+  };
+
+  const type = (it: CalItem, p: Platform | undefined, v: string) => {
+    const ps = itemPlatforms(it);
+    const base = shownTexts(it);
+    setEdit({ id: idOf(it), texts: sameOf(it) || !p ? Object.fromEntries(ps.map((q) => [q, v])) : { ...base, [p]: v } });
+  };
+
+  const toggleSame = (it: CalItem, p: Platform | undefined) => {
+    if (it.kind !== 'draft' || !p) return;
+    const d = it.draft;
+    const ps = itemPlatforms(it);
+    if (sameOf(it)) {
+      // Nothing to write: each tab starts from the shared text; the first edit gives that platform its own.
+      setModes((m) => ({ ...m, [d.id]: false }));
+      return notice('Each platform can have its own text now.');
+    }
+    const texts = shownTexts(it);
+    const shared = texts[p] ?? '';
+    const others = ps.filter((q) => q !== p && texts[q] !== shared);
+    setModes((m) => ({ ...m, [d.id]: true }));
+    setEdit(null);
+    return run(() => patchText(d, textsPatch(d, texts, [p, ...ps.filter((q) => q !== p)], true),
+      others.length ? `${plats(others)} now post${others.length > 1 ? '' : 's'} the ${label(p)} text.` : 'Same text everywhere.'));
+  };
+
+  const restore = (it: CalItem) => {
+    if (it.kind !== 'draft') return;
+    const r = restorePatch(it.draft);
+    if (!r) return;
+    setEdit(null);
+    setModes((m) => ({ ...m, [it.draft.id]: false }));
+    return run(() => patchText(it.draft, r, 'Autopilot’s per-platform versions are back.'));
+  };
+
   /** Undo for Approve / Approve all: back in review at the slots they had. */
   const unapprove = (list: { draftId: string; plannedAt: string | null }[], focus?: string) =>
     run(async () => {
@@ -256,25 +325,28 @@ export default function Dashboard() {
       else notice(r.restored.length > 1 ? `${r.restored.length} posts are back in review.` : 'Back in review.');
     });
 
+  const leftOut = (targets: Platform[], queued: Platform[]) => {
+    const out = targets.filter((p) => !queued.includes(p));
+    return out.length ? ` ${plats(out)} left out: reconnect to include ${out.length > 1 ? 'them' : 'it'}.` : '';
+  };
+
   const approve = async (it: CalItem) => {
-    if (it.kind !== 'draft' || !toReview(it)) return;
+    if (it.kind !== 'draft' || !toReview(it) || overOf(it).length || !liveOf(it).length) return;
     const d = it.draft;
-    const b = bodyOf(it);
-    if (overOf(it, b).length) return;
+    // What's typed goes out: save it first (an unsaved edit would otherwise be dropped).
+    if (!(await flush(it))) return;
     const next = nextToReview(order, d.id);
-    const day = strip.find((x) => x.items.includes(it))?.key;
-    if (day && day !== NO_TIME && day !== LATER) fileAway(d.id, day);
     act([d.id], 'approved');
-    setFlash({ ids: [d.id], days: day ? [day] : [] });
+    setJust([d.id]);
     advance(next);
     try {
-      if (b !== d.body) await apiPatch(`/api/drafts/${d.id}`, { body: b });
       const r = await apiPost<{ approved: Approved[]; skipped: Skipped[] }>('/api/plan/approve', { draftIds: [d.id] });
       const a = r.approved[0];
       if (r.skipped[0] || !a) { act([d.id], null); failure(`Not approved. ${r.skipped[0] ? skipMessage(r.skipped[0]) : ''}`); }
       else {
         const when = a.rendering ? 'posts when the video lands' : a.scheduledAt ? fmtSlot(new Date(a.scheduledAt)) : 'next free slot';
-        notice(`Approved · ${when}${a.reslotted ? ' (next free slot)' : ''}`, () => unapprove([{ draftId: d.id, plannedAt: d.plannedAt }], d.id));
+        const missing = a.rendering ? leftOut(itemPlatforms(it), liveOf(it)) : leftOut(itemPlatforms(it), a.platforms ?? []);
+        notice(`Approved · ${when}${a.reslotted ? ' (next free slot)' : ''}.${missing}`, () => unapprove([{ draftId: d.id, plannedAt: d.plannedAt }], d.id));
       }
     } catch (e) {
       act([d.id], null);
@@ -287,10 +359,11 @@ export default function Dashboard() {
     if (it.kind !== 'draft' || !toReview(it)) return;
     const d = it.draft;
     const next = nextToReview(order, d.id);
-    const card = document.querySelector<HTMLElement>(`[data-post="${CSS.escape(d.id)}"]`);
-    const anim = card && !reduced() ? card.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'scale(.94)' }], { duration: 200, easing: 'cubic-bezier(.2,0,0,1)', fill: 'forwards' }) : null;
+    const row = document.querySelector<HTMLElement>(`.row[data-id="${CSS.escape(d.id)}"]`);
+    const anim = row && !reduced() ? row.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateX(-8px)' }], { duration: 200, easing: 'cubic-bezier(.2,0,0,1)', fill: 'forwards' }) : null;
     await anim?.finished.catch(() => {});
     act([d.id], 'skipped');
+    setEdit((c) => (c?.id === d.id ? null : c));
     advance(next);
     try {
       await apiPost('/api/plan/skip', { draftId: d.id });
@@ -311,10 +384,11 @@ export default function Dashboard() {
 
   const approveAll = () =>
     run(async () => {
+      if (sel && !(await flush(sel))) return;
       const list = approvable.map((i) => ({ draftId: i.draft.id, plannedAt: i.draft.plannedAt }));
       const ids = list.map((x) => x.draftId);
       act(ids, 'approved');
-      setFlash({ ids, days: strip.filter((b) => b.items.some((i) => ids.includes(idOf(i)))).map((b) => b.key) });
+      setJust(ids);
       setLookOver(false);
       const r = await apiPost<{ approved: Approved[]; skipped: (Skipped & { draftId: string })[] }>('/api/plan/approve', { all: true });
       const trims = r.skipped.filter((s) => s.reason === 'too_long');
@@ -322,21 +396,28 @@ export default function Dashboard() {
       act(other.map((s) => s.draftId), null);
       const back = list.filter((x) => r.approved.some((a) => a.draftId === x.draftId));
       const undo = back.length ? () => unapprove(back) : undefined;
+      const without = gone.length && r.approved.some((a) => !a.rendering && items.some((i) => idOf(i) === a.draftId && itemPlatforms(i).some((p) => gone.includes(p))))
+        ? ` ${plats(gone)} left out: reconnect to include it.` : '';
       if (other.length) failure(`${other.length} not approved. ${skipMessage(other[0])}`);
-      else notice(`Approved ${r.approved.length}.${trims.length ? ` ${trims.length} need${trims.length > 1 ? '' : 's'} a trim first.` : ''}`, undo);
+      else notice(`Approved ${r.approved.length}.${trims.length ? ` ${trims.length} need${trims.length > 1 ? '' : 's'} a trim first.` : ''}${without}`, undo);
     });
 
-  /** The buffer's drafts get proposed times across the week — still drafts to review. Undo puts them back. */
-  const spread = () =>
-    run(async () => {
+  /** The needs-a-time drafts get proposed times across the week, 3 a day at most — still drafts to review. Undo puts them back. */
+  const spread = async () => {
+    setSpreading(true);
+    await run(async () => {
       const r = await apiPost<{ placed: { draftId: string; previous: string | null }[]; left: number }>('/api/plan/spread', { timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone });
       const n = r.placed.length;
-      if (!n) return notice('No free slots left this week. Pick a time on each post instead.');
+      setLeft(r.left || null);
+      if (!n) { setLeft(r.left || null); return notice('No free slots left this week. Pick a time on each post instead.'); }
       notice(`Spread ${n} post${n > 1 ? 's' : ''} across the week. Still drafts to review.${r.left ? ` ${r.left} didn’t fit.` : ''}`, () => run(async () => {
         await Promise.all(r.placed.map((p) => apiPatch(`/api/drafts/${p.draftId}`, { plannedAt: p.previous })));
+        setLeft(null);
         notice('Moved back.');
       }));
     });
+    setSpreading(false);
+  };
 
   /** Move a post (drag onto a day, or the time picker). Undo puts it back. */
   const reschedule = (it: CalItem, at: Date) => {
@@ -350,19 +431,6 @@ export default function Dashboard() {
     return run(async () => {
       await put(at);
       notice(`Moved to ${fmtSlot(at)}.`, () => run(async () => { await put(from); notice('Moved back.'); }));
-    });
-  };
-
-  const saveBody = (it: CalItem, b: string) => {
-    if (it.kind !== 'draft') return;
-    const prev = it.draft.body;
-    return run(async () => {
-      await apiPatch(`/api/drafts/${it.draft.id}`, { body: b });
-      notice('Caption saved.', () => run(async () => {
-        await apiPatch(`/api/drafts/${it.draft.id}`, { body: prev });
-        setEdit({ id: it.draft.id, body: prev });
-        notice('Caption restored.');
-      }));
     });
   };
 
@@ -381,32 +449,44 @@ export default function Dashboard() {
 
   const [dragging, setDragging] = useState<string | null>(null);
   const [overDay, setOverDay] = useState<string | null>(null);
-  const drop = (b: Bucket, key: string) => {
-    const it = items.find((i) => i.key === key);
-    if (it && b.day) reschedule(it, moveToDay(it, b.day));
-  };
+  const dropFor = (day: Date): DropProps => ({
+    onDragOver: (e) => { if (dragging) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setOverDay(dayKey(day)); } },
+    onDragLeave: (e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOverDay(null); },
+    onDrop: (e) => {
+      e.preventDefault();
+      setOverDay(null);
+      const it = items.find((i) => i.key === e.dataTransfer.getData('text/x-cal'));
+      if (it) reschedule(it, moveToDay(it, day));
+    },
+  });
 
-  const unhealthy = now ? (accounts ?? []).filter((a) => !a.isStub && healthFor(a, now).tone === 'bad') : [];
-  const risk = unhealthy.length ? firstAtRisk(items, unhealthy.map((a) => a.platform), now) : null;
+  const risk = gone.length ? firstAtRisk(items, gone, now) : null;
   const noAccounts = accounts?.length === 0;
   const block = blocked ?? (plan?.counts.missing && !generating ? plan.blocked : null) ?? (noAccounts ? 'no_accounts' : null);
   const blockInfo = block ? BLOCKED[block] : undefined;
   const planN = Math.min(plan?.counts.missing ?? 0, 30);
 
-  const range = today && `${format(today, isSameMonth(today, addDays(today, 6)) ? 'd' : 'd MMM')} – ${format(addDays(today, 6), 'd MMM')}`;
-  const loading = !today || !plan || !schedApi.data;
+  const range = today && `${format(today, isSameMonth(today, addDays(today, 6)) ? 'd' : 'd MMM')}–${format(addDays(today, 6), 'd MMM')}`;
+  const loading = !today || !plan || !schedApi.data || !ag;
   const mode: 'error' | 'loading' | 'empty' | 'filed' | 'review' =
     planApi.error ? 'error' : loading ? 'loading' : !items.length ? 'empty' : filed ? 'filed' : 'review';
+  const view = mode === 'filed' ? 'filed' : urlPost ? 'post' : 'list';
 
-  // A approve · S skip · E edit caption · ←/→ browse. Not while typing, with a modifier, or with a popover open.
+  // A approve · S skip · E edit the text · ←/→ browse. Not while typing, with a modifier, or with a popover open.
   const keys = useRef<(e: KeyboardEvent) => void>(() => {});
   useEffect(() => {
     keys.current = (e) => {
       if (mode !== 'review' || !sel || e.metaKey || e.ctrlKey || e.altKey || typing(e.target) || document.querySelector('.when-pop, dialog[open]')) return;
+      if (isPhone() && !urlPost) return; // the phone's list screen: nothing is open to act on
       const k = e.key.toLowerCase();
       if (k === 'a') { e.preventDefault(); void approve(sel); }
       else if (k === 's') { e.preventDefault(); void skip(sel); }
-      else if (k === 'e' && capRef.current && !capRef.current.readOnly) { e.preventDefault(); capRef.current.focus(); }
+      else if (k === 'e' && capRef.current && !capRef.current.readOnly) {
+        e.preventDefault();
+        const t = capRef.current;
+        t.focus();
+        t.setSelectionRange(t.value.length, t.value.length);
+      }
       else if (e.key === 'ArrowRight') { e.preventDefault(); step(1); }
       else if (e.key === 'ArrowLeft') { e.preventDefault(); step(-1); }
     };
@@ -419,20 +499,27 @@ export default function Dashboard() {
 
   // ---- the decision bar: always there; what it says and enables follows the selected post ----
   const selTone = sel ? toneOf(sel) : null;
+  const selOver = sel ? overOf(sel) : [];
+  const selLive = sel ? liveOf(sel) : [];
+  const selGone = sel ? itemPlatforms(sel).filter((p) => gone.includes(p)) : [];
   const canAct = mode === 'review' && !!sel && selTone === 'review';
+  const goneNote = selGone.length && selLive.length ? ` ${plats(selGone)} skipped: reconnect to include ${selGone.length > 1 ? 'them' : 'it'}.` : '';
   let line: React.ReactNode;
-  let lineTone: 'ok' | 'err' | '' = '';
+  let lineTone: 'ok' | 'err' | 'warn' | '' = '';
   let side: React.ReactNode = null;
   if (mode === 'error') line = 'Couldn’t load your plan.';
   else if (mode === 'loading') line = 'Loading your week…';
-  else if (mode === 'empty') line = generating ? 'Drafts appear above as Autopilot writes them.' : 'Nothing to review yet. Plan the week first.';
+  else if (mode === 'empty') line = generating ? 'Drafts appear here as Autopilot writes them.' : 'Nothing to review yet. Plan the week first.';
   else if (mode === 'filed') { line = 'All reviewed. Every approved post is scheduled.'; lineTone = 'ok'; }
   else if (sel && selTone === 'review' && sel.kind === 'draft') {
     const d = sel.draft;
-    if (over.length) { line = `Can’t approve: too long for ${plats(over)}. Trim the caption first.`; lineTone = 'err'; }
-    else if (d.rendering) line = 'Approve now: it posts when the video lands.';
-    else if (!sel.at || d.overdue) line = `Approving gives it the next free slot on ${plats(itemPlatforms(sel)) || 'its platforms'}.`;
-    else line = `Approving schedules it for ${fmtSlot(sel.at)} on ${plats(itemPlatforms(sel)) || 'its platforms'}.`;
+    if (selOver.length) { line = `Can’t approve: too long for ${plats(selOver)}. Trim it first.`; lineTone = 'err'; }
+    else if (!selLive.length && selGone.length) {
+      line = <>Can’t approve: {plats(selGone)} need{selGone.length > 1 ? '' : 's'} reconnecting first. <Link href="/settings/connections">Reconnect</Link></>; lineTone = 'warn';
+    }
+    else if (d.rendering && !d.media.length) line = `Approve now: it posts when the video lands.${goneNote}`;
+    else if (needsTime(sel, now)) line = `Approving gives it the next free slot${plan?.nextEmptySlot ? `, ≈ ${slotLabel(new Date(plan.nextEmptySlot), today!)}` : ''}, on ${plats(selLive)}.${goneNote}`;
+    else line = `Approving schedules it for ${slotLabel(sel.at!, today!)} on ${plats(selLive)}.${goneNote}`;
   } else if (sel && selTone === 'waiting') { line = 'Approved · posts when the video lands.'; lineTone = 'ok'; }
   else if (sel?.kind === 'post') {
     const g = sel.group;
@@ -447,7 +534,7 @@ export default function Dashboard() {
       line = `Posted · ${fmtSlot(sel.at)}`; lineTone = 'ok';
       side = g.url ? <a className="btn sm" href={g.url} target="_blank" rel="noreferrer">View post <Icon name="arrow_up_right" size={12} /></a> : null;
     } else if (g.accountGone) {
-      line = `The ${plats(g.platforms)} account is disconnected. Reconnect it and this post goes out.`; lineTone = 'err';
+      line = `The ${plats(g.platforms)} account is disconnected. Reconnect it, then retry this post.`; lineTone = 'err';
       side = <Link className="btn sm" href="/settings/connections">Reconnect</Link>;
     } else if (selTone === 'failed') {
       line = `Failed: ${g.error || 'no reason was recorded.'}`; lineTone = 'err';
@@ -457,57 +544,46 @@ export default function Dashboard() {
       side = restorable(g) ? <button type="button" className="btn sm" disabled={busy} onClick={() => postAction(sel, 'restore')}>Restore</button> : null;
     }
   } else line = 'Pick a post to review it.';
-  const whyNot = canAct ? undefined : mode === 'review' && sel ? 'Already decided: this post isn’t waiting for review' : 'Nothing to review';
+  const whyNot = canAct ? undefined : mode === 'review' && sel ? 'Already decided' : 'Nothing to review';
+  const approveWhy = whyNot ?? (selOver.length ? 'Too long: trim it first' : !selLive.length ? 'Reconnect first' : undefined);
 
-  let main: React.ReactNode = null;
-  if (mode === 'error') {
-    main = <p className="home__alert" role="alert">Couldn’t load your plan. <button type="button" className="btn sm" onClick={() => refresh()}>Try again</button></p>;
-  } else if (mode === 'loading') {
-    main = <Skeleton />;
-  } else if (mode === 'empty') {
-    main = (
-      <section className="home-card home-plan" aria-label="Plan this week">
-        <Empty
-          icon="sparkle"
-          title="Plan this week"
-          action={<>
-            <Button variant="primary" size="lg" cost={plan?.estimatedCredits ?? 0} busy={busy || generating} onClick={generate}
-              disabled={!!blockInfo || !planN} reason={blockInfo ? blockInfo.text : !planN ? 'You’re at your weekly target.' : undefined}>
-              {generating ? 'Drafting…' : busy ? 'Starting…' : `Plan ${planN} post${planN === 1 ? '' : 's'}`}
-            </Button>
-            {generating ? <span className="home-mono" role="status">{drafted} of {draftTotal} drafted · days fill in as each lands</span>
-              : blockInfo ? <Link className="home__link" href={blockInfo.href}>{blockInfo.cta} →</Link>
-              : !planN ? <Link className="home__link" href="/autopilot">Change the target in Autopilot →</Link>
-              : <span className="home-mono">{credits ? `Balance ${credits.balance.toLocaleString('en-US')} cr · ` : ''}takes about 2 minutes</span>}
-          </>}
-        >
-          Autopilot writes one topic a day for each of your platforms, in your voice. Nothing posts until you approve it.
-        </Empty>
-      </section>
-    );
-  } else if (mode === 'filed') {
-    const days = strip.filter((b) => b.day);
-    const live = items.filter((i) => toneOf(i) !== 'canceled').length;
-    main = (
-      <section className="home-card home-filed" aria-label="Week filed">
-        <span className="home-filed__tk"><Tick /></span>
+  const needN = ag?.need.length ?? 0;
+  const spreadWhy = !needN ? 'Nothing needs a time' : left && left >= needN ? 'No free slots left this week' : busy && !spreading ? 'Busy' : undefined;
+  const reviewLeft = items.filter(toReview).length;
+  const nextUp = ag ? soonestToReview(ag) : null;
+  const selDraft = sel?.kind === 'draft' ? sel.draft : null;
+  const selTab = sel && tab?.id === idOf(sel) ? tab.p : sel ? itemPlatforms(sel)[0] : undefined;
+  const restoreDiffers = !!sel && !!selDraft?.machine && (() => {
+    const r = restorePatch(selDraft)!;
+    const back = textsOf({ ...sel, draft: { ...selDraft, ...r } } as DraftItem);
+    return itemPlatforms(sel).some((p) => back[p] !== textsOf(sel)[p]);
+  })();
+
+  const allBtn = (
+    <Button onClick={approveAll} disabled={busy || !approvable.length} size="sm"
+      reason={busy ? undefined : approvable.length ? undefined : needTrim ? `${needTrim} need${needTrim > 1 ? '' : 's'} a trim first` : 'Nothing left to approve'}>
+      Approve all <span className="count">{approvable.length}</span>
+    </Button>
+  );
+
+  let pane: React.ReactNode = null;
+  if (mode === 'filed') {
+    const live = items.filter((i) => toneOf(i) !== 'canceled');
+    const first = live.filter((i) => i.at && i.at.getTime() > now).sort((a, b) => a.at!.getTime() - b.at!.getTime())[0];
+    pane = (
+      <div className="filed" aria-label="Week filed">
+        <span className="filed-tk"><Tick /></span>
         <h2>Your week is filed</h2>
-        <span className="home-filed__slot tnum">{live} post{live === 1 ? '' : 's'} scheduled · {range}</span>
-        <div className="home-filed__ledger">
-          {days.map((b, k) => {
-            const n = b.items.filter((i) => toneOf(i) !== 'canceled').length;
-            return <div key={b.key} style={{ animationDelay: `${360 + k * 50}ms` }}><b>{format(b.day!, 'EEE d MMM')}</b><span className="tnum">{n ? `${n} post${n > 1 ? 's' : ''}` : '—'}</span></div>;
-          })}
-        </div>
-        <p>Nothing else needs you this week. If a post fails or an account drops, it shows up here with a fix.</p>
+        <p>All {live.length} post{live.length === 1 ? ' is' : 's are'} approved and scheduled · {range}. Nothing needs you until Autopilot drafts next week. If a post fails or an account drops, it shows up here with a fix.</p>
+        {first?.at && <span className="filed-slot tnum">Next goes out {slotLabel(first.at, today!)}</span>}
         <div className="home-row">
-          <button type="button" className="btn" onClick={() => { setLookOver(true); if (order[0]) select(order[0], 0); }}>Look over a post</button>
+          <button type="button" className="btn" onClick={() => { setLookOver(true); if (order[0]) show(order[0], 0); }}>Look over a post</button>
           <Link className="btn primary" href="/compose"><Icon name="plus" size={13} />New post</Link>
         </div>
-      </section>
+      </div>
     );
-  } else if (sel && plan) {
-    main = (
+  } else if (sel && plan && today) {
+    pane = (
       <ReviewPanel
         key={idOf(sel)}
         item={sel}
@@ -515,259 +591,128 @@ export default function Dashboard() {
         total={order.length}
         dir={dir}
         now={now}
-        today={today!}
+        today={today}
         limits={plan.limits}
-        body={body}
-        over={over}
+        texts={shownTexts(sel)}
+        same={sameOf(sel)}
+        tab={selTab}
+        gone={gone}
+        nextSlot={plan.nextEmptySlot ? new Date(plan.nextEmptySlot) : null}
         developed={developed.includes(idOf(sel))}
+        canRestore={restoreDiffers}
         capRef={capRef}
         authorFor={(p) => accounts?.find((a) => a.platform === p)}
-        onBody={(b) => setEdit({ id: idOf(sel), body: b })}
-        onSaveBody={(b) => saveBody(sel, b)}
+        onTab={(p) => { void flush(sel); setTab({ id: idOf(sel), p }); }}
+        onType={(v) => type(sel, selTab, v)}
+        onDone={() => { void flush(sel); }}
+        onSame={() => toggleSame(sel, selTab)}
+        onRestore={() => restore(sel)}
         onStep={step}
+        onBack={back}
         onReschedule={(at) => reschedule(sel, at)}
       />
     );
   }
 
   return (
-    <div className="page-fill home">
-      <header className="home__head">
-        <h1 className="home__title">This week <span className="home__range tnum">{range}</span></h1>
-        <div className="home__meter" role="status">
+    <div className="page-fill home" data-view={view}>
+      <header className="home-head">
+        <h1>This week</h1>
+        {range && <span className="range tnum">{range}</span>}
+        <span className="meter" role="status">
           {generating && items.length > 0
             ? <span className="home-mono">Drafting · {drafted} of {draftTotal} drafted</span>
-            : <span className="tnum"><b>{count}</b> of {total} reviewed</span>}
+            : <span className="tnum"><b>{count}</b>/{total} reviewed</span>}
           <span className={`bar${total && done === total ? ' is-done' : ''}`}><i style={{ transform: `scaleX(${total ? done / total : 0})` }} /></span>
-        </div>
-        <span className="home__all">
-          <Button onClick={approveAll} disabled={busy || !approvable.length}
-            reason={busy ? undefined : approvable.length ? undefined : needTrim ? `${needTrim} need${needTrim > 1 ? '' : 's'} a trim first` : 'Nothing left to approve'}>
-            Approve all <span className="count">{approvable.length}</span>
-          </Button>
         </span>
+        {gone.length > 0 && (
+          <Link className="chipwarn" href="/settings/connections"
+            title={`${plats(gone)} need${gone.length > 1 ? '' : 's'} reconnecting${risk?.at ? ` before ${format(risk.at, 'EEE h:mm a')} can post there` : ''}. Until then, approving leaves ${gone.length > 1 ? 'them' : 'it'} out.`}>
+            <Icon name="alert" size={12} /><u>Reconnect {plats(gone)}</u>
+          </Link>
+        )}
+        <span className="home-all">{allBtn}</span>
       </header>
-
-      {unhealthy.length > 0 && (
-        <p className="home__alert" role="alert">
-          <Icon name="alert" size={14} />
-          <span>
-            {plats(unhealthy.map((a) => a.platform))} need{unhealthy.length > 1 ? '' : 's'} reconnecting
-            {risk?.at ? ` before ${format(risk.at, 'EEE h:mm a')} can post.` : ' before it can post.'}
-          </span>
-          <Link className="btn sm" href="/settings/connections">Reconnect{unhealthy.length === 1 ? ` ${plats(unhealthy.map((a) => a.platform))}` : ''}</Link>
-        </p>
-      )}
       {schedApi.error && (
-        <p className="home__alert" role="alert">Couldn’t load scheduled posts. <button type="button" className="btn sm" onClick={() => refresh()}>Try again</button></p>
+        <p className="home-alert" role="alert">Couldn’t load scheduled posts. <button type="button" className="btn sm" onClick={() => refresh()}>Try again</button></p>
       )}
 
-      {mode !== 'error' && mode !== 'loading' && (
-        <section className="home-card home__week" aria-label="This week">
-          <div className={`strip${dragging ? ' is-dragging' : ''}`} role="tablist" aria-label="Days">
-            {strip.map((b) => (
-              <DayTile
-                key={b.key}
-                b={b}
-                today={today!}
-                on={mode !== 'empty' && b.key === shownKey}
-                over={overDay === b.key}
-                generating={generating}
-                landed={flash.days.includes(b.key)}
-                dev={devDays.includes(b.key)}
-                onClick={() => pickDay(b)}
-                drop={b.day ? {
-                  onDragOver: (e) => { if (dragging) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setOverDay(b.key); } },
-                  onDragLeave: (e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOverDay(null); },
-                  onDrop: (e) => { e.preventDefault(); setOverDay(null); drop(b, e.dataTransfer.getData('text/x-cal')); },
-                } : undefined}
-              />
-            ))}
-          </div>
-          {mode !== 'empty' && shown && (
-            <div key={shown.key} className="dday">
-              <div className="dday__h">
-                <b>{shown.key === NO_TIME ? 'No time yet' : shown.key === LATER ? 'Later' : format(shown.day!, 'EEE d MMM')}</b>
-                <span className="home__note">
-                  {shown.key === NO_TIME ? `${shown.items.length} post${shown.items.length === 1 ? '' : 's'} whose time passed or was never set`
-                    : shown.items.length ? `${shown.items.length} post${shown.items.length === 1 ? '' : 's'}` : ''}
-                </span>
-                {shown.key === NO_TIME ? (
-                  <button type="button" className="btn sm dday__act" onClick={spread} disabled={busy || !shown.items.some((i) => i.kind === 'draft' && movable(i))}>
-                    <Icon name="calendar" size={12} />Spread across the week
-                  </button>
-                ) : (
-                  <Link className="btn sm dday__act" href={composeFor(shown.day)}><Icon name="plus" size={12} />New post{shown.day ? ` for ${format(shown.day, 'EEE')}` : ''}</Link>
-                )}
-              </div>
-              {shown.items.length ? (
-                <div className="dposts">
-                  {shown.items.map((i) => (
-                    <PostCard
-                      key={i.key}
-                      item={i}
-                      bucket={shown}
-                      on={!filed && i === sel}
-                      just={flash.ids.includes(idOf(i))}
-                      developed={developed.includes(idOf(i))}
-                      over={i === sel ? over.length > 0 : i.kind === 'draft' && !i.draft.approved && i.draft.tooLong.length > 0}
-                      dragged={dragging === i.key}
-                      onClick={() => select(i)}
-                      onDrag={(k) => { setDragging(k); if (!k) setOverDay(null); }}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <div className="dday__empty">
-                  <p>
-                    Nothing on {shown.day ? format(shown.day, 'EEE d MMM') : 'this day'}.
-                    {plan ? ` Autopilot plans up to your weekly target of ${plan.counts.target} posts and you have ${plan.counts.target - plan.counts.missing}.` : ''}
-                    {' '}Add one yourself, or move a post here with its time picker.
-                  </p>
-                  <div className="home-row">
-                    <Link className="btn primary sm" href={composeFor(shown.day)}><Icon name="plus" size={12} />New post{shown.day ? ` for ${format(shown.day, 'EEE')}` : ''}</Link>
-                    <Button size="sm" cost={plan?.estimatedCredits ?? 0} busy={generating} onClick={generate}
-                      disabled={busy || !planN || !!blockInfo} reason={blockInfo ? blockInfo.text : !planN ? 'Plan more is off: you’re at your weekly target.' : undefined}>
-                      {generating ? 'Drafting…' : 'Plan more'}
-                    </Button>
-                    {blockInfo && !generating && <Link className="home__link" href={blockInfo.href}>{blockInfo.cta} →</Link>}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+      {mode === 'error' ? (
+        <p className="home-alert" role="alert">Couldn’t load your plan. <button type="button" className="btn sm" onClick={() => refresh()}>Try again</button></p>
+      ) : mode === 'loading' ? (
+        <div className="home-panes" aria-busy="true" aria-label="Loading">
+          <div className="ag skel-pane">{Array.from({ length: 7 }, (_, i) => <Skel key={i} h={i ? 28 : 96} />)}</div>
+          <div className="rv skel-pane"><Skel h={14} w="50%" /><Skel h={30} w={200} /><Skel h={220} /></div>
+        </div>
+      ) : mode === 'empty' ? (
+        <section className="home-plan" aria-label="Plan this week">
+          <Empty
+            icon="sparkle"
+            title="Plan this week"
+            action={<>
+              <Button variant="primary" size="lg" cost={plan?.estimatedCredits ?? 0} busy={busy || generating} onClick={generate}
+                disabled={!!blockInfo || !planN} reason={blockInfo ? blockInfo.text : !planN ? 'You’re at your weekly target.' : undefined}>
+                {generating ? 'Drafting…' : busy ? 'Starting…' : `Plan ${planN} post${planN === 1 ? '' : 's'}`}
+              </Button>
+              {generating ? <span className="home-mono" role="status">{drafted} of {draftTotal} drafted · they appear here as each lands</span>
+                : blockInfo ? <Link className="home-link" href={blockInfo.href}>{blockInfo.cta} →</Link>
+                : !planN ? <Link className="home-link" href="/autopilot">Change the target in Autopilot →</Link>
+                : <span className="home-mono">{credits ? `Balance ${credits.balance.toLocaleString('en-US')} cr · ` : ''}takes about 2 minutes</span>}
+            </>}
+          >
+            Autopilot writes one topic a day for each of your platforms, in your voice. Nothing posts until you approve it.
+          </Empty>
         </section>
+      ) : (
+        <div className="home-panes">
+          <Agenda
+            ag={ag!}
+            today={today!}
+            selId={filed ? null : selKey}
+            needOpen={needOpen ?? (!!sel && ag!.need.includes(sel))}
+            onNeedOpen={setNeedOpen}
+            left={left}
+            spreadBusy={spreading}
+            spreadWhy={spreadWhy}
+            onSpread={spread}
+            onSelect={(it) => show(it)}
+            just={just}
+            tooLong={(it) => overOf(it).length > 0}
+            composeFor={composeFor}
+            dragging={dragging}
+            onDrag={(k) => { setDragging(k); if (!k) setOverDay(null); }}
+            overDay={overDay}
+            dropFor={dropFor}
+          />
+          <section className="rv" aria-label={mode === 'filed' ? 'Week filed' : 'Review post'} key={mode === 'filed' ? 'filed' : selKey ?? 'none'}>
+            {pane}
+          </section>
+        </div>
       )}
 
-      {main}
-
-      {/* The bar's line says why Skip/Approve are off, so the buttons carry it as a title only. */}
-      <PinBar msg={<span className={`home-bar__line${lineTone ? ` is-${lineTone}` : ''}`}>{lineTone === 'ok' && <Tick />}<span>{line}</span>{side}</span>}>
+      {/* One bar. Phone list screen: Approve all and the way into review; otherwise Skip / Approve for the open post. */}
+      <PinBar msg={<>
+        <span className={`home-bar__line bar-post${lineTone ? ` is-${lineTone}` : ''}`}>{lineTone === 'ok' && <Tick />}<span>{line}</span>{side}</span>
+        <span className="home-bar__line bar-list">{mode !== 'review' ? line : reviewLeft ? `${reviewLeft} to review · ${needN} need${needN === 1 ? 's' : ''} a time` : 'All reviewed. Every approved post is scheduled.'}</span>
+      </>}>
         <span className="home-bar__keys" aria-hidden="true">
-          <span><kbd>←</kbd><kbd>→</kbd> browse</span><span><kbd>E</kbd> edit</span><span><kbd>A</kbd> approve</span><span><kbd>S</kbd> skip</span>
+          <span><kbd>←</kbd><kbd>→</kbd> browse</span><span><kbd>E</kbd> edit</span>
         </span>
-        <button type="button" className="btn lg" disabled={!canAct} title={whyNot} onClick={() => sel && skip(sel)}>Skip <kbd>S</kbd></button>
-        <button type="button" className="btn primary lg" disabled={!canAct || over.length > 0} title={over.length ? 'Too long: trim the caption first' : whyNot}
-          onClick={() => sel && approve(sel)}>
-          <Icon name="check" size={13} />Approve <kbd>A</kbd>
-        </button>
+        <span className="bar-list">
+          {allBtn}
+          <button type="button" className="btn primary" disabled={mode !== 'review' || !nextUp || !toReview(nextUp)} title={nextUp && toReview(nextUp) ? undefined : 'Nothing left to review'}
+            onClick={() => nextUp && show(nextUp, 1)}>
+            Review next <Icon name="chevron_right" size={13} />
+          </button>
+        </span>
+        <span className="bar-post">
+          {/* The line says why Skip/Approve are off, so the buttons carry it as a title only. */}
+          <button type="button" className="btn" disabled={!canAct} title={whyNot} onClick={() => sel && skip(sel)}>Skip <kbd>S</kbd></button>
+          <button type="button" className="btn primary" disabled={!!approveWhy} title={approveWhy} onClick={() => sel && approve(sel)}>
+            <Icon name="check" size={13} />Approve <kbd>A</kbd>
+          </button>
+        </span>
       </PinBar>
     </div>
-  );
-}
-
-type DropProps = Pick<React.HTMLAttributes<HTMLButtonElement>, 'onDragOver' | 'onDragLeave' | 'onDrop'>;
-
-function DayTile({ b, today, on, over, generating, landed, dev, onClick, drop }: {
-  b: Bucket; today: Date; on: boolean; over: boolean; generating: boolean; landed: boolean; dev: boolean; onClick: () => void; drop?: DropProps;
-}) {
-  const n = b.items.length;
-  const doneN = n - b.toReview;
-  const isToday = b.day && dayKey(b.day) === dayKey(today);
-  const cls = ['dtile', on && 'is-on', isToday && 'is-today', over && 'is-over', drop && 'is-drop', !b.day && 'is-edge', landed && 'is-landed', dev && 'is-dev'].filter(Boolean).join(' ');
-  return (
-    <button type="button" role="tab" aria-selected={on} className={cls} data-day={b.key} onClick={onClick} {...drop}>
-      <span className="dtile__h">
-        {b.key === NO_TIME ? <><Icon name="clock" size={12} /><b>No time yet</b></> : b.key === LATER ? <b>Later</b>
-          : <><b>{isToday ? 'Today' : format(b.day!, 'EEE')}</b><span className="tnum">{format(b.day!, 'd')}</span></>}
-      </span>
-      <span className="dtile__tp">{b.topic ?? ' '}</span>
-      <span className={`dtile__sum tnum${n && !b.toReview ? ' is-ok' : ''}`}>
-        {n ? <>{n} post{n > 1 ? 's' : ''} · {b.toReview ? <em>{b.toReview} to review</em> : 'all set'}</> : generating ? 'Drafting…' : 'No posts'}
-      </span>
-      <span className="mb"><i className={n && !b.toReview ? 'is-ok' : ''} style={{ transform: `scaleX(${n ? doneN / n : 0})` }} /></span>
-    </button>
-  );
-}
-
-function PostCard({ item, bucket, on, just, developed, over, dragged, onClick, onDrag }: {
-  item: CalItem; bucket: Bucket; on: boolean; just: boolean; developed: boolean; over: boolean; dragged: boolean; onClick: () => void; onDrag: (key: string | null) => void;
-}) {
-  const tone = toneOf(item);
-  const can = movable(item);
-  const when = !item.at ? 'No time'
-    : bucket.key === NO_TIME ? 'Time passed'
-    : bucket.key === LATER ? format(item.at, 'EEE d · h:mm a')
-    : format(item.at, 'h:mm a');
-  const rendering = item.kind === 'draft' && item.draft.rendering && !itemMedia(item);
-  const topic = item.kind === 'draft' ? item.draft.title?.trim() : null;
-  return (
-    <button
-      type="button"
-      data-post={idOf(item)}
-      className={`pcard pcard--${tone}${on ? ' is-on' : ''}${just ? ' is-just' : ''}${dragged ? ' is-dragged' : ''}`}
-      aria-pressed={on}
-      aria-label={`${KIND_LABEL[kindOf(item)]} at ${when}, ${over ? 'too long' : statusLabel(item)}`}
-      onClick={onClick}
-      draggable={can || undefined}
-      onDragStart={can ? (e) => {
-        e.dataTransfer.setData('text/x-cal', item.key);
-        e.dataTransfer.effectAllowed = 'move';
-        // After the browser snapshots the drag image, so the ghost isn't dimmed.
-        setTimeout(() => onDrag(item.key));
-      } : undefined}
-      onDragEnd={can ? () => onDrag(null) : undefined}
-    >
-      <Thumb item={item} rendering={rendering} developed={developed} />
-      <span className="pcard__main">
-        <span className="pcard__tm tnum">{when}</span>
-        <span className="pcard__lb">{rendering ? 'Video · rendering' : KIND_LABEL[kindOf(item)]}{topic ? ` · ${topic}` : ''}</span>
-        <Glyphs platforms={itemPlatforms(item)} />
-      </span>
-      <span className="pcard__st" title={over ? 'Too long' : statusLabel(item)}>
-        {tone === 'review' ? <i className={`rdot${over ? ' is-err' : ''}`} /> : tone === 'failed' ? <i className="rdot is-err" /> : tone === 'canceled' ? <i className="skp" /> : <Tick />}
-      </span>
-    </button>
-  );
-}
-
-/** Card thumbnail: the image, a video's poster (else a representative frame), ruled lines for a text post, a sheen while rendering. */
-function Thumb({ item, rendering, developed }: { item: CalItem; rendering: boolean; developed: boolean }) {
-  const m = itemMedia(item);
-  const k = kindOf(item);
-  return (
-    <span className={`thumb thumb--${k}${rendering ? ' is-rendering' : ''}${developed ? ' develop' : ''}`} aria-hidden="true">
-      {m && isVideo(m) && !m.posterUrl ? <VideoThumb url={m.url} />
-        : m ? <ThumbImg src={m.posterUrl ?? m.url} alt="" size={48} /> : null}
-      {k === 'video' && !rendering && <span className="thumb__play" />}
-    </span>
-  );
-}
-
-/**
- * Video frame for a card. A strip can hold 30+ videos; mounting them all at once starves Chrome's
- * per-host media connections, so some sit at readyState 0/1 with their seek pending and paint blank.
- * Only load once the card nears the viewport, and re-run the (idempotent) seek on metadata, data and mount.
- */
-function VideoThumb({ url }: { url: string }) {
-  const [near, setNear] = useState(false);
-  const box = useRef<HTMLSpanElement>(null);
-  useEffect(() => {
-    const el = box.current;
-    if (!el || typeof IntersectionObserver === 'undefined') { setNear(true); return; }
-    const io = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) { setNear(true); io.disconnect(); } }, { rootMargin: '300px' });
-    io.observe(el);
-    return () => io.disconnect();
-  }, []);
-  return (
-    <span ref={box} className="thumb__vid">
-      {near && <video src={url} preload="metadata" muted playsInline onLoadedMetadata={seekToPoster} onLoadedData={seekToPoster}
-        ref={(v) => { if (v && v.readyState >= 1) seekToPoster({ currentTarget: v }); }} />}
-    </span>
-  );
-}
-
-function Skeleton() {
-  return (
-    <>
-      <section className="home-card home__week" aria-busy="true" aria-label="Loading">
-        <div className="strip">{Array.from({ length: 7 }, (_, i) => <Skel key={i} h={76} />)}</div>
-        <div className="dposts">{Array.from({ length: 3 }, (_, i) => <Skel key={i} h={62} w={188} style={{ flex: 'none' }} />)}</div>
-      </section>
-      <div className="hr">
-        <div className="hr-ed"><Skel h={12} w="40%" /><Skel h={132} /><Skel h={30} w={200} /></div>
-        <div className="hr-pv"><Skel h={240} /></div>
-      </div>
-    </>
   );
 }

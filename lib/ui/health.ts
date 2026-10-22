@@ -55,7 +55,10 @@ export function healthFor(acct: HealthAccount | null, now: number): Health {
   }
   const exp = new Date(acct.tokenExpiresAt).getTime();
   const diff = exp - now;
-  if (diff <= 0) return { status: 'expired', label: 'Token expired', detail: 'reconnect to resume publishing', pct: 100, tone: 'bad' };
+  // An auto-renewing token lapsing (YouTube's last 1 h, between refresh-cron runs) isn't
+  // broken: the publisher refreshes it before posting (lib/platforms/token.ts ensureFreshToken).
+  if (diff <= 0 && !acct.autoRefresh) return { status: 'expired', label: 'Token expired', detail: 'reconnect to resume publishing', pct: 100, tone: 'bad' };
+  if (diff <= 0) return { status: 'live', label: 'Auto-renewing', detail: 'renews before it posts', pct: 12, tone: 'good' };
   const days = Math.floor(diff / DAY);
   const hrs = Math.floor((diff % DAY) / 3_600_000);
   const timeLeft =
@@ -82,3 +85,6 @@ export function healthFor(acct: HealthAccount | null, now: number): Health {
   const pct = Math.max(12, Math.min(100, (diff / SIXTY) * 100));
   return { status: 'live', label: 'Connected', detail: `expires in ${timeLeft}`, pct, tone: 'accent' };
 }
+
+/** A post queued for this account fails at its slot: the cron doesn't wait for a reconnect. */
+export const cantPost = (acct: HealthAccount, now: number) => healthFor(acct, now).tone === 'bad';

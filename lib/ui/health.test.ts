@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { healthFor } from './health';
+import { cantPost, healthFor } from './health';
 import { activityMeta } from './activity';
 
 const NOW = Date.UTC(2026, 7, 15, 12, 0, 0);
@@ -28,6 +28,14 @@ describe('healthFor', () => {
     const h = healthFor(acct({ tokenExpiresAt: new Date(NOW - DAY).toISOString() }), NOW);
     expect(h.status).toBe('expired');
     expect(h.tone).toBe('bad');
+  });
+
+  it('an auto-renewing token that lapsed between refresh runs can still post (the publisher refreshes it)', () => {
+    const a = acct({ tokenExpiresAt: new Date(NOW - 2 * 3_600_000).toISOString(), autoRefresh: true });
+    expect(healthFor(a, NOW).tone).toBe('good');
+    expect(cantPost(a, NOW)).toBe(false);
+    expect(cantPost(acct({ tokenExpiresAt: new Date(NOW - DAY).toISOString() }), NOW)).toBe(true);
+    expect(cantPost(acct({ autoRefresh: true, lastRefreshError: '401 invalid_grant' }), NOW)).toBe(true);
   });
 
   it('warns inside the last day', () => {

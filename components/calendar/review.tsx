@@ -7,203 +7,234 @@ import { addDays, format } from 'date-fns';
 import { Icon, Pglyph } from '../icons';
 import { PLATFORM_LABELS, PLATFORM_TO_SHORT } from '../../lib/ui/platforms';
 import type { Platform } from '../../lib/db/schema';
-import { Glyphs } from './glyphs';
 import { seekToPoster } from '../../lib/media/motionSeek';
-import {
-  KIND_LABEL, dayKey, isVideo, itemMedia, itemPlatforms, kindOf, movable, statusLabel, textFor, tightestLimit, toneOf, type CalItem,
-} from './model';
+import { KIND_LABEL, dayKey, isVideo, itemMedia, itemPlatforms, kindOf, movable, statusLabel, toneOf, type CalItem } from './model';
 
 export type PostAction = 'cancel' | 'retry' | 'restore' | 'unapprove';
 export type Author = { displayName: string | null; handle: string | null; avatarUrl: string | null };
 
 const label = (p: Platform) => PLATFORM_LABELS[p] ?? p;
 const n = (x: number) => x.toLocaleString('en-US');
+export const KIND_ICON = { text: 'list', image: 'image', video: 'play' } as const;
 
 type Props = {
   item: CalItem;
   index: number;
   total: number;
-  /** Which way the user browsed: the edit pane slides in from that side. */
+  /** Which way the user browsed: the pane slides in from that side. */
   dir: number;
   /** Epoch ms, ticking; picks closer than 5 minutes to it are disabled. */
   now: number;
   today: Date;
   limits: Record<Platform, number>;
-  /** The caption as edited (owned by Home so the decision bar approves what's typed). */
-  body: string;
-  over: Platform[];
+  /** What each platform posts, as typed (unsaved) or as the server's postText says. */
+  texts: Partial<Record<Platform, string>>;
+  /** One text for every platform: typing edits them all. */
+  same: boolean;
+  tab: Platform | undefined;
+  /** Accounts that need reconnecting: approve leaves them out. */
+  gone: Platform[];
+  /** ≈ where "the next free slot" lands, for a post whose time passed. */
+  nextSlot: Date | null;
   /** The rendering clip just landed: the frame develops in. */
   developed: boolean;
+  /** Autopilot's per-platform versions can be put back (Same text is off and they differ). */
+  canRestore: boolean;
   capRef: React.RefObject<HTMLTextAreaElement | null>;
   authorFor: (p: Platform) => Author | undefined;
-  onBody: (body: string) => void;
-  onSaveBody: (body: string) => void;
+  onTab: (p: Platform) => void;
+  onType: (text: string) => void;
+  onDone: () => void;
+  onSame: () => void;
+  onRestore: () => void;
   onStep: (n: 1 | -1) => void;
+  onBack: () => void;
   onReschedule: (at: Date) => void;
 };
 
-/** One post up for review, in Compose's order: edit on the left, the platform-true preview on the right. Remount per post (key). */
-export function ReviewPanel({ item, index, total, dir, now, today, limits, body, over, developed, capRef, authorFor, onBody, onSaveBody, onStep, onReschedule }: Props) {
+/** One post up for review. The post card is the editor: each tab shows exactly what that platform posts. Remount per post (key). */
+export function ReviewPanel(props: Props) {
+  const { item, index, total, dir, now, today, limits, texts, same, gone, nextSlot, developed, canRestore, capRef, authorFor, onTab, onType, onDone, onSame, onRestore, onStep, onBack, onReschedule } = props;
   const draft = item.kind === 'draft' ? item.draft : null;
   const platforms = itemPlatforms(item);
+  const tab = props.tab && platforms.includes(props.tab) ? props.tab : platforms[0];
   const tone = toneOf(item);
   const editable = !!draft && !draft.approved;
-  const tight = tightestLimit(platforms, limits);
-  const kind = KIND_LABEL[kindOf(item)];
-  const topic = draft?.title?.trim();
-  const noSlot = !!draft && !draft.approved && (!item.at || draft.overdue);
+  const kind = kindOf(item);
+  const title = draft?.title?.trim() || firstLine(texts[tab] ?? '') || KIND_LABEL[kind];
+  const passed = !!draft && editable && !!item.at && item.at.getTime() < now;
+  const text = (tab ? texts[tab] : draft?.body) ?? '';
+  const limit = tab ? limits[tab] : undefined;
+  const over = (p: Platform) => (texts[p] ?? '').length > (limits[p] ?? Infinity);
+  const edited = (p: Platform) => !!draft?.machine && texts[p] !== (draft.machine.perPlatform[p] ?? draft.machine.text);
+  const sameWhy = !editable ? 'Approved posts are locked' : platforms.length < 2 ? 'Only one platform' : undefined;
+  const a = tab ? authorFor(tab) : undefined;
+  const when = item.at && !passed ? slotLabel(item.at, today) : 'next free slot';
+
+  useLayoutEffect(() => {
+    const t = capRef.current;
+    if (!t) return;
+    // field-sizing:content isn't in Firefox: size the text to its content by hand —
+    // again whenever its width changes (the phone mounts it hidden, at width 0).
+    let w = -1;
+    const fit = () => {
+      if (t.clientWidth === w) return;
+      w = t.clientWidth;
+      t.style.height = 'auto';
+      t.style.height = `${t.scrollHeight}px`;
+    };
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(t);
+    return () => ro.disconnect();
+  }, [text, tab, capRef]);
 
   return (
-    <div className="hr">
-      <section className={`hr-ed${dir < 0 ? ' is-prev' : dir > 0 ? ' is-next' : ''}`} aria-label="Edit post">
-        <div className="hr-ed__meta">
-          <span className="hr-ed__kind">{kind}</span>
-          {topic && <span className="hr-ed__topic">· {topic}</span>}
-          <span className={`hr-chip hr-chip--${over.length && tone === 'review' ? 'failed' : tone}`}>{over.length && tone === 'review' ? 'Too long' : statusLabel(item)}</span>
-          <span className="hr-ed__nav">
-            <span className="hr-ed__pos tnum">{index + 1} / {total}</span>
-            <button type="button" className="icon-btn" aria-label="Previous post" onClick={() => onStep(-1)}><Icon name="chevron_left" size={14} /></button>
-            <button type="button" className="icon-btn" aria-label="Next post" onClick={() => onStep(1)}><Icon name="chevron_right" size={14} /></button>
-          </span>
-        </div>
+    <div className={`rv-in${dir < 0 ? ' is-prev' : dir > 0 ? ' is-next' : ''}`}>
+      <div className="rv-back">
+        <button type="button" className="btn sm" onClick={onBack}><Icon name="chevron_left" size={14} />This week</button>
+        <span className="rv-pos tnum">{index + 1} / {total}</span>
+        <button type="button" className="icon-btn" aria-label="Previous post" onClick={() => onStep(-1)}><Icon name="chevron_left" size={14} /></button>
+        <button type="button" className="icon-btn" aria-label="Next post" onClick={() => onStep(1)}><Icon name="chevron_right" size={14} /></button>
+      </div>
+      <div className="rv-head">
+        <span className="rv-kind" title={KIND_LABEL[kind]}><Icon name={KIND_ICON[kind]} size={12} /><span>{KIND_LABEL[kind]}</span></span>
+        <h2 title={title}>{title}</h2>
+        <span className={`badge ${tone === 'review' ? (platforms.some(over) ? 'err' : 'accent') : tone === 'failed' ? 'err' : tone === 'canceled' ? '' : 'ok'}`}>
+          <span className="d" />{tone === 'review' && platforms.some(over) ? 'Too long' : draft?.rendering && !itemMedia(item) && tone === 'review' ? 'Rendering' : statusLabel(item)}
+        </span>
+        <span className="rv-nav">
+          <span className="rv-pos tnum">{index + 1} / {total}</span>
+          <button type="button" className="icon-btn" aria-label="Previous post" onClick={() => onStep(-1)}><Icon name="chevron_left" size={14} /></button>
+          <button type="button" className="icon-btn" aria-label="Next post" onClick={() => onStep(1)}><Icon name="chevron_right" size={14} /></button>
+        </span>
+      </div>
 
-        <div>
-          <label className="hr-lbl" htmlFor="hr-cap">
-            <b>Caption</b>
-            {tight && <span className={`hr-count${over.length ? ' is-over' : ''}`}>{n(body.length)} / {n(tight.limit)} · {label(tight.platform)}</span>}
-          </label>
-          <textarea
-            id="hr-cap"
-            ref={capRef}
-            className="input hr-cap"
-            rows={6}
-            value={body}
-            readOnly={!editable}
-            onChange={(e) => onBody(e.target.value)}
-            onBlur={() => { if (draft && editable && body !== draft.body) onSaveBody(body); }}
-            onKeyDown={(e) => { if (e.key === 'Escape') e.currentTarget.blur(); }}
-          />
-          {over.length > 0 && (
-            <p className="hr-warn" role="status">
-              Too long for {over.map((p) => `${label(p)} (${n(body.length)}/${n(limits[p])})`).join(', ')}. Trim it, or open in Compose to drop {over.map(label).join(', ')}.
-            </p>
+      <div className="rv-when">
+        <When item={item} now={now} today={today} onPick={onReschedule} />
+        {passed && <span className="rv-passed" title={nextSlot ? `Approving gives it the next free slot, ≈ ${slotLabel(nextSlot, today)}` : undefined}><Icon name="alert" size={12} /><span>{format(item.at!, 'EEE d · h:mm a')} passed. Gets the next free slot.</span></span>}
+        {editable && !item.at && <span className="rv-passed">No time yet. Gets the next free slot.</span>}
+      </div>
+
+      <div className="ptabs">
+        <div className="tabs" role="tablist" aria-label="What each platform posts">
+          {platforms.map((p) => (
+            <button key={p} type="button" role="tab" className="ptab" aria-selected={p === tab} onClick={() => onTab(p)}>
+              <Pglyph p={PLATFORM_TO_SHORT[p]} />
+              <span className="nm">{label(p)}</span>
+              {gone.includes(p) && <span className="wn" title={`${label(p)} needs reconnecting`}><Icon name="alert" size={12} /></span>}
+              {edited(p) && <span className="ed" title="Edited by you" />}
+              <span className={`c tnum${over(p) ? ' over' : ''}`}>{n((texts[p] ?? '').length)}</span>
+            </button>
+          ))}
+          {!platforms.length && <span className="rv-note">No platforms. Open in Compose to pick some.</span>}
+        </div>
+        <button type="button" className="same" role="switch" aria-checked={same} disabled={!!sameWhy} title={sameWhy} onClick={onSame}>
+          <span className="sw" aria-hidden="true" /><span className="long">Same text everywhere</span><span className="short">Same text</span>
+        </button>
+      </div>
+      {editable && !same && canRestore && (
+        <p className="rv-note rv-restore">Each platform has its own text. <button type="button" className="linkish" onClick={onRestore}>Restore Autopilot’s versions</button></p>
+      )}
+
+      <div className="rv-grid">
+        <article className="post" aria-label={tab ? `${label(tab)} post` : 'Post'}>
+          <header className="post-h">
+            {tab && <Avatar author={a} p={tab} />}
+            <div>
+              <b>{a?.displayName?.trim() || a?.handle?.trim() || 'You'}</b>
+              <span>{[tab && label(tab), when].filter(Boolean).join(' · ')}</span>
+            </div>
+          </header>
+          {tab && gone.includes(tab) && (
+            <p className="rv-gone"><Icon name="alert" size={12} /><span>{label(tab)} needs reconnecting. Approving leaves it out. <Link href="/settings/connections">Reconnect</Link> first to include it.</span></p>
           )}
-          {!editable && (
-            <p className="hr-note">
-              {tone === 'pending' || tone === 'waiting' ? 'Approved posts are locked. Move it back to review, or cancel and edit in Compose.' : 'This post can’t be edited here.'}
-            </p>
+          <div className="txwrap">
+            <textarea
+              ref={capRef}
+              className="tx"
+              rows={3}
+              value={text}
+              readOnly={!editable}
+              aria-label={same && platforms.length > 1 ? 'Text for every platform' : tab ? `${label(tab)} text` : 'Text'}
+              onChange={(e) => onType(e.target.value)}
+              onBlur={() => { if (editable) onDone(); }}
+              onKeyDown={(e) => { if (e.key === 'Escape') e.currentTarget.blur(); }}
+            />
+          </div>
+          <div className="txbar">
+            <span className="ed">{editable ? <><Icon name="edit" size={12} />{same && platforms.length > 1 ? 'Click the text to edit it for every platform' : `Click the text to edit what ${tab ? label(tab) : 'it'} posts`}</>
+              : tone === 'pending' || tone === 'waiting' ? 'Approved posts are locked. Undo or move it back to review to edit.' : 'This post can’t be edited here.'}</span>
+            <span className="on">{same && platforms.length > 1 ? 'Editing every platform' : `Editing ${tab ? label(tab) : 'the text'}`} · <kbd>Esc</kbd> to finish</span>
+            {limit != null && <span className={`cnt tnum${tab && over(tab) ? ' over' : ''}`}>{n(text.length)} / {n(limit)}</span>}
+          </div>
+          <Media item={item} now={now} developed={developed} />
+        </article>
+
+        <div className="rv-aside">
+          <div><p className="k">Goes to</p><p>{platforms.length ? platforms.map(label).join(', ') : '—'}</p></div>
+          {draft?.rationale && (
+            <details>
+              <summary>Why this {draft.score != null && <span className="score tnum">{draft.score}</span>}<Icon name="chevron_down" size={12} /></summary>
+              <p>{draft.rationale}</p>
+            </details>
           )}
+          <div className="rv-compose">
+            {editable
+              ? <Link className="btn sm" href={`/compose?draft=${draft.id}`}><Icon name="edit" size={12} />Open in Compose</Link>
+              : <button type="button" className="btn sm" disabled><Icon name="edit" size={12} />Open in Compose</button>}
+            <span className="why">{editable ? 'Change media, format or platforms' : 'Only posts in review open in Compose'}</span>
+          </div>
         </div>
-
-        <div className="hr-row">
-          <span className="hr-row__l">Goes to</span>
-          <span className="hr-plats">
-            {platforms.length ? platforms.map((p) => <span key={p} className="hr-plat"><Glyphs platforms={[p]} />{label(p)}</span>)
-              : <span className="hr-note">No platforms. Open in Compose to pick some.</span>}
-          </span>
-        </div>
-
-        <div className="hr-row">
-          <span className="hr-row__l">Posts</span>
-          <span className="hr-plats">
-            <When item={item} now={now} today={today} onPick={onReschedule} />
-            {noSlot && <span className="hr-note">{item.at ? 'This time passed.' : ''} Approving gives it the next free slot.</span>}
-          </span>
-        </div>
-
-        {draft?.rationale && <p className="hr-why"><b>Why this</b>{draft.rationale}</p>}
-
-        <div className="hr-row">
-          {editable
-            ? <Link className="btn sm" href={`/compose?draft=${draft.id}`}><Icon name="edit" size={12} />Open in Compose</Link>
-            : <button type="button" className="btn sm" disabled><Icon name="edit" size={12} />Open in Compose</button>}
-          <span className="hr-note">{editable ? 'Change media, format or platforms' : 'Only drafts in review open in Compose'}</span>
-        </div>
-      </section>
-
-      <Preview item={item} body={body} platforms={platforms} now={now} today={today} developed={developed} over={over} authorFor={authorFor} />
+      </div>
     </div>
   );
 }
 
-/** How it reads on each platform: one tab per platform, the feed's fold, the real media frame. */
-function Preview({ item, body, platforms, now, today, developed, over, authorFor }: {
-  item: CalItem; body: string; platforms: Platform[]; now: number; today: Date; developed: boolean; over: Platform[]; authorFor: (p: Platform) => Author | undefined;
-}) {
-  const [pick, setPick] = useState<Platform | null>(null);
-  const active = pick && platforms.includes(pick) ? pick : platforms[0];
-  const [more, setMore] = useState(false);
-  const [clamped, setClamped] = useState(false);
-  const cap = useRef<HTMLParagraphElement>(null);
-  const text = active ? textFor(item, active, body) : body;
-  const m = itemMedia(item);
-  const isText = kindOf(item) === 'text';
-  useLayoutEffect(() => {
-    const el = cap.current;
-    if (!el || more) return;
-    const measure = () => setClamped(el.scrollHeight > el.clientHeight + 1);
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [text, more]);
+const firstLine = (t: string) => t.split('\n').find((l) => l.trim())?.trim().slice(0, 90) ?? '';
 
-  const a = active ? authorFor(active) : undefined;
-  const name = a?.displayName?.trim() || a?.handle?.trim() || 'You';
-  const differ = platforms.some((p) => textFor(item, p, body) !== body);
-  const rendering = item.kind === 'draft' && item.draft.rendering && !m;
-  const mins = item.kind === 'draft' && now ? Math.max(0, Math.round((now - new Date(item.draft.createdAt).getTime()) / 60_000)) : 0;
-
+/** The account's picture, or its first letter when there's none or it fails to load (expired CDN links). */
+function Avatar({ author, p }: { author?: Author; p: Platform }) {
+  const [broken, setBroken] = useState(false);
+  const name = author?.displayName?.trim() || author?.handle?.trim() || label(p);
   return (
-    <section className="hr-pv" aria-label="Preview">
-      <div className="hr-ptabs" role="tablist" aria-label="Preview platform">
-        {platforms.map((p) => (
-          <button key={p} type="button" role="tab" aria-selected={p === active} className="hr-ptab" onClick={() => setPick(p)}>{label(p)}</button>
-        ))}
-        {!platforms.length && <span className="hr-note">No platform to preview.</span>}
-      </div>
-      <article className="hr-post">
-        <header className="hr-post__head">
-          {a?.avatarUrl
-            // eslint-disable-next-line @next/next/no-img-element
-            ? <img className="hr-post__av" src={a.avatarUrl} alt="" referrerPolicy="no-referrer" />
-            : active ? <Pglyph p={PLATFORM_TO_SHORT[active]} size="lg" /> : <span className="hr-post__av" />}
-          <div>
-            <b className="hr-post__name">{name}</b>
-            <span className="hr-note">{[active && label(active), item.at && !(item.kind === 'draft' && item.draft.overdue) ? slotLabel(item.at, today) : 'next free slot'].filter(Boolean).join(' · ')}</span>
-          </div>
-        </header>
-        <p ref={cap} className={`hr-post__text${more ? '' : isText ? ' is-long' : ' is-clamped'}`}>{text}</p>
-        {(clamped || more) && (
-          <button type="button" className="hr-post__more" aria-expanded={more} onClick={() => setMore((v) => !v)}>{more ? 'Show less' : '…more'}</button>
-        )}
-        {!isText && (
-          <div className="hr-frame">
-            {rendering ? (
-              <div className="hr-frame__state" role="status">
-                <b>Rendering the video</b>
-                <span className="tnum hr-frame__timer">drafted {mins} min ago · checks every 10 s</span>
-                <span>{item.kind === 'draft' && item.draft.approved ? 'Approved. It posts when the clip lands.' : 'Approve now and it posts when the clip lands. It develops here when it’s ready.'}</span>
-              </div>
-            ) : m ? (
-              <div key={m.url} className={`hr-frame__art${developed ? ' develop' : ''}`}>
-                {isVideo(m)
-                  ? <video src={m.url} poster={m.posterUrl} controls muted playsInline preload="metadata" onLoadedMetadata={m.posterUrl ? undefined : seekToPoster} />
-                  // eslint-disable-next-line @next/next/no-img-element
-                  : <img src={m.url} alt="" />}
-              </div>
-            ) : <div className="hr-frame__state is-empty">No media yet.</div>}
-          </div>
-        )}
-      </article>
-      <p className="hr-note hr-pv__foot">
-        {over.length ? <span className="hr-err">Too long for {over.map(label).join(', ')}</span> : differ ? 'Each platform has its own copy' : 'Same caption on every platform'}
-      </p>
-    </section>
+    <span className="av" aria-hidden="true">
+      {author?.avatarUrl && !broken
+        // eslint-disable-next-line @next/next/no-img-element
+        ? <img src={author.avatarUrl} alt="" referrerPolicy="no-referrer" onError={() => setBroken(true)} />
+        : name[0]?.toUpperCase()}
+      <Pglyph p={PLATFORM_TO_SHORT[p]} className="av-pl" />
+    </span>
   );
 }
 
-const slotLabel = (d: Date, today: Date) =>
+/** The real media frame: a rendering clip says so (and develops in when it lands), images and videos show as posted. */
+function Media({ item, now, developed }: { item: CalItem; now: number; developed: boolean }) {
+  const m = itemMedia(item);
+  if (kindOf(item) === 'text') return null;
+  const rendering = item.kind === 'draft' && item.draft.rendering && !m;
+  const mins = item.kind === 'draft' && now ? Math.max(0, Math.round((now - new Date(item.draft.createdAt).getTime()) / 60_000)) : 0;
+  return (
+    <div className="frame">
+      {rendering ? (
+        <div className="frame-state" role="status">
+          <b>Rendering the video</b>
+          <span className="tnum frame-timer">drafted {mins} min ago · checks every 10 s</span>
+          <span>{item.kind === 'draft' && item.draft.approved ? 'Approved. It posts when the clip lands.' : 'Approve now and it posts when the clip lands. It develops here when it’s ready.'}</span>
+        </div>
+      ) : m ? (
+        <div key={m.url} className={`frame-art${developed ? ' develop' : ''}`}>
+          {isVideo(m)
+            ? <video src={m.url} poster={m.posterUrl} controls muted playsInline preload="metadata" onLoadedMetadata={m.posterUrl ? undefined : seekToPoster} />
+            // eslint-disable-next-line @next/next/no-img-element
+            : <img src={m.url} alt="" />}
+        </div>
+      ) : <div className="frame-state is-empty">No media yet.</div>}
+    </div>
+  );
+}
+
+export const slotLabel = (d: Date, today: Date) =>
   `${dayKey(d) === dayKey(today) ? 'Today' : dayKey(d) === dayKey(addDays(today, 1)) ? 'Tomorrow' : format(d, 'EEE d MMM')} · ${format(d, 'h:mm a')}`;
 
 export function Tick() {
@@ -228,7 +259,7 @@ function When({ item, now, today, onPick }: { item: CalItem; now: number; today:
   const can = movable(item);
   // A passed time isn't a choice: show it as needing a slot.
   const cur = item.at && item.at >= today && item.at.getTime() >= now ? item.at : null;
-  const label = !item.at ? 'Pick a time' : item.kind === 'draft' && item.draft.overdue ? 'Pick a new time' : slotLabel(item.at, today);
+  const label = !item.at ? 'Pick a time' : !cur && item.kind === 'draft' && !item.draft.approved ? 'Pick a new time' : `Posts ${slotLabel(item.at, today)}`;
 
   const open = pos !== null;
   const close = () => setPos(null);

@@ -125,6 +125,25 @@ describe('approve', () => {
     expect(Math.abs(a - b)).toBeGreaterThanOrEqual(2 * 60 * 60 * 1000);
   });
 
+  it('leaves out an account that needs reconnecting: the cron would fail that post for good at its slot', async () => {
+    state.drafts = [draft('d-1', { plannedAt: new Date(NOW.getTime() + DAY), targetPlatforms: ['x', 'linkedin'] })];
+    state.accounts = [
+      { id: 'acc-x', platform: 'x', lastRefreshError: '401 invalid_grant', refreshToken: 'r' },
+      { id: 'acc-li', platform: 'linkedin', tokenExpiresAt: new Date(Date.now() + 30 * DAY), refreshToken: null },
+    ];
+    const res = await approveDrafts('u1', { all: true }, NOW);
+    expect(res.approved[0].platforms).toEqual(['linkedin']);
+    expect(posts().map((p) => p.platform)).toEqual(['linkedin']);
+  });
+
+  it('every platform disconnected: not approved, and says why', async () => {
+    state.drafts = [draft('d-1', { plannedAt: new Date(NOW.getTime() + DAY) })];
+    state.accounts = [{ id: 'acc-x', platform: 'x', tokenExpiresAt: new Date(Date.now() - DAY), refreshToken: null }];
+    const res = await approveDrafts('u1', { all: true }, NOW);
+    expect(res.approved).toEqual([]);
+    expect(res.skipped[0]).toMatchObject({ draftId: 'd-1', reasons: { x: 'disconnected' } });
+  });
+
   it('uses the override time when given', async () => {
     const at = '2026-03-05T16:30:00.000Z';
     state.drafts = [draft('d-1', { plannedAt: new Date(NOW.getTime() + DAY) })];

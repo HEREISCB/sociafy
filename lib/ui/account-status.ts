@@ -54,11 +54,11 @@ export function accountStatus(a: StatusAccount, now: number, queued = 0): Accoun
     return { rank: 4, tone: 'ok', badge: 'Connected', line: 'Access doesn’t expire', broken: false, soon: false };
   }
   const left = new Date(a.tokenExpiresAt).getTime() - now;
-  if (left <= 0) {
+  if (left <= 0 && !a.autoRefresh) {
     return { rank: 0, tone: 'bad', badge: 'Token expired', line: `Expired ${span(-left)} ago · ${stuck}`, broken: true, soon: false };
   }
   if (a.autoRefresh) {
-    return { rank: 4, tone: 'ok', badge: 'Auto-renewing', line: `Renews itself · next in ${span(left)}`, broken: false, soon: false };
+    return { rank: 4, tone: 'ok', badge: 'Auto-renewing', line: left > 0 ? `Renews itself · next in ${span(left)}` : 'Renews itself before it posts', broken: false, soon: false };
   }
   if (left < 7 * DAY) {
     const by = new Date(a.tokenExpiresAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });

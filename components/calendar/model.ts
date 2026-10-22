@@ -1,7 +1,8 @@
-import { addDays, format } from 'date-fns';
+import { addDays, differenceInCalendarDays, format } from 'date-fns';
 import { PLATFORM_LABELS } from '../../lib/ui/platforms';
 import type { DraftMedia, Platform } from '../../lib/db/schema';
 import type { PlanView } from '../../lib/agent/plan';
+import { postText, type PostTextDraft } from '../../lib/agent/postText';
 
 export type ScheduledStatus = 'pending' | 'publishing' | 'published' | 'failed' | 'canceled';
 
@@ -96,7 +97,6 @@ export function toneOf(i: CalItem): Tone {
 
 export const itemMedia = (i: CalItem): DraftMedia | undefined => (i.kind === 'draft' ? i.draft.media[0] : i.group.media[0]);
 export const itemPlatforms = (i: CalItem): Platform[] => (i.kind === 'draft' ? i.draft.targetPlatforms ?? [] : i.group.platforms);
-export const itemText = (i: CalItem) => (i.kind === 'draft' ? i.draft.body : i.group.text);
 export const isVideo = (m?: DraftMedia) => !!m?.mimeType?.startsWith('video/');
 
 /** A post's draft id: stable across a move or an approve (a group's key includes its time and status). */
@@ -125,37 +125,27 @@ export function moveToDay(i: CalItem, day: Date): Date {
   return d;
 }
 
-/** The strip: the buffer/spinner card (no time, or one on a day already gone), the 7 days from
- *  today, then "Later" (beyond the week). Empty edge buckets are dropped. */
-export type Bucket = {
-  key: string;
-  /** null for the buffer and "Later" buckets. */
-  day: Date | null;
-  items: CalItem[];
-  /** The day's topic: its first titled draft. */
-  topic: string | null;
-  toReview: number;
-};
-export const NO_TIME = 'none';
-export const LATER = 'later';
+/** Still to review and without a usable time: never set, or already passed. The same set
+ *  "Spread across the week" places (lib/agent/plan.ts spreadDrafts: planned_at null or < now). */
+export const needsTime = (i: CalItem, now: number) => toReview(i) && (!i.at || i.at.getTime() < now);
 
-export function buckets(items: CalItem[], today: Date): Bucket[] {
-  const end = addDays(today, 7);
-  const keyOf = (i: CalItem) => (!i.at || i.at < today ? NO_TIME : i.at >= end ? LATER : dayKey(i.at));
-  const days = Array.from({ length: 7 }, (_, n) => addDays(today, n));
-  const out: Bucket[] = [NO_TIME, ...days, LATER].map((d) => {
-    const key = typeof d === 'string' ? d : dayKey(d);
-    const its = items.filter((i) => keyOf(i) === key);
-    const titled = its.find((i) => i.kind === 'draft' && i.draft.title?.trim());
-    return {
-      key,
-      day: typeof d === 'string' ? null : d,
-      items: its,
-      topic: titled?.kind === 'draft' ? titled.draft.title!.trim() : null,
-      toReview: its.filter(toReview).length,
-    };
-  });
-  return out.filter((b) => b.day || b.items.length);
+/** The agenda: "Needs a time" first, then the 7 days from today (kept even when empty), then Later. */
+export type Agenda = { need: CalItem[]; days: { day: Date; items: CalItem[] }[]; later: CalItem[] };
+export function agenda(items: CalItem[], today: Date, now: number): Agenda {
+  const out: Agenda = { need: [], days: Array.from({ length: 7 }, (_, n) => ({ day: addDays(today, n), items: [] })), later: [] };
+  for (const i of items) {
+    if (needsTime(i, now)) { out.need.push(i); continue; }
+    // Not the user's to place (approved, or a queued post): anything before today sits on today.
+    const k = i.at ? Math.max(0, differenceInCalendarDays(i.at, today)) : 0;
+    if (k >= 7) out.later.push(i); else out.days[k].items.push(i);
+  }
+  return out;
+}
+export const agendaOrder = (a: Agenda) => [...a.need, ...a.days.flatMap((d) => d.items), ...a.later];
+
+/** Where Home opens: the soonest timed post still to review (it goes out first), else the first one to review. */
+export function soonestToReview(a: Agenda): CalItem | null {
+  return [...a.days.flatMap((d) => d.items), ...a.later].find(toReview) ?? a.need[0] ?? agendaOrder(a)[0] ?? null;
 }
 
 /** Header meter: everything on Home except canceled posts; reviewed = no longer waiting on the user. */
@@ -164,7 +154,7 @@ export function progress(items: CalItem[]) {
   return { done: total - items.filter(toReview).length, total };
 }
 
-/** After an approve or skip: the next post to review after `fromId` in strip order —
+/** After an approve or skip: the next post to review after `fromId` in agenda order —
  *  the rest of that day, then the following days, wrapping round. */
 export function nextToReview(order: CalItem[], fromId: string): CalItem | null {
   const at = order.findIndex((i) => idOf(i) === fromId);
@@ -175,23 +165,43 @@ export function nextToReview(order: CalItem[], fromId: string): CalItem | null {
   return null;
 }
 
-/** Where a day tile's click lands: its first post to review, else its first post. */
-export const firstOfDay = (b: Bucket): CalItem | null => b.items.find(toReview) ?? b.items[0] ?? null;
-
 /** Nothing left that needs the user: no draft to review and no failed post. */
 export const weekFiled = (items: CalItem[]) => items.length > 0 && !items.some((i) => toReview(i) || toneOf(i) === 'failed');
 
-/** The platform whose limit the caption hits first: the counter measures against it. */
-export function tightestLimit(platforms: Platform[], limits: Record<Platform, number>): { platform: Platform; limit: number } | null {
-  return platforms.reduce<{ platform: Platform; limit: number } | null>(
-    (best, p) => (limits[p] && (!best || limits[p] < best.limit) ? { platform: p, limit: limits[p] } : best), null);
+/** The draft as postText reads it. `machine` is Autopilot's variant-A snapshot (GET /api/plan). */
+export const asPostText = (d: Pick<ReviewItem, 'body' | 'perPlatformText' | 'machine'>): PostTextDraft =>
+  ({ body: d.body, perPlatformText: d.perPlatformText, variants: d.machine ? [d.machine] : null });
+
+/** What each platform posts: for a draft, postText on every target (the publisher's own rule); for a queued post, its rows. */
+export function textsOf(i: CalItem): Partial<Record<Platform, string>> {
+  if (i.kind === 'post') return Object.fromEntries(i.group.rows.map((r) => [r.platform, r.text]));
+  const d = asPostText(i.draft);
+  return Object.fromEntries((i.draft.targetPlatforms ?? []).map((p) => [p, postText(d, p)]));
 }
 
-/** What goes out on `p`. A draft edited here posts the edited body everywhere (publish.ts postText). */
-export function textFor(i: CalItem, p: Platform, body: string): string {
-  if (i.kind === 'post') return i.group.rows.find((r) => r.platform === p)?.text ?? i.group.text;
-  return body !== i.draft.body ? body : i.draft.texts?.[p] ?? body;
+export const sameText = (texts: Partial<Record<Platform, string>>, platforms: Platform[]) =>
+  new Set(platforms.map((p) => texts[p] ?? '')).size <= 1;
+
+export const overLimit = (texts: Partial<Record<Platform, string>>, platforms: Platform[], limits: Partial<Record<Platform, number>>) =>
+  platforms.filter((p) => (texts[p] ?? '').length > (limits[p] ?? Infinity));
+
+export type TextsPatch = { body?: string; perPlatformText: Partial<Record<Platform, string>> };
+
+/**
+ * PATCH /api/drafts/:id body that makes each platform post what was typed.
+ * Same text: the body, and no per-platform copy, so postText falls back to the body everywhere.
+ * Otherwise an explicit entry per target (non-target entries are kept). One case postText
+ * overrides: a platform's text retyped to Autopilot's exact copy after the body was edited
+ * posts the body (the refetch shows that).
+ */
+export function textsPatch(d: Pick<ReviewItem, 'perPlatformText'>, typed: Partial<Record<Platform, string>>, platforms: Platform[], same: boolean): TextsPatch {
+  if (same) return { body: typed[platforms[0]] ?? '', perPlatformText: {} };
+  return { perPlatformText: { ...d.perPlatformText, ...Object.fromEntries(platforms.map((p) => [p, typed[p] ?? ''])) } };
 }
+
+/** Autopilot's original per-platform versions (variant A), or null for a hand-made draft. */
+export const restorePatch = (d: Pick<ReviewItem, 'machine'>): Required<TextsPatch> | null =>
+  d.machine ? { body: d.machine.text, perPlatformText: { ...d.machine.perPlatform } } : null;
 
 /** The first post still to go out on one of these platforms (for "X needs reconnecting before …"). */
 export const firstAtRisk = (items: CalItem[], platforms: Platform[], now: number): CalItem | null =>
@@ -203,6 +213,8 @@ export function skipMessage(s: Skipped): string {
   if (s.reason === 'too_long') return `Too long for ${(s.platforms ?? []).map((p) => PLATFORM_LABELS[p] ?? p).join(', ')}.`;
   if (s.reason === 'not_a_draft') return 'Already scheduled.';
   if (s.reason === 'not_found') return 'This post is gone.';
+  const gone = Object.entries(s.reasons ?? {}).filter(([, r]) => r === 'disconnected').map(([p]) => PLATFORM_LABELS[p] ?? p);
+  if (gone.length) return `Reconnect ${gone.join(', ')} first.`;
   return Object.values(s.reasons ?? {})[0] ?? 'Could not schedule this post.';
 }
 
