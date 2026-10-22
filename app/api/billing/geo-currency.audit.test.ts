@@ -8,7 +8,7 @@
  *   2. It then wrote that client-supplied header through to `billing_country`
  *      permanently. The header is display-only now and is never persisted.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const { profileRow, updates } = vi.hoisted(() => ({
   profileRow: {
@@ -106,5 +106,45 @@ describe('GET /api/billing — geo currency', () => {
     profileRow.billingCurrency = 'USD';
     const body = await (await call({ 'cf-ipcountry': 'IN' })).json();
     expect(body.currency).toBe('USD');
+  });
+});
+
+describe('GET /api/billing — plan state the page shows', () => {
+  const row = profileRow as Record<string, unknown>;
+  afterEach(() => {
+    Object.assign(row, {
+      tier: 'starter', subscriptionStatus: null, subscriptionCurrentPeriodEnd: null,
+      pendingTierChangeTo: null, pendingTierChangeAt: null, creditCycleStart: undefined,
+    });
+  });
+
+  it('quotes each upgrade with the same proration the charge uses, and nothing for lower tiers', async () => {
+    const day = 86_400_000;
+    Object.assign(row, {
+      tier: 'pro',
+      subscriptionStatus: 'active',
+      creditCycleStart: new Date(Date.now() - 10 * day),
+      subscriptionCurrentPeriodEnd: new Date(Date.now() + 20 * day),
+    });
+    const body = await (await call({})).json();
+    const [starter, pro, business] = body.tiers;
+    expect(starter.upgrade).toBeNull();
+    expect(pro.upgrade).toBeNull();
+    // (₹29,999 − ₹14,999) × 20/30 ≈ ₹10,000; floored paise, a hair under.
+    expect(business.upgrade.dueMinor).toBeGreaterThan(999_000);
+    expect(business.upgrade.dueMinor).toBeLessThanOrEqual(1_000_000);
+    expect(business.upgrade.creditsNow).toBe(19_000);
+    expect(body.cancelsAt).toBeNull();
+  });
+
+  it('reports a recorded cycle-end cancel', async () => {
+    const end = new Date(Date.now() + 5 * 86_400_000);
+    Object.assign(row, {
+      tier: 'pro', subscriptionStatus: 'active', creditCycleStart: new Date(),
+      subscriptionCurrentPeriodEnd: end, pendingTierChangeAt: end,
+    });
+    const body = await (await call({})).json();
+    expect(body.cancelsAt).toBe(end.toISOString());
+    expect(body.pendingTierChange).toBeNull();
   });
 });

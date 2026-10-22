@@ -1,28 +1,38 @@
 import { NextRequest } from 'next/server';
-import { eq } from 'drizzle-orm';
+import { and, desc, eq, gte, lt, sql } from 'drizzle-orm';
 import { withUser } from '../../../lib/api';
 import { db } from '../../../lib/db';
-import { profiles, TIER_CREDITS, type Tier } from '../../../lib/db/schema';
-import { getBalance, recentLedger } from '../../../lib/credits/ledger';
+import { creditLedger, profiles, TIER_CREDITS, type Tier } from '../../../lib/db/schema';
+import { getBalance } from '../../../lib/credits/ledger';
 import { ACTION_LABELS, type CreditAction } from '../../../lib/credits/pricing';
+import { summarizeCycle } from '../../../lib/ui/ledgerLabel';
 
 export const runtime = 'nodejs';
 
+const PAGE = 50;
+
 /**
- * GET /api/credits — returns current balance, tier metadata, and the
- * recent ledger (last 50 rows) for the usage page.
+ * GET /api/credits — current balance, tier metadata, and one page of the
+ * ledger (newest 50) for the usage page. Read-only.
+ *
+ *   ?before=<ISO createdAt>  the page older than that row ("Load older")
+ *   ?cycle=1                 adds `cycle`: carriedOver/added/spent/refunded and
+ *                            spend per category since creditCycleStart
  *
  * Shape:
  *   {
- *     balance: number,
- *     tier: 'starter' | 'pro' | 'business',
- *     monthlyAllocation: number,
- *     creditCycleStart: ISO string,
- *     ledger: Array<{ id, kind, action, label, credits, meta, createdAt }>
+ *     balance, tier, monthlyAllocation, creditCycleStart,
+ *     ledger: Array<{ id, kind, action, label, credits, meta, createdAt }>,
+ *     hasMore: boolean,
+ *     cycle?: CycleSummary
  *   }
  */
 export async function GET(req: NextRequest) {
   return withUser(async (user) => {
+    const params = req.nextUrl.searchParams;
+    const beforeRaw = params.get('before');
+    const before = beforeRaw && !Number.isNaN(Date.parse(beforeRaw)) ? new Date(beforeRaw) : null;
+
     const [profile] = await db()
       .select({
         tier: profiles.tier,
@@ -34,7 +44,29 @@ export async function GET(req: NextRequest) {
 
     const tier = (profile?.tier ?? 'starter') as Tier;
     const balance = await getBalance(user.id);
-    const ledger = await recentLedger(user.id, 50);
+    const rows = await db()
+      .select()
+      .from(creditLedger)
+      .where(before
+        ? and(eq(creditLedger.userId, user.id), lt(creditLedger.createdAt, before))
+        : eq(creditLedger.userId, user.id))
+      .orderBy(desc(creditLedger.createdAt))
+      .limit(PAGE + 1);
+    const ledger = rows.slice(0, PAGE);
+
+    let cycle;
+    if (params.get('cycle') && profile?.creditCycleStart) {
+      const sums = await db()
+        .select({
+          kind: creditLedger.kind,
+          action: creditLedger.action,
+          credits: sql<number>`SUM(${creditLedger.credits})::int`,
+        })
+        .from(creditLedger)
+        .where(and(eq(creditLedger.userId, user.id), gte(creditLedger.createdAt, profile.creditCycleStart)))
+        .groupBy(creditLedger.kind, creditLedger.action);
+      cycle = summarizeCycle(sums.map((s) => ({ ...s, credits: Number(s.credits) })), balance);
+    }
 
     return {
       balance,
@@ -52,6 +84,8 @@ export async function GET(req: NextRequest) {
         meta: row.meta,
         createdAt: row.createdAt.toISOString(),
       })),
+      hasMore: rows.length > PAGE,
+      ...(cycle ? { cycle } : {}),
     };
   }, req);
 }

@@ -12,7 +12,8 @@ type IconName =
   | 'send' | 'fire' | 'globe' | 'lock' | 'waveform' | 'target'
   | 'folder' | 'grid' | 'list' | 'link' | 'book' | 'fork' | 'alert'
   | 'maximize' | 'log_out'
-  | 'shield';
+  | 'shield'
+  | 'copy' | 'download';
 
 interface IconProps extends React.SVGProps<SVGSVGElement> {
   name: IconName;
@@ -65,6 +66,8 @@ export const Icon: React.FC<IconProps> = ({ name, size = 16, ...props }) => {
     maximize: <><path d="M2.5 6V2.5H6M14 6V2.5H10.5M2.5 10v3.5H6M14 10v3.5H10.5"/></>,
     log_out: <><path d="M6 2.5H3.5a1 1 0 00-1 1v9a1 1 0 001 1H6M10.5 11l3-3-3-3M13.5 8H6"/></>,
     shield: <><path d="M8 1.5L2.5 4v5c0 3 2.5 5 5.5 5.5 3-.5 5.5-2.5 5.5-5.5V4L8 1.5z"/></>,
+    copy: <><rect x="5" y="5" width="8.5" height="8.5" rx="1.5"/><path d="M11 5V3.5a1 1 0 00-1-1H3.5a1 1 0 00-1 1V10a1 1 0 001 1H5"/></>,
+    download: <><path d="M8 3v8M4.5 7.5L8 11l3.5-3.5M3 13h10"/></>,
   };
 
   return (

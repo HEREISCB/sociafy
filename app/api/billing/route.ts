@@ -5,7 +5,9 @@ import { db } from '../../../lib/db';
 import { profiles, TIER_CREDITS, type Tier } from '../../../lib/db/schema';
 import { getBalance } from '../../../lib/credits/ledger';
 import { env, isStubMode, geoCountry } from '../../../lib/env';
-import { tierPriceView, type Currency } from '../../../lib/billing/pricing';
+import { tierPriceView, TIER_PRICING, type Currency } from '../../../lib/billing/pricing';
+import { scheduledCancelAt } from '../../../lib/billing/cancel';
+import { deltaCredits, proratedDiffMinor } from '../../../lib/billing/providers/razorpay/proration';
 
 export const runtime = 'nodejs';
 
@@ -44,6 +46,8 @@ export async function GET(req: NextRequest) {
     const provider = 'razorpay' as const;
     const hasActiveSubscription = profile?.subscriptionStatus === 'active';
     const canSwitchProvider = !hasActiveSubscription;
+    const now = new Date();
+    const cancelsAt = profile ? scheduledCancelAt(profile, now) : null;
     // Subscriptions ride on Razorpay Plans, which require the Subscriptions
     // product to be enabled on the merchant account. Until ops creates the 3
     // plans and pastes the IDs in env, the Subscribe buttons can't go anywhere
@@ -70,6 +74,8 @@ export async function GET(req: NextRequest) {
       provider,
       isIndia,
       canSwitchProvider,
+      /** Cycle-end cancel we recorded; null once the webhook has landed. */
+      cancelsAt: cancelsAt?.toISOString() ?? null,
       pendingTierChange: profile?.pendingTierChangeTo ? {
         toTier: profile.pendingTierChangeTo,
         at: profile.pendingTierChangeAt?.toISOString() ?? null,
@@ -86,6 +92,21 @@ export async function GET(req: NextRequest) {
           amountMinor: p.chargeMinor,
           credits: TIER_CREDITS[t],
           isCurrent: hasActiveSubscription && t === tier,
+          // Read-only preview of what POST /api/billing/change-tier will charge:
+          // the same proratedDiffMinor call with the same inputs, so the figure
+          // can only shrink by the seconds between preview and click.
+          upgrade: hasActiveSubscription && TIER_PRICING.INR[t].amountMinor > TIER_PRICING.INR[tier].amountMinor
+            ? {
+                dueMinor: proratedDiffMinor({
+                  oldAmountMinor: TIER_PRICING.INR[tier].amountMinor,
+                  newAmountMinor: TIER_PRICING.INR[t].amountMinor,
+                  now,
+                  periodStart: profile!.creditCycleStart,
+                  periodEnd: profile!.subscriptionCurrentPeriodEnd ?? now,
+                }),
+                creditsNow: deltaCredits(tier, t),
+              }
+            : null,
         };
       }),
     };

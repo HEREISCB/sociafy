@@ -18,7 +18,11 @@ vi.mock('../../../lib/db', () => ({
       const rows = [Object.fromEntries(Object.keys(cols).map((k) => [k, `v_${k}`]))];
       return {
         from: () => ({
-          where: () => ({ orderBy: () => Promise.resolve(rows) }),
+          where: () => ({
+            orderBy: () => Promise.resolve(rows),
+            // The per-key 24h spend: key v_id spent 140.
+            groupBy: () => Promise.resolve([{ keyId: 'v_id', spent: 140 }]),
+          }),
         }),
       };
     },
@@ -65,6 +69,11 @@ describe('GET /api/keys', () => {
     ]);
     expect(Object.keys(body[0])).not.toContain('keyHash');
     expect(JSON.stringify(body)).not.toContain('key_hash');
+  });
+
+  it('adds each key\'s rolling-24h spend', async () => {
+    const body = (await (await GET({} as never)).json()) as Record<string, unknown>[];
+    expect(body[0].spent24h).toBe(140);
   });
 });
 

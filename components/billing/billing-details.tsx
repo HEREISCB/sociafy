@@ -12,7 +12,7 @@
 
 import { useEffect, useState } from 'react';
 import { apiPatch, useApi } from '../../lib/ui/fetcher';
-import { GST_STATE_OPTIONS, isValidGstin, stateCodeFromGstin } from '../../lib/billing/gst';
+import { GST_STATE_OPTIONS, gstTreatment, isValidGstin, stateCodeFromGstin } from '../../lib/billing/gst';
 import type { BillingAddress } from '../../lib/db/schema';
 
 export type BillingDetailsValue = {
@@ -86,7 +86,36 @@ export function useBillingDetails() {
     }
   };
 
-  return { value, set, setAddress, save, saving, loaded, validate };
+  /** Drop unsaved edits: re-seed from what the server has. */
+  const reset = () => setLoaded(false);
+
+  return { value, set, setAddress, save, saving, loaded, validate, reset };
+}
+
+/** Read mode: what the next invoice will say, and which tax line it carries. */
+export function BillingDetailsSummary({ value }: { value: BillingDetailsValue }) {
+  const a = value.billingAddress;
+  const country = (a.country ?? value.billingCountry ?? 'IN').toUpperCase();
+  const address = [a.line1, a.line2, [a.city, a.postalCode].filter(Boolean).join(' '), a.state, country === 'IN' ? '' : COUNTRIES.find((c) => c.code === country)?.name]
+    .filter(Boolean).join(', ');
+  const tax = gstTreatment({ country, placeOfSupply: value.placeOfSupply, gstin: value.gstin });
+  return (
+    <>
+      <div className="acct-taxsum">
+        <div><span className="acct-label">Legal name</span><b>{value.legalName || 'Not set: invoices use your account name'}</b></div>
+        <div><span className="acct-label">GSTIN</span><b className={value.gstin ? 'mono' : ''}>{value.gstin || 'None (B2C invoice)'}</b></div>
+        <div><span className="acct-label">Address</span><b>{address || 'Not set'}</b></div>
+      </div>
+      <p className="acct-note" style={{ marginTop: 12 }}>
+        {tax.split === 'export'
+          ? 'No GST: billed as an export of services.'
+          : tax.split === 'igst'
+            ? `${tax.label}: you’re in ${tax.stateName}, we bill from Uttar Pradesh.`
+            : `${tax.label}: ${tax.stateName ? 'you’re in Uttar Pradesh, like us' : 'no state on record, so we bill as Uttar Pradesh'}.`}
+        {' '}Invoices already issued can’t be changed.
+      </p>
+    </>
+  );
 }
 
 /**

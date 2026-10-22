@@ -1,15 +1,20 @@
 'use client';
 
-import React, { Suspense, useEffect, useState } from 'react';
+import React, { Suspense, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
+import { mutate as mutateKey } from 'swr';
 import { Icon } from '../../../../../components/icons';
-import type { CreditsPayload } from '../../../../../components/credits';
-import { CREDIT_PRICES } from '../../../../../lib/credits/pricing';
+import { Button, Modal, useToast } from '../../../../../components/ui';
+import { CREDIT_PRICES, MOTION_PER_SEC } from '../../../../../lib/credits/pricing';
 import { apiPost, friendlyApiError, useApi } from '../../../../../lib/ui/fetcher';
 import { openRazorpayModal } from '../../../../../components/billing/razorpay-checkout';
-import { ledgerRowLabel } from '../../../../../lib/ui/ledgerLabel';
 import { topupPriceView } from '../../../../../lib/billing/pricing';
-import { BillingDetailsFields, useBillingDetails } from '../../../../../components/billing/billing-details';
+import { gstTreatment, splitInclusive } from '../../../../../lib/billing/gst';
+import type { BillingDetailsValue } from '../../../../../components/billing/billing-details';
+import { inr, num, shortDate } from '../../../../../components/billing/account-ui';
+
+type Tier = 'starter' | 'pro' | 'business';
 
 type CheckoutHandoff =
   | { kind: 'redirect'; url: string }
@@ -25,68 +30,51 @@ type CheckoutHandoff =
       notes: Record<string, string>;
     };
 
-type InvoiceRow = {
-  id: string;
-  kind: 'subscription' | 'topup' | 'upgrade';
-  status: 'pending' | 'issued' | 'failed';
-  number: string | null;
-  url: string | null;
-  currency: string;
-  grossMinor: number;
-  taxMinor: number;
-  taxRatePct: number;
-  description: string | null;
-  createdAt: string;
-};
-
-const rupees = (minor: number) => `₹${(minor / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
-
 type BillingPayload = {
-  currentTier: 'starter' | 'pro' | 'business';
+  currentTier: Tier;
   currentTierLabel: string;
   monthlyAllocation: number;
   balance: number;
   subscriptionStatus: string | null;
   subscriptionCurrentPeriodEnd: string | null;
-  stripeCustomerId: string | null;
-  razorpayCustomerId: string | null;
   hasActiveSubscription: boolean;
   billingConfigured: boolean;
   subscriptionsAvailable: boolean;
   /** Display currency only — the charge is always INR. */
   currency: 'INR' | 'USD';
-  provider: 'razorpay' | null;
-  isIndia: boolean;
   canSwitchProvider: boolean;
-  pendingTierChange: { toTier: 'starter' | 'pro' | 'business'; at: string | null } | null;
+  cancelsAt: string | null;
+  pendingTierChange: { toTier: Tier; at: string | null } | null;
   tiers: Array<{
-    tier: 'starter' | 'pro' | 'business';
+    tier: Tier;
     label: string;
-    /** Local figure — approximate when `priceApproximate`. */
     priceMonthly: string;
-    /** What Razorpay actually charges, always in ₹. */
     chargeMonthly: string;
     priceApproximate: boolean;
     amountMinor: number;
     credits: number;
     isCurrent: boolean;
+    upgrade: { dueMinor: number; creditsNow: number } | null;
   }>;
 };
 
-const TIER_RANK: Record<BillingPayload['currentTier'], number> = { starter: 0, pro: 1, business: 2 };
+const TIER_RANK: Record<Tier, number> = { starter: 0, pro: 1, business: 2 };
 
-// "All 6 platforms", not seven: the Reddit adapter ships but its OAuth app
-// isn't provisioned in production, so nobody can connect it. Raise to seven
-// when it is.
-const TIER_PERKS: Record<BillingPayload['currentTier'], string[]> = {
-  starter: ['2,000 credits / month', 'All 6 platforms', 'Text, image & 720p video', 'Manual posting + scheduling', 'Email support'],
-  pro: ['6,000 credits / month', 'All 6 platforms', 'Autopilot — trend → draft → schedule', 'Web research on captions', 'Priority email support'],
-  business: ['25,000 credits / month', 'All 6 platforms', '1080p hero clips included', 'Autopilot with media generation', 'Daily reel guarantee · onboarding call'],
+// Credit counts come from the API (TIER_CREDITS), never retyped here. These are
+// the perks the owner has listed so far; none is enforced in code yet, so the
+// copy says what each plan is for rather than what the others can't do.
+const TIER_PERKS: Record<Tier, string[]> = {
+  starter: ['Text, image & 720p video', 'Scheduling on all 6 platforms', 'Email support'],
+  pro: ['Everything in Starter', 'Autopilot: trend → draft → schedule', 'Web research on captions'],
+  business: ['Everything in Pro', '1080p hero clips', 'Onboarding call'],
 };
 
-/** Shown to users whenever checkout can't start because payments aren't configured. */
-const PAYMENTS_DOWN = 'Payments are temporarily unavailable. Please try again shortly.';
-const LEDGER_PREVIEW = 10;
+const PACKS = [1000, 2000, 5000] as const;
+const PAYMENTS_DOWN = 'Payments are unavailable right now. Try again shortly.';
+const REEL = CREDIT_PRICES.video_8s_720p_quality;
+const IMAGE = CREDIT_PRICES.image_medium_1024;
+
+type SheetState = null | { kind: 'topup' } | { kind: 'cancel' } | { kind: 'upgrade' | 'down'; tier: Tier };
 
 export default function BillingPage() {
   return (
@@ -98,482 +86,392 @@ export default function BillingPage() {
 
 function BillingPageInner() {
   const { data, mutate } = useApi<BillingPayload>('/api/billing');
-  const { data: credits, isLoading: ledgerLoading } = useApi<CreditsPayload>('/api/credits', { refreshInterval: 30_000 });
+  const { data: details } = useApi<BillingDetailsValue>('/api/billing/details');
   const params = useSearchParams();
+  const toast = useToast();
+  const [sheet, setSheet] = useState<SheetState>(null);
+  const [pack, setPack] = useState<number>(2000);
   const [busy, setBusy] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
-  const [topupOpen, setTopupOpen] = useState(false);
-  const [topupBusy, setTopupBusy] = useState(false);
-  const [cancelBusy, setCancelBusy] = useState(false);
-  const [cancelOpen, setCancelOpen] = useState(false);
-  // null = not touched yet: plans start open only when there's nothing to manage.
-  const [plansOpen, setPlansOpen] = useState<boolean | null>(null);
-  const [showAllLedger, setShowAllLedger] = useState(false);
-  const billing = useBillingDetails();
-  const [detailsMsg, setDetailsMsg] = useState<string | null>(null);
-  const { data: invoiceData } = useApi<{ invoices: InvoiceRow[] }>('/api/billing/invoices');
 
-  const saveDetails = async () => {
-    const err = await billing.save();
-    setDetailsMsg(err ?? 'Saved. Future invoices will use these details.');
-  };
+  const refresh = () => Promise.all([mutate(), mutateKey('/api/credits')]);
 
-  async function apiFetch<T>(url: string, init: RequestInit): Promise<T> {
-    const r = await fetch(url, { ...init, headers: { 'content-type': 'application/json', ...(init.headers ?? {}) } });
-    if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
-    return r.json() as Promise<T>;
-  }
+  // The balance re-arrives only when SWR sees a real change (a webhook landed),
+  // never on a timer.
+  const [arriveKey, setArriveKey] = useState(0);
+  const prevBalance = useRef<number | null>(null);
+  useEffect(() => {
+    if (!data) return;
+    if (prevBalance.current !== null && prevBalance.current !== data.balance) setArriveKey((k) => k + 1);
+    prevBalance.current = data.balance;
+  }, [data]);
 
-  // Operators get the details in the console; users only ever see PAYMENTS_DOWN.
+  // Operators get the details in the console; users see PAYMENTS_DOWN.
   useEffect(() => {
     if (data && !data.billingConfigured) {
       console.error('[billing] Payment provider is not configured: checkout and top-up are disabled.');
     }
   }, [data]);
 
-  const cancelSubscription = async () => {
-    setCancelBusy(true);
-    try {
-      const r = await apiPost<{ periodEnd: string | null }>('/api/billing/cancel', {});
-      const end = r.periodEnd ? new Date(r.periodEnd).toLocaleDateString() : 'your renewal date';
-      setToast(`Subscription will end on ${end}.`);
-      setCancelOpen(false);
-      await mutate();
-    } catch (e) {
-      setToast(`Couldn't cancel: ${e instanceof Error ? e.message.slice(0, 160) : String(e)}`);
-    } finally {
-      setCancelBusy(false);
-    }
-  };
-
-  const clearPendingDowngrade = async () => {
-    setBusy('clear-pending');
-    try {
-      const r = await apiFetch<{ cleared: boolean; caveat: string }>('/api/billing/change-tier', { method: 'DELETE' });
-      setToast(r.caveat);
-      await mutate();
-    } catch (e) {
-      setToast(`Couldn't clear pending switch: ${e instanceof Error ? e.message.slice(0, 160) : String(e)}`);
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  // Checkout return: one-shot toast, then nudge SWR a few times so the balance
-  // updates once the webhook lands. (A sticky "confirming" banner waiting for a
-  // balance delta never cleared when the webhook beat the redirect.)
+  // Checkout return: one toast, then nudge SWR until the webhook's credits show.
   useEffect(() => {
     const result = params.get('checkout');
     if (!result) return;
-    if (result === 'success') {
-      setToast('Payment received — credits will appear within a few seconds.');
-      const t1 = setTimeout(() => mutate(), 2000);
-      const t2 = setTimeout(() => mutate(), 6000);
-      const t3 = setTimeout(() => mutate(), 12000);
-      if (typeof window !== 'undefined') {
-        window.history.replaceState(null, '', '/account/billing');
-      }
-      return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
-    }
-    if (result === 'canceled') {
-      setToast('Checkout canceled — no changes to your plan.');
-      if (typeof window !== 'undefined') {
-        window.history.replaceState(null, '', '/account/billing');
-      }
-    }
-  }, [params, mutate]);
-
-  // ?topup=1 (from the credit meter / out-of-credits banner) opens the top-up sheet.
-  useEffect(() => {
-    if (!params.get('topup') || !data) return;
-    if (data.billingConfigured) setTopupOpen(true);
     window.history.replaceState(null, '', '/account/billing');
-  }, [params, data]);
+    if (result === 'success') {
+      toast('Payment received. Adding your credits…');
+      const ts = [2000, 6000, 12000, 20000].map((ms) => setTimeout(() => { void mutate(); void mutateKey('/api/credits'); }, ms));
+      return () => ts.forEach(clearTimeout);
+    }
+    if (result === 'canceled') toast('Checkout closed. Nothing was charged.');
+  }, [params, mutate, toast]);
+
+  // ?topup=1 (header button, out-of-credits banner) opens the top-up sheet.
+  // It opens even when payments are down, so the reason is visible instead of
+  // the link silently doing nothing.
+  useEffect(() => {
+    if (!params.get('topup')) return;
+    setSheet({ kind: 'topup' });
+    window.history.replaceState(null, '', '/account/billing');
+  }, [params]);
+
+  const fail = (e: unknown) => {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.includes('503') || msg.includes('billing_coming_soon')) {
+      console.error('[billing] payments unavailable:', msg);
+      toast(PAYMENTS_DOWN, { tone: 'err' });
+    } else {
+      toast(friendlyApiError(e), { tone: 'err' });
+    }
+  };
 
   const dispatchHandoff = async (handoff: CheckoutHandoff) => {
     if (handoff.kind === 'redirect') {
-      if (typeof window !== 'undefined') {
-        window.location.assign(handoff.url);
-      }
+      window.location.assign(handoff.url);
       return;
     }
-    await openRazorpayModal(handoff, {
-      onDismiss: () => setToast('Checkout canceled — no changes to your plan.'),
-    });
+    await openRazorpayModal(handoff, { onDismiss: () => toast('Checkout closed. Nothing was charged.') });
   };
 
-  const startCheckout = async (tier: 'starter' | 'pro' | 'business') => {
-    setBusy(tier);
-    try {
-      const handoff = await apiPost<CheckoutHandoff>('/api/billing/checkout', { tier });
-      await dispatchHandoff(handoff);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (msg.includes('503') || msg.includes('billing_coming_soon')) {
-        console.error('[billing] checkout unavailable:', msg);
-        setToast(PAYMENTS_DOWN);
-      } else {
-        // friendlyApiError turns `Error("<status>: <json>")` into the server's
-        // `hint` sentence. Never interpolate the raw message.
-        setToast(friendlyApiError(e));
-      }
-    } finally {
-      setBusy(null);
-    }
+  const run = async (key: string, fn: () => Promise<void>) => {
+    setBusy(key);
+    try { await fn(); } catch (e) { fail(e); } finally { setBusy(null); }
   };
 
-  const changeTier = async (toTier: 'starter' | 'pro' | 'business') => {
-    setBusy(toTier);
-    try {
-      const result = await apiPost<{ kind: 'immediate' | 'scheduled'; effectiveAt: string; handoff?: CheckoutHandoff }>(
-        '/api/billing/change-tier',
-        { toTier },
-      );
-      if (result.kind === 'immediate' && result.handoff) {
-        await dispatchHandoff(result.handoff);
-      } else if (result.kind === 'scheduled') {
-        setToast(`Plan will switch to ${toTier} on ${new Date(result.effectiveAt).toLocaleDateString()}.`);
-        await mutate();
-      } else {
-        setToast('Plan switched.');
-        await mutate();
-      }
-    } catch (e) {
-      setToast(`Couldn't switch tier — ${friendlyApiError(e)}`);
-    } finally {
-      setBusy(null);
-    }
-  };
+  const subscribe = (tier: Tier) => run(tier, async () => {
+    await dispatchHandoff(await apiPost<CheckoutHandoff>('/api/billing/checkout', { tier }));
+  });
 
-  const buyTopUp = async (credits: number) => {
-    setTopupBusy(true);
-    try {
-      const handoff = await apiPost<CheckoutHandoff>('/api/billing/topup', { credits });
-      setTopupOpen(false);
-      await dispatchHandoff(handoff);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (msg.includes('503') || msg.includes('billing_coming_soon')) {
-        console.error('[billing] top-up unavailable:', msg);
-        setToast(PAYMENTS_DOWN);
-      } else {
-        setToast(friendlyApiError(e));
-      }
-    } finally {
-      setTopupBusy(false);
-    }
-  };
+  const changeTier = (tier: Tier) => run('change', async () => {
+    const r = await apiPost<{ kind: 'immediate' | 'scheduled'; effectiveAt: string; handoff?: CheckoutHandoff }>(
+      '/api/billing/change-tier', { toTier: tier },
+    );
+    setSheet(null);
+    if (r.handoff) return dispatchHandoff(r.handoff);
+    toast(r.kind === 'scheduled' ? `Scheduled: ${label(tier)} from ${shortDate(r.effectiveAt)}.` : 'Plan switched.');
+    await refresh();
+  });
 
-  const showInr = async () => {
-    try {
-      await apiPost('/api/billing/preferences', { currency: 'INR' });
-      await mutate();
-    } catch (e) {
-      setToast(`Couldn't switch currency: ${friendlyApiError(e)}`);
-    }
-  };
+  const buyTopUp = () => run('topup', async () => {
+    const handoff = await apiPost<CheckoutHandoff>('/api/billing/topup', { credits: pack });
+    setSheet(null);
+    await dispatchHandoff(handoff);
+  });
 
-  const cycleEnd = data?.subscriptionCurrentPeriodEnd ? new Date(data.subscriptionCurrentPeriodEnd) : null;
-  // Ticking "now" keeps render pure and accurate through midnight.
-  const [now, setNow] = useState<number>(0);
-  useEffect(() => {
-    setNow(Date.now());
-    const id = setInterval(() => setNow(Date.now()), 60_000);
-    return () => clearInterval(id);
-  }, []);
-  const daysLeft = cycleEnd && now > 0
-    ? Math.max(0, Math.ceil((cycleEnd.getTime() - now) / (24 * 60 * 60 * 1000)))
-    : null;
-  const pct = data && data.monthlyAllocation > 0
-    ? Math.min(100, Math.round((data.balance / data.monthlyAllocation) * 100))
-    : 0;
-  const barState = pct <= 5 ? 'crit' : pct <= 15 ? 'warn' : '';
-
-  // Escape closes whichever modal is up; the cancel dialog honours its in-flight guard.
-  useEffect(() => {
-    if (!topupOpen && !cancelOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      setTopupOpen(false);
-      if (!cancelBusy) setCancelOpen(false);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [topupOpen, cancelOpen, cancelBusy]);
+  const cancel = () => run('cancel', async () => {
+    const r = await apiPost<{ periodEnd: string | null }>('/api/billing/cancel', {});
+    setSheet(null);
+    toast(r.periodEnd ? `Plan ends ${shortDate(r.periodEnd)}. You won’t be charged again.` : 'Cancelled. You won’t be charged again.');
+    await refresh();
+  });
 
   const active = !!data?.hasActiveSubscription;
-  const currentTier = data?.tiers.find((t) => t.isCurrent);
-  const showPlans = plansOpen ?? (!!data && !active);
-  const ledger = credits?.ledger ?? [];
-  const visibleLedger = showAllLedger ? ledger : ledger.slice(0, LEDGER_PREVIEW);
-  const invoices = invoiceData?.invoices ?? [];
+  const current = data?.tiers.find((t) => t.isCurrent) ?? null;
+  const periodEnd = data?.subscriptionCurrentPeriodEnd ?? null;
+  const endLabel = periodEnd ? shortDate(periodEnd) : 'your renewal date';
+  const cancelsAt = data?.cancelsAt ?? null;
+  const pending = data?.pendingTierChange ?? null;
+  const fill = data && active && data.monthlyAllocation > 0 ? Math.min(1, data.balance / data.monthlyAllocation) : 0;
+  const [now] = useState(() => Date.now());
+  const daysLeft = periodEnd ? Math.max(0, Math.ceil((new Date(periodEnd).getTime() - now) / 86_400_000)) : null;
+
+  const sheetTier = sheet && 'tier' in sheet ? data?.tiers.find((t) => t.tier === sheet.tier) ?? null : null;
+  const topup = topupPriceView(data?.currency ?? 'INR', pack);
+  const tax = gstTreatment({ country: details?.billingAddress?.country ?? details?.billingCountry, placeOfSupply: details?.placeOfSupply, gstin: details?.gstin });
 
   return (
-    <div className="plan-page">
-      {toast && <div className="set-notice" role="status">{toast}</div>}
+    <div className="acct-page">
+      {data?.subscriptionStatus === 'past_due' && (
+        <div className="acct-banner" role="alert">
+          <Icon name="alert" size={14} />
+          <span>
+            Razorpay couldn’t charge your card for the {data.currentTierLabel === 'No plan' ? '' : `${label(data.currentTier)} `}plan.
+            Retry from Razorpay’s email, or top up to keep generating. Your credits still work.
+          </span>
+        </div>
+      )}
+      {data?.subscriptionStatus === 'incomplete' && (
+        <div className="acct-banner" role="status">
+          <Icon name="clock" size={14} />
+          <span>Your {label(data.currentTier)} plan is waiting for you to approve it in Razorpay. Check your email for the link.</span>
+        </div>
+      )}
 
-      <section className="card plan-balance" aria-label="Credit balance">
-        <div className="plan-balance-top">
-          <div>
-            <div className="plan-label">Credits</div>
-            <div className="plan-big mono">{data ? data.balance.toLocaleString() : '—'}</div>
-            <div className="plan-sub">
-              {active
-                ? <>of {data!.monthlyAllocation.toLocaleString()} this cycle
-                    {daysLeft !== null && <> · {daysLeft === 0 ? 'renews today' : daysLeft === 1 ? 'renews tomorrow' : `renews in ${daysLeft} days`}</>}
-                  </>
-                : data ? 'No active plan' : ' '}
-            </div>
+      <section className="card acct-bal-card" aria-label="Credit balance">
+        <div className="acct-label">Credits left</div>
+        <div className="acct-bal-top">
+          <div key={arriveKey} className={`acct-big mono${arriveKey ? ' arrive' : ''}`}>
+            {data ? num(data.balance) : '—'}<small>cr</small>
           </div>
-          <button className={active ? "btn primary" : "btn"} onClick={() => setTopupOpen(true)} disabled={!data?.billingConfigured}>
-            <Icon name="plus" size={14} /> Top up
-          </button>
+          <Link className="acct-link" href="/account/usage">See where they went</Link>
         </div>
         {active && (
-          <div className={`meter-bar ${barState}`} role="presentation">
-            <div className="fill" style={{ width: `${pct}%` }} />
-          </div>
+          <div className="acct-meter" aria-hidden="true"><i style={{ transform: `scaleX(${fill})` }} /></div>
         )}
-        {data && !data.billingConfigured && <p className="plan-note">{PAYMENTS_DOWN}</p>}
+        <p className="acct-note">
+          {!data ? ' '
+            : !active ? 'Credits from top-ups and grants. Nothing renews, and credits don’t expire.'
+            : cancelsAt ? <>of {num(data.monthlyAllocation)} this cycle · plan ends <b>{shortDate(cancelsAt)}</b>; your credits stay usable after that</>
+            : <>of {num(data.monthlyAllocation)} this cycle · renews <b>{endLabel}</b> with {num(data.monthlyAllocation)} more · unused credits stay</>}
+        </p>
+        {data && (
+          <p className="acct-buys">
+            Enough for ≈ <span className="mono">{num(Math.floor(data.balance / REEL))}</span> AI reels,
+            or <span className="mono">{num(Math.floor(data.balance / IMAGE))}</span> images,
+            or <span className="mono">{num(Math.floor(data.balance / CREDIT_PRICES.text_post))}</span> captions
+          </p>
+        )}
       </section>
 
       <section className="card" aria-labelledby="plan-head">
-        <div className="card-head">
+        <div className="card-head acct-card-head">
           <h3 id="plan-head">Plan</h3>
-          <button className="btn sm" onClick={() => setPlansOpen(!showPlans)} aria-expanded={showPlans}>
-            {showPlans ? 'Hide plans' : 'Change plan'}
-          </button>
+          {data && (
+            <span key={`${cancelsAt}${pending?.toTier}`} className={`badge acct-swap ${!active ? '' : cancelsAt || pending ? 'warn' : 'ok'}`}>
+              {!active ? 'No plan · paying as you go'
+                : cancelsAt ? `${current?.label} · ends ${shortDate(cancelsAt)} · won’t renew`
+                : pending ? `${current?.label} · switches to ${label(pending.toTier)} on ${pending.at ? shortDate(pending.at) : endLabel}`
+                : `${current?.label} · ${current?.chargeMonthly}/mo · renews ${endLabel}`}
+            </span>
+          )}
+        </div>
+        <div className="acct-tiers">
+          {(data?.tiers ?? []).map((t) => {
+            const up = active && data && TIER_RANK[t.tier] > TIER_RANK[data.currentTier];
+            let btn: React.ReactNode;
+            let why = '';
+            if (t.isCurrent) {
+              btn = <Button disabled>Your plan</Button>;
+              why = cancelsAt ? `Ends ${shortDate(cancelsAt)}` : pending ? `Until ${pending.at ? shortDate(pending.at) : endLabel}` : `Renews ${endLabel}`;
+            } else if (!data?.billingConfigured) {
+              btn = <Button disabled>{active ? (up ? 'Upgrade' : 'Switch') : 'Subscribe'}</Button>;
+              why = PAYMENTS_DOWN;
+            } else if (!data.subscriptionsAvailable) {
+              btn = <Button disabled>Subscribe</Button>;
+              why = 'Monthly plans aren’t live yet. Top up instead.';
+            } else if (active && cancelsAt) {
+              btn = <Button disabled>{up ? 'Upgrade' : 'Switch'}</Button>;
+              why = `Available after ${shortDate(cancelsAt)}`;
+            } else if (active && pending) {
+              btn = <Button disabled>{pending.toTier === t.tier ? `Switching ${pending.at ? shortDate(pending.at) : ''}` : up ? 'Upgrade' : 'Switch'}</Button>;
+              why = pending.toTier === t.tier ? `${current?.label} stays until then` : 'A switch is already scheduled';
+            } else if (up && t.upgrade) {
+              btn = (
+                <Button variant="primary" onClick={() => setSheet({ kind: 'upgrade', tier: t.tier })}>
+                  Upgrade <span className="cost">{inr(t.upgrade.dueMinor)} today</span>
+                </Button>
+              );
+              why = daysLeft !== null ? `Prorated for ${daysLeft} day${daysLeft === 1 ? '' : 's'} left` : 'Prorated for the rest of this cycle';
+            } else if (active) {
+              btn = <Button onClick={() => setSheet({ kind: 'down', tier: t.tier })}>Switch on {endLabel}</Button>;
+              why = 'No charge today';
+            } else {
+              btn = (
+                <Button busy={busy === t.tier} onClick={() => subscribe(t.tier)}>
+                  {busy === t.tier ? 'Opening Razorpay…' : <>Subscribe <span className="cost">{t.chargeMonthly}/mo</span></>}
+                </Button>
+              );
+              why = t.priceApproximate ? `Charged ${t.chargeMonthly} in INR` : 'Opens Razorpay';
+            }
+            return (
+              <div key={t.tier} className={`acct-tier${t.isCurrent ? ' cur' : ''}`}>
+                <div className="acct-tier-name">{t.label}{t.isCurrent && <span className="badge acct-ink">Current</span>}</div>
+                <div className="acct-price">{t.priceMonthly}<small> / month</small></div>
+                <ul>
+                  <li className="mono">{num(t.credits)} credits / month</li>
+                  {TIER_PERKS[t.tier].map((p) => <li key={p}>{p}</li>)}
+                </ul>
+                {btn}
+                <div className="acct-why">{why}</div>
+              </div>
+            );
+          })}
+          {!data && [0, 1, 2].map((i) => <div key={i} className="acct-tier"><span className="skel" style={{ height: 160 }} /></div>)}
+        </div>
+        <div className="acct-card-foot">
+          <span>
+            Charged in ₹ INR incl. 18% GST, with a tax invoice.
+            {data?.currency === 'USD' && ' Dollar figures are approximate.'}{' '}
+            <Link href="/legal/refund">Refund &amp; cancellation policy</Link>
+          </span>
+          <span className="acct-cancel">
+            <Button
+              size="sm"
+              disabled={!active || !!cancelsAt}
+              reason={!active ? 'No plan to cancel' : cancelsAt ? `Ends ${shortDate(cancelsAt)}. Pick a plan again after that.` : undefined}
+              onClick={() => setSheet({ kind: 'cancel' })}
+            >
+              Cancel plan
+            </Button>
+          </span>
+        </div>
+      </section>
+
+      <section className="card" aria-labelledby="costs-head">
+        <div className="card-head acct-card-head">
+          <h3 id="costs-head">What things cost</h3>
+          <span className="acct-note">Every button that spends shows its cost</span>
         </div>
         <div className="card-body">
-          <div className="plan-current">
-            {active && currentTier ? (
-              <div>
-                <div className="plan-current-name">{currentTier.label}</div>
-                <div className="plan-sub">{currentTier.chargeMonthly} / month</div>
-              </div>
-            ) : (
-              <div className="plan-sub">{data ? 'Choose a plan to start posting.' : ' '}</div>
-            )}
-            {data?.subscriptionStatus && data.subscriptionStatus !== 'active' && (
-              <span className="badge badge--warn">{data.subscriptionStatus.replace(/_/g, ' ')}</span>
-            )}
+          {/* Read off the charge table, never retyped. */}
+          <div className="acct-costs">
+            <div><span>Caption</span><span>{CREDIT_PRICES.text_post} cr</span></div>
+            <div><span>Caption <em>with web research</em></span><span>{CREDIT_PRICES.text_post_research} cr</span></div>
+            <div><span>Image <em>standard</em></span><span>{IMAGE} cr</span></div>
+            <div><span>Image <em>high quality</em></span><span>{CREDIT_PRICES.image_high_portrait}–{CREDIT_PRICES.image_high_1024} cr</span></div>
+            <div><span>Photo used as reference</span><span>+{CREDIT_PRICES.image_reference} cr</span></div>
+            <div><span>Motion graphic</span><span>{MOTION_PER_SEC} cr / s</span></div>
+            <div><span>AI video <em>8 s · 720p</em></span><span>{num(REEL)} cr</span></div>
+            <div><span>AI video <em>15 s · 1080p</em></span><span>{num(CREDIT_PRICES.video_15s_1080p_quality)} cr</span></div>
+            <div><span>Avatar video <em>480p / 720p</em></span><span>{CREDIT_PRICES.avatar_video_480p} / {CREDIT_PRICES.avatar_video_720p} cr</span></div>
+            <div><span>Voiceover</span><span>{CREDIT_PRICES.tts_synthesis} cr</span></div>
           </div>
-          {data?.pendingTierChange && (
-            <div className="plan-pending">
-              <span>
-                Switches to {data.pendingTierChange.toTier} on{' '}
-                {data.pendingTierChange.at ? new Date(data.pendingTierChange.at).toLocaleDateString() : 'cycle end'}.
-                Current credits stay usable until then.
-              </span>
-              <button className="btn sm" onClick={clearPendingDowngrade} disabled={busy === 'clear-pending'}>
-                {busy === 'clear-pending' ? 'Working…' : 'Cancel switch'}
-              </button>
-            </div>
-          )}
+          <p className="acct-note" style={{ marginTop: 12 }}>
+            Failed generations refund automatically. Top-ups cost {topupPriceView('INR').charge} per 1,000 credits incl. GST.
+          </p>
         </div>
-
-        {showPlans && (
-          <div className="plan-grid">
-            {(data?.tiers ?? []).map((t) => (
-              <div key={t.tier} className={`plan-tier ${t.isCurrent ? 'current' : ''}`}>
-                <div className="plan-tier-name">
-                  {t.label}
-                  {t.isCurrent && <span className="badge">Current</span>}
-                </div>
-                <div className="plan-tier-price">{t.priceMonthly}<span className="per"> / month</span></div>
-                {/* The customer must see the currency they'll actually be charged before subscribing. */}
-                {t.priceApproximate && (
-                  <div className="plan-tier-charge">Billed as {t.chargeMonthly} / month in INR</div>
-                )}
-                <ul>
-                  {TIER_PERKS[t.tier].map((perk) => <li key={perk}>{perk}</li>)}
-                </ul>
-                {t.isCurrent ? (
-                  <button className="btn" disabled>Current plan</button>
-                ) : !data?.subscriptionsAvailable ? (
-                  <button className="btn" disabled title="Monthly plans aren't live yet. Top up credits for now.">
-                    Coming soon — monthly plans
-                  </button>
-                ) : data?.hasActiveSubscription ? (
-                  <button className="btn" onClick={() => changeTier(t.tier)} disabled={busy === t.tier}>
-                    {busy === t.tier ? 'Working…' :
-                      TIER_RANK[t.tier] > TIER_RANK[data!.currentTier]
-                        ? `Upgrade to ${t.label}`
-                        : `Downgrade to ${t.label}`}
-                  </button>
-                ) : (
-                  <button className="btn" onClick={() => startCheckout(t.tier)} disabled={busy === t.tier}>
-                    {busy === t.tier
-                      ? 'Redirecting…'
-                      // Currency in the label: no one pays in rupees without reading "INR" first.
-                      : t.priceApproximate
-                        ? `Subscribe — ${t.chargeMonthly}/mo INR`
-                        : `Subscribe to ${t.label}`}
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-        {data && (
-          <div className="plan-currency">
-            {data.currency === 'INR'
-              ? 'Charged in ₹ INR with a GST invoice.'
-              : 'Charged in ₹ INR. Dollar figures are approximate; your bank sets the conversion rate.'}
-            {data.canSwitchProvider && data.currency !== 'INR' && (
-              <button className="set-link" onClick={showInr}>Show ₹ prices</button>
-            )}
-          </div>
-        )}
       </section>
 
-      <section className="card" aria-labelledby="activity-head">
-        <div className="card-head"><h3 id="activity-head">Credit activity</h3></div>
-        <div className="plan-rows">
-          {ledgerLoading && <div className="plan-empty">Loading…</div>}
-          {!ledgerLoading && ledger.length === 0 && (
-            <div className="plan-empty">No credit activity yet.</div>
-          )}
-          {visibleLedger.map((row) => <LedgerRow key={row.id} row={row} />)}
-        </div>
-        <div className="plan-card-foot">
-          <span>
-            {/* Read off the charge table, never retyped. */}
-            Text {CREDIT_PRICES.text_post} · image {CREDIT_PRICES.image_medium_1024} · 720p reel {CREDIT_PRICES.video_8s_720p_quality}
-            {' '}· 1080p hero {CREDIT_PRICES.video_15s_1080p_quality} credits. Failed generations refund automatically.
-          </span>
-          {ledger.length > LEDGER_PREVIEW && (
-            <button className="set-link" onClick={() => setShowAllLedger((v) => !v)}>
-              {showAllLedger ? 'Show less' : `Show all ${ledger.length}`}
+      <p className="acct-legal">
+        Sociafy is a product of GNIX Semiconductors Private Limited, 2TF, Satyam Complex 2, Sector Alpha II, Greater Noida, Uttar Pradesh 201310, India.
+      </p>
+
+      {/* ---------- Top up: pick a pack → see the total → Pay ---------- */}
+      <Modal
+        open={sheet?.kind === 'topup'}
+        onClose={() => { if (busy !== 'topup') setSheet(null); }}
+        title="Top up credits"
+        footer={<>
+          <Button onClick={() => setSheet(null)} disabled={busy === 'topup'}>Not now</Button>
+          <Button
+            variant="primary"
+            busy={busy === 'topup'}
+            disabled={!data?.billingConfigured}
+            reason={PAYMENTS_DOWN}
+            onClick={buyTopUp}
+          >
+            {busy === 'topup' ? 'Opening Razorpay…' : `Pay ${topup.charge}`}
+          </Button>
+        </>}
+      >
+        <p className="acct-sheet-p">Paid once. Credits never expire and land a few seconds after payment.</p>
+        <div className="row" role="group" aria-label="Pack size">
+          {PACKS.map((n) => (
+            <button key={n} type="button" className="chip" aria-pressed={pack === n} onClick={() => setPack(n)}>
+              {num(n)} credits
             </button>
-          )}
-        </div>
-      </section>
-
-      <section className="card" aria-labelledby="invoices-head">
-        <div className="card-head"><h3 id="invoices-head">Invoices</h3></div>
-        <div className="plan-rows">
-          {invoices.length === 0 ? (
-            <div className="plan-empty">No invoices yet. One is issued for every payment.</div>
-          ) : invoices.map((inv) => (
-            <div key={inv.id} className="plan-row">
-              <div className="plan-row-main">
-                <div>{inv.description ?? inv.kind}</div>
-                <div className="plan-row-meta">
-                  {new Date(inv.createdAt).toLocaleDateString()}{inv.number && <> · {inv.number}</>}
-                </div>
-              </div>
-              <span className="num" title={`incl. ${rupees(inv.taxMinor)} GST @ ${inv.taxRatePct}%`}>{rupees(inv.grossMinor)}</span>
-              {inv.url ? (
-                <a className="btn ghost sm" href={inv.url} target="_blank" rel="noreferrer">Download</a>
-              ) : (
-                // Money moved and credits landed; only the document is late.
-                <span className="plan-row-when">{inv.status === 'failed' ? 'Retrying…' : 'Preparing…'}</span>
-              )}
-            </div>
           ))}
         </div>
-        <details className="plan-details">
-          <summary>Invoice details — legal name, GSTIN, address</summary>
-          <div className="plan-details-body">
-            <p className="set-hint">
-              Add your GSTIN before your next charge to get a B2B tax invoice. Issued invoices can&apos;t be amended.
-            </p>
-            <BillingDetailsFields value={billing.value} set={billing.set} setAddress={billing.setAddress} />
-            <div className="set-actions">
-              <button className="btn primary" onClick={saveDetails} disabled={billing.saving || !billing.loaded}>
-                {billing.saving ? 'Saving…' : 'Save details'}
-              </button>
-              {detailsMsg && (
-                <span className={billing.validate() ? 'set-hint err' : 'set-hint'}>{detailsMsg}</span>
-              )}
-            </div>
+        <div className="acct-sum">
+          <div><span>{num(pack)} credits</span><span>{topup.approximate ? `${topup.display} · ${topup.charge}` : topup.charge}</span></div>
+          <div className="acct-note">
+            <span>incl. GST{tax.split === 'export' ? '' : ` (${tax.label})`}</span>
+            <span>{inr(splitInclusive(topup.chargeMinor).taxMinor)}</span>
           </div>
-        </details>
-      </section>
+          <div className="acct-note"><span>Buys ≈ {num(Math.floor(pack / REEL))} AI reels or {num(Math.floor(pack / IMAGE))} images</span><span /></div>
+        </div>
+        <p className="acct-note">
+          Invoice to <b>{details?.legalName || 'your account (no company name yet)'}</b>
+          {details?.gstin && <> · GSTIN <span className="mono">{details.gstin}</span></>}
+          {' · '}<Link className="acct-link" href="/account/invoices?edit=1">Edit</Link>
+        </p>
+      </Modal>
 
-      <footer className="plan-foot">
-        <span>
-          Charges are in ₹ INR. Credits stay usable until your renewal date if you cancel.
-          {' '}<a href="/legal/refund">Refund &amp; cancellation policy</a>.
-        </span>
-        <span>Sociafy is a product of GNIX SEMICONDUCTORS PRIVATE LIMITED, 2TF, Satyam Complex 2, Sector Alpha II, Greater Noida, Uttar Pradesh 201310, India.</span>
-        {active && (
-          <button className="set-link" onClick={() => setCancelOpen(true)} disabled={cancelBusy}>
-            {cancelBusy ? 'Canceling…' : 'Cancel subscription'}
-          </button>
+      {/* ---------- Upgrade: show the prorated amount, then Razorpay ---------- */}
+      <Modal
+        open={sheet?.kind === 'upgrade' && !!sheetTier?.upgrade}
+        onClose={() => { if (busy !== 'change') setSheet(null); }}
+        title={`Upgrade to ${sheetTier?.label ?? ''}`}
+        footer={<>
+          <Button onClick={() => setSheet(null)} disabled={busy === 'change'}>Not now</Button>
+          <Button variant="primary" busy={busy === 'change'} onClick={() => sheetTier && changeTier(sheetTier.tier)}>
+            {busy === 'change' ? 'Opening Razorpay…' : <>Continue to Razorpay <span className="cost">{inr(sheetTier?.upgrade?.dueMinor ?? 0)}</span></>}
+          </Button>
+        </>}
+      >
+        {sheetTier?.upgrade && (
+          <>
+            <p className="acct-sheet-p">
+              You pay the difference for the {daysLeft ?? 'remaining'} days left in this cycle. {sheetTier.label} starts once the payment goes through.
+            </p>
+            <div className="acct-sum">
+              <div><span>Due today (prorated)</span><span>{inr(sheetTier.upgrade.dueMinor)}</span></div>
+              <div className="acct-note"><span>incl. GST</span><span>{inr(splitInclusive(sheetTier.upgrade.dueMinor).taxMinor)}</span></div>
+              <div><span>Credits added after payment</span><span>+{num(sheetTier.upgrade.creditsNow)}</span></div>
+              <div><span>Then</span><span>{sheetTier.chargeMonthly} / month</span></div>
+            </div>
+            <p className="acct-note">Your plan changes only after Razorpay confirms the payment.</p>
+          </>
         )}
-      </footer>
+      </Modal>
 
-      {topupOpen && (
-        <div role="dialog" aria-modal="true" aria-labelledby="topup-head" className="modal-scrim" onClick={() => setTopupOpen(false)}>
-          <div className="modal-sheet plan-modal" onClick={(e) => e.stopPropagation()}>
-            <h3 id="topup-head">Top up credits</h3>
-            <p>
-              {topupPriceView(data?.currency ?? 'INR').display} per 1,000 credits, charged once
-              {data?.currency === 'INR' ? '' : ' in ₹ INR (dollar figures are approximate)'}.
+      {/* ---------- Downgrade: confirm, nothing charged ---------- */}
+      <Modal
+        open={sheet?.kind === 'down'}
+        onClose={() => { if (busy !== 'change') setSheet(null); }}
+        title={`Switch to ${sheetTier?.label ?? ''} on ${endLabel}?`}
+        footer={<>
+          <Button onClick={() => setSheet(null)} disabled={busy === 'change'}>Keep {current?.label}</Button>
+          <Button variant="primary" busy={busy === 'change'} onClick={() => sheetTier && changeTier(sheetTier.tier)}>
+            Switch on {endLabel}
+          </Button>
+        </>}
+      >
+        {sheetTier && (
+          <>
+            <p className="acct-sheet-p">
+              You keep {current?.label} and every credit you have until {endLabel}. From then you get {num(sheetTier.credits)} credits
+              a month for {sheetTier.chargeMonthly}. Nothing is charged today. Razorpay may email you to approve the new plan.
             </p>
-            <div className="stack">
-              {[1000, 2000, 5000].map((n) => {
-                const v = topupPriceView(data?.currency ?? 'INR', n);
-                return (
-                  <button key={n} className="btn" onClick={() => buyTopUp(n)} disabled={topupBusy}>
-                    <span>{n.toLocaleString()} credits</span>
-                    {/* An approximate figure never stands alone next to a pay action. */}
-                    <span className="mono">{v.approximate ? `${v.display} · ${v.charge}` : v.charge}</span>
-                  </button>
-                );
-              })}
+            <div className="acct-sum">
+              <div><span>{current?.label} until</span><span>{endLabel}</span></div>
+              <div><span>Then {sheetTier.label}</span><span>{sheetTier.chargeMonthly} / mo</span></div>
+              <div><span>Credits you have now</span><span>stay</span></div>
             </div>
-            <div className="plan-modal-actions">
-              <button className="btn ghost" onClick={() => setTopupOpen(false)}>Cancel</button>
-            </div>
-          </div>
+          </>
+        )}
+      </Modal>
+
+      {/* ---------- Cancel: calm, exact, Keep plan is the default ---------- */}
+      <Modal
+        open={sheet?.kind === 'cancel'}
+        onClose={() => { if (busy !== 'cancel') setSheet(null); }}
+        title={`Cancel your ${current?.label ?? ''} plan?`}
+        footer={<>
+          <Button busy={busy === 'cancel'} onClick={cancel}>{busy === 'cancel' ? 'Cancelling…' : `Cancel on ${endLabel}`}</Button>
+          <Button variant="primary" onClick={() => setSheet(null)} disabled={busy === 'cancel'}>Keep plan</Button>
+        </>}
+      >
+        <p className="acct-sheet-p">Nothing changes until <b>{endLabel}</b>. After that:</p>
+        <div className="acct-sum">
+          <div><span>Your {data ? num(data.balance) : ''} credits</span><span>stay usable</span></div>
+          <div><span>Posts already scheduled</span><span>still go out</span></div>
+          <div><span>Monthly credits and charges</span><span>stop</span></div>
+          <div><span>Refund for this cycle</span><span>none</span></div>
         </div>
-      )}
-      {cancelOpen && (
-        <div role="dialog" aria-modal="true" aria-labelledby="cancel-head" className="modal-scrim" onClick={() => { if (!cancelBusy) setCancelOpen(false); }}>
-          <div className="modal-sheet plan-modal" onClick={(e) => e.stopPropagation()}>
-            <h3 id="cancel-head">Cancel subscription?</h3>
-            <p>
-              Your plan stays active until {cycleEnd ? cycleEnd.toLocaleDateString() : 'your renewal date'} and your
-              credits stay usable until then. After that it won&apos;t renew and autopilot stops. You can resubscribe anytime.
-            </p>
-            <div className="plan-modal-actions">
-              <button className="btn ghost" onClick={() => setCancelOpen(false)} disabled={cancelBusy}>
-                Keep plan
-              </button>
-              <button className="btn danger" onClick={cancelSubscription} disabled={cancelBusy}>
-                {cancelBusy ? 'Canceling…' : 'Cancel subscription'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+        <p className="acct-note">Changed your mind later? Pick a plan again after {endLabel}.</p>
+      </Modal>
     </div>
   );
 }
 
-const LedgerRow: React.FC<{ row: CreditsPayload['ledger'][number] }> = ({ row }) => {
-  const { title, detail } = ledgerRowLabel(row);
-  return (
-    <div className="plan-row">
-      <div className="plan-row-main">
-        <div>{title}</div>
-        {detail && <div className="plan-row-meta">{detail}</div>}
-      </div>
-      <span className={`num ${row.credits > 0 ? 'pos' : ''}`}>
-        {row.credits > 0 ? '+' : ''}{row.credits.toLocaleString()}
-      </span>
-      <span className="plan-row-when">{relTime(row.createdAt)}</span>
-    </div>
-  );
-};
-
-function relTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  if (diff < 60_000) return 'just now';
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
+const label = (t: Tier) => t.charAt(0).toUpperCase() + t.slice(1);

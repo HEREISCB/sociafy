@@ -6,6 +6,7 @@ import { parseBody } from '../../../../lib/validation';
 import { db } from '../../../../lib/db';
 import { profiles, TIERS } from '../../../../lib/db/schema';
 import { providerFor } from '../../../../lib/billing/router';
+import { scheduledCancelAt } from '../../../../lib/billing/cancel';
 
 export const runtime = 'nodejs';
 
@@ -35,6 +36,14 @@ export async function POST(req: NextRequest) {
     if (profile.tier === parsed.data.toTier) {
       return jsonError('same_tier', 400);
     }
+    // The Razorpay subscription is already set to end: an upgrade would buy a
+    // new one mid-cancel, and a downgrade would cancel it a second time.
+    const endsAt = scheduledCancelAt(profile, new Date());
+    if (endsAt) {
+      return jsonError('cancel_scheduled', 409, {
+        hint: `Your plan ends on ${endsAt.toDateString()}. You can choose a plan again after that.`,
+      });
+    }
 
     const provider = providerFor({
       paymentProvider: profile.paymentProvider as 'stripe' | 'razorpay' | null,
@@ -53,21 +62,21 @@ export async function POST(req: NextRequest) {
 /**
  * DELETE /api/billing/change-tier
  *
- * Clear a pending tier change ("Cancel switch" button). Per spec §8.3 step 6,
- * this only clears the local flag — the underlying Razorpay cancellation is
- * one-way, so the caller must re-subscribe before period_end. Returns a
- * caveat the UI surfaces to the user.
+ * Drop a pending downgrade. Per spec §8.3 step 6 the underlying Razorpay
+ * cancellation is one-way, so the plan now simply ends on its date: keeping
+ * pendingTierChangeAt turns the row into the "cancels at" marker
+ * (lib/billing/cancel.ts) instead of letting the page claim it renews.
  */
 export async function DELETE(req: NextRequest) {
   return withUser(async (user) => {
     await db()
       .update(profiles)
-      .set({ pendingTierChangeTo: null, pendingTierChangeAt: null, updatedAt: new Date() })
+      .set({ pendingTierChangeTo: null, updatedAt: new Date() })
       .where(eq(profiles.id, user.id));
 
     return {
       cleared: true,
-      caveat: 'Your Razorpay subscription will still end on its scheduled date. Re-subscribe before then to keep service uninterrupted.',
+      caveat: 'Your plan now ends on its scheduled date instead of switching. Your credits stay usable.',
     };
   }, req);
 }
