@@ -75,29 +75,6 @@ function GenerateButton({ what, busy, cost, disabled, onClick, reasonId }: { wha
   );
 }
 
-export function WritingOptions({ preset, setPreset, research, setResearch }: {
-  preset: string;
-  setPreset: (p: string) => void;
-  research: boolean;
-  setResearch: (v: boolean) => void;
-}) {
-  return (
-    <div className="compose-more-body">
-      <div className="compose-chips" role="group" aria-label="Format">
-        {PRESETS.map((p) => (
-          <button key={p.id} type="button" className={`prompt-chip${preset === p.id ? ' active' : ''}`} aria-pressed={preset === p.id} onClick={() => setPreset(p.id)}>
-            {p.label}
-          </button>
-        ))}
-      </div>
-      <label className="compose-check">
-        <input type="checkbox" checked={research} onChange={(e) => setResearch(e.target.checked)} />
-        Research the web and your past posts first <span className="compose-note">slower, costs more</span>
-      </label>
-    </div>
-  );
-}
-
 type PanelProps = { gen: MediaGen; cost: number | null; disabled: boolean; onGenerate: () => void };
 
 export function ImageOptions({ gen, cost, disabled, onGenerate, attachedImages }: PanelProps & { attachedImages: number }) {
@@ -158,9 +135,10 @@ export function VideoOptions({ gen, cost, disabled, onGenerate }: PanelProps) {
   // `motion` / `motionAi` are the server's feature flags; without them the option doesn't exist.
   const { data: brand } = useApi<{ kit: BrandKit; profile: BrandProfile; motion?: boolean; motionAi?: boolean }>('/api/brand-kit');
   const motionKinds = [
-    ...(brand?.motion ? [{ ai: false, label: 'Templates' }] : []),
-    ...(brand?.motionAi ? [{ ai: true, label: 'AI-designed' }] : []),
+    { ai: false, label: 'Templates', on: Boolean(brand?.motion) },
+    { ai: true, label: 'AI-designed', on: Boolean(brand?.motionAi) },
   ];
+  const anyMotion = motionKinds.some((k) => k.on);
   // Same readiness rules the server applies (lib/media/motionJob.ts): the warning is the reason Generate is off.
   const brandBlocked = Boolean(motion && brand && !(aiMotion ? motionAiReady : motionReady)(brand.kit, brand.profile));
   // Templates render 9:16 / 16:9 only; square falls back to vertical.
@@ -179,22 +157,21 @@ export function VideoOptions({ gen, cost, disabled, onGenerate }: PanelProps) {
         }}
       />
 
-      {motionKinds.length > 0 && (
-        <div className="compose-field">
-          <span className="compose-label">Kind</span>
-          <div className="mode-switch compose-self-start" role="radiogroup" aria-label="Kind">
-            <button type="button" role="radio" aria-checked={!motion} className={`opt${!motion ? ' active' : ''}`} onClick={() => motion && set({ videoMode: 'text' })}>AI video</button>
-            <button type="button" role="radio" aria-checked={motion} className={`opt${motion ? ' active' : ''}`} onClick={() => !motion && pickMotion(!brand?.motion)}>Motion graphics</button>
-          </div>
+      <div className="compose-field">
+        <span className="compose-label">Kind</span>
+        <div className="mode-switch compose-self-start" role="radiogroup" aria-label="Kind">
+          <button type="button" role="radio" aria-checked={!motion} className={`opt${!motion ? ' active' : ''}`} onClick={() => motion && set({ videoMode: 'text' })}>AI video</button>
+          <button type="button" role="radio" aria-checked={motion} className={`opt${motion ? ' active' : ''}`} disabled={!anyMotion} onClick={() => !motion && pickMotion(!brand?.motion)}>Motion graphics</button>
         </div>
-      )}
+        {brand && !anyMotion && <p className="compose-note">Motion graphics aren’t switched on for your account yet.</p>}
+      </div>
 
-      {motion && motionKinds.length > 0 && (
+      {motion && (
         <div className="compose-field">
           <span className="compose-label">Style</span>
           <div className="mode-switch compose-self-start" role="radiogroup" aria-label="Motion graphic style">
             {motionKinds.map((k) => (
-              <button key={k.label} type="button" role="radio" aria-checked={s.motionAi === k.ai} className={`opt${s.motionAi === k.ai ? ' active' : ''}`} onClick={() => pickMotion(k.ai)}>
+              <button key={k.label} type="button" role="radio" aria-checked={s.motionAi === k.ai} className={`opt${s.motionAi === k.ai ? ' active' : ''}`} disabled={!k.on} title={k.on ? undefined : 'Not switched on for your account'} onClick={() => pickMotion(k.ai)}>
                 {k.label}
               </button>
             ))}
@@ -335,16 +312,6 @@ export function VideoOptions({ gen, cost, disabled, onGenerate }: PanelProps) {
             <option value="16:9">Wide 16:9</option>
           </select>
         </Field>
-        {aiMotion && (
-          <Field label={`Length · ${s.motionAiDuration}s`}>
-            <input type="range" min={MOTION_AI.durationSec.min} max={MOTION_AI.durationSec.max} value={s.motionAiDuration} onChange={(e) => set({ motionAiDuration: Number(e.target.value) })} />
-          </Field>
-        )}
-        {prompted && (
-          <Field label={`Length · ${videoDuration(s)}s`}>
-            <input type="range" min={model.durationSec.min} max={model.durationSec.max} value={videoDuration(s)} onChange={(e) => set({ videoDuration: Number(e.target.value) })} />
-          </Field>
-        )}
         {prompted && (
           <Field label="How many">
             <select className="input" value={s.videoCount} onChange={(e) => set({ videoCount: Number(e.target.value) })}>
@@ -401,6 +368,43 @@ export function VideoOptions({ gen, cost, disabled, onGenerate }: PanelProps) {
         what={motion ? 'motion graphic' : 'video'} busy={gen.busy === 'video'} cost={cost}
         disabled={disabled || brandBlocked} onClick={onGenerate} reasonId={brandBlocked ? 'motion-brand-reason' : undefined}
       />
+    </div>
+  );
+}
+
+/**
+ * The one Length control for video, shared by Auto and Custom (and the chat,
+ * and From a website). The left end means the AI decides (Auto) or the
+ * model's default (Custom); Custom clamps to what the picked engine renders.
+ */
+export function LengthControl({ gen, length, setLength }: { gen: MediaGen; length: number | null; setLength: (n: number | null) => void }) {
+  const { s } = gen;
+  const { min, max } = MOTION_AI.durationSec;
+  const auto = s.videoSmart;
+  const template = MOTION_TEMPLATES[s.motionTemplate];
+  const fixed = auto ? null
+    : s.videoMode === 'avatar' ? 'An avatar runs as long as its script or audio.'
+    : s.videoMode === 'motion' && !s.motionAi ? `The ${template.label} template runs ${template.durationSec}s.`
+    : null;
+  const motion = s.videoMode === 'motion';
+  const effective = auto ? length : motion ? s.motionAiDuration : videoDuration(s);
+  const model = VIDEO_MODELS[videoModel(s)];
+  const note = fixed ?? (!auto && !motion && length && effective !== length
+    ? `${model.name} renders ${model.durationSec.min}–${model.durationSec.max}s, so this clip is ${effective}s.`
+    : null);
+  const shown = fixed ? 'Fixed' : length ? `${length}s` : auto ? 'AI decides' : `Default ${effective}s`;
+  return (
+    <div className="compose-field">
+      <label className="compose-length">
+        <span className="compose-label">Length</span>
+        <input
+          type="range" min={min - 1} max={max} step={1} value={length ?? min - 1} disabled={Boolean(fixed)}
+          aria-valuetext={shown} aria-describedby={note ? 'compose-length-note' : undefined}
+          onChange={(e) => { const n = Number(e.target.value); setLength(n >= min ? n : null); }}
+        />
+        <output className="tnum">{shown}</output>
+      </label>
+      {note && <p id="compose-length-note" className="compose-note">{note}</p>}
     </div>
   );
 }

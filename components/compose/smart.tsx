@@ -20,7 +20,7 @@ const MIN_CHARS = 15;
 
 type Override = { format: Exclude<VideoFormat, 'none'> } | { cheapest: true };
 // Keyed by planKeys().full (post + override), same as every request and response.
-// ponytail: module-level memo of recent plans, so "Choose myself" → back (or re-picking a chip) is instant; per tab, no persistence.
+// ponytail: module-level memo of recent plans, so Custom → back to Auto (or re-picking a chip) is instant; per tab, no persistence.
 const PLAN_TTL_MS = 5 * 60_000;
 const plans = new Map<string, { at: number; res: PlanResponse }>();
 const recall = (key: string) => {
@@ -34,16 +34,15 @@ const remember = (key: string, res: PlanResponse) => {
 };
 
 /** Video tab default: the planner picks the format, length and sound; one button renders it. */
-export function SmartVideo({ gen, text, platforms, attachments, length, setLength, onPlan }: {
+export function SmartVideo({ gen, text, platforms, attachments, length, onPlan }: {
   gen: MediaGen;
   text: string;
   platforms: string[];
   attachments: { url: string; mimeType: string }[];
-  /** Picked length in seconds (null = Auto). Held by Compose so its chat can set it. */
+  /** Picked length in seconds (null = Auto). Held by Compose: one Length control, also set by its chat. */
   length: number | null;
-  setLength: (n: number | null) => void;
   /** The plan on screen (format, length, shape) for the preview's video placeholder. */
-  onPlan?: (slot: Omit<VideoSlot, 'rendering'> | null) => void;
+  onPlan?: (slot: VideoSlot | null) => void;
 }) {
   // An override belongs to the post it was picked on: new text, platforms or attachments → best fit again.
   const [picked, setPicked] = useState<{ input: string; v: Override } | null>(null);
@@ -112,16 +111,12 @@ export function SmartVideo({ gen, text, platforms, attachments, length, setLengt
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, retry, tooShort]);
 
-  const chooseMyself = (
-    <button type="button" className="btn ghost sm compose-self-start" onClick={() => gen.set({ videoSmart: false })}>Choose myself</button>
-  );
   /** Generate is always on screen; before a plan exists it is disabled and says why. */
   const waitingActions = (why: string) => (
     <div className="row smart-actions">
       <button type="button" className="btn primary" disabled aria-describedby="smart-wait">
         <Icon name="sparkle" size={12} /> Generate
       </button>
-      {chooseMyself}
       <span id="smart-wait" className="sr-only">{why}</span>
     </div>
   );
@@ -129,8 +124,8 @@ export function SmartVideo({ gen, text, platforms, attachments, length, setLengt
   if (tooShort) {
     return (
       <div className="compose-media-panel">
-        <p className="compose-note">{text.trim() ? 'Write a little more and we’ll pick the best kind of video for it.' : 'We’ll pick the best format once the post box has a description.'}</p>
-        {waitingActions('Write the post first')}
+        <p className="compose-note">{text.trim() ? 'Write a little more and we’ll pick the best kind of video for it.' : 'We’ll pick the best format once the brief describes the post.'}</p>
+        {waitingActions('Write the brief first')}
       </div>
     );
   }
@@ -142,7 +137,6 @@ export function SmartVideo({ gen, text, platforms, attachments, length, setLengt
         <p className="compose-note compose-error">{err}</p>
         <div className="row">
           <button type="button" className="btn sm" onClick={() => setRetry((n) => n + 1)}><Icon name="refresh" size={12} /> Try again</button>
-          {chooseMyself}
         </div>
       </div>
     );
@@ -241,7 +235,6 @@ export function SmartVideo({ gen, text, platforms, attachments, length, setLengt
             <span className="compose-cost">{price} cr</span>
           </button>
         )}
-        {chooseMyself}
       </div>
     </div>
   );

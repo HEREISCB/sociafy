@@ -1,8 +1,10 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSWRConfig } from 'swr';
+import { AnimatePresence, LazyMotion, MotionConfig } from 'motion/react';
+import * as m from 'motion/react-m';
 import { Icon, Pglyph } from './icons';
 import { apiPatch, apiPost, friendlyApiError, useApi } from '../lib/ui/fetcher';
 import { PLATFORM_LABELS, PLATFORM_TO_SHORT, SHORT_TO_PLATFORM } from '../lib/ui/platforms';
@@ -13,8 +15,8 @@ import { MOTION_AI } from '../lib/ai/models';
 import type { Platform } from '../lib/db/schema';
 import { InsufficientCreditsBanner } from './credits';
 import { Attachments, MAX_ATTACHED, type MediaItem } from './compose/attachments';
-import { genCosts, RenderStatus, useMediaGen } from './compose/generate';
-import { ImageOptions, PRESETS, VideoOptions, WritingOptions } from './compose/options';
+import { DEFAULT_SETTINGS, genCosts, useMediaGen } from './compose/generate';
+import { ImageOptions, LengthControl, PRESETS, VideoOptions } from './compose/options';
 import { Preview, type VideoSlot } from './compose/preview';
 import { AvatarCropModal } from './compose/avatar-crop';
 import { MotionEditor } from './compose/motion-editor';
@@ -62,30 +64,92 @@ const label = (p: string) => PLATFORM_LABELS[p] ?? p;
 
 /** apiPost throws "<status>: <body>". Pull the JSON body back out. */
 function errBody(e: unknown): { status: number; body: Record<string, unknown> } | null {
-  const m = (e instanceof Error ? e.message : '').match(/^(\d{3}):\s*([\s\S]*)$/);
-  if (!m) return null;
-  try { return { status: Number(m[1]), body: JSON.parse(m[2]) }; } catch { return { status: Number(m[1]), body: {} }; }
+  const hit = (e instanceof Error ? e.message : '').match(/^(\d{3}):\s*([\s\S]*)$/);
+  if (!hit) return null;
+  try { return { status: Number(hit[1]), body: JSON.parse(hit[2]) }; } catch { return { status: Number(hit[1]), body: {} }; }
 }
 
 /** A per-platform publish error is "code: sentence" — show the sentence. */
 function reasonCopy(err?: string): string {
-  const m = err?.match(/^([a-z_]+)(?::\s*([\s\S]+))?$/);
+  const hit = err?.match(/^([a-z_]+)(?::\s*([\s\S]+))?$/);
   if (!err) return 'Could not post. Try again.';
-  if (m) return m[2] ?? 'Could not post. Try again.';
+  if (hit) return hit[2] ?? 'Could not post. Try again.';
   return err;
 }
 const needsReconnect = (err?: string) => /platform_not_connected|reconnect|expired|revoked|token|permission|no_page/i.test(err ?? '');
 
-export default function Compose({ draftId, onDone, initial }: {
-  draftId?: string | null;
-  onDone?: () => void;
-  /** Prefill from the URL (?prompt, ?slot, ?platforms) — calendar's "Edit in compose". */
-  initial?: { prompt?: string; slot?: string; platforms?: string };
+type Format = 'text' | 'image' | 'video';
+type Toast = { id: number; msg: string; undo?: () => void };
+
+const loadMotion = () => import('./compose/motion-features').then((r) => r.default);
+/** --ease-transition / --ease-reveal (tokens.css), for motion's JS animations. */
+const EASE_T = [0.65, 0, 0.35, 1] as const;
+const EASE_R = [0.16, 1, 0.3, 1] as const;
+
+const FORMAT_HINT: Record<Format, string> = {
+  text: 'Text posts go out as written',
+  image: 'Generate an image from the brief, or add your own',
+  video: 'Generate a video from the brief',
+};
+
+/**
+ * Segmented control: the app's .mode-switch with one ink indicator that
+ * slides between options (a clip-path transition, so nothing reflows).
+ */
+function Seg<T extends string>({ value, options, onChange, label: name, className = '' }: {
+  value: T;
+  options: readonly { id: T; label: React.ReactNode; disabled?: boolean }[];
+  onChange: (v: T) => void;
+  label: string;
+  className?: string;
 }) {
-  const [body, setBody] = useState(initial?.prompt ?? '');
-  const [prompt, setPrompt] = useState('');
+  const root = useRef<HTMLDivElement | null>(null);
+  const ind = useRef<HTMLSpanElement | null>(null);
+  useLayoutEffect(() => {
+    const el = root.current;
+    const bar = ind.current;
+    if (!el || !bar) return;
+    const place = () => {
+      const on = el.querySelector<HTMLElement>('[aria-checked="true"]');
+      if (!on || !el.clientWidth) return;
+      const l = on.offsetLeft - 3;
+      bar.style.clipPath = `inset(0 ${el.clientWidth - 6 - l - on.offsetWidth}px 0 ${l}px round 999px)`;
+      // First placement lands without sliding in from the edge.
+      requestAnimationFrame(() => el.setAttribute('data-ready', ''));
+    };
+    place();
+    const ro = new ResizeObserver(place);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [value]);
+  return (
+    <div ref={root} className={`mode-switch seg ${className}`} role="radiogroup" aria-label={name}>
+      <span ref={ind} className="seg-ind" aria-hidden="true" />
+      {options.map((o) => (
+        <button key={o.id} type="button" role="radio" aria-checked={value === o.id} className={`opt${value === o.id ? ' active' : ''}`} disabled={o.disabled} onClick={() => onChange(o.id)}>
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export default function Compose({ draftId, initial, title, onNew }: {
+  draftId?: string | null;
+  /** Prefill from the URL (?prompt → the Brief, ?slot, ?platforms) — calendar's "Edit in compose". */
+  initial?: { prompt?: string; slot?: string; platforms?: string };
+  title: string;
+  /** Start over with an empty post. */
+  onNew: () => void;
+}) {
+  /** The Brief: the prompt for Write caption, image, video and chat. Saved as the draft's `prompt`, never posted. */
+  const [brief, setBrief] = useState(initial?.prompt ?? '');
+  /** The Caption: what gets posted. Saved as the draft's `body`. */
+  const [caption, setCaption] = useState('');
   const [variants, setVariants] = useState<Variant[]>([]);
   const [chosen, setChosen] = useState<string | null>(null);
+  /** Bumped per Write caption so the Versions chips stagger in again. */
+  const [round, setRound] = useState(0);
   /** Text the user wrote for one platform. Only these are sent as perPlatformText. */
   const [custom, setCustom] = useState<Partial<Record<Platform, string>>>({});
   /** Per-platform copy the agent wrote, offered as the start of an override. */
@@ -97,11 +161,20 @@ export default function Compose({ draftId, onDone, initial }: {
   const [attached, setAttached] = useState<MediaItem[]>([]);
   /** The attached motion graphic open in the editor. */
   const [editing, setEditing] = useState<MediaItem | null>(null);
-  /** The last video rendered in this session (chat edits it) and the smart card's Length (chat sets it). */
+  /** The last video rendered in this session (chat edits it). */
   const [rendered, setRendered] = useState<MediaItem | null>(null);
+  /** The one video Length (null = the AI decides). Smart plan, Custom, chat and From a website all read it. */
   const [videoLength, setVideoLength] = useState<number | null>(null);
   /** The smart card's plan on screen — the preview's placeholder until the video exists. */
-  const [planSlot, setPlanSlot] = useState<Omit<VideoSlot, 'rendering'> | null>(null);
+  const [planSlot, setPlanSlot] = useState<VideoSlot | null>(null);
+  /** The last generated item: it develops in the preview. */
+  const [fresh, setFresh] = useState<string | null>(null);
+  const [tab, setTab] = useState<'one' | 'web'>('one');
+  /** Phone/narrow only: which column is on screen. */
+  const [pane, setPane] = useState<'edit' | 'preview'>('edit');
+  const [chatOpen, setChatOpen] = useState(false);
+  const closeChat = useCallback(() => setChatOpen(false), []);
+  const [previewPick, setPreviewPick] = useState<Platform | null>(null);
   // Local wall-clock times are the browser's: computed on the server (UTC) they'd mismatch hydration,
   // so both are set after mount.
   const [when, setWhen] = useState('');
@@ -118,9 +191,9 @@ export default function Compose({ draftId, onDone, initial }: {
   }, []);
   const [preset, setPreset] = useState('announcement');
   const [research, setResearch] = useState(false);
-  const [media, setMedia] = useState<'text' | 'image' | 'video'>('video');
+  const [media, setMedia] = useState<Format>('text');
   const [savedId, setSavedId] = useState<string | null>(null);
-  const [busy, setBusy] = useState<null | 'write' | 'schedule' | 'post'>(null);
+  const [busy, setBusy] = useState<null | 'write' | 'save' | 'schedule' | 'post'>(null);
   const lock = useRef(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [result, setResult] = useState<Result | null>(null);
@@ -128,12 +201,43 @@ export default function Compose({ draftId, onDone, initial }: {
   const { mutate } = useSWRConfig();
   const refreshCredits = () => { void mutate('/api/credits'); };
 
+  const [toast, setToast] = useState<Toast | null>(null);
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 5_000);
+    return () => clearTimeout(t);
+  }, [toast]);
+  const toastSeq = useRef(0);
+  /** The chat drawer stops above the pinned bar, so Schedule is never covered. */
+  const bar = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = bar.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => document.documentElement.style.setProperty('--compose-bar-h', `${el.offsetHeight}px`));
+    ro.observe(el);
+    return () => { ro.disconnect(); document.documentElement.style.removeProperty('--compose-bar-h'); };
+  }, []);
+  const say =(msg: string, undo?: () => void) => setToast({ id: ++toastSeq.current, msg, undo });
+  /** Latest Caption/Brief for async callers (Write caption, chat), so Undo restores what was really there. */
+  const latest = useRef({ caption, brief });
+  useEffect(() => { latest.current = { caption, brief }; });
+  /** Overwrite the Caption or Brief; anything that was there gets an Undo. */
+  const replaceText = (field: 'Caption' | 'Brief', next: string, fresh?: string) => {
+    const set = field === 'Caption' ? setCaption : setBrief;
+    const prev = field === 'Caption' ? latest.current.caption : latest.current.brief;
+    if (prev === next) return;
+    set(next);
+    if (prev.trim()) say(`${field} replaced`, () => set(prev));
+    else if (fresh) say(fresh);
+  };
+
   const gen = useMediaGen({
     added: (items) => {
       // A batch of images becomes a carousel; of several clips, the first is attached and the rest wait in the library.
       const take = items[0]?.mimeType?.startsWith('video/') ? items.slice(0, 1) : items;
       setAttached((cur) => [...cur, ...take].slice(0, MAX_ATTACHED));
       if (take[0]?.mimeType?.startsWith('video/')) setRendered(take[0]);
+      setFresh(take[0]?.id ?? null);
       setCreditError(null);
       refreshCredits();
     },
@@ -146,18 +250,24 @@ export default function Compose({ draftId, onDone, initial }: {
       setNotice([failed.length && added ? `${added} of ${total} clips made.` : null, extra, ...reasons, ...new Set(notes)].filter(Boolean).join(' ') || null);
     },
   });
+  /** The Length control, the chat and From a website share one length; Custom's engines read it too. */
+  const setLength = (n: number | null) => {
+    setVideoLength(n);
+    gen.set({ motionAiDuration: n ?? MOTION_AI.durationSec.default, videoDuration: n ?? DEFAULT_SETTINGS.videoDuration });
+  };
 
   const { data: accounts } = useApi<Account[]>('/api/accounts');
   const { data: plan } = useApi<{ nextEmptySlot?: string }>('/api/plan');
   const connected = useMemo(() => [...new Set((accounts ?? []).map((a) => a.platform))], [accounts]);
-  const ready = attached.filter((m) => !m.uploading);
+  const ready = attached.filter((x) => !x.uploading);
   /** What actually gets posted: in Video mode only the clip — the other attachments are its references. */
   const out = postMedia(media, ready);
   const kind = media === 'video' ? 'video' : postKind(out);
   const selected = picked ?? connected;
   const targets = connected.filter((p) => selected.includes(p) && supportsKind(p, kind));
-  const textFor = (p: Platform) => custom[p] ?? body;
+  const textFor = (p: Platform) => custom[p] ?? caption;
   const over = targets.filter((p) => textFor(p).length > LIMIT[p]);
+  const active = previewPick && targets.includes(previewPick) ? previewPick : targets[0];
 
   // The next free slot in the plan, unless the URL or the user already chose a time.
   useEffect(() => {
@@ -181,14 +291,15 @@ export default function Compose({ draftId, onDone, initial }: {
       };
       if (cancelled) return;
       setSavedId(d.id);
-      setBody(d.body ?? '');
-      setPrompt(d.prompt ?? '');
+      // Older drafts kept one text for both: it's the caption; the brief is whatever prompt they had.
+      setCaption(d.body ?? '');
+      setBrief(d.prompt ?? '');
       if (d.preset) setPreset(d.preset);
       setVariants(d.variants ?? []);
       setChosen(d.selectedVariantLabel);
       setPicked(d.targetPlatforms?.length ? d.targetPlatforms : null);
       setMedia(postKind(d.media));
-      setAttached((d.media ?? []).map((m) => ({ id: m.id, url: m.url, mimeType: m.mimeType, label: m.url.split('/').pop() || 'Media', ...(m.posterUrl && { posterUrl: m.posterUrl }) })));
+      setAttached((d.media ?? []).map((x) => ({ id: x.id, url: x.url, mimeType: x.mimeType, label: x.url.split('/').pop() || 'Media', ...(x.posterUrl && { posterUrl: x.posterUrl }) })));
       // Copy the agent wrote is a suggestion; only text that differs from it
       // (and from the body) is something the user customized.
       const snap = d.variants?.[0]?.perPlatform ?? {};
@@ -201,8 +312,8 @@ export default function Compose({ draftId, onDone, initial }: {
     return () => { cancelled = true; };
   }, [draftId]);
 
-  /** Shared guard + error handling for anything that spends or posts. */
-  const run = async (what: 'write' | 'schedule' | 'post', fn: () => Promise<void>) => {
+  /** Shared guard + error handling for anything that spends, saves or posts. */
+  const run = async (what: 'write' | 'save' | 'schedule' | 'post', fn: () => Promise<void>) => {
     if (lock.current) return;
     lock.current = true;
     setBusy(what);
@@ -216,6 +327,7 @@ export default function Compose({ draftId, onDone, initial }: {
         refreshCredits();
       } else if (what === 'post' && Array.isArray(b?.body.results)) {
         setResult({ kind: 'published', rows: b.body.results as PublishRow[] });
+        setPane('preview');
       } else {
         setNotice(friendlyApiError(e));
       }
@@ -226,37 +338,38 @@ export default function Compose({ draftId, onDone, initial }: {
   };
 
   const write = () => run('write', async () => {
-    const p = body.trim();
     const r = await apiPost<{ variants?: (Variant & { id?: string })[]; toolsUsed?: string[] }>('/api/compose/variants', {
-      prompt: p, preset, platforms: targets.length ? targets : connected, withTools: research,
+      prompt: brief.trim(), preset, platforms: targets.length ? targets : connected, withTools: research,
     });
     const vs = (r.variants ?? []).map((v, i) => ({ ...v, label: v.label ?? v.id ?? String.fromCharCode(65 + i) }));
     refreshCredits();
     setCreditError(null);
     if (!vs.length) { setNotice('No draft came back. Try again.'); return; }
-    setPrompt(p);
     setVariants(vs);
     setChosen(vs[0].label);
-    setBody(vs[0].text);
+    setRound((n) => n + 1);
+    replaceText('Caption', vs[0].text, 'Caption written');
     if (research && r.toolsUsed?.length) setNotice(`Researched with ${r.toolsUsed.join(' + ')}.`);
   });
 
   /** Create or update the draft. Remembers the id so a retry never makes a second draft. */
   const save = async () => {
     const payload = {
-      prompt,
-      body,
+      prompt: brief,
+      body: caption,
       variants: variants.map(({ label: l, text, score, rationale, perPlatform, approved }) => ({ label: l, text, score, rationale, perPlatform, approved })),
       selectedVariantLabel: chosen,
       targetPlatforms: targets,
-      perPlatformText: Object.fromEntries(targets.filter((p) => custom[p] && custom[p] !== body).map((p) => [p, custom[p]!])),
-      media: out.filter((m) => m.id && m.url && m.mimeType).map((m) => ({ id: m.id!, url: m.url!, mimeType: m.mimeType! })),
+      perPlatformText: Object.fromEntries(targets.filter((p) => custom[p] && custom[p] !== caption).map((p) => [p, custom[p]!])),
+      media: out.filter((x) => x.id && x.url && x.mimeType).map((x) => ({ id: x.id!, url: x.url!, mimeType: x.mimeType! })),
       preset,
     };
     const d = savedId ? await apiPatch<{ id: string }>(`/api/drafts/${savedId}`, payload) : await apiPost<{ id: string }>('/api/drafts', payload);
     setSavedId(d.id);
     return d.id;
   };
+
+  const saveDraft = () => run('save', async () => { await save(); say('Draft saved'); });
 
   const schedule = () => run('schedule', async () => {
     const at = new Date(when);
@@ -265,287 +378,405 @@ export default function Compose({ draftId, onDone, initial }: {
     const r = await apiPost<{ scheduled: { platform: string }[]; skipped?: string[] }>('/api/schedule', {
       draftId: id, scheduledAt: at.toISOString(), platforms: targets,
     });
-    setResult({ kind: 'scheduled', platforms: r.scheduled.map((s) => s.platform), at, skipped: r.skipped ?? [] });
+    setResult({ kind: 'scheduled', platforms: r.scheduled.map((x) => x.platform), at, skipped: r.skipped ?? [] });
+    setPane('preview');
   });
 
   const postNow = (platforms: Platform[] = targets) => run('post', async () => {
     const id = await save();
     const r = await apiPost<{ results?: PublishRow[] }>('/api/publish', { draftId: id, platforms });
     setResult({ kind: 'published', rows: r.results ?? [] });
+    setPane('preview');
   });
 
-  const empty = !body.trim() && out.length === 0;
-  const blocker = attached.some((m) => m.uploading) ? 'Waiting for the upload to finish.'
-    : empty ? null
-    : media === 'video' && !out.length ? (gen.busy === 'video' ? 'Wait for the video to finish rendering.' : 'Generate the video first — or switch to Image or Text only to post without one.')
-    : !connected.length ? null
+  const empty = !caption.trim() && out.length === 0;
+  const blocker = attached.some((x) => x.uploading) ? 'Waiting for the upload to finish.'
+    : empty ? 'Write a caption first.'
+    : media === 'video' && !out.length ? (gen.busy === 'video' ? 'Wait for the video to finish rendering.' : 'Generate the video first, or switch Format to Text.')
+    : media === 'image' && gen.busy === 'image' ? 'Wait for the image to finish.'
+    : accounts && !connected.length ? 'Connect an account to post.'
     : !targets.length ? 'Pick at least one platform that takes this kind of post.'
     : over.length ? `Too long for ${over.map((p) => `${label(p)} (${textFor(p).length}/${LIMIT[p]})`).join(', ')}.`
     : null;
-  const canSubmit = !empty && !blocker && targets.length > 0 && busy === null;
   const done = result?.kind === 'scheduled' ? result.platforms.length > 0 : result?.rows.length ? result.rows.every((r) => r.ok) : false;
-  const readyImages = ready.filter((m) => m.mimeType?.startsWith('image/'));
+  const canSubmit = !empty && !blocker && targets.length > 0 && busy === null && !done;
+  const canSave = Boolean(caption.trim() || brief.trim() || out.length) && busy === null && !done;
+  const barMsg = done
+    ? `${result?.kind === 'scheduled' ? 'Scheduled' : 'Posted'}. Start a New post to make another.`
+    : blocker ?? 'Ready. Schedule for the time set, or post now.';
+  const readyImages = ready.filter((x) => x.mimeType?.startsWith('image/'));
   const costs = genCosts(gen.s, readyImages.length);
   const writeCost = priceForCompose({ withTools: research, extraSearches: 0 }).credits;
   const retryable = result?.kind === 'published'
     ? result.rows.filter((r) => !r.ok && !r.error?.startsWith('already_publishing') && !r.error?.startsWith('platform_not_connected')).map((r) => r.platform)
     : [];
-  const customizable = targets.filter((p) => custom[p] === undefined);
-  const stripNote = ready.length === out.length ? null
-    : media === 'video' ? 'References for the video — only the video is posted'
-    : media === 'text' ? 'Not posted — Text only posts no media'
-    : 'Only the images are posted';
+  const attachNote = media === 'video' ? 'Photos you add guide the video; only the video is posted.'
+    : media === 'text' ? 'Not posted with a Text post. Switch Format to Image to post photos.'
+    : ready.length !== out.length ? 'Only the images are posted with the caption.'
+    : 'Photos you add are posted with the caption.';
   const videoSlot: VideoSlot | null = media === 'video' && !out.length
-    ? { ...((gen.s.videoSmart && planSlot) || { aspect: gen.s.videoAspect }), rendering: gen.busy === 'video' }
+    ? (gen.s.videoSmart && planSlot) || { aspect: gen.s.videoAspect }
+    : null;
+  const tight = targets.length ? targets.reduce((a, p) => (LIMIT[p] < LIMIT[a] ? p : a)) : null;
+  const briefNote = !brief.trim() && (media === 'image' || (media === 'video' && !gen.s.videoSmart && gen.s.videoMode !== 'avatar'))
+    ? `Write a brief above — it’s what the ${media} is made from.`
     : null;
 
+  /** One chip per connected account, here and on the From a website tab. */
+  const platformChips = (k: typeof kind) => (
+    <>
+      {accounts && !connected.length ? (
+        <p className="compose-note">No accounts connected. <Link href="/settings/connections">Connect one</Link> to post.</p>
+      ) : (
+        <div className="compose-chips" role="group" aria-label="Post to">
+          {connected.map((p) => {
+            const ok = supportsKind(p, k);
+            const acct = accounts?.find((a) => a.platform === p);
+            const on = ok && selected.includes(p);
+            return (
+              <button
+                key={p}
+                type="button"
+                className={`prompt-chip${on ? ' active' : ''}`}
+                aria-pressed={on}
+                disabled={!ok}
+                onClick={() => setPicked(on ? selected.filter((x) => x !== p) : [...selected, p])}
+              >
+                <Pglyph p={PLATFORM_TO_SHORT[p]} /> {label(p)}
+                {(acct?.isStub || acct?.lastRefreshError) && <span className="badge badge--warn">reconnect</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {connected.filter((p) => !supportsKind(p, k)).map((p) => (
+        <p key={p} className="compose-note">{unsupportedReason(p, k)}</p>
+      ))}
+    </>
+  );
+
+  const resultTitle = !result ? ''
+    : result.kind === 'scheduled' ? (done ? 'Scheduled' : 'Nothing was scheduled')
+    : done ? 'Posted' : result.rows.some((r) => r.ok) ? 'Posted to some platforms' : 'Couldn’t post';
+
   return (
-    <div className="compose">
-      {gen.cropFile && (
-        <AvatarCropModal file={gen.cropFile} aspect={gen.s.videoAspect} onApply={gen.applyFace} onCancel={() => gen.setCropFile(null)} />
-      )}
-      {editing?.id && (
-        <MotionEditor
-          id={editing.id}
-          onClose={() => setEditing(null)}
-          onCredits={(e) => { setCreditError(e); refreshCredits(); }}
-          onCharged={refreshCredits}
-          onUse={(item) => { setAttached((cur) => cur.map((a) => (a.id === editing.id ? item : a))); setRendered((r) => (r?.id === editing.id ? item : r)); setEditing(null); }}
-        />
-      )}
-      {creditError && <InsufficientCreditsBanner balance={creditError.balance} needed={creditError.needed} onDismiss={() => setCreditError(null)} />}
-
-      <FromWebsite
-        length={videoLength}
-        platforms={connected.filter((p) => selected.includes(p) && supportsKind(p, 'video'))}
-        onUse={(text, items) => {
-          setBody(text);
-          setAttached((cur) => [...cur, ...items].slice(0, MAX_ATTACHED));
-        }}
-        onCredits={(e) => { setCreditError(e); refreshCredits(); }}
-        onCharged={() => { setCreditError(null); refreshCredits(); }}
-      />
-
-      <div className="compose-editor">
-        <label htmlFor="compose-text" className="sr-only">Post</label>
-        <textarea
-          id="compose-text"
-          className="compose-text"
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          placeholder="Write your post — or describe it and let AI draft it"
-          rows={7}
-        />
-        <Attachments attached={attached} onChange={setAttached} onNotice={setNotice} onEdit={setEditing} note={stripNote}>
-          <span className="compose-spacer" />
-          <label className="compose-duration">
-            Video length
-            {/* Left end = the AI decides; then 6–60 s (AI motion's range; footage is clamped to its engine). */}
-            <input
-              type="range" min={MOTION_AI.durationSec.min - 1} max={MOTION_AI.durationSec.max} step={1} value={videoLength ?? MOTION_AI.durationSec.min - 1}
-              aria-valuetext={videoLength ? `${videoLength} seconds` : 'AI decides'}
-              onChange={(e) => { const n = Number(e.target.value); setVideoLength(n >= MOTION_AI.durationSec.min ? n : null); }}
-            />
-            <span className="compose-duration-val">{videoLength ? `${videoLength}s` : 'AI decides'}</span>
-          </label>
-          <button type="button" className="btn ghost sm" disabled={!body.trim() || busy !== null} onClick={write}>
-            <Icon name="sparkle" size={12} /> {busy === 'write' ? 'Writing…' : variants.length ? 'Rewrite' : 'Write it for me'} <span className="compose-cost">{writeCost} cr</span>
-          </button>
-        </Attachments>
-      </div>
-
-      <ComposeChat
-        body={body} setBody={setBody} platforms={targets} connected={connected} onPlatforms={setPicked} setLength={setVideoLength}
-        video={rendered && attached.some((a) => a.id === rendered.id) ? rendered : null}
-        onSwap={(old, item) => { setAttached((cur) => cur.map((a) => (a.id === old.id ? item : a))); setRendered(item); }}
-        onCredits={(e) => { setCreditError(e); refreshCredits(); }}
-        onCharged={refreshCredits}
-      />
-
-      {variants.length > 1 && (
-        <div className="compose-chips" role="group" aria-label="AI versions">
-          <span className="compose-label">Versions</span>
-          {variants.map((v) => (
-            <button key={v.label} type="button" className={`prompt-chip${chosen === v.label ? ' active' : ''}`} aria-pressed={chosen === v.label} title={v.text} onClick={() => { setChosen(v.label); setBody(v.text); }}>
-              {v.label}
-            </button>
-          ))}
-        </div>
-      )}
-
-      <section className="compose-media" aria-label="Media">
-        <div className="mode-switch" role="radiogroup" aria-label="Add media">
-          {([['video', 'Video', 'play'], ['image', 'Image', 'image'], ['text', 'Text only', 'edit']] as const).map(([id, name, icon]) => (
-            <button key={id} type="button" role="radio" aria-checked={media === id} className={`opt${media === id ? ' active' : ''}`} onClick={() => setMedia(id)}>
-              <Icon name={icon} size={12} /> {name}
-            </button>
-          ))}
-        </div>
-        {media !== 'text' && !body.trim() && !(media === 'video' && !gen.s.videoSmart && gen.s.videoMode === 'avatar') && (
-          <p className="compose-note">Describe the {media} in the post box above — that text is the prompt.</p>
-        )}
-        {media === 'image' && (
-          <ImageOptions
-            gen={gen}
-            cost={costs.image}
-            attachedImages={readyImages.length}
-            disabled={!body.trim() || gen.busy !== null}
-            onGenerate={() => gen.generateImage(body.trim(), readyImages.map((m) => m.url!))}
-          />
-        )}
-        {media === 'video' && gen.s.videoSmart && (
-          <SmartVideo
-            gen={gen}
-            text={body}
-            platforms={targets}
-            attachments={ready.flatMap((m) => (m.url && m.mimeType ? [{ url: m.url, mimeType: m.mimeType }] : []))}
-            length={videoLength}
-            setLength={setVideoLength}
-            onPlan={setPlanSlot}
-          />
-        )}
-        {media === 'video' && !gen.s.videoSmart && (
-          <button type="button" className="btn ghost sm" onClick={() => gen.set({ videoSmart: true })}>
-            <Icon name="sparkle" size={12} /> Use smart
-          </button>
-        )}
-        {media === 'video' && !gen.s.videoSmart && (
-          <VideoOptions
-            gen={gen}
-            cost={costs.video}
-            disabled={(!body.trim() && gen.s.videoMode !== 'avatar') || gen.busy !== null}
-            onGenerate={() => gen.generateVideo(body.trim())}
-          />
-        )}
-      </section>
-
-      {gen.render && <RenderStatus render={gen.render} />}
-      {notice && <p role="status" aria-live="polite" className="compose-notice">{notice}</p>}
-
-      <section className="stack" aria-label="Platforms">
-        {accounts && !connected.length ? (
-          <p className="compose-note">No accounts connected. <Link href="/settings/connections">Connect one</Link> to post.</p>
-        ) : (
-          <div className="compose-chips" role="group" aria-label="Post to">
-            {connected.map((p) => {
-              const ok = supportsKind(p, kind);
-              const acct = accounts?.find((a) => a.platform === p);
-              const on = ok && selected.includes(p);
-              return (
-                <button
-                  key={p}
-                  type="button"
-                  className={`prompt-chip${on ? ' active' : ''}`}
-                  aria-pressed={on}
-                  disabled={!ok}
-                  onClick={() => setPicked(on ? selected.filter((x) => x !== p) : [...selected, p])}
-                >
-                  <Pglyph p={PLATFORM_TO_SHORT[p]} /> {label(p)}
-                  {(acct?.isStub || acct?.lastRefreshError) && <span className="badge badge--warn">reconnect</span>}
-                </button>
-              );
-            })}
-          </div>
-        )}
-        {connected.filter((p) => !supportsKind(p, kind)).map((p) => (
-          <p key={p} className="compose-note">{unsupportedReason(p, kind)}</p>
-        ))}
-
-        {targets.filter((p) => custom[p] !== undefined).map((p) => (
-          <div key={p} className="compose-field">
-            <span className="compose-label">
-              {label(p)} version · <span className={textFor(p).length > LIMIT[p] ? 'compose-error' : undefined}>{textFor(p).length}/{LIMIT[p]}</span>
-            </span>
-            <textarea className="input" rows={3} aria-label={`${label(p)} version`} value={custom[p]} onChange={(e) => setCustom((c) => ({ ...c, [p]: e.target.value }))} />
-            <button type="button" className="btn ghost sm compose-self-start" onClick={() => setCustom((c) => { const n = { ...c }; delete n[p]; return n; })}>
-              Use the main text
-            </button>
-          </div>
-        ))}
-        {body.trim() && customizable.length > 0 && (
-          <div className="compose-chips">
-            {customizable.map((p) => (
-              <button key={p} type="button" className={`btn ghost sm${over.includes(p) ? ' compose-error' : ''}`} onClick={() => setCustom((c) => ({ ...c, [p]: machine[p] ?? body }))}>
-                Customize for {label(p)}
-              </button>
-            ))}
-          </div>
-        )}
-      </section>
-
-      {result && (
-        <section className="compose-results" aria-live="polite">
-          {result.kind === 'scheduled' ? (
-            <p>
-              Scheduled for {result.at.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} on {result.platforms.map(label).join(', ')}.
-              {result.skipped.length > 0 && <span className="compose-note"> Skipped {result.skipped.map(label).join(', ')}.</span>}
-            </p>
-          ) : (
-            <ul className="stack">
-              {result.rows.map((r) => (
-                <li key={r.platform} className="compose-result">
-                  <Pglyph p={PLATFORM_TO_SHORT[r.platform] ?? r.platform} />
-                  <span className="compose-result-name">{label(r.platform)}</span>
-                  {r.ok ? (
-                    <>
-                      <span className="badge badge--ok">Posted</span>
-                      {r.url && <a href={r.url} target="_blank" rel="noreferrer" className="btn ghost sm">View <Icon name="arrow_up_right" size={11} /></a>}
-                    </>
-                  ) : (
-                    <span className="compose-error">
-                      {reasonCopy(r.error)}
-                      {needsReconnect(r.error) && <> <Link href="/settings/connections">Reconnect</Link></>}
-                    </span>
-                  )}
-                </li>
-              ))}
-            </ul>
+    <LazyMotion features={loadMotion} strict>
+      <MotionConfig reducedMotion="user">
+        <div className="compose">
+          {gen.cropFile && (
+            <AvatarCropModal file={gen.cropFile} aspect={gen.s.videoAspect} onApply={gen.applyFace} onCancel={() => gen.setCropFile(null)} />
           )}
-          <div className="row">
-            {retryable.length > 0 && (
-              <button type="button" className="btn sm" disabled={busy !== null} onClick={() => postNow(retryable)}>
-                Retry {retryable.map(label).join(', ')}
-              </button>
-            )}
-            {done && onDone && <button type="button" className="btn primary sm" onClick={onDone}>Done</button>}
-            {result.kind === 'scheduled' && done && <Link href="/dashboard" className="btn ghost sm">Open calendar</Link>}
-          </div>
-        </section>
-      )}
+          {editing?.id && (
+            <MotionEditor
+              id={editing.id}
+              onClose={() => setEditing(null)}
+              onCredits={(e) => { setCreditError(e); refreshCredits(); }}
+              onCharged={refreshCredits}
+              onUse={(item) => { setAttached((cur) => cur.map((a) => (a.id === editing.id ? item : a))); setRendered((r) => (r?.id === editing.id ? item : r)); setEditing(null); }}
+            />
+          )}
+          <ComposeChat
+            open={chatOpen} onClose={closeChat}
+            body={brief} setBody={(t) => replaceText('Brief', t)} platforms={targets} connected={connected} onPlatforms={setPicked} setLength={setLength}
+            video={rendered && attached.some((a) => a.id === rendered.id) ? rendered : null}
+            onSwap={(old, item) => { setAttached((cur) => cur.map((a) => (a.id === old.id ? item : a))); setRendered(item); }}
+            onCredits={(e) => { setCreditError(e); refreshCredits(); }}
+            onCharged={refreshCredits}
+          />
 
-      {!done && (
-        <div className="stack">
-          <div className="compose-actions">
-            <label className="compose-when">
-              <span className="sr-only">Post at</span>
-              <input
-                type="datetime-local"
-                className="input"
-                value={when}
-                min={minWhen}
-                onChange={(e) => { whenSet.current = true; setWhen(e.target.value); }}
-              />
-            </label>
-            <button type="button" className="btn primary" disabled={!canSubmit} onClick={schedule}>
-              {busy === 'schedule' ? 'Scheduling…' : 'Schedule'}
-            </button>
-            <button type="button" className="btn" disabled={!canSubmit} onClick={() => postNow()}>
-              {busy === 'post' ? 'Posting…' : 'Post now'}
-            </button>
+          <div className="page-header compose-header">
+            <h1>{title}</h1>
+            <Seg
+              value={tab} onChange={setTab} label="What to make"
+              options={[{ id: 'one', label: 'One post' }, { id: 'web', label: <>From a website <small className="seg-aside">many</small></> }]}
+            />
           </div>
-          {blocker && <p className="compose-note">{blocker}</p>}
+
+          {creditError && <InsufficientCreditsBanner balance={creditError.balance} needed={creditError.needed} onDismiss={() => setCreditError(null)} />}
+
+          <div className="compose-tab stack" hidden={tab !== 'web'}>
+            <section className="card compose-card" aria-label="Post to">
+              <div className="compose-head-row"><span className="compose-title">Post to</span><span className="compose-note">Video posts go to the platforms that take video</span></div>
+              {platformChips('video')}
+            </section>
+            <FromWebsite
+              length={videoLength}
+              platforms={connected.filter((p) => selected.includes(p) && supportsKind(p, 'video'))}
+              onUse={(text, items, combined) => {
+                const prev = { ...latest.current };
+                setBrief(text);
+                if (!combined) setCaption(text);
+                setAttached((cur) => [...cur, ...items].slice(0, MAX_ATTACHED));
+                // Photos only post from an Image post; a Video post uses them as references.
+                if (items.length && media === 'text') setMedia('image');
+                setTab('one');
+                if (prev.brief.trim() || (!combined && prev.caption.trim())) {
+                  say(combined ? 'Brief replaced' : 'Caption and brief replaced', () => { setBrief(prev.brief); setCaption(prev.caption); });
+                }
+              }}
+              onCredits={(e) => { setCreditError(e); refreshCredits(); }}
+              onCharged={() => { setCreditError(null); refreshCredits(); }}
+            />
+          </div>
+
+          <div className="compose-tab compose-one" hidden={tab !== 'one'}>
+            <Seg className="compose-panes" value={pane} onChange={setPane} label="View" options={[{ id: 'edit', label: 'Edit' }, { id: 'preview', label: 'Preview' }]} />
+            <div className="compose-grid">
+              <div className="compose-left" data-off={pane !== 'edit' || undefined}>
+                <section className="card compose-card" aria-label="Make it">
+                  <div className="compose-field">
+                    <div className="compose-head-row"><span className="compose-title">Format</span><span className="compose-note">{FORMAT_HINT[media]}</span></div>
+                    <Seg
+                      value={media} onChange={setMedia} label="Format"
+                      options={[
+                        { id: 'text', label: <><Icon name="list" size={12} /> Text</> },
+                        { id: 'image', label: <><Icon name="image" size={12} /> Image</> },
+                        { id: 'video', label: <><Icon name="play" size={12} /> Video</> },
+                      ]}
+                    />
+                  </div>
+                  <div className="compose-field">
+                    <div className="compose-head-row">
+                      <label htmlFor="compose-brief" className="compose-title">Brief</label>
+                      <span className="compose-note">What’s this post about? AI uses this, it isn’t posted</span>
+                    </div>
+                    <textarea
+                      id="compose-brief" className="input compose-textarea" rows={3} value={brief} onChange={(e) => setBrief(e.target.value)}
+                      placeholder="e.g. Our cold brew is back for winter — 20% off this week, local delivery only"
+                    />
+                    <div className="compose-tools">
+                      <button type="button" className="btn sm" disabled={!brief.trim() || busy !== null} title={brief.trim() ? undefined : 'Write a brief first'} onClick={write}>
+                        <Icon name="sparkle" size={12} /> {busy === 'write' ? 'Writing…' : variants.length ? 'Rewrite caption' : 'Write caption'} <span className="compose-cost">{writeCost} cr</span>
+                      </button>
+                      <select className="input compose-select" aria-label="Writing style" value={preset} onChange={(e) => setPreset(e.target.value)}>
+                        {PRESETS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+                      </select>
+                      <label className="compose-check" title="Reads the web and your past posts first — slower, costs more">
+                        <input type="checkbox" checked={research} onChange={(e) => setResearch(e.target.checked)} /> Research the web
+                      </label>
+                      <span className="compose-spacer" />
+                      <button type="button" className="btn ghost sm" aria-expanded={chatOpen} onClick={() => setChatOpen((o) => !o)}>
+                        <Icon name="chat" size={12} /> Ask AI
+                      </button>
+                    </div>
+                  </div>
+
+                  <AnimatePresence mode="wait" initial={false}>
+                    <m.div
+                      key={media} className="compose-panel"
+                      initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4, transition: { duration: 0.12 } }}
+                      transition={{ duration: 0.28, ease: EASE_T }}
+                    >
+                      {media === 'text' && (
+                        <p className="compose-note">Text posts publish the caption only. To post photos, switch Format to Image.</p>
+                      )}
+                      {briefNote && <p className="compose-note">{briefNote}</p>}
+                      {media === 'image' && (
+                        <ImageOptions
+                          gen={gen}
+                          cost={costs.image}
+                          attachedImages={readyImages.length}
+                          disabled={!brief.trim() || gen.busy !== null}
+                          onGenerate={() => gen.generateImage(brief.trim(), readyImages.map((x) => x.url!))}
+                        />
+                      )}
+                      {media === 'video' && (
+                        <>
+                          <div className="row compose-wrap">
+                            <Seg
+                              value={gen.s.videoSmart ? 'auto' : 'custom'} onChange={(v) => gen.set({ videoSmart: v === 'auto' })} label="Video settings"
+                              options={[{ id: 'auto', label: 'Auto' }, { id: 'custom', label: 'Custom' }]}
+                            />
+                            <span className="compose-note">{gen.s.videoSmart ? 'Auto picks the format from your brief' : 'Pick the kind, engine and sound yourself'}</span>
+                          </div>
+                          <LengthControl gen={gen} length={videoLength} setLength={setLength} />
+                          {gen.s.videoSmart ? (
+                            <SmartVideo
+                              gen={gen}
+                              text={brief}
+                              platforms={targets}
+                              attachments={ready.flatMap((x) => (x.url && x.mimeType ? [{ url: x.url, mimeType: x.mimeType }] : []))}
+                              length={videoLength}
+                              onPlan={setPlanSlot}
+                            />
+                          ) : (
+                            <VideoOptions
+                              gen={gen}
+                              cost={costs.video}
+                              disabled={(!brief.trim() && gen.s.videoMode !== 'avatar') || gen.busy !== null}
+                              onGenerate={() => gen.generateVideo(brief.trim())}
+                            />
+                          )}
+                        </>
+                      )}
+                    </m.div>
+                  </AnimatePresence>
+                </section>
+
+                {notice && <p role="status" aria-live="polite" className="compose-notice">{notice}</p>}
+
+                <m.section layout="position" layoutDependency={media} className="card compose-card" aria-label="Caption">
+                  <div className="compose-head-row">
+                    <label htmlFor="compose-caption" className="compose-title">Caption</label>
+                    <span className={`compose-count tnum${tight && caption.length > LIMIT[tight] ? ' compose-error' : ''}`}>
+                      {tight ? `${caption.length} / ${LIMIT[tight]} · ${label(tight)}` : `${caption.length} characters`}
+                    </span>
+                  </div>
+                  <textarea
+                    id="compose-caption" className="input compose-textarea" rows={6} value={caption} onChange={(e) => setCaption(e.target.value)}
+                    placeholder="Write the caption, or use Write caption above"
+                  />
+                  <div className="compose-chips" role="group" aria-label="AI versions">
+                    <span className="compose-label">Versions</span>
+                    {variants.length ? variants.map((v, i) => (
+                      <m.button
+                        key={`${round}-${v.label}`} type="button" className={`prompt-chip compose-version${chosen === v.label ? ' active' : ''}`} aria-pressed={chosen === v.label} title={v.text}
+                        initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.06, duration: 0.6, ease: EASE_R }}
+                        onClick={() => { setChosen(v.label); replaceText('Caption', v.text); }}
+                      >
+                        {v.label}
+                      </m.button>
+                    )) : ['A', 'B', 'C'].map((l) => (
+                      <button key={l} type="button" className="prompt-chip compose-version" disabled aria-describedby="compose-versions-note">{l}</button>
+                    ))}
+                    {!variants.length && <span id="compose-versions-note" className="compose-note">Appear after Write caption</span>}
+                  </div>
+                  <Attachments attached={attached} onChange={setAttached} onNotice={setNotice} onEdit={setEditing} note={attachNote} />
+                </m.section>
+              </div>
+
+              <aside className="card compose-card compose-right" data-off={pane !== 'preview' || undefined} aria-label="The post">
+                <div className="compose-field">
+                  <div className="compose-head-row"><span className="compose-title">Post to</span><span className="compose-note">Tap to add or remove</span></div>
+                  {platformChips(kind)}
+                </div>
+
+                {result && (
+                  <m.section
+                    className={`compose-results${done ? ' is-filed' : ''}`} aria-live="polite"
+                    initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, ease: EASE_R }}
+                  >
+                    {done && (
+                      <m.span className="compose-filed-tick" initial={{ opacity: 0, scale: 0.6 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.2, duration: 0.52, ease: EASE_R }}>
+                        <Icon name="check" size={20} />
+                      </m.span>
+                    )}
+                    <h3 className="compose-filed-title">{resultTitle}</h3>
+                    {result.kind === 'scheduled' ? (
+                      <p>
+                        <span className="compose-filed-slot tnum">
+                          {result.at.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}{result.platforms.length ? ` · ${result.platforms.map(label).join(', ')}` : ''}
+                        </span>
+                        {result.skipped.length > 0 && <span className="compose-note"> Skipped {result.skipped.map(label).join(', ')}.</span>}
+                      </p>
+                    ) : (
+                      <ul className="stack">
+                        {result.rows.map((r) => (
+                          <li key={r.platform} className="compose-result">
+                            <Pglyph p={PLATFORM_TO_SHORT[r.platform] ?? r.platform} />
+                            <span className="compose-result-name">{label(r.platform)}</span>
+                            {r.ok ? (
+                              <>
+                                <span className="badge badge--ok">Posted</span>
+                                {r.url && <a href={r.url} target="_blank" rel="noreferrer" className="btn ghost sm">View <Icon name="arrow_up_right" size={11} /></a>}
+                              </>
+                            ) : (
+                              <span className="compose-error">
+                                {reasonCopy(r.error)}
+                                {needsReconnect(r.error) && <> <Link href="/settings/connections">Reconnect</Link></>}
+                              </span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    <div className="row compose-wrap compose-filed-actions">
+                      {retryable.length > 0 && (
+                        <button type="button" className="btn sm" disabled={busy !== null} onClick={() => postNow(retryable)}>
+                          Retry {retryable.map(label).join(', ')}
+                        </button>
+                      )}
+                      <Link href="/dashboard" className="btn ghost sm">Open calendar</Link>
+                      <button type="button" className="btn primary sm" onClick={onNew}>New post</button>
+                    </div>
+                  </m.section>
+                )}
+
+                {!done && (
+                  <>
+                    <Preview
+                      platforms={targets} active={active} onActive={setPreviewPick} textFor={textFor} media={out} videoSlot={videoSlot}
+                      job={gen.render} format={media} freshId={fresh}
+                      authorFor={(p) => accounts?.find((a) => a.platform === p)}
+                    />
+                    {active && custom[active] !== undefined ? (
+                      <div className="compose-field">
+                        <span className="compose-label">
+                          {label(active)} version · <span className={textFor(active).length > LIMIT[active] ? 'compose-error' : undefined}>{textFor(active).length}/{LIMIT[active]}</span>
+                        </span>
+                        <textarea className="input" rows={3} aria-label={`${label(active)} version`} value={custom[active]} onChange={(e) => setCustom((c) => ({ ...c, [active]: e.target.value }))} />
+                        <button type="button" className="btn ghost sm compose-self-start" onClick={() => setCustom((c) => { const n = { ...c }; delete n[active]; return n; })}>
+                          Use the main caption
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="compose-custom">
+                        <span className="compose-note">
+                          {!active ? 'Pick a platform to customize its caption.'
+                            : !caption.trim() ? 'Write a caption first to customize it per platform.'
+                            : targets.some((p) => custom[p] !== undefined) ? `Customized for ${targets.filter((p) => custom[p] !== undefined).map(label).join(', ')}`
+                            : 'Same caption on every platform'}
+                        </span>
+                        <button
+                          type="button" className={`btn ghost sm${active && over.includes(active) ? ' compose-error' : ''}`} disabled={!active || !caption.trim()}
+                          onClick={() => active && setCustom((c) => ({ ...c, [active]: machine[active] ?? caption }))}
+                        >
+                          <Icon name="edit" size={12} /> Customize for {active ? label(active) : 'a platform'}
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </aside>
+            </div>
+
+            <div ref={bar} className="compose-bar">
+              <div className="compose-toast-wrap">
+                <AnimatePresence>
+                  {toast && (
+                    <m.div
+                      key={toast.id} className="compose-toast" role="status"
+                      initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10, transition: { duration: 0.2 } }}
+                      transition={{ duration: 0.28, ease: EASE_R }}
+                    >
+                      <span>{toast.msg}</span>
+                      {toast.undo && <button type="button" onClick={() => { toast.undo?.(); setToast(null); }}>Undo</button>}
+                    </m.div>
+                  )}
+                </AnimatePresence>
+              </div>
+              <p className="compose-bar-msg" role="status">
+                {barMsg}
+                {!done && accounts && !connected.length && <> <Link href="/settings/connections">Connect</Link></>}
+              </p>
+              <label className="compose-when">
+                <span className="sr-only">Post at</span>
+                <input
+                  type="datetime-local" className="input" value={when} min={minWhen} disabled={done}
+                  onChange={(e) => { whenSet.current = true; setWhen(e.target.value); }}
+                />
+              </label>
+              <div className="compose-bar-btns">
+                <button type="button" className="btn" disabled={!canSave} onClick={saveDraft}>{busy === 'save' ? 'Saving…' : 'Save draft'}</button>
+                <button type="button" className="btn" disabled={!canSubmit} onClick={() => postNow()}>{busy === 'post' ? 'Posting…' : 'Post now'}</button>
+                <button type="button" className="btn primary" disabled={!canSubmit} onClick={schedule}>
+                  <Icon name="clock" size={13} /> {busy === 'schedule' ? 'Scheduling…' : 'Schedule'}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
-      )}
-
-      <details className="compose-more">
-        <summary>Writing options · {PRESETS.find((p) => p.id === preset)?.label ?? preset}{research ? ' + research' : ''}</summary>
-        <WritingOptions preset={preset} setPreset={setPreset} research={research} setResearch={setResearch} />
-      </details>
-
-      <details className="compose-more" open>
-        <summary>Preview</summary>
-        <Preview platforms={targets} textFor={textFor} media={out} videoSlot={videoSlot} authorFor={(p) => accounts?.find((a) => a.platform === p)} />
-      </details>
-    </div>
+      </MotionConfig>
+    </LazyMotion>
   );
 }

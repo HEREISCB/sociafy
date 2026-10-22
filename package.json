@@ -23,6 +23,7 @@
     "@clerk/nextjs": "^7.3.3",
     "date-fns": "^4.1.0",
     "drizzle-orm": "^0.45.2",
+    "motion": "^14.5.0",
     "nanoid": "^5.1.11",
     "next": "16.2.4",
     "openai": "^6.38.0",

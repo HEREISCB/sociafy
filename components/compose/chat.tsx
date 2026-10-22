@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
+import { AnimatePresence } from 'motion/react';
+import * as m from 'motion/react-m';
 import { Icon } from '../icons';
 import { priceForCompose, priceForMotionAiEdit } from '../../lib/credits/pricing';
 import type { Platform } from '../../lib/db/schema';
@@ -15,11 +17,16 @@ type Credits = { balance: number; needed: number };
 const BRIEF_COST = priceForCompose({ withTools: false }).credits;
 
 /**
- * Compose's chat. Brief mode: talk the post (= the video prompt) into the post box,
- * plus length and platforms. Edit mode, once this session rendered an editable
- * AI motion graphic: each message is a whole-video edit of it, swapped in when done.
+ * Compose's chat, a side drawer. Brief mode: talk the Brief (the prompt for the
+ * caption, image and video) into shape, plus length and platforms. Edit mode,
+ * once this session rendered an editable AI motion graphic: each message is a
+ * whole-video edit of it, swapped in when done. Stays mounted while closed so
+ * the conversation and a running edit survive.
  */
-export function ComposeChat({ body, setBody, platforms, connected, onPlatforms, setLength, video, onSwap, onCredits, onCharged }: {
+export function ComposeChat({ open, onClose, body, setBody, platforms, connected, onPlatforms, setLength, video, onSwap, onCredits, onCharged }: {
+  open: boolean;
+  onClose: () => void;
+  /** The Brief. */
   body: string;
   setBody: (s: string) => void;
   platforms: Platform[];
@@ -32,7 +39,6 @@ export function ComposeChat({ body, setBody, platforms, connected, onPlatforms, 
   onCredits: (e: Credits) => void;
   onCharged: () => void;
 }) {
-  const [open, setOpen] = useState(false);
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -44,7 +50,13 @@ export function ComposeChat({ body, setBody, platforms, connected, onPlatforms, 
   const list = useRef<HTMLDivElement | null>(null);
   const alive = useRef(true);
   useEffect(() => () => { alive.current = false; }, []);
-  useEffect(() => { list.current?.scrollTo({ top: list.current.scrollHeight }); }, [msgs.length, render]);
+  useEffect(() => { list.current?.scrollTo({ top: list.current.scrollHeight }); }, [msgs.length, render, open]);
+  useEffect(() => {
+    if (!open) return;
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', esc);
+    return () => window.removeEventListener('keydown', esc);
+  }, [open, onClose]);
 
   // Only AI motion graphics with an editable job can be edited; the segments view is the check (404 = no).
   const vid = video?.motionAi && video.id ? video.id : null;
@@ -119,16 +131,22 @@ export function ComposeChat({ body, setBody, platforms, connected, onPlatforms, 
   };
 
   return (
-    <div className="chat">
-      <button type="button" className="btn ghost sm compose-self-start" aria-expanded={open} aria-controls="compose-chat" onClick={() => setOpen((o) => !o)}>
-        <Icon name="sparkle" size={12} /> {open ? 'Hide chat' : editing ? 'Chat to edit the video' : 'Chat'}
-      </button>
+    <AnimatePresence>
       {open && (
-        <section id="compose-chat" className="chat-panel" aria-label={editing ? 'Edit the video by chat' : 'Brief by chat'}>
+        <m.section
+          id="compose-chat" className="chat-panel" aria-label={editing ? 'Edit the video by chat' : 'Brief by chat'}
+          initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 24 }}
+          transition={{ duration: 0.28, ease: [0.65, 0, 0.35, 1] }}
+        >
+          <header className="chat-head">
+            <h2>{editing ? 'Edit the video' : 'Ask AI'}</h2>
+            <span className="compose-note">{editing ? 'Each message edits the whole video' : 'Shapes the brief, not the caption'}</span>
+            <button type="button" className="icon-btn" aria-label="Close chat" onClick={onClose}><Icon name="x" size={14} /></button>
+          </header>
           {video && !editing && (
             <p className="compose-note">
               {editable
-                ? <>Re-briefing writes a new post; Generate makes a new video. <button type="button" className="chat-link" onClick={() => setRebrief(null)}>Edit the current video instead</button></>
+                ? <>Re-briefing rewrites the brief; Generate makes a new video. <button type="button" className="chat-link" onClick={() => setRebrief(null)}>Edit the current video instead</button></>
                 : vid && info?.id !== vid ? 'Checking whether this video can be edited…'
                 : 'This video can’t be edited by chat (AI footage and templates aren’t). Tell me what to change and I’ll rewrite the brief — then Generate makes a new one.'}
             </p>
@@ -141,7 +159,7 @@ export function ComposeChat({ body, setBody, platforms, connected, onPlatforms, 
           <div ref={list} className="chat-log" role="log" aria-live="polite" aria-busy={busy}>
             {msgs.length === 0 && (
               <p className="compose-note">
-                {editing ? 'What should change? e.g. “make the headline bigger and the music quieter”.' : 'Tell me about the video — e.g. “a 15s video for my bakery’s new croissant, warm tone, for Instagram”.'}
+                {editing ? 'What should change? e.g. “make the headline bigger and the music quieter”.' : 'Tell me about the post and I’ll write the brief — e.g. “a 15s video for my bakery’s new croissant, warm tone, for Instagram”.'}
               </p>
             )}
             {msgs.map((m, i) => (
@@ -161,7 +179,8 @@ export function ComposeChat({ body, setBody, platforms, connected, onPlatforms, 
               maxLength={editing ? 1_000 : 2_000}
               value={input}
               disabled={busy}
-              placeholder={editing ? 'Describe the change…' : 'Describe the video…'}
+              autoFocus
+              placeholder={editing ? 'Describe the change…' : 'Describe the post…'}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); } }}
             />
@@ -169,8 +188,8 @@ export function ComposeChat({ body, setBody, platforms, connected, onPlatforms, 
               {render ? 'Editing…' : busy ? 'Sending…' : 'Send'} <span className="compose-cost">{cost} cr</span>
             </button>
           </div>
-        </section>
+        </m.section>
       )}
-    </div>
+    </AnimatePresence>
   );
 }

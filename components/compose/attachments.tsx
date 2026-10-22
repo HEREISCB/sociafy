@@ -64,7 +64,7 @@ export function Attachments({
   onNotice: (msg: string) => void;
   /** Open the editor for an AI-designed motion graphic. */
   onEdit?: (m: MediaItem) => void;
-  /** What the strip is for when it isn't all posted (e.g. "References for the video"). */
+  /** What happens to attachments in this format (posted, or references for the video). Always shown. */
   note?: string | null;
   children?: React.ReactNode;
 }) {
@@ -133,7 +133,6 @@ export function Attachments({
 
   return (
     <>
-      {attached.length > 0 && note && <p className="compose-label" id="compose-strip-note">{note}</p>}
       {attached.length > 0 && (
         <ul className="compose-strip" aria-label="Attached media" aria-describedby={note ? 'compose-strip-note' : undefined}>
           {attached.map((m) => (
@@ -162,6 +161,7 @@ export function Attachments({
           <Icon name="folder" size={12} /> Library
         </button>
         {children}
+        {note && <span className="compose-note" id="compose-strip-note">{note}</span>}
       </div>
 
       {libOpen && (

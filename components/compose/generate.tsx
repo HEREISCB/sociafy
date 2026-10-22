@@ -98,8 +98,10 @@ export function videoModel(s: GenSettings): VideoModelId {
   return s.videoModel === 'sociafy-cinema-1' && !cinemaBlockers(s).length ? 'sociafy-cinema-1' : 'sociafy-motion-1';
 }
 
+/** The length as rendered: the shared Length control can ask for more (or less) than the model takes. */
 export function videoDuration(s: GenSettings): number {
-  return Math.min(s.videoDuration, VIDEO_MODELS[videoModel(s)].durationSec.max);
+  const { min, max } = VIDEO_MODELS[videoModel(s)].durationSec;
+  return Math.max(min, Math.min(s.videoDuration, max));
 }
 
 /** Credits for one click. null = priced server-side from a live quote (Cinema). */
@@ -237,6 +239,7 @@ export function useMediaGen(report: GenReport) {
 
   const generateImage = async (prompt: string, refs: string[]) => {
     setBusy('image');
+    setRender({ startedAt: Date.now(), phases: ['rendering'], usual: 'Images usually take under a minute.', slowAfterSec: 90 });
     report.notice(null);
     try {
       const { r, data } = await postJson('/api/media/generate-image', {
@@ -250,6 +253,7 @@ export function useMediaGen(report: GenReport) {
     } catch {
       report.notice('Image generation failed. Check your connection and try again.');
     } finally {
+      setRender(null);
       setBusy(null);
     }
   };
@@ -344,7 +348,8 @@ export function useMediaGen(report: GenReport) {
     if (voice && !(s.avatarVoiceId && s.avatarScript.trim())) { report.notice('Pick a voice and write what the avatar should say.'); return; }
     if (!voice && !s.audio) { report.notice('Upload an audio track for the avatar.'); return; }
     setBusy('video');
-    report.notice('Rendering your avatar — this takes a couple of minutes.');
+    setRender({ startedAt: Date.now(), phases: ['queued'], usual: 'Avatars usually take a couple of minutes.', slowAfterSec: 300 });
+    report.notice(null);
     try {
       const { r, data } = await postJson('/api/media/generate-avatar', {
         imageUrl: s.avatarFace, aspect: s.videoAspect,
@@ -355,6 +360,7 @@ export function useMediaGen(report: GenReport) {
       if (handled(r, data, 'Avatar generation')) return;
       const jobId = (data.job as { id: string } | undefined)?.id;
       if (!jobId) { report.notice('Avatar generation did not start. Try again.'); return; }
+      setRender((v) => (v ? { ...v, phases: ['rendering'] } : v));
       const out = await pollJob(`/api/media/gen-job/${jobId}`, 8 * 60_000, [5_000, 1_000, 12_000]);
       if ('asset' in out && out.asset) {
         report.added([toItem(out.asset, s.videoAspect.replace(':', '/'))]);
@@ -367,6 +373,7 @@ export function useMediaGen(report: GenReport) {
     } catch {
       report.notice('Avatar generation failed. Check your connection and try again.');
     } finally {
+      setRender(null);
       setBusy(null);
     }
   };
@@ -400,19 +407,34 @@ export type MediaGen = ReturnType<typeof useMediaGen>;
 
 const mmss = (sec: number) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
 
-/** Live render status. Elapsed time and phase are real; the bar is
- *  deliberately indeterminate because nothing reports a percentage. */
-export function RenderStatus({ render }: { render: Render }) {
+function useElapsed(startedAt: number) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1_000);
     return () => clearInterval(t);
   }, []);
-  const elapsed = Math.max(0, Math.floor((now - render.startedAt) / 1_000));
+  return Math.max(0, Math.floor((now - startedAt) / 1_000));
+}
+
+/** The earliest phase any clip is still in ('done' when none is). */
+function headOf(render: Render): ClipPhase {
   const active = render.phases.filter((p) => p !== 'done' && p !== 'failed');
-  const head = active.length ? active.reduce((a, b) => (ORDER.indexOf(b) < ORDER.indexOf(a) ? b : a)) : 'done';
+  return active.length ? active.reduce((a, b) => (ORDER.indexOf(b) < ORDER.indexOf(a) ? b : a)) : 'done';
+}
+function summaryOf(render: Render) {
   const done = render.phases.filter((p) => p === 'done').length;
-  const summary = render.phases.length > 1 ? `${PHASE_LABEL[head]} — ${done} of ${render.phases.length} done` : PHASE_LABEL[head];
+  const head = PHASE_LABEL[headOf(render)];
+  return render.phases.length > 1 ? `${head} — ${done} of ${render.phases.length} done` : head;
+}
+const waitCopy = (render: Render, elapsed: number) => (elapsed >= (render.slowAfterSec ?? 240)
+  ? 'Longer than usual — still rendering. It lands in your library even if you leave.'
+  : render.usual ?? 'Videos usually take 2–4 minutes.');
+
+/** Live render status. Elapsed time and phase are real; the bar is
+ *  deliberately indeterminate because nothing reports a percentage. */
+export function RenderStatus({ render }: { render: Render }) {
+  const elapsed = useElapsed(render.startedAt);
+  const summary = summaryOf(render);
   return (
     <div className="compose-render">
       <div role="status" aria-live="polite" className="sr-only">{summary}</div>
@@ -421,11 +443,29 @@ export function RenderStatus({ render }: { render: Render }) {
         <span className="compose-render-time tnum" aria-hidden="true">{mmss(elapsed)}</span>
       </div>
       <div className="render-bar" />
-      <p className="compose-note">
-        {elapsed >= (render.slowAfterSec ?? 240)
-          ? 'Longer than usual — still rendering. It lands in your library even if you leave.'
-          : render.usual ?? 'Videos usually take 2–4 minutes.'}
-      </p>
+      <p className="compose-note">{waitCopy(render, elapsed)}</p>
+    </div>
+  );
+}
+
+const STEPS: ClipPhase[] = ['queued', 'rendering', 'storing'];
+
+/** The same real phases as a checklist, for the preview's media frame while a job runs. */
+export function RenderPhases({ render }: { render: Render }) {
+  const elapsed = useElapsed(render.startedAt);
+  const head = headOf(render);
+  const at = head === 'done' ? STEPS.length : STEPS.indexOf(head);
+  const done = render.phases.filter((p) => p === 'done').length;
+  return (
+    <div className="compose-phases">
+      <div role="status" aria-live="polite" className="sr-only">{summaryOf(render)}</div>
+      <ul className="compose-phase-list" aria-hidden="true">
+        {STEPS.map((p, i) => (
+          <li key={p} className={i < at ? 'is-done' : i === at ? 'is-now' : undefined}><i />{PHASE_LABEL[p]}</li>
+        ))}
+      </ul>
+      <span className="compose-phase-time tnum">{mmss(elapsed)}{render.phases.length > 1 ? ` · ${done} of ${render.phases.length} done` : ''}</span>
+      <p className="compose-note">{waitCopy(render, elapsed)}</p>
     </div>
   );
 }

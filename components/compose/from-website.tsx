@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ThumbImg } from '../thumb-img';
+import { PLATFORM_LABELS } from '../../lib/ui/platforms';
 import { apiPost, friendlyApiError } from '../../lib/ui/fetcher';
 import { priceForCompose } from '../../lib/credits/pricing';
 import { MOTION_AI, motionAiExtraMin } from '../../lib/ai/models';
@@ -115,16 +116,17 @@ const hintOf = (e: unknown) => {
 };
 
 /**
- * Video tab: paste a product/company website, get its products, and make one
- * video post per product (each lands on Home as its own draft, rendering).
- * Or drop one product's caption + photos into the post box to edit by hand.
+ * Compose's "From a website" tab: paste a product/company website, get its
+ * products, and make one video post per product (each its own draft,
+ * rendering). Or drop ticked items into the One post tab to edit by hand.
  */
 export function FromWebsite({ platforms, length, onUse, onCredits, onCharged }: {
   /** Where the new posts go (the composer's platform picks that take video). */
   platforms: Platform[];
   /** Picked video length in seconds (null = Auto). */
   length: number | null;
-  onUse: (text: string, media: MediaItem[]) => void;
+  /** `combined`: several items merged into one brief, not a ready caption. */
+  onUse: (text: string, media: MediaItem[], combined: boolean) => void;
   onCredits: (e: { balance: number; needed: number }) => void;
   onCharged: () => void;
 }) {
@@ -219,7 +221,7 @@ export function FromWebsite({ platforms, length, onUse, onCredits, onCharged }: 
     } finally {
       setBusy(null);
     }
-    onUse(text, media);
+    onUse(text, media, !one);
   };
 
   const toggle = (id: string) => setChecked((cur) => {
@@ -229,16 +231,19 @@ export function FromWebsite({ platforms, length, onUse, onCredits, onCharged }: 
   });
 
   return (
-    <div className="compose-media-panel fromsite">
-      <div className="mode-switch" role="radiogroup" aria-label="Make videos about">
-        {(Object.keys(MODES) as Mode[]).map((id) => (
-          <button key={id} type="button" role="radio" aria-checked={mode === id} className={`opt${mode === id ? ' active' : ''}`} disabled={busy !== null} onClick={() => { setMode(id); setFound(null); setMade(null); setError(null); }}>
-            {MODES[id].tab}
-          </button>
-        ))}
+    <div className="card compose-card fromsite">
+      <div className="compose-field">
+        <div className="compose-head-row"><span className="compose-title">Make a post for</span><span className="compose-note">One video post per item, each scheduled on its own</span></div>
+        <div className="compose-chips" role="radiogroup" aria-label="Make videos about">
+          {(Object.keys(MODES) as Mode[]).map((id) => (
+            <button key={id} type="button" role="radio" aria-checked={mode === id} className={`prompt-chip${mode === id ? ' active' : ''}`} disabled={busy !== null} onClick={() => { setMode(id); setFound(null); setMade(null); setError(null); }}>
+              {MODES[id].tab}
+            </button>
+          ))}
+        </div>
       </div>
       <form className="fromsite-row" onSubmit={find}>
-        <label className="compose-label" htmlFor="fromsite-url">From a website</label>
+        <label className="sr-only" htmlFor="fromsite-url">Website</label>
         <input
           id="fromsite-url" className="input" type="text" inputMode="url" autoComplete="url" spellCheck={false}
           placeholder="https://yourshop.com" value={url} onChange={(e) => setUrl(e.target.value)} disabled={busy === 'find'}
@@ -273,8 +278,10 @@ export function FromWebsite({ platforms, length, onUse, onCredits, onCharged }: 
               </li>
             ))}
           </ul>
-          {!platforms.length && <p className="compose-note">Pick at least one platform below that takes video.</p>}
-          <div className="row">
+          <p className="compose-note">
+            {platforms.length ? `Posting to ${platforms.map((p) => PLATFORM_LABELS[p] ?? p).join(', ')} · ${length ? `${length}s each` : 'length picked per video'}.` : 'Pick at least one platform above that takes video.'}
+          </p>
+          <div className="row fromsite-actions">
             <button type="button" className="btn primary" disabled={!picked.length || !platforms.length || busy !== null} onClick={make}>
               {busy === 'make' ? 'Starting videos…' : `Make ${picked.length} ${picked.length === 1 ? 'video' : 'videos'}`}
               {total != null ? <span className="compose-cost">{total} cr</span> : picked.length > 0 && <span className="compose-cost">pricing…</span>}

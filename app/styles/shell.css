@@ -2,7 +2,6 @@
 .app {
   display: grid;
   grid-template-columns: 220px 1fr;
-  height: 100vh;
   height: 100dvh;
   width: 100%;
   /* clip, not hidden: a hidden box can still be scrolled by focus()/scrollIntoView, which slid the whole shell up. */
@@ -199,7 +198,10 @@ html:has(body .app), body:has(.app) { overflow: hidden; overscroll-behavior: non
   min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
-  padding: 28px var(--s-8) 80px;
+  /* Exposed so a page can pin a bar flush to the scrollport's edges (compose). */
+  --page-x: var(--s-8);
+  --page-b: 80px;
+  padding: 28px var(--page-x) var(--page-b);
 }
 
 /* ---------- Mobile drawer (desktop hides these) ---------- */
@@ -253,9 +255,9 @@ html:has(body .app), body:has(.app) { overflow: hidden; overscroll-behavior: non
   .shell-new-label { display: none; }
   .shell-new { padding: 6px 10px; }
 
-  .page { padding: var(--s-4) 14px 64px; }
+  .page { --page-x: 14px; --page-b: 64px; padding: var(--s-4) var(--page-x) var(--page-b); }
 }
 
 @media (max-width: 480px) {
-  .page { padding: var(--s-3) var(--s-3) 56px; }
+  .page { --page-x: var(--s-3); --page-b: 56px; padding: var(--s-3) var(--page-x) var(--page-b); }
 }
