@@ -10,7 +10,7 @@
  */
 
 import type { Platform } from '../db/schema';
-import { MOTION_AI } from '../ai/models';
+import { FOOTAGE_EDIT, MOTION_AI } from '../ai/models';
 
 /** Stable action keys persisted to credit_ledger.action. */
 export type CreditAction =
@@ -42,6 +42,7 @@ export type CreditAction =
   | 'video_motion_graphics'
   | 'video_motion_ai'
   | 'video_motion_ai_edit'
+  | 'video_edit_footage'
   | 'text_chat';
 
 /**
@@ -144,6 +145,11 @@ export const CREDIT_PRICES: Record<CreditAction, number> = {
   // worker revises the existing composition and re-renders. Per second of the
   // video being edited, half the from-scratch rate: 6s = 54, 15s = 135, 60s = 540.
   video_motion_ai_edit: MOTION_PER_SEC / 2,
+  // "Edit my video": the user's own footage cut, captioned and finished by the
+  // same worker. Per second of the FINISHED video, the AI-designed rate (+
+  // MOTION_AI_AUDIO_PER_SEC with a music bed). Charged up front at the quoted
+  // cap, the unused seconds refunded on completion (footageEditRefund).
+  video_edit_footage: MOTION_PER_SEC,
   // POST /api/v1/chat/completions. Metered per call from the provider's actual
   // token usage by priceForChat() below; this number is only the per-call floor.
   text_chat: 1,
@@ -318,6 +324,46 @@ export function priceForMotionAiEdit(durationSec: number): { action: CreditActio
   return { action, credits: CREDIT_PRICES[action] * sec };
 }
 
+/**
+ * "Edit my video", quoted at `capSec` (clamped to MOTION_AI.durationSec): the most it can
+ * cost. A music bed (or voiceover) adds MOTION_AI_AUDIO_PER_SEC; the user's own speech is free.
+ */
+export function priceForFootageEdit(
+  capSec: number,
+  audio?: { narration?: boolean; music?: boolean },
+): { action: CreditAction; credits: number; perSec: number; sec: number } {
+  const action: CreditAction = 'video_edit_footage';
+  const { min, max } = MOTION_AI.durationSec;
+  const sec = Math.min(max, Math.max(min, Math.ceil(capSec) || min));
+  const perSec = CREDIT_PRICES[action] + (audio?.narration || audio?.music ? MOTION_AI_AUDIO_PER_SEC : 0);
+  return { action, credits: perSec * sec, perSec, sec };
+}
+
+/**
+ * The cap a footage edit is quoted (and limited) at: the length the user picked, or
+ * FOOTAGE_EDIT.autoSec for Auto; never more than the clips plus 5 s (room for an intro
+ * or end card), since an edit can't outrun its footage. `sourceSec` comes from the
+ * browser: understating it only shortens the user's own video, so it needs no proof.
+ */
+export function footageEditCap(lengthSec: number | null, sourceSec?: number | null): number {
+  const { min, max } = MOTION_AI.durationSec;
+  const want = lengthSec ?? FOOTAGE_EDIT.autoSec;
+  const room = sourceSec && sourceSec > 0 ? Math.ceil(sourceSec) + 5 : Infinity;
+  return Math.min(max, Math.max(min, Math.round(Math.min(want, room))));
+}
+
+/**
+ * Credits to give back when a footage edit finishes shorter than its cap: the
+ * charge is perSec × capSec, the video costs perSec per started second (never
+ * under the minimum length). Never negative, never more than was charged.
+ */
+export function footageEditRefund(a: { charged: number; capSec: number; actualSec: number }): number {
+  if (!(a.charged > 0) || !(a.capSec > 0) || !Number.isFinite(a.actualSec)) return 0;
+  const perSec = a.charged / a.capSec;
+  const used = Math.min(a.capSec, Math.max(MOTION_AI.durationSec.min, Math.ceil(a.actualSec - 0.01)));
+  return Math.max(0, Math.round(a.charged - perSec * used));
+}
+
 // =====================================================
 // Text-post price helper
 // =====================================================
@@ -434,6 +480,7 @@ export const ACTION_LABELS: Record<CreditAction, string> = {
   video_motion_graphics: 'Video · Motion graphic',
   video_motion_ai: 'Video · AI-designed motion graphic',
   video_motion_ai_edit: 'Video · Motion graphic edit',
+  video_edit_footage: 'Video · Edit my video',
   text_chat: 'API chat / vision',
 };
 

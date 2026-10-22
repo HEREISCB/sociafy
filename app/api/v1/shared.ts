@@ -188,6 +188,8 @@ export function publicVideoError(raw: string | null | undefined): string | null 
   // Cinema. Same two outcomes, same two codes — one code means one thing across
   // the API regardless of which engine served the model. The backend's own
   // prose stays in the log; `cinema_refused` is set by us, not echoed.
+  // The motion worker couldn't download/read/transcribe the footage ("Edit my video" clips, hybrid footage).
+  if (/^motion_failed: (footage|transcribe)_failed/.test(raw)) return 'footage_unreadable';
   if (raw.startsWith('cinema_refused')) return 'prompt_rejected';
   if (raw.startsWith('cinema_failed')) {
     console.error('[v1/videos] cinema backend reported a failed render:', raw.slice(0, 300));

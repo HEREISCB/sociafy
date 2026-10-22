@@ -115,6 +115,20 @@ li.compose-thumb { cursor: default; }
 .compose-slot video { width: 96px; height: 54px; object-fit: cover; border-radius: var(--r-sm); border: 1px solid var(--line); }
 .compose-slot audio { flex: 1; min-width: 0; }
 
+/* Edit my video: the raw clips, each with its own real upload progress. */
+.footage-clips { display: flex; flex-direction: column; gap: var(--s-2); margin: 0; padding: 0; list-style: none; }
+.footage-clip {
+  display: flex; align-items: center; gap: var(--s-3);
+  padding: var(--s-2) var(--s-2) var(--s-2) var(--s-3);
+  border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface);
+}
+.footage-clip.is-error { border-color: var(--err); }
+.footage-clip.is-error .compose-note { color: var(--err-ink); }
+.footage-clip-body { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.footage-clip-name { font-size: var(--fs-sm); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.footage-bar { height: 2px; margin-top: var(--s-1); background: var(--subtle); overflow: hidden; }
+.footage-bar i { display: block; height: 100%; background: var(--text); transform-origin: left; transition: transform var(--dur-primary) var(--ease-primary); }
+
 /* Video render status. The bar is indeterminate on purpose: nothing in the
    pipeline reports progress. */
 .compose-render {

@@ -89,7 +89,7 @@ export function MotionEditor({
   const video = useRef<HTMLVideoElement | null>(null);
   const alive = useRef(true);
   const following = useRef<string | null>(null);
-  useEffect(() => () => { alive.current = false; }, []);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []); // re-armed: Strict Mode remounts
 
   const load = useCallback(async (jobId: string) => {
     try {

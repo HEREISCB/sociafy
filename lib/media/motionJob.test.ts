@@ -67,7 +67,7 @@ vi.mock('../credits/ledger', () => {
   };
 });
 
-import { MotionNotReady, autopilotTemplate, submitMotionAiEdit, submitMotionAiVideo, submitMotionVideo } from './motionJob';
+import { MotionNotReady, autopilotTemplate, submitFootageEdit, submitMotionAiEdit, submitMotionAiVideo, submitMotionVideo } from './motionJob';
 
 const READY = { logo: { primary: { id: 'l', url: 'https://cdn/logo.svg', mime: 'image/svg+xml' } }, colors: { primary: '#5B5EF2' }, facts: ['12 languages'] };
 const go = () => submitMotionVideo({ userId: 'u1', template: 'stat', aspect: '9:16', topic: 'Hindi support is live', via: 'compose' });
@@ -220,5 +220,35 @@ describe('submitMotionAiEdit', () => {
     const { job } = await edit();
     expect(job.status).toBe('pending');
     expect(st.refunds).toHaveLength(0);
+  });
+});
+
+describe('submitFootageEdit', () => {
+  const go = (over: Partial<Parameters<typeof submitFootageEdit>[0]> = {}) => submitFootageEdit({
+    userId: 'u1', clips: [{ url: 'https://cdn/users/u1/raw.mov', name: 'take.mov' }], instructions: 'Cut the pauses',
+    aspect: '9:16', lengthSec: null, sourceSec: 14.2, music: false, sfx: true, ...over,
+  });
+
+  it('charges the quote for the cap and sends the raw clips, cap and instructions as a footage edit', async () => {
+    st.balance = 5000;
+    const { creditsCharged } = await go();
+    expect(creditsCharged).toBe(20 * 18); // 14.2 s of clips + 5 → a 20 s cap
+    expect(st.rows[0]).toMatchObject({ provider: 'motion-claude', genMode: 'motion-ai-footage', durationSec: 20, creditsCharged: 360 });
+    expect(st.charges[0]).toMatchObject({ action: 'video_edit_footage', credits: 360 });
+    expect(st.submitted[0]).toMatchObject({
+      kind: 'footage-edit', autoLength: true, durationSec: 20, prompt: 'Cut the pauses', aspect: '9:16',
+      audio: { narration: false, sfx: true, music: false },
+      footage: [{ url: 'https://cdn/users/u1/raw.mov', label: 'take.mov' }],
+      videoKey: expect.stringMatching(/^users\/u1\//),
+    });
+  });
+
+  it('runs without a brand kit, adds the music surcharge, and refuses a short balance before writing', async () => {
+    st.kit = {}; st.balance = 5000;
+    expect((await go({ lengthSec: 30, sourceSec: null, music: true })).creditsCharged).toBe(30 * 22);
+    expect(st.submitted[0]).toMatchObject({ autoLength: false, durationSec: 30 });
+    st.balance = 100; st.rows = [];
+    await expect(go()).rejects.toThrow('insufficient');
+    expect(st.rows).toHaveLength(0);
   });
 });

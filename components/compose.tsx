@@ -17,6 +17,7 @@ import { InsufficientCreditsBanner } from './credits';
 import { Attachments, MAX_ATTACHED, type MediaItem } from './compose/attachments';
 import { DEFAULT_SETTINGS, genCosts, useMediaGen } from './compose/generate';
 import { ImageOptions, LengthControl, PRESETS, VideoOptions } from './compose/options';
+import { FootageOptions } from './compose/footage';
 import { Preview, type VideoSlot } from './compose/preview';
 import { AvatarCropModal } from './compose/avatar-crop';
 import { MotionEditor } from './compose/motion-editor';
@@ -44,6 +45,7 @@ const VIDEO_FAIL_COPY: Record<string, string> = {
   submit_unconfirmed: 'We never got confirmation the clip was accepted. Credits are refunded automatically — try again.',
   duplicate_request: 'That request was already running, so it was not charged twice.',
   generation_rejected: 'The request was rejected before rendering started. Credits were refunded.',
+  footage_unreadable: 'We couldn’t read or transcribe the footage. Credits were refunded — re-export your clip as MP4 and try again.',
   poll_timeout: 'Still rendering — it will appear in your library once it lands, and nothing extra is charged.',
 };
 const videoFailCopy = (code: string) => VIDEO_FAIL_COPY[code] ?? 'The clip failed to render. Credits were refunded.';
@@ -212,7 +214,7 @@ export default function Compose({ draftId, initial, title, onNew }: {
   /** The Length control, the chat and From a website share one length; Custom's engines read it too. */
   const setLength = (n: number | null) => {
     setVideoLength(n);
-    gen.set({ motionAiDuration: n ?? MOTION_AI.durationSec.default, videoDuration: n ?? DEFAULT_SETTINGS.videoDuration });
+    gen.set({ motionAiDuration: n ?? MOTION_AI.durationSec.default, videoDuration: n ?? DEFAULT_SETTINGS.videoDuration, footageLength: n });
   };
 
   const { data: accounts } = useApi<Account[]>('/api/accounts');
@@ -377,7 +379,8 @@ export default function Compose({ draftId, initial, title, onNew }: {
     ? (gen.s.videoSmart && planSlot) || { aspect: gen.s.videoAspect }
     : null;
   const tight = targets.length ? targets.reduce((a, p) => (LIMIT[p] < LIMIT[a] ? p : a)) : null;
-  const briefNote = !brief.trim() && (media === 'image' || (media === 'video' && !gen.s.videoSmart && gen.s.videoMode !== 'avatar'))
+  const footageMode = media === 'video' && !gen.s.videoSmart && gen.s.videoMode === 'footage';
+  const briefNote = !brief.trim() && (media === 'image' || (media === 'video' && !gen.s.videoSmart && gen.s.videoMode !== 'avatar' && !footageMode))
     ? `Write a brief above — it’s what the ${media} is made from.`
     : null;
 
@@ -547,13 +550,18 @@ export default function Compose({ draftId, initial, title, onNew }: {
                         <>
                           <div className="row compose-wrap">
                             <Seg
-                              value={gen.s.videoSmart ? 'auto' : 'custom'} onChange={(v) => gen.set({ videoSmart: v === 'auto' })} label="Video settings"
-                              options={[{ id: 'auto', label: 'Auto' }, { id: 'custom', label: 'Custom' }]}
+                              value={footageMode ? 'edit' : gen.s.videoSmart ? 'auto' : 'custom'} label="Video settings"
+                              onChange={(v) => gen.set(v === 'edit'
+                                ? { videoSmart: false, videoMode: 'footage' }
+                                : { videoSmart: v === 'auto', ...(gen.s.videoMode === 'footage' ? { videoMode: 'text' as const } : {}) })}
+                              options={[{ id: 'auto', label: 'Auto' }, { id: 'custom', label: 'Custom' }, { id: 'edit', label: 'Edit my video' }]}
                             />
-                            <span className="compose-note">{gen.s.videoSmart ? 'Auto picks the format from your brief' : 'Pick the kind, engine and sound yourself'}</span>
+                            <span className="compose-note">{footageMode ? 'Upload your raw clips; we cut and finish them the way you ask' : gen.s.videoSmart ? 'Auto picks the format from your brief' : 'Pick the kind, engine and sound yourself'}</span>
                           </div>
                           <LengthControl gen={gen} length={videoLength} setLength={setLength} />
-                          {gen.s.videoSmart ? (
+                          {footageMode ? (
+                            <FootageOptions gen={gen} />
+                          ) : gen.s.videoSmart ? (
                             <SmartVideo
                               gen={gen}
                               text={brief}

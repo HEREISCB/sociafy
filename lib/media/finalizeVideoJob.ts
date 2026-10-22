@@ -9,7 +9,9 @@ import { cleanAudio, saveMotionResult, savedAudioWarning } from './motionVersion
 import { makeMediaKey, publicUrlFor, uploadBuffer } from '../storage/r2';
 import { downloadToBuffer } from './finalize';
 import { posterUrls, savePoster } from './posters';
-import { refund } from '../credits/ledger';
+import { partialRefund, refund } from '../credits/ledger';
+import { footageEditRefund } from '../credits/pricing';
+import { FOOTAGE_EDIT } from '../ai/models';
 import { isStubMode } from '../env';
 
 /**
@@ -313,7 +315,24 @@ async function finalizeMotionJob(
   if (r.status === 'failed') return failAndRefund(job, `motion_failed: ${r.error ?? 'unknown'}`);
   // Only a key inside this user's prefix — never let a result point the asset elsewhere.
   if (!r.videoKey?.startsWith(`users/${job.userId}/`)) return failAndRefund(job, 'store_failed: bad_motion_key');
+  // A footage edit (and its edits) runs as long as the editor cut it, up to the quoted cap:
+  // the asset, the row (edit prices) and the segments follow the real length.
+  const capSec = job.durationSec;
+  const realSec = Number.isFinite(r.durationSec) && r.durationSec! > 0 ? Math.min(capSec, Math.max(1, Math.ceil(r.durationSec! - 0.01))) : capSec;
+  if (realSec !== capSec) job = { ...job, durationSec: realSec };
   let claimed = await claimAsset(job, r.videoKey, 'video/mp4', r.sizeBytes ?? null);
+  if (claimed.status === 'completed' && realSec !== capSec) {
+    // Charged for the cap up front: return the seconds it didn't use. One refund per charge
+    // (the ledger's rule), so the race loser repeating this is a no-op.
+    // ponytail: a crash between the claim and this refund keeps the full charge; move it into the claim transaction if that ever shows up.
+    const back = job.genMode === FOOTAGE_EDIT.genMode && job.creditLedgerId ? footageEditRefund({ charged: job.creditsCharged ?? 0, capSec, actualSec: r.durationSec! }) : 0;
+    try {
+      if (back > 0) await partialRefund({ userId: job.userId, ledgerId: job.creditLedgerId!, credits: back, action: 'video_edit_footage', reason: 'unused_seconds' });
+      await db().update(videoJobs).set({ durationSec: realSec, updatedAt: new Date() }).where(eq(videoJobs.id, job.id));
+    } catch (e) {
+      console.warn('[finalize-video] footage-edit settle failed:', e instanceof Error ? e.message : e);
+    }
+  }
   // The worker's poster is the thumbnail. Idempotent, so the race loser re-writing is fine.
   if (claimed.status === 'completed' && claimed.asset) {
     const posterUrl = await savePoster(job.userId, claimed.asset.id, r.posterKey);

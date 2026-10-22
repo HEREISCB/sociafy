@@ -9,13 +9,19 @@ export const segmentRange = (dur) => [Math.max(3, Math.round(dur / 6)), Math.max
 // Per-step limits in ms. Up to 20 s: claude 12 min, check 2, render 5, job 22 (+5 with footage).
 // Longer: claude +20 s per extra second (cap 25 min), render 10 s per second, check +1 s per second,
 // so 60 s gets claude 25, check 2.7, render 10, job ~41 min. The app's motionAiExtraMin must stay >= job - 22.
-export function jobLimits(dur, footage = false) {
+// A footage edit ("raw": the user's own clips) adds 20 min for downloading up to 5 × 1 GB and
+// transcribing, and 8 min of Claude time for reading the transcript and running the cut.
+export function jobLimits(dur, footage = false, raw = false) {
   const MIN = 60_000, over = Math.max(0, dur - 20);
-  const claude = Math.min(25 * MIN, 12 * MIN + over * 20_000);
+  const claude = Math.min(25 * MIN, 12 * MIN + over * 20_000) + (raw ? 8 * MIN : 0);
   const check = 2 * MIN + over * 1_000;
   const render = Math.max(5 * MIN, dur * 10_000);
-  return { claude, check, render, footage: 5 * MIN, job: claude + check + render + 3 * MIN + (footage ? 5 * MIN : 0), turns: dur > 20 ? 120 : 80 };
+  const fetch = raw ? 20 * MIN : footage ? 5 * MIN : 0;
+  return { claude, check, render, footage: fetch || 5 * MIN, job: claude + check + render + 3 * MIN + fetch, turns: dur > 20 || raw ? 120 : 80 };
 }
+
+// Footage edits: the user's raw clips. Sizes/lengths the app also enforces before charging.
+export const RAW = { maxBytes: 1024 ** 3, maxSourceSec: 600, fps: 30 };
 const HEX = /^#[0-9a-fA-F]{3,8}$/;
 
 // Keys go straight into the R2 URL path: only a user's prefix, no dot segments, no odd chars.
@@ -33,8 +39,11 @@ export function parseSubmit(b) {
   const durationSec = Number(b.durationSec);
   if (!Number.isFinite(durationSec) || durationSec < DURATION.min || durationSec > DURATION.max) return { error: 'bad_duration' };
   if (!validKey(b.videoKey) || !validKey(b.posterKey)) return { error: 'bad_key' };
-  const footage = parseFootage(b.footage, durationSec);
-  if (!footage) return { error: 'bad_footage' };
+  if (b.kind != null && b.kind !== 'footage-edit') return { error: 'bad_kind' };
+  const raw = b.kind === 'footage-edit';
+  // Raw clips are whole sources (no placement/trim): Claude decides the cut from the transcript.
+  const footage = raw ? parseFootage(b.footage, durationSec)?.map(({ url: u, label }) => ({ url: u, label })) : parseFootage(b.footage, durationSec);
+  if (!footage || (raw && !footage.length)) return { error: 'bad_footage' };
   const br = b.brand && typeof b.brand === 'object' ? b.brand : {};
   const colors = {};
   for (const c of ['primary', 'secondary', 'background', 'text', 'accent']) if (HEX.test(br.colors?.[c] ?? '')) colors[c] = br.colors[c];
@@ -49,7 +58,97 @@ export function parseSubmit(b) {
     },
     audio: parseAudio(b.audio),
     ...(footage.length && { footage }),
+    // durationSec is the cap for a footage edit; autoLength = the user left the length to us.
+    ...(raw && { kind: 'footage-edit', autoLength: b.autoLength === true }),
   };
+}
+
+// ---- Footage edits (motion-cut + transcripts) ----
+
+const r2 = (x) => Math.round(x * 100) / 100;
+const frame = (x) => Math.round(x * RAW.fps) / RAW.fps;
+// Frame-aligned seconds keep 4 decimals: x * 30 still rounds back to the exact frame (motion-cut does).
+const r4 = (x) => Math.round(x * 10_000) / 10_000;
+
+// ElevenLabs speech-to-text response → [[start, end, text, speaker?]]: spoken words and
+// "(laughs)"-style audio events; spacing tokens dropped.
+export function sttWords(resp) {
+  const out = [];
+  for (const w of Array.isArray(resp?.words) ? resp.words : []) {
+    if (!w || (w.type !== 'word' && w.type !== 'audio_event')) continue;
+    const s = Number(w.start), e = Number(w.end), t = String(w.text ?? '').trim();
+    if (!t || !Number.isFinite(s) || !Number.isFinite(e) || e < s) continue;
+    out.push([r2(s), r2(e), t, ...(w.speaker_id ? [String(w.speaker_id).slice(0, 20)] : [])]);
+  }
+  return out;
+}
+
+// transcript.txt: one line per phrase (split at pauses >= 0.4 s or every 12 words), each word
+// with its start time, so Claude can read 10 minutes of speech and still cut on word edges.
+export function packTranscript(clips) {
+  return clips.map((c) => {
+    const lines = [`## ${c.id} (${c.durationSec} s${c.language ? `, ${c.language}` : ''}${c.words.length ? '' : ', no speech'})`];
+    let cur = [], prevEnd = 0;
+    const flush = () => { if (cur.length) lines.push(`[${cur[0][0]}-${cur.at(-1)[1]}] ${cur.map((w) => `${w[2]}@${w[0]}`).join(' ')}`); cur = []; };
+    for (const w of c.words) {
+      const gap = w[0] - prevEnd;
+      if (gap >= 0.4 || cur.length >= 12) { flush(); if (gap >= 0.4) lines.push(`(pause ${r2(gap)} s)`); }
+      cur.push(w);
+      prevEnd = w[1];
+    }
+    flush();
+    if (c.words.length && c.durationSec - prevEnd >= 0.4) lines.push(`(pause ${r2(c.durationSec - prevEnd)} s to the end)`);
+    return lines.join('\n');
+  }).join('\n\n');
+}
+
+// Never cut inside a word: an edge inside one moves out to just before/after it (80 ms pad,
+// never into the neighbouring word). ASR timestamps drift 50–100 ms; the pad absorbs it.
+export function snapToWords(start, end, words = []) {
+  const PAD = 0.08;
+  for (let i = 0; i < words.length; i++) {
+    const [s, e] = words[i];
+    if (start > s && start < e) start = Math.max(i ? words[i - 1][1] : 0, s - PAD, 0);
+    if (end > s && end < e) end = Math.min(i < words.length - 1 ? words[i + 1][0] : Infinity, e + PAD);
+  }
+  return [start, end];
+}
+
+// edl.json from Claude → { ranges: [{clip, start, end}] } snapped to words and the 30 fps grid,
+// or { error } in words Claude can act on. Total must fit the paid cap.
+export function parseEdl(raw, clips, maxSec) {
+  const list = raw?.ranges;
+  if (!Array.isArray(list) || !list.length || list.length > 200) return { error: 'edl.json needs "ranges": 1-200 items of {clip, start, end}' };
+  const byId = new Map(clips.map((c) => [c.id, c]));
+  const ranges = [];
+  for (const [i, r] of list.entries()) {
+    const c = byId.get(r?.clip);
+    if (!c) return { error: `range ${i}: unknown clip ${JSON.stringify(r?.clip)} (have ${[...byId.keys()].join(', ')})` };
+    if (typeof r.start !== 'number' || typeof r.end !== 'number' || !Number.isFinite(r.start) || !Number.isFinite(r.end)) return { error: `range ${i}: start/end must be numbers (seconds)` };
+    let [s, e] = snapToWords(Math.max(0, r.start), Math.min(c.durationSec, r.end), c.words);
+    s = frame(Math.max(0, s)); e = frame(Math.min(c.durationSec, e));
+    if (e - s < 0.2) return { error: `range ${i}: shorter than 0.2 s after snapping (${s}-${e})` };
+    ranges.push({ clip: c.id, start: r4(s), end: r4(e) });
+  }
+  const total = r2(ranges.reduce((n, r) => n + (r.end - r.start), 0));
+  if (total > maxSec + 0.05) return { error: `total ${total} s is over the ${maxSec} s limit: cut more` };
+  return { ranges, total };
+}
+
+// Where each range lands in the cut, and every word fully kept, on the cut's timeline.
+export function remapWords(ranges, clips) {
+  const byId = new Map(clips.map((c) => [c.id, c]));
+  let t = 0;
+  const placed = [], words = [];
+  for (const r of ranges) {
+    const out = { ...r, outStart: r2(t), outEnd: r2(t + r.end - r.start) };
+    placed.push(out);
+    for (const [s, e, text] of byId.get(r.clip)?.words ?? []) {
+      if (s >= r.start - 0.05 && e <= r.end + 0.05) words.push([r2(Math.max(out.outStart, s - r.start + t)), r2(Math.min(out.outEnd, e - r.start + t)), text]);
+    }
+    t += r.end - r.start;
+  }
+  return { ranges: placed, words, durationSec: r2(t) };
 }
 
 // submit.footage → [{url, label, startSec?, trimStartSec?, durationSec?}] or null when malformed.

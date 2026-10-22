@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ACTION_LABELS, MOTION_PER_SEC, priceForMotion, priceForMotionAi, priceForMotionAiEdit } from './pricing';
+import { ACTION_LABELS, MOTION_PER_SEC, footageEditCap, footageEditRefund, priceForFootageEdit, priceForMotion, priceForMotionAi, priceForMotionAiEdit } from './pricing';
 import { MOTION_TEMPLATES } from '../ai/models';
 
 describe('motion-graphics pricing', () => {
@@ -47,5 +47,31 @@ describe('AI-designed motion-graphic edit pricing', () => {
     expect(priceForMotionAiEdit(20).credits).toBe(180);
     expect(priceForMotionAiEdit(60).credits).toBe(540);
     expect(ACTION_LABELS.video_motion_ai_edit).toBeTruthy();
+  });
+});
+
+describe('Edit my video pricing', () => {
+  it('is 18 cr per second of the cap, +4 cr/s with music; speech is free', () => {
+    expect(priceForFootageEdit(60)).toEqual({ action: 'video_edit_footage', credits: 1080, perSec: 18, sec: 60 });
+    expect(priceForFootageEdit(20, { music: true })).toMatchObject({ credits: 440, perSec: 22 });
+    expect(priceForFootageEdit(2).credits).toBe(108); // the minimum length
+    expect(ACTION_LABELS.video_edit_footage).toBeTruthy();
+  });
+
+  it('caps at the chosen length or Auto (60 s), never past the clips + 5 s', () => {
+    expect(footageEditCap(null)).toBe(60);
+    expect(footageEditCap(null, 14.2)).toBe(20);
+    expect(footageEditCap(30, 600)).toBe(30);
+    expect(footageEditCap(30, 3)).toBe(8);
+    expect(footageEditCap(null, 0.5)).toBe(6);
+  });
+
+  it('refunds the seconds the finished video did not use, never more than was charged', () => {
+    expect(footageEditRefund({ charged: 1080, capSec: 60, actualSec: 12.4 })).toBe(1080 - 13 * 18);
+    expect(footageEditRefund({ charged: 440, capSec: 20, actualSec: 19.996 })).toBe(0);
+    expect(footageEditRefund({ charged: 1080, capSec: 60, actualSec: 3 })).toBe(1080 - 6 * 18);
+    expect(footageEditRefund({ charged: 1080, capSec: 60, actualSec: 75 })).toBe(0);
+    expect(footageEditRefund({ charged: 0, capSec: 60, actualSec: 10 })).toBe(0);
+    expect(footageEditRefund({ charged: 1080, capSec: 60, actualSec: NaN })).toBe(0);
   });
 });

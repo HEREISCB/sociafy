@@ -60,6 +60,13 @@ export type SubmitMotionAiArgs = {
   audio?: MotionAudioRequest;
   /** Hybrid: AI footage clips (https, ≤5) the composition plays. A clip the worker can't fetch fails the job (`footage_failed`). */
   footage?: MotionFootage[];
+  /**
+   * 'footage-edit' ("Edit my video"): `footage` is the user's raw clips (with sound), `prompt` their
+   * instructions, `durationSec` the most the result may run (it may be shorter: see the result's durationSec).
+   */
+  kind?: 'footage-edit';
+  /** footage-edit: the user left the length to the editor (else aim for about durationSec). */
+  autoLength?: boolean;
 };
 
 /** One footage clip for a hybrid. Seconds are on the composition's timeline (startSec) and into the clip (trimStartSec). */
@@ -88,7 +95,7 @@ export type MotionSegment = {
 };
 
 /** The template engine's result, plus the composition's segments once done (and the parent for an edit). */
-export type MotionAiResult = MotionResult & { segments?: MotionSegment[]; parentCallId?: string; audio?: MotionAudio };
+export type MotionAiResult = MotionResult & { segments?: MotionSegment[]; parentCallId?: string; audio?: MotionAudio; /** What the video really runs, in seconds. */ durationSec?: number };
 
 export function getMotionAiResult(callId: string): Promise<MotionAiResult> {
   return call(`motion-ai/result?callId=${encodeURIComponent(callId)}`, { method: 'GET', timeoutMs: 15_000 });

@@ -968,6 +968,7 @@ Status codes: `200`, `401`, `500`, `503`.
     | `generation_failed` | Generation started and did not produce a usable clip. Nothing about your request is known to be wrong — retrying is reasonable. |
     | `generation_timeout` | The job never finished (closed out after 2 hours). |
     | `storage_failed` | Generated, but we could not store it. |
+    | `footage_unreadable` | Motion graphics with footage only: the footage could not be downloaded, read or transcribed. |
     | `submit_unconfirmed` | Our submission was never acknowledged, so we could not tell whether it was accepted. Closed out after a 10-minute grace window. |
     | `duplicate_request` | Another request with the same `Idempotency-Key` won the race; that one is the real job. |
 
