@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  buckets, calendarItems, groupRows, idOf, kindOf, moveToDay, nextToReview, progress, statusLabel, toneOf, LATER, NO_TIME,
+  buckets, calendarItems, firstAtRisk, firstOfDay, groupRows, idOf, kindOf, textFor, tightestLimit, weekFiled, moveToDay, nextToReview, progress, statusLabel, toneOf, LATER, NO_TIME,
   type ReviewItem, type ScheduledRow,
 } from '../../../../components/calendar/model';
 
@@ -104,5 +104,39 @@ describe('home model', () => {
     const [post] = calendarItems([], groupRows([row({ scheduledAt: new Date(2026, 10, 1, 14, 30).toISOString() })]));
     expect(moveToDay(post, day)).toEqual(new Date(2026, 10, 5, 14, 30));
     expect(moveToDay({ kind: 'draft', key: 'x', at: null, draft: draft({}) }, day)).toEqual(new Date(2026, 10, 5, 10, 0));
+  });
+
+  it('a day click lands on its first post to review, else its first post; empty day → null', () => {
+    const items = calendarItems([draft({ id: 'a', plannedAt: at(1, 9), approved: true, rendering: true }), draft({ id: 'b', plannedAt: at(1, 12) })], []);
+    const [day] = buckets(items, today);
+    expect(idOf(firstOfDay(day)!)).toBe('b');
+    expect(firstOfDay(buckets([], today)[0])).toBeNull();
+  });
+
+  it('the week is filed only when nothing waits on review and nothing failed', () => {
+    expect(weekFiled([])).toBe(false);
+    expect(weekFiled(calendarItems([], groupRows([row({})])))).toBe(true);
+    expect(weekFiled(calendarItems([draft({ id: 'a' })], groupRows([row({})])))).toBe(false);
+    expect(weekFiled(calendarItems([], groupRows([row({ status: 'failed' })])))).toBe(false);
+  });
+
+  it('counts the caption against the tightest platform', () => {
+    expect(tightestLimit(['instagram', 'x'], { instagram: 2200, x: 280 } as never)).toEqual({ platform: 'x', limit: 280 });
+    expect(tightestLimit([], {} as never)).toBeNull();
+  });
+
+  it('previews each platform\'s own copy until the caption is edited here', () => {
+    const [d] = calendarItems([draft({ body: 'b', texts: { x: 'x copy' } })], []);
+    expect(textFor(d, 'x', 'b')).toBe('x copy');
+    expect(textFor(d, 'linkedin', 'b')).toBe('b');
+    expect(textFor(d, 'x', 'edited')).toBe('edited');
+    const [p] = calendarItems([], groupRows([row({ text: 'on x' }), row({ id: '2', platform: 'linkedin', text: 'on li' })]));
+    expect(textFor(p, 'linkedin', '')).toBe('on li');
+  });
+
+  it('names the first upcoming post on a disconnected platform', () => {
+    const items = calendarItems([draft({ id: 'a', plannedAt: at(2), targetPlatforms: ['linkedin'] }), draft({ id: 'b', plannedAt: at(3) })], []);
+    expect(idOf(firstAtRisk(items, ['x'], today.getTime())!)).toBe('b');
+    expect(firstAtRisk(items, ['instagram'], today.getTime())).toBeNull();
   });
 });

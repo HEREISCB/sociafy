@@ -19,6 +19,7 @@ import { Glyphs } from './calendar/glyphs';
 import { ThumbImg } from './thumb-img';
 import { seekToPoster } from '../lib/media/motionSeek';
 import { ReviewPanel, Tick, type Author, type PostAction } from './calendar/review';
+import { Button, Empty, PinBar, Skeleton as Skel, useToast } from './ui';
 
 type Account = HealthAccount & Author & { id: string; platform: Platform };
 type Approved = { draftId: string; scheduledAt: string | null; reslotted: boolean; rendering?: true };
@@ -94,7 +95,6 @@ function fileAway(id: string, day: string) {
     { duration: 420, easing: 'cubic-bezier(.65,0,.35,1)' }).onfinish = () => g.remove();
 }
 
-type Toast = { text: string; id: number; error?: boolean; undo?: () => void };
 type Flash = { ids: string[]; days: string[] };
 
 export default function Dashboard() {
@@ -103,7 +103,7 @@ export default function Dashboard() {
 
   const planKey = '/api/plan?days=7';
   // Poll while a plan run drafts (4 s) or a clip renders (10 s); otherwise sit still.
-  const pollMs = (d?: PlanView) => (d?.generating ? 4000 : d?.counts.rendering ? 10_000 : 0);
+  const pollMs = (d?: PlanView | null) => (d?.generating ? 4000 : d?.counts.rendering ? 10_000 : 0);
   const planApi = useApi<PlanView>(planKey, { refreshInterval: (d) => pollMs(d as PlanView | undefined) });
   const plan = planApi.data;
   const schedKey = today ? `/api/schedule?from=${today.toISOString()}&to=${addDays(today, 7).toISOString()}` : null;
@@ -123,10 +123,9 @@ export default function Dashboard() {
     }
   }, [schedKey, mutate]);
 
-  const [toast, setToast] = useState<Toast | null>(null);
-  const notice = (text: string, undo?: () => void) => setToast({ text, undo, id: clock() });
-  const failure = (text: string) => setToast({ text, error: true, id: clock() });
-  const closeToast = useCallback(() => setToast(null), []);
+  const toast = useToast();
+  const notice = (text: string, undo?: () => void) => toast(text, { undo });
+  const failure = (text: string) => toast(text, { tone: 'err' });
 
   /** Approves and skips show at once; the server catches up on refresh. */
   const [acted, setActed] = useState<Map<string, 'approved' | 'skipped'>>(new Map());
@@ -172,9 +171,9 @@ export default function Dashboard() {
     const landed = was ? plan.review.filter((d) => was.has(d.id) && !d.rendering && d.media.length) : [];
     if (!landed.length) return;
     setDeveloped(landed.map((d) => d.id));
-    setToast({ text: `${landed[0].title?.trim() || 'Your'} video is ready.`, id: clock() });
+    toast(`${landed[0].title?.trim() || 'Your'} video is ready.`);
     setTimeout(() => setDeveloped([]), 1200);
-  }, [plan]);
+  }, [plan, toast]);
 
   const [selId, setSelId] = useState<string | null>(null);
   const [dir, setDir] = useState(0);
@@ -468,17 +467,22 @@ export default function Dashboard() {
   } else if (mode === 'empty') {
     main = (
       <section className="home-card home-plan" aria-label="Plan this week">
-        <span className="home-plan__spark"><Icon name="sparkle" size={20} /></span>
-        <h2>Plan this week</h2>
-        <p>Autopilot writes one topic a day for each of your platforms, in your voice. Nothing posts until you approve it.</p>
-        <button type="button" className="btn primary home__cta" onClick={generate} disabled={busy || generating || !!blockInfo || !planN}>
-          {generating ? 'Drafting…' : busy ? 'Starting…' : `Plan ${planN || ''} post${planN === 1 ? '' : 's'}`}
-          <span className="home-cost">≈ {plan?.estimatedCredits ?? 0} cr</span>
-        </button>
-        {generating ? <span className="home-mono" role="status">{drafted} of {draftTotal} drafted · days fill in as each lands</span>
-          : blockInfo ? <p className="home__note">{blockInfo.text} <Link href={blockInfo.href}>{blockInfo.cta} →</Link></p>
-          : !planN ? <p className="home__note">You’re at your weekly target. Change it in <Link href="/autopilot">Autopilot</Link>.</p>
-          : <span className="home-mono">{credits ? `Balance ${credits.balance.toLocaleString('en-US')} cr · ` : ''}takes about 2 minutes</span>}
+        <Empty
+          icon="sparkle"
+          title="Plan this week"
+          action={<>
+            <Button variant="primary" size="lg" cost={plan?.estimatedCredits ?? 0} busy={busy || generating} onClick={generate}
+              disabled={!!blockInfo || !planN} reason={blockInfo ? blockInfo.text : !planN ? 'You’re at your weekly target.' : undefined}>
+              {generating ? 'Drafting…' : busy ? 'Starting…' : `Plan ${planN} post${planN === 1 ? '' : 's'}`}
+            </Button>
+            {generating ? <span className="home-mono" role="status">{drafted} of {draftTotal} drafted · days fill in as each lands</span>
+              : blockInfo ? <Link className="home__link" href={blockInfo.href}>{blockInfo.cta} →</Link>
+              : !planN ? <Link className="home__link" href="/autopilot">Change the target in Autopilot →</Link>
+              : <span className="home-mono">{credits ? `Balance ${credits.balance.toLocaleString('en-US')} cr · ` : ''}takes about 2 minutes</span>}
+          </>}
+        >
+          Autopilot writes one topic a day for each of your platforms, in your voice. Nothing posts until you approve it.
+        </Empty>
       </section>
     );
   } else if (mode === 'filed') {
@@ -527,7 +531,7 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="home">
+    <div className="page-fill home">
       <header className="home__head">
         <h1 className="home__title">This week <span className="home__range tnum">{range}</span></h1>
         <div className="home__meter" role="status">
@@ -536,10 +540,12 @@ export default function Dashboard() {
             : <span className="tnum"><b>{count}</b> of {total} reviewed</span>}
           <span className={`bar${total && done === total ? ' is-done' : ''}`}><i style={{ transform: `scaleX(${total ? done / total : 0})` }} /></span>
         </div>
-        <button type="button" className="btn home__all" onClick={approveAll} disabled={busy || !approvable.length}
-          title={approvable.length ? undefined : needTrim ? 'The rest need a trim first' : 'Nothing left to approve'}>
-          Approve all <span className="home-cost">{approvable.length}</span>
-        </button>
+        <span className="home__all">
+          <Button onClick={approveAll} disabled={busy || !approvable.length}
+            reason={busy ? undefined : approvable.length ? undefined : needTrim ? `${needTrim} need${needTrim > 1 ? '' : 's'} a trim first` : 'Nothing left to approve'}>
+            Approve all <span className="count">{approvable.length}</span>
+          </Button>
+        </span>
       </header>
 
       {unhealthy.length > 0 && (
@@ -595,7 +601,7 @@ export default function Dashboard() {
                 )}
               </div>
               {shown.items.length ? (
-                <div className="dposts" role="list">
+                <div className="dposts">
                   {shown.items.map((i) => (
                     <PostCard
                       key={i.key}
@@ -620,12 +626,11 @@ export default function Dashboard() {
                   </p>
                   <div className="home-row">
                     <Link className="btn primary sm" href={composeFor(shown.day)}><Icon name="plus" size={12} />New post{shown.day ? ` for ${format(shown.day, 'EEE')}` : ''}</Link>
-                    <button type="button" className="btn sm" onClick={generate} disabled={busy || generating || !planN || !!blockInfo}>
-                      {generating ? 'Drafting…' : 'Plan more'} <span className="home-cost">{plan?.estimatedCredits ?? 0} cr</span>
-                    </button>
-                    {(!planN || blockInfo) && !generating && (
-                      <span className="home__note">{blockInfo ? <>{blockInfo.text} <Link href={blockInfo.href}>{blockInfo.cta} →</Link></> : 'Plan more is off: you’re at your weekly target.'}</span>
-                    )}
+                    <Button size="sm" cost={plan?.estimatedCredits ?? 0} busy={generating} onClick={generate}
+                      disabled={busy || !planN || !!blockInfo} reason={blockInfo ? blockInfo.text : !planN ? 'Plan more is off: you’re at your weekly target.' : undefined}>
+                      {generating ? 'Drafting…' : 'Plan more'}
+                    </Button>
+                    {blockInfo && !generating && <Link className="home__link" href={blockInfo.href}>{blockInfo.cta} →</Link>}
                   </div>
                 </div>
               )}
@@ -636,26 +641,17 @@ export default function Dashboard() {
 
       {main}
 
-      <div className="home-bar">
-        <div className="home-toast-wrap">
-          {toast && <ToastBar key={toast.id} toast={toast} onClose={closeToast} />}
-        </div>
-        <p className={`home-bar__line${lineTone ? ` is-${lineTone}` : ''}`} role="status">
-          {lineTone === 'ok' && <Tick />}
-          <span>{line}</span>
-          {side}
-        </p>
+      {/* The bar's line says why Skip/Approve are off, so the buttons carry it as a title only. */}
+      <PinBar msg={<span className={`home-bar__line${lineTone ? ` is-${lineTone}` : ''}`}>{lineTone === 'ok' && <Tick />}<span>{line}</span>{side}</span>}>
         <span className="home-bar__keys" aria-hidden="true">
           <span><kbd>←</kbd><kbd>→</kbd> browse</span><span><kbd>E</kbd> edit</span><span><kbd>A</kbd> approve</span><span><kbd>S</kbd> skip</span>
         </span>
-        <div className="home-bar__btns">
-          <button type="button" className="btn home-bar__btn" disabled={!canAct} title={whyNot} onClick={() => sel && skip(sel)}>Skip <kbd>S</kbd></button>
-          <button type="button" className="btn primary home-bar__btn" disabled={!canAct || over.length > 0} title={over.length ? 'Too long: trim the caption first' : whyNot}
-            onClick={() => sel && approve(sel)}>
-            <Icon name="check" size={13} />Approve <kbd>A</kbd>
-          </button>
-        </div>
-      </div>
+        <button type="button" className="btn lg" disabled={!canAct} title={whyNot} onClick={() => sel && skip(sel)}>Skip <kbd>S</kbd></button>
+        <button type="button" className="btn primary lg" disabled={!canAct || over.length > 0} title={over.length ? 'Too long: trim the caption first' : whyNot}
+          onClick={() => sel && approve(sel)}>
+          <Icon name="check" size={13} />Approve <kbd>A</kbd>
+        </button>
+      </PinBar>
     </div>
   );
 }
@@ -698,7 +694,6 @@ function PostCard({ item, bucket, on, just, developed, over, dragged, onClick, o
   return (
     <button
       type="button"
-      role="listitem"
       data-post={idOf(item)}
       className={`pcard pcard--${tone}${on ? ' is-on' : ''}${just ? ' is-just' : ''}${dragged ? ' is-dragged' : ''}`}
       aria-pressed={on}
@@ -766,28 +761,13 @@ function Skeleton() {
   return (
     <>
       <section className="home-card home__week" aria-busy="true" aria-label="Loading">
-        <div className="strip">{Array.from({ length: 7 }, (_, i) => <div key={i} className="sk sk--tile" />)}</div>
-        <div className="dposts">{Array.from({ length: 3 }, (_, i) => <div key={i} className="sk sk--card" />)}</div>
+        <div className="strip">{Array.from({ length: 7 }, (_, i) => <Skel key={i} h={76} />)}</div>
+        <div className="dposts">{Array.from({ length: 3 }, (_, i) => <Skel key={i} h={62} w={188} style={{ flex: 'none' }} />)}</div>
       </section>
       <div className="hr">
-        <div className="hr-ed"><div className="sk" style={{ height: 12, width: '40%' }} /><div className="sk" style={{ height: 132 }} /><div className="sk" style={{ height: 30, width: 200 }} /></div>
-        <div className="hr-pv"><div className="sk" style={{ height: 240 }} /></div>
+        <div className="hr-ed"><Skel h={12} w="40%" /><Skel h={132} /><Skel h={30} w={200} /></div>
+        <div className="hr-pv"><Skel h={240} /></div>
       </div>
     </>
-  );
-}
-
-/** Result of an action, right above the bar that caused it, with Undo where there is one. Errors linger longer. */
-function ToastBar({ toast, onClose }: { toast: Toast; onClose: () => void }) {
-  useEffect(() => {
-    const t = setTimeout(onClose, toast.error ? 8000 : toast.undo ? 6000 : 3000);
-    return () => clearTimeout(t);
-  }, [toast, onClose]);
-  return (
-    <div className={`home-toast${toast.error ? ' is-error' : ''}`} role={toast.error ? 'alert' : 'status'}>
-      <span>{toast.text}</span>
-      {toast.undo && <button type="button" className="home-toast__btn" onClick={() => { onClose(); toast.undo!(); }}>Undo</button>}
-      <button type="button" className="home-toast__x" aria-label="Dismiss" onClick={onClose}><Icon name="x" size={12} /></button>
-    </div>
   );
 }

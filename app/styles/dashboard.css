@@ -3,17 +3,15 @@
    → the pinned decision bar. The page scrolls; the bar stays at the bottom.
    Motion: transform / opacity / filter only (colour on hover/press as in Compose). */
 
-.page:has(> .home) { display: flex; flex-direction: column; }
 .home {
-  flex: 1 0 auto;
-  display: flex; flex-direction: column; gap: var(--s-3);
+  gap: var(--s-3);
   min-width: 0; width: 100%; max-width: 1440px; margin: 0 auto;
 }
 .home-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); }
 .home-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
 .home-mono { font-family: var(--mono); font-size: var(--fs-xs); color: var(--text-2); }
-.home-cost { font-family: var(--mono); font-size: 11px; font-weight: 400; opacity: .75; }
 .home__note { margin: 0; font-size: var(--fs-xs); color: var(--text-2); }
+.home__link { font-size: var(--fs-xs); color: var(--text); font-weight: 500; text-decoration: underline; text-underline-offset: 2px; }
 .home__note a { color: var(--text); font-weight: 500; text-decoration: underline; text-underline-offset: 2px; }
 
 /* ---------- header ---------- */
@@ -28,7 +26,8 @@
   transition: transform 600ms var(--ease-reveal), background-color 400ms var(--ease-primary);
 }
 .bar.is-done i, .mb i.is-ok { background: var(--ok); }
-.home__all { min-height: 36px; }
+.home__all { display: inline-flex; align-items: center; gap: var(--s-2); }
+.home__all .why { order: -1; }
 
 .home__alert {
   display: flex; align-items: center; flex-wrap: wrap; gap: var(--s-2);
@@ -68,7 +67,7 @@
 .dtile::after { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: var(--ok-soft); opacity: 0; pointer-events: none; }
 .dtile.is-landed::after { animation: home-wash 520ms var(--ease-reveal); }
 /* Its first draft arrived while Autopilot drafts: the tile develops. */
-.dtile.is-dev { animation: home-develop 900ms var(--ease-reveal) backwards; }
+.dtile.is-dev { animation: develop var(--dur-reveal) var(--ease-reveal) backwards; }
 
 .dday { animation: home-row 280ms var(--ease-transition); }
 .dday__h { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s-2); padding: 12px 4px 8px; }
@@ -116,7 +115,6 @@
 .thumb--text::before { content: ""; position: absolute; left: 7px; right: 7px; top: 10px; height: 24px; background: repeating-linear-gradient(180deg, var(--line-strong) 0 2px, transparent 2px 5px); }
 .thumb--video:not(:has(video, img)) { background: linear-gradient(180deg, #2a1c14, #4a3122); }
 .thumb.is-rendering::after { content: ""; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 30%, rgba(255,255,255,.2) 50%, transparent 70%); transform: translateX(-100%); animation: home-sheen 1.6s linear infinite; }
-.thumb.develop > :first-child { animation: home-develop 900ms var(--ease-reveal) both; }
 .thumb__play { position: absolute; left: 50%; top: 50%; translate: -35% -50%; border-left: 7px solid rgba(255,255,255,.92); border-top: 4.5px solid transparent; border-bottom: 4.5px solid transparent; filter: drop-shadow(0 1px 2px rgba(0,0,0,.4)); }
 
 /* The approved card's ghost, flying into its day tile (dashboard.tsx fileAway). */
@@ -182,8 +180,8 @@ textarea.hr-cap[readonly] { background: var(--bg); border-color: var(--line); co
 .hr-post__more { margin: -6px 12px 10px; padding: 0; border: 0; background: none; font: inherit; font-size: var(--fs-xs); color: var(--text-2); cursor: pointer; }
 .hr-frame { position: relative; height: clamp(200px, calc(100dvh - 500px), 360px); border-top: 1px solid var(--line); background: var(--subtle); overflow: hidden; }
 .hr-frame__art { position: absolute; inset: 0; }
-.hr-frame__art img, .hr-frame__art video { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; }
-.hr-frame__art.develop { animation: home-develop 900ms var(--ease-reveal) both; }
+.hr-frame__art img, .hr-frame__art video { width: 100%; height: 100%; object-fit: contain; display: block; }
+.hr-frame__art video { background: #000; }
 .hr-frame__state {
   position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: var(--s-2);
   padding: 20px; text-align: center; font-size: var(--fs-xs); color: rgba(255,255,255,.88);
@@ -227,11 +225,11 @@ textarea.hr-cap[readonly] { background: var(--bg); border-color: var(--line); co
 .when-pop button:disabled { opacity: .35; cursor: not-allowed; }
 
 /* ---------- empty week / generating, and the filed week ---------- */
-.home-plan, .home-filed { display: grid; justify-items: center; gap: 10px; padding: 36px 20px; text-align: center; }
-.home-plan h2, .home-filed h2 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -.01em; }
-.home-plan p, .home-filed p { margin: 0; max-width: 48ch; font-size: var(--fs-sm); color: var(--text-2); }
-.home-plan__spark { width: 40px; height: 40px; display: grid; place-items: center; border-radius: var(--r); background: var(--accent-soft); color: var(--accent-ink); }
-.home__cta { min-height: 40px; padding: 0 18px; font-size: 14px; }
+.home-plan .empty { padding: 36px 20px; }
+.home-filed { display: grid; justify-items: center; gap: 10px; padding: 36px 20px; text-align: center; }
+.home-filed h2 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -.01em; }
+.home-filed p { margin: 0; max-width: 48ch; font-size: var(--fs-sm); color: var(--text-2); }
+.home-plan .empty .ico { background: var(--accent-soft); color: var(--accent-ink); }
 .home-filed__tk { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 50%; background: var(--ok-soft); color: var(--ok-ink); animation: home-pop 520ms var(--ease-reveal) 160ms backwards; }
 .home-filed__tk .tick { width: 20px; height: 20px; }
 .home-filed__tk .tick path { animation: home-draw 360ms var(--ease-primary) 300ms both; }
@@ -241,32 +239,14 @@ textarea.hr-cap[readonly] { background: var(--bg); border-color: var(--line); co
 .home-filed__ledger b { font-weight: 500; color: var(--text); }
 .home-filed .home-row { justify-content: center; }
 
-.sk { border-radius: 8px; background: var(--subtle); }
-.sk--tile { height: 76px; border-radius: 10px; }
-.sk--card { flex: none; width: 188px; height: 62px; border-radius: 10px; }
-.hr-ed:has(> .sk) { gap: var(--s-3); }
-
-/* ---------- the pinned decision bar (Compose's .compose-bar pattern; to replace with ui.tsx) ---------- */
-.home-bar {
-  position: sticky; bottom: calc(-1 * var(--page-b)); z-index: 20;
-  margin: auto calc(-1 * var(--page-x)) calc(-1 * var(--page-b));
-  padding: var(--s-3) var(--page-x);
-  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
-  border-top: 1px solid var(--line);
-  background: color-mix(in oklch, var(--surface) 92%, transparent);
-  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-}
-.home > .home-bar { margin-top: auto; }
-.home-bar__line { flex: 1 1 240px; min-width: 0; margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 12.5px; color: var(--text-2); }
+/* ---------- the pinned decision bar (<PinBar>): status line + key hints + Skip/Approve ---------- */
+.home-bar__line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 12.5px; color: var(--text-2); }
 .home-bar__line.is-ok { color: var(--ok-ink); }
 .home-bar__line.is-err { color: var(--err-ink); }
 .home-bar__line > span { min-width: 0; }
 .home-bar__line .btn { color: var(--text); }
-.home-bar__keys { display: flex; gap: 10px; font-size: 11.5px; color: var(--text-3); }
+.home-bar__keys { display: flex; align-items: center; gap: 10px; margin-right: 6px; font-size: 11.5px; color: var(--text-3); }
 .home-bar__keys span { display: inline-flex; align-items: center; gap: 3px; }
-.home-bar__btns { display: flex; gap: var(--s-2); flex: 0 0 auto; }
-.home-bar__btn { min-height: 40px; padding: 0 18px; font-size: 14px; justify-content: center; transition: background-color 160ms var(--ease-primary), transform 120ms var(--ease-primary); }
-.home-bar__btn:not(:disabled):active { transform: scale(.98); }
 .home kbd {
   display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px;
   border-radius: 4px; background: var(--subtle); box-shadow: inset 0 -1px 0 var(--line-strong);
@@ -275,42 +255,17 @@ textarea.hr-cap[readonly] { background: var(--bg); border-color: var(--line); co
 .home .btn.primary kbd { background: rgba(255,255,255,.16); box-shadow: none; color: rgba(255,255,255,.75); }
 .home .btn.primary:disabled kbd { background: transparent; color: inherit; }
 
-/* Toast: right above the bar that caused it. */
-.home-toast-wrap { position: absolute; left: 0; right: 0; bottom: calc(100% + 10px); display: flex; justify-content: center; padding: 0 var(--s-3); pointer-events: none; }
-.home-toast {
-  display: flex; align-items: center; gap: var(--s-3); max-width: 100%;
-  padding: 6px 6px 6px 14px; border-radius: var(--r-pill);
-  background: var(--text); color: var(--bg); box-shadow: var(--shadow-pop); font-size: var(--fs-sm);
-  pointer-events: auto; animation: home-toast 280ms var(--ease-reveal);
-}
-.home-toast.is-error { background: var(--err-soft); color: var(--err-ink); box-shadow: inset 0 0 0 1px var(--err), var(--shadow-pop); }
-.home-toast__btn { min-height: 28px; padding: 0 12px; border: 0; border-radius: var(--r-pill); background: rgba(255,255,255,.14); color: inherit; font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: pointer; transition: background-color 160ms var(--ease-primary); }
-.home-toast.is-error .home-toast__btn { background: color-mix(in srgb, currentColor 14%, transparent); }
-.home-toast__x { display: grid; place-items: center; width: 28px; height: 28px; flex: none; border: 0; border-radius: var(--r-pill); background: none; color: inherit; opacity: .7; cursor: pointer; transition: opacity 160ms var(--ease-primary); }
-@media (hover: hover) and (pointer: fine) {
-  .home-toast__btn:hover { background: rgba(255,255,255,.22); }
-  .home-toast__x:hover { opacity: 1; }
-}
-
 @keyframes home-row { from { opacity: 0; transform: translateY(4px); } }
 @keyframes home-in { from { opacity: 0; transform: translateX(12px); } }
 @keyframes home-in-prev { from { opacity: 0; transform: translateX(-12px); } }
 @keyframes home-menu { from { opacity: 0; transform: translateY(-4px) scale(.98); } }
-@keyframes home-toast { from { opacity: 0; transform: translateY(20px); } }
 @keyframes home-draw { from { stroke-dashoffset: 1; } }
 @keyframes home-wash { 0% { opacity: 1; } 100% { opacity: 0; } }
 @keyframes home-pop { from { opacity: 0; transform: scale(.6); } }
 @keyframes home-up { from { opacity: 0; transform: translateY(4px); } }
 @keyframes home-sheen { to { transform: translateX(100%); } }
-/* "Darkroom develop": washed-out and soft → sharp (Compose's curve). */
-@keyframes home-develop {
-  0% { opacity: .15; filter: blur(14px) saturate(0) contrast(.45) brightness(1.55); }
-  60% { filter: blur(3px) saturate(.6) contrast(.85) brightness(1.12); }
-  100% { opacity: 1; filter: none; }
-}
-
 /* ---------- narrower ---------- */
-@media (max-width: 1100px) { .home-bar__keys { display: none; } }
+@media (max-width: 1100px) { .home-bar__keys { display: none !important; } }
 @media (max-width: 859px) {
   .strip { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; }
   .strip::-webkit-scrollbar { display: none; }
@@ -325,15 +280,12 @@ textarea.hr-cap[readonly] { background: var(--bg); border-color: var(--line); co
   .home__meter { order: 3; flex: 1 1 100%; margin: 0; }
   .home__meter .bar { flex: 1; width: auto; }
   .home__all { margin-left: auto; }
+  .home__all .why { display: none; } /* the meter row and the bar already say why */
   .home__week { padding: 8px; }
   .pcard { width: 172px; }
   .hr-ed, .hr-pv { padding: var(--s-3); }
   .hr-ed__pos { display: none; }
-  .home-bar { padding-block: 10px; }
-  .home-bar__line { flex-basis: 100%; }
-  .home-bar__btns { flex: 1 1 100%; }
-  .home-bar__btn { flex: 1; }
-  .home-bar__btn kbd { display: none; }
+  .pinbar .btn kbd { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -342,5 +294,5 @@ textarea.hr-cap[readonly] { background: var(--bg); border-color: var(--line); co
     transition-duration: 1ms !important;
   }
   .thumb.is-rendering::after, .hr-frame__state::after { animation: none; transform: none; opacity: 0; }
-  .dtile:active, .pcard:active, .when-btn:active, .home-bar__btn:active { transform: none; }
+  .dtile:active, .pcard:active, .when-btn:active { transform: none; }
 }
