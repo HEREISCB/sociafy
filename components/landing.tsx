@@ -30,9 +30,9 @@ const PostArt = () => (
     <ellipse cx="200" cy="292" rx="86" ry="12" fill="#000" opacity=".22" />
     <path d="M138 110h124l-7 172a12 12 0 01-12 11h-86a12 12 0 01-12-11z" fill="url(#dt-g2)" />
     <rect x="134" y="100" width="132" height="16" rx="4" fill="#2b1f18" />
-    <rect x="154" y="168" width="92" height="70" rx="4" fill="#FAFAF7" />
+    <rect x="148" y="168" width="104" height="70" rx="4" fill="#FAFAF7" />
     <text x="200" y="198" textAnchor="middle" fontWeight="600" fontSize="13" fill="#0A0A0A" style={ink}>COLD BREW</text>
-    <text x="200" y="218" textAnchor="middle" fontSize="8" fill="#6B6B66" style={{ fontFamily: 'var(--mono)' }}>WINTER BATCH · 500ML</text>
+    <text x="200" y="218" textAnchor="middle" fontSize="7" fill="#6B6B66" style={{ fontFamily: 'var(--mono)' }}>WINTER BATCH · 500ML</text>
     <text x="26" y="52" fontWeight="600" fontSize="28" fill="#0A0A0A" style={ink}>20% off</text>
     <text x="26" y="74" fontSize="13" fill="#3a2a20" style={ink}>this week · Bengaluru</text>
   </svg>
@@ -66,7 +66,7 @@ const DevelopTray = () => (
         <div><b>Third Wave Brew Co.</b><span>Instagram · Thu 9:30 AM</span></div>
         <span className="dt-pill">
           <span className="badge">Draft</span>
-          <span className="badge badge--ok">Scheduled</span>
+          <span className="badge ok">Scheduled</span>
         </span>
       </div>
       <div className="dt-cap">
@@ -118,26 +118,26 @@ const Tick = () => <span className="lp-tick" aria-hidden="true"><Icon name="chec
 // Which days of a 4-week month are filled, and which of those are videos (accent).
 const FILLED = [1, 3, 4, 8, 10, 11, 15, 17, 18, 22, 24, 25];
 
-const STEPS: [string, string, React.ReactNode][] = [
-  ['Connect', 'Link your accounts and your website. Sociafy learns your voice from what you already wrote.', (
+const STEPS: { t: string; d: string; vis: React.ReactNode }[] = [
+  { t: 'Connect', d: 'Link your accounts and your website. Sociafy learns your voice from what you already wrote.', vis: (
     <>
       <div className="lp-vrow"><PG k="li" />LinkedIn<span className="sp" /><Tick /></div>
       <div className="lp-vrow"><PG k="ig" />Instagram<span className="sp" /><Tick /></div>
       <div className="lp-vrow"><Icon name="globe" />thirdwavebrew.in<span className="sp" /><span className="lp-note">Voice learned</span></div>
     </>
-  )],
-  ['Review your plan', 'Read the drafts, change what you like, approve the rest. Every draft shows what it costs.', (
+  ) },
+  { t: 'Review your plan', d: 'Read the drafts, change what you like, approve the rest. Every draft shows what it costs.', vis: (
     <>
-      <div className="lp-vrow">Winter batch launch<span className="sp" /><span className="badge badge--ok">Approved</span></div>
-      <div className="lp-vrow">Why 18 hours of steeping<span className="sp" /><span className="badge badge--ok">Approved</span></div>
-      <div className="lp-vrow">Meet the roaster<span className="sp" /><span className="badge badge--accent">Needs you</span></div>
+      <div className="lp-vrow">Winter batch launch<span className="sp" /><span className="badge ok">Approved</span></div>
+      <div className="lp-vrow">Why 18 hours of steeping<span className="sp" /><span className="badge ok">Approved</span></div>
+      <div className="lp-vrow">Meet the roaster<span className="sp" /><span className="badge accent">Needs you</span></div>
     </>
-  )],
-  ['It posts', 'Approved posts go out on schedule, on every platform, while you get on with your work.', (
+  ) },
+  { t: 'It posts', d: 'Approved posts go out on schedule, on every platform, while you get on with your work.', vis: (
     <div className="lp-month">
       {Array.from({ length: 28 }, (_, i) => <i key={i} className={FILLED.includes(i) ? (i % 7 === 4 ? 'p a' : 'p') : undefined} />)}
     </div>
-  )],
+  ) },
 ];
 
 const HowItWorks = () => (
@@ -145,7 +145,7 @@ const HowItWorks = () => (
     <h2 id="how-h" data-reveal>Once a week or once a month. Then it is off your desk.</h2>
     <p className="lp-sub" data-reveal>You come in, read what was made, change what you like, approve the rest, and leave.</p>
     <ol className="lp-steps">
-      {STEPS.map(([t, d, vis], i) => (
+      {STEPS.map(({ t, d, vis }, i) => (
         <li key={t} className="card" data-reveal={i ? i + 1 : ''}>
           <span className="lp-n">0{i + 1}</span>
           <h3>{t}</h3>

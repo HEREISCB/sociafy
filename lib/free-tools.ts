@@ -16,6 +16,8 @@ type FreeTool = {
   blurb: string;
   /** A sample output, for the hub and landing cards. */
   sample: string;
+  /** Textarea hint; deliberately not one of the example chips. */
+  placeholder: string;
   /** What comes back, for the empty state: "Five captions". */
   makes: string;
   /** Header over the results: "5 captions". */
@@ -28,31 +30,37 @@ export const FREE_TOOLS: Record<FreeToolId, FreeTool> = {
   caption: {
     slug: '/free-instagram-caption-generator', title: 'Instagram caption generator',
     blurb: 'Five captions, five different hooks.', sample: 'Cold-brew season is back. 18 hours of patience in every bottle.',
+    placeholder: 'e.g. our winter cold-brew is back, 20% off this week',
     makes: 'Five captions', noun: 'captions',
   },
   hashtag: {
     slug: '/free-hashtag-generator', title: 'Hashtag generator',
     blurb: '30 tags in broad, community and niche sets.', sample: '#coldbrew #bengalurucafe #specialtycoffeeindia',
+    placeholder: 'e.g. a small-batch coffee roaster in Bengaluru',
     makes: 'Three sets of ten hashtags', noun: 'hashtag sets', labels: ['Broad', 'Community', 'Niche'],
   },
   linkedin: {
     slug: '/free-linkedin-post-generator', title: 'LinkedIn post generator',
     blurb: 'Three posts with a first line worth the click.', sample: 'We almost didn’t launch the winter batch. Here is why we did.',
+    placeholder: 'e.g. what we learned shipping our first paid feature',
     makes: 'Three LinkedIn posts', noun: 'posts',
   },
   bio: {
     slug: '/free-bio-generator', title: 'Social media bio generator',
     blurb: 'Five bios under 150 characters.', sample: 'Small-batch cold brew, steeped 18 h. Bengaluru delivery.',
+    placeholder: 'e.g. freelance designer who brands small cafés',
     makes: 'Five bios', noun: 'bios',
   },
   tweet: {
     slug: '/free-tweet-generator', title: 'Tweet / X post generator',
     blurb: 'Five posts under 280 characters.', sample: 'Cold brew is not iced coffee. Thread on why it tastes sweeter.',
+    placeholder: 'e.g. why we stopped doing weekly status meetings',
     makes: 'Five posts', noun: 'posts',
   },
   youtube: {
     slug: '/free-youtube-title-generator', title: 'YouTube title & description generator',
     blurb: 'Five titles and two descriptions.', sample: 'I steeped coffee for 18 hours. Here is what changed',
+    placeholder: 'e.g. testing three budget espresso machines for a month',
     makes: 'Five titles and two descriptions', noun: 'results',
     labels: ['Title', 'Title', 'Title', 'Title', 'Title', 'Description', 'Description'],
   },

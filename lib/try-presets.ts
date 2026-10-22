@@ -20,7 +20,7 @@ export const aspectFits = (kind: 'image' | 'video', a: string): a is TryAspect =
 /** Free media tries per browser per day. lib/try enforces it; it lives here so pages can state it. */
 export const TRY_PER_DAY = { image: 2, video: 1 } as const;
 /** How long a free try usually takes. */
-export const TRY_WAIT = { image: 'about 30 s', video: '1–3 min' } as const;
+export const TRY_WAIT = { image: '~30 s', video: '1–3 min' } as const;
 
 /** Free-try pages. The return path after sign-up must be one of these. */
 export const TRY_PAGES = [

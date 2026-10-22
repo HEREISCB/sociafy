@@ -53,6 +53,14 @@ const isTable = (l: string) => l.startsWith('|');
 const startsBlock = (l: string) =>
   !l.trim() || isFence(l) || isRule(l) || isBullet(l) || isHeading(l) || isTable(l);
 
+/** Heading text → anchor id: "2. `GET /api/v1/me`" → "2-get-api-v1-me". */
+export const slug = (heading: string) =>
+  heading.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+/** The ## headings, for a table of contents. Labels drop inline markup. */
+export const headings = (src: string) =>
+  [...src.matchAll(/^## (.+)$/gm)].map(([, h]) => ({ id: slug(h), label: h.replace(/[`*]/g, '') }));
+
 export function renderMarkdown(src: string): React.ReactNode[] {
   const lines = src.split('\n');
   const out: React.ReactNode[] = [];
@@ -73,6 +81,8 @@ export function renderMarkdown(src: string): React.ReactNode[] {
       out.push(
         <div className="code-block" key={k}>
           <pre>{body.join('\n')}</pre>
+          {/* Wired by the public site's RevealObserver (one delegated listener). */}
+          <button type="button" className="btn sm code-copy" data-copy-code>Copy</button>
         </div>,
       );
       continue;
@@ -81,7 +91,9 @@ export function renderMarkdown(src: string): React.ReactNode[] {
     if (isHeading(line)) {
       const level = line.match(/^#+/)![0].length;
       const Tag = `h${Math.min(level, 6)}` as 'h1';
-      out.push(<Tag key={key()}>{inline(line.slice(level + 1))}</Tag>);
+      const text = line.slice(level + 1);
+      // h2s get an id so the page's table of contents can link to them.
+      out.push(<Tag key={key()} id={level === 2 ? slug(text) : undefined}>{inline(text)}</Tag>);
       i++;
       continue;
     }

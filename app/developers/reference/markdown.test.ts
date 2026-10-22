@@ -24,7 +24,7 @@ describe('the docs/api.md renderer', () => {
   it('renders headings, rules and paragraphs', () => {
     const out = html('# Title\n\ntext\n\n---\n\n## Two\n\n### Three');
     expect(out).toContain('<h1>Title</h1>');
-    expect(out).toContain('<h2>Two</h2>');
+    expect(out).toContain('<h2 id="two">Two</h2>');
     expect(out).toContain('<h3>Three</h3>');
     expect(out).toContain('<hr/>');
     expect(out).toContain('<p>text</p>');
@@ -49,7 +49,7 @@ describe('the docs/api.md renderer', () => {
 
   it('renders fenced code verbatim, without parsing markdown inside it', () => {
     const out = html('```bash\n# 30-120s is typical\necho **not bold**\n```');
-    expect(out).toContain('<div class="code-block"><pre># 30-120s is typical\necho **not bold**</pre></div>');
+    expect(out).toContain('<div class="code-block"><pre># 30-120s is typical\necho **not bold**</pre>');
   });
 
   it('renders tables, honouring escaped pipes inside a cell', () => {
@@ -77,7 +77,7 @@ describe('the docs/api.md renderer', () => {
     // Pinned counts, bumped whenever docs/api.md gains a section or a table —
     // they exist so a renderer that silently drops the tail of the doc fails
     // here rather than shipping a truncated reference page.
-    expect((out.match(/<h2>/g) ?? []).length).toBe(14);
+    expect((out.match(/<h2 /g) ?? []).length).toBe(14);
     expect((out.match(/<table/g) ?? []).length).toBe(16);
     // Strip code and pre, then nothing markdown-ish may remain in the prose.
     const prose = out
@@ -87,6 +87,15 @@ describe('the docs/api.md renderer', () => {
     expect(prose).not.toMatch(/\*/);
     expect(prose).not.toMatch(/`/);
     expect(prose).not.toMatch(/(^|\n)#{1,6} /);
+  });
+});
+
+describe('table of contents', () => {
+  it('lists the ## headings with ids that match the rendered ones', async () => {
+    const { headings } = await import('./markdown');
+    const md = '# T\n\n## 2. \`GET /api/v1/me\`\n\n### sub';
+    expect(headings(md)).toEqual([{ id: '2-get-api-v1-me', label: '2. GET /api/v1/me' }]);
+    expect(html(md)).toContain('<h2 id="2-get-api-v1-me">');
   });
 });
 

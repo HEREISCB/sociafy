@@ -3,51 +3,11 @@
 // The few interactive bits of the public pages. Everything around them is
 // server-rendered HTML; these hydrate on their own.
 
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Seg } from './ui';
 import { tierPriceView, topupLabel, type Currency } from '../lib/billing/pricing';
 import { CREDIT_PRICES } from '../lib/credits/pricing';
 import type { Tier } from '../lib/db/schema';
-
-/**
- * Segmented control with one sliding ink indicator (clip-path, no reflow).
- * Copied from compose's Seg with lp- class names; to replace with ui.tsx.
- */
-export function LpSeg<T extends string>({ value, options, onChange, label }: {
-  value: T;
-  options: readonly { id: T; label: React.ReactNode }[];
-  onChange: (v: T) => void;
-  label: string;
-}) {
-  const root = useRef<HTMLDivElement | null>(null);
-  const ind = useRef<HTMLSpanElement | null>(null);
-  useLayoutEffect(() => {
-    const el = root.current;
-    const bar = ind.current;
-    if (!el || !bar) return;
-    const place = () => {
-      const on = el.querySelector<HTMLElement>('[aria-checked="true"]');
-      if (!on || !el.clientWidth) return;
-      const l = on.offsetLeft - 3;
-      bar.style.clipPath = `inset(0 ${el.clientWidth - 6 - l - on.offsetWidth}px 0 ${l}px round 999px)`;
-      // First placement lands without sliding in from the edge.
-      requestAnimationFrame(() => el.setAttribute('data-ready', ''));
-    };
-    place();
-    const ro = new ResizeObserver(place);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [value]);
-  return (
-    <div ref={root} className="lp-seg" role="radiogroup" aria-label={label}>
-      <span ref={ind} className="lp-seg-ind" aria-hidden="true" />
-      {options.map((o) => (
-        <button key={o.id} type="button" role="radio" aria-checked={value === o.id} onClick={() => onChange(o.id)}>
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 /** Guess the visitor's currency from their timezone (no network): India → INR, else USD. */
 const detectCurrency = (): Currency => {
@@ -118,7 +78,7 @@ export function Pricing({ initial, credits }: { initial: Currency | null; credit
           <h2 id="pricing-h">Pricing</h2>
           <p className="lp-sub">Paid plans only. Cancel anytime, it ends with your billing cycle.</p>
         </div>
-        <LpSeg
+        <Seg
           label="Currency"
           value={currency}
           options={[{ id: 'INR', label: '₹ India' }, { id: 'USD', label: '$ Global' }]}
@@ -133,7 +93,7 @@ export function Pricing({ initial, credits }: { initial: Currency | null; credit
             <div className={`card lp-price${tier === 'pro' ? ' is-feat' : ''}`} key={tier} data-reveal={i ? i + 1 : ''}>
               <div className="lp-price-name">
                 {name}
-                {tier === 'pro' && <span className="badge badge--accent">Most picked</span>}
+                {tier === 'pro' && <span className="badge accent">Most picked</span>}
               </div>
               <div className={`lp-amt${switched ? ' lp-reprint' : ''}`} key={currency}>
                 <span className="mono">{v.display}</span><small> /mo</small>
@@ -212,10 +172,10 @@ export function HubFilter({ counts }: { counts: Record<'all' | 'write' | 'image'
     setF(v);
     ref.current?.parentElement?.querySelector('.hub-grid')?.setAttribute('data-filter', v);
   };
-  const lbl = (t: string, n: number) => <>{t} <span className="lp-count">{n}</span></>;
+  const lbl = (t: string, n: number) => <>{t} <span className="seg-aside">{n}</span></>;
   return (
     <div ref={ref} className="hub-bar">
-      <LpSeg
+      <Seg
         label="Filter tools"
         value={f}
         onChange={pick}

@@ -53,20 +53,8 @@
    Public site (landing, free tools)
    =================================================================== */
 
-/* Hero: badge, headline, lede, CTA rise out of a soft blur, staggered.
-   `backwards` (not `both`) so once it ends the press scale still works. */
-@keyframes hero-rise {
-  from { opacity: 0; transform: translateY(12px); filter: blur(4px); }
-}
-.hero > div > *,
-.hero > figure,
-.tool-hero > * {
-  animation: hero-rise 800ms var(--ease-out) backwards;
-}
-.hero > div > :nth-child(2), .tool-hero > :nth-child(2) { animation-delay: 80ms; }
-.hero > div > :nth-child(3), .tool-hero > :nth-child(3) { animation-delay: 160ms; }
-.hero > div > :nth-child(n+4), .tool-hero > :nth-child(n+4) { animation-delay: 240ms; }
-.hero > figure { animation-delay: 320ms; }
+/* No hero entrance: the h1 is the LCP element and paints on the first frame
+   (it used to fade in over 800ms, which pushed tool-page LCP to ~1s). */
 
 /* Scroll reveal (components/reveal-observer.tsx). Hidden only under
    html.reveal-ready, which the head script sets when motion is allowed,
@@ -126,7 +114,6 @@
 }
 @media (prefers-reduced-motion: reduce) {
   /* Marketing: everything is just there. */
-  .hero > div > *, .hero > figure, .tool-hero > * { animation: none; }
   [data-reveal], .reveal-ready [data-reveal]:not([data-shown]) {
     opacity: 1; transform: none; filter: none; transition: none;
   }

@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { TryPage } from '../../components/try-page';
 
 const TITLE = 'Free AI Image Generator — Text to Image Online | Sociafy';
-const DESCRIPTION = 'Turn a text prompt into a high-quality AI image in seconds. Free to try, no sign-up needed to generate. Made for social posts on Instagram, LinkedIn and X.';
+const DESCRIPTION = 'Turn a text prompt into a high-quality AI image in seconds. Free tool, no sign-up needed to generate. Made for social posts on Instagram, LinkedIn and X.';
 
 export const metadata: Metadata = {
   title: TITLE,
@@ -17,14 +17,14 @@ export default function Page() {
     <TryPage
       kind="image"
       h1={<>Free AI image generator, <span className="accent">from one sentence</span>.</>}
-      lede="Describe what you want and get a sharp, post-ready image. Try it free right here, no account needed to generate."
+      lede="Describe what you want and get a sharp, post-ready image. Free tool, no account needed to generate."
       steps={[
         ['Describe your image', 'Write a sentence: the subject, the setting, the mood. We polish your prompt automatically for better results.'],
         ['We generate it', 'A state-of-the-art image model draws it in about half a minute.'],
         ['Unlock and download', 'Create a Sociafy account to remove the watermark, download the HD image, and post it straight to your socials.'],
       ]}
       faq={[
-        ['Is the AI image generator really free?', 'Yes. Everyone gets free image generations every day. You can generate without an account; an account removes the watermark and unlocks the HD download.'],
+        ['Is the AI image generator really free?', 'Yes. You get 2 free images a day per browser. You can generate without an account; an account removes the watermark and unlocks the HD download.'],
         ['Why does my image have a watermark?', 'Free previews carry a Sociafy watermark. Create a Sociafy account and the clean, full-quality image downloads straight away and is saved to your media library.'],
         ['Can I use the images commercially?', 'Yes. Images you generate are yours to use in posts, ads and on your website.'],
         ['What size are the images?', 'Free images are 1024×1024 squares, a good fit for Instagram, LinkedIn and X. Inside Sociafy you can also make portrait and landscape images at higher quality.'],

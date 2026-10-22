@@ -9,9 +9,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import Link from 'next/link';
-import { renderMarkdown } from './markdown';
+import type { Metadata } from 'next';
+import { headings, renderMarkdown } from './markdown';
+import { DocLayout, SiteShell } from '../../../components/site-chrome';
 
-export const metadata = { title: 'API reference · Sociafy' };
+export const metadata: Metadata = {
+  title: 'API reference · Sociafy',
+  description: 'Sociafy Media API v1: generate videos and images with your own API key, metered in Sociafy credits. Endpoints, costs, idempotency, rate limits and errors.',
+  alternates: { canonical: '/developers/reference' },
+};
 
 // The whole file is indented four spaces; strip it or every line is a code block.
 const REFERENCE = fs
@@ -56,16 +62,24 @@ const CSS = `
 }
 `;
 
+const TOC = headings(REFERENCE);
+
 export default function ApiReferencePage() {
   return (
-    <main className="doc-page">
+    <SiteShell className="dev-ref" current="developers">
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
-      <p style={{ marginBottom: 20 }}>
-        <Link href="/account/api" style={{ color: 'var(--ink-3)', fontSize: 13, textDecoration: 'none' }}>
-          &larr; Back to API settings
-        </Link>
-      </p>
-      <article className="md-doc">{renderMarkdown(REFERENCE)}</article>
-    </main>
+      <DocLayout
+        toc={TOC}
+        head={
+          <div className="dev-ref-head">
+            <span className="field-note">Developers</span>
+            {/* Signed out, /account/api sends you through sign-in and back. */}
+            <Link className="btn primary lp-pill" href="/account/api">Get an API key</Link>
+          </div>
+        }
+      >
+        <div className="md-doc">{renderMarkdown(REFERENCE)}</div>
+      </DocLayout>
+    </SiteShell>
   );
 }
