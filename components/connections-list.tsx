@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Icon, Pglyph } from './icons';
-import { apiDelete, useApi } from '../lib/ui/fetcher';
+import { useApi } from '../lib/ui/fetcher';
 import { healthFor, type Health } from '../lib/ui/health';
 import { PLATFORMS, PLATFORM_LABELS, oauthErrorCopy, oauthErrorRetryable } from '../lib/ui/platforms';
 import type { Platform } from '../lib/db/schema';
@@ -20,11 +20,6 @@ export type Account = {
   lastRefreshError: string | null;
   createdAt: string;
   meta: { pageName?: string } | null;
-};
-
-type ScheduledPost = {
-  platform: Platform;
-  status: 'pending' | 'publishing' | 'published' | 'failed' | 'canceled';
 };
 
 export type Flash =
@@ -81,7 +76,8 @@ export function useOAuthReturn(onRead?: (fromOAuth: boolean) => void) {
   return { flash, dismiss: () => setFlash(null) };
 }
 
-const handleOf = (a: Account) => (a.handle ? `@${a.handle.replace(/^@/, '')}` : a.displayName || a.platformUserId);
+export const handleOf = (a: Pick<Account, 'handle' | 'displayName' | 'platformUserId'>) =>
+  a.handle ? `@${a.handle.replace(/^@/, '')}` : a.displayName || a.platformUserId;
 
 const badgeTone: Record<Health['tone'], string> = {
   good: 'badge--ok',
@@ -91,26 +87,23 @@ const badgeTone: Record<Health['tone'], string> = {
   neutral: '',
 };
 
+/**
+ * Onboarding's connect list: PLATFORMS order, one action per row.
+ * Settings › Accounts has its own list in connections.tsx.
+ */
 export default function ConnectionsList({
-  mode,
   next,
   flash,
   onDismissFlash,
 }: {
-  mode: 'onboarding' | 'manage';
+  mode: 'onboarding';
   /** Where OAuth returns to. */
   next: string;
   flash: Flash | null;
   onDismissFlash: () => void;
 }) {
-  const manage = mode === 'manage';
   const { data: accounts, mutate, unauth } = useApi<Account[]>('/api/accounts');
-  const { data: scheduled } = useApi<ScheduledPost[]>(manage ? '/api/schedule' : null);
   const now = useNow();
-  const [open, setOpen] = useState<Platform | null>(null);
-  const [confirming, setConfirming] = useState<string | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [disconnectError, setDisconnectError] = useState<string | null>(null);
   // Back from OAuth: refetch, and show that row as "Connecting…" until the
   // refetch lands, so the list never contradicts the "X connected" banner.
   const [arriving, setArriving] = useState<string | null>(null);
@@ -123,36 +116,9 @@ export default function ConnectionsList({
 
   const connect = (p: Platform) => window.location.assign(`/api/oauth/${p}/start?next=${encodeURIComponent(next)}`);
 
-  const disconnect = async (a: Account) => {
-    setBusy(a.id);
-    setDisconnectError(null);
-    try {
-      await apiDelete(`/api/accounts/${a.id}`);
-      await mutate();
-      setConfirming(null);
-      setOpen(null);
-    } catch {
-      setDisconnectError(`Couldn't disconnect ${PLATFORM_LABELS[a.platform] ?? a.platform}. Please try again.`);
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const count = (p: Platform, statuses: ScheduledPost['status'][]) =>
-    (scheduled ?? []).filter((s) => s.platform === p && statuses.includes(s.status)).length;
-
   return (
     <div className="stack">
       {flash && <FlashBanner flash={flash} onDismiss={onDismissFlash} onRetry={() => { onDismissFlash(); connect(flash.platform as Platform); }} />}
-
-      {disconnectError && (
-        <div role="alert" className="conn-banner conn-banner--err">
-          <span className="conn-banner__text">{disconnectError}</span>
-          <button type="button" className="btn ghost sm" onClick={() => setDisconnectError(null)} aria-label="Dismiss">
-            <Icon name="x" size={12} />
-          </button>
-        </div>
-      )}
 
       {unauth && (
         <div className="conn-banner">
@@ -166,9 +132,6 @@ export default function ConnectionsList({
           const acct = accounts?.find((a) => a.platform === p.id) ?? null;
           const health = healthFor(acct, now);
           const healthy = isHealthy(health);
-          const expanded = manage && open === p.id && !!acct;
-          const queued = count(p.id, ['pending', 'publishing']);
-          const published = count(p.id, ['published']);
           return (
             <li key={p.id} className="conn-row">
               <div className="conn-row__main">
@@ -183,66 +146,15 @@ export default function ConnectionsList({
                 <div className="conn-row__actions">
                   {!healthy && arriving === p.id ? (
                     <span className="conn-row__done is-pending" role="status">Connecting…</span>
-                  ) : healthy && !manage ? (
+                  ) : healthy ? (
                     <span className="conn-row__done"><Icon name="check" size={12} /> Connected</span>
-                  ) : !healthy ? (
+                  ) : (
                     <button type="button" className="btn sm" onClick={() => connect(p.id)} disabled={!!unauth}>
                       {acct ? 'Reconnect' : 'Connect'}
-                    </button>
-                  ) : null}
-                  {manage && acct && (
-                    <button
-                      type="button"
-                      className="btn ghost sm"
-                      aria-expanded={expanded}
-                      aria-label={`${p.name} details`}
-                      onClick={() => { setOpen(expanded ? null : p.id); setConfirming(null); }}
-                    >
-                      <Icon name={expanded ? 'chevron_down' : 'chevron_right'} size={12} />
                     </button>
                   )}
                 </div>
               </div>
-
-              {expanded && acct && (
-                <div className="conn-row__details">
-                  <dl className="conn-facts">
-                    <dt>Account</dt>
-                    <dd>{handleOf(acct)}{acct.meta?.pageName ? ` · ${acct.meta.pageName}` : ''}</dd>
-                    <dt>Access</dt>
-                    <dd>{health.status === 'persistent' ? 'Does not expire' : health.detail}</dd>
-                    <dt>Connected</dt>
-                    <dd>{new Date(acct.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</dd>
-                  </dl>
-                  {confirming === acct.id ? (
-                    <div className="stack">
-                      {/* Disconnecting deletes this platform's queue and publish history; drafts survive. */}
-                      <p className="conn-warn">
-                        <strong>
-                          This permanently deletes {queued > 0 ? `${queued} queued post${queued === 1 ? '' : 's'}` : 'nothing from your queue'}
-                          {published > 0 ? ` and ${published} published post${published === 1 ? '' : 's'} from your ${p.name} history` : ''}.
-                        </strong>{' '}
-                        {queued > 0 ? 'Those posts will never publish. ' : ''}Your drafts are kept.
-                      </p>
-                      <div className="row">
-                        <button type="button" className="btn sm" onClick={() => setConfirming(null)} disabled={busy === acct.id}>Cancel</button>
-                        <button type="button" className="btn sm conn-danger" onClick={() => disconnect(acct)} disabled={busy === acct.id}>
-                          {busy === acct.id ? 'Removing…' : `Disconnect ${p.name}`}
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="row">
-                      {healthy && (
-                        <button type="button" className="btn sm" onClick={() => connect(p.id)} disabled={!!unauth}>Reconnect</button>
-                      )}
-                      <button type="button" className="btn ghost sm conn-danger-text" onClick={() => setConfirming(acct.id)} disabled={!!unauth}>
-                        Disconnect
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
             </li>
           );
         })}
@@ -251,7 +163,7 @@ export default function ConnectionsList({
   );
 }
 
-function FlashBanner({ flash, onDismiss, onRetry }: { flash: Flash; onDismiss: () => void; onRetry: () => void }) {
+export function FlashBanner({ flash, onDismiss, onRetry }: { flash: Flash; onDismiss: () => void; onRetry: () => void }) {
   const ok = flash.kind === 'success';
   const label = PLATFORM_LABELS[flash.platform] ?? flash.platform;
   return (

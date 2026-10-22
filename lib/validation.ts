@@ -67,6 +67,10 @@ export const planApproveSchema = z.object({
   overrides: z.record(uuid, z.string().datetime()).optional(),
 }).refine((b) => b.all || b.draftIds, { message: 'draftIds or all:true required' });
 export const planSkipSchema = z.object({ draftId: uuid });
+// Undo an approve: each draft goes back to review at its old slot (null = no time).
+export const planUnapproveSchema = z.object({
+  items: z.array(z.object({ draftId: uuid, plannedAt: z.string().datetime().nullable() })).min(1).max(100),
+});
 const validTimeZone = (tz: string) => { try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); return true; } catch { return false; } };
 export const planSpreadSchema = z.object({ timeZone: z.string().min(1).max(64).refine(validTimeZone, 'invalid time zone') });
 
@@ -184,6 +188,10 @@ export const brandKitPatchSchema = brandKitSchema.extend({
   guidePdf: brandKitSchema.shape.guidePdf.nullable(),
   narratorVoiceId: uuid.nullable().optional(),
 });
+
+// Voice twins ----------------------------------------------------------
+/** PATCH /api/voices/[id]: rename only (the column already exists). */
+export const voiceRenameSchema = z.object({ name: z.string().trim().min(1).max(60) });
 
 // Accounts -------------------------------------------------------------
 export const stubAccountCreateSchema = z.object({

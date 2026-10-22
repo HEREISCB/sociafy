@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { useApi } from '../../lib/ui/fetcher';
+import { Button, useToast } from '../ui';
+import { useApi, friendlyApiError } from '../../lib/ui/fetcher';
 
 // Kept in sync with lib/demo/shield-script.ts (duplicated here to avoid pulling
 // the server AI module into the client bundle). Empty saved prompt => server
@@ -16,15 +17,16 @@ const DEFAULT_SYSTEM_PROMPT = `You are the crisis communications lead for {{bran
 Structure: acknowledge → address the specific concern → present facts → state a concrete action → invite further contact. Empathetic but factual, no admission of unproven wrongdoing. NO stage directions, NO [brackets], NO formatting — just the script text itself.`;
 
 /**
- * Editor for the per-user system prompt that drives crisis-response generation.
+ * Editor for the per-user system prompt that drives reply drafting.
  * Supports {{variables}} substituted with live mention data at generate time.
  * Empty prompt falls back to the built-in default server-side.
  */
 const ResponseSettings: React.FC = () => {
+  const toast = useToast();
   const { data, mutate } = useApi<{ settings: { systemPrompt: string } }>('/api/shield/settings');
   const [prompt, setPrompt] = useState('');
   const [busy, setBusy] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
 
   // Hydrate from server once loaded (only when the field is still untouched).
@@ -33,14 +35,15 @@ const ResponseSettings: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
+  const edit = (next: string) => { setPrompt(next); setMsg(null); };
+
   const insertVar = (v: string) => {
     const token = `{{${v}}}`;
     const el = taRef.current;
-    if (!el) { setPrompt(p => p + token); return; }
+    if (!el) { edit(prompt + token); return; }
     const start = el.selectionStart ?? prompt.length;
     const end = el.selectionEnd ?? prompt.length;
-    const next = prompt.slice(0, start) + token + prompt.slice(end);
-    setPrompt(next);
+    edit(prompt.slice(0, start) + token + prompt.slice(end));
     requestAnimationFrame(() => {
       el.focus();
       const pos = start + token.length;
@@ -48,32 +51,39 @@ const ResponseSettings: React.FC = () => {
     });
   };
 
+  /** Overwrites the textarea, with Undo when there was something to lose. */
+  const replace = (next: string, note: string) => {
+    const prev = prompt;
+    edit(next);
+    if (prev.trim() && prev !== next) toast(note, { undo: () => edit(prev) });
+  };
+
   const save = async () => {
     setBusy(true);
-    setSaved(false);
+    setMsg(null);
     try {
-      await fetch('/api/shield/settings', {
+      const res = await fetch('/api/shield/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ systemPrompt: prompt }),
       });
+      // A failed PUT used to report "Saved" anyway.
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text().catch(() => '')}`);
       await mutate();
-      setSaved(true);
+      setMsg({ ok: true, text: prompt.trim() ? 'Saved' : 'Saved · using the default' });
+    } catch (e) {
+      setMsg({ ok: false, text: `Not saved. ${friendlyApiError(e)}` });
     } finally {
       setBusy(false);
     }
   };
 
-  const isCustom = prompt.trim().length > 0;
-
   return (
     <div className="stack">
-      <p className="set-hint">
-        How the AI writes replies. Leave blank for the default. Variables fill in from the mention.
-      </p>
+      <p className="set-hint">How the AI writes replies. Leave blank to use ours. Variables fill in from the mention.</p>
       <div className="row shield-vars">
         {TEMPLATE_VARS.map(v => (
-          <button key={v} type="button" className="badge mono" onClick={() => insertVar(v)}>
+          <button key={v} type="button" className="shield-var" onClick={() => insertVar(v)}>
             {`{{${v}}}`}
           </button>
         ))}
@@ -82,24 +92,20 @@ const ResponseSettings: React.FC = () => {
         ref={taRef}
         className="input"
         value={prompt}
-        onChange={e => { setPrompt(e.target.value); setSaved(false); }}
-        placeholder={DEFAULT_SYSTEM_PROMPT}
+        onChange={e => edit(e.target.value)}
+        placeholder="Using the default: acknowledge → address the concern → facts → concrete action → invite contact."
         rows={8}
-        aria-label="Custom AI prompt"
+        aria-label="Reply prompt"
       />
       <div className="set-actions">
-        <button className="btn sm primary" onClick={save} disabled={busy}>
-          {busy ? 'Saving…' : 'Save prompt'}
-        </button>
-        <button className="btn sm ghost" onClick={() => { setPrompt(DEFAULT_SYSTEM_PROMPT); setSaved(false); }} disabled={busy}>
+        <Button size="sm" variant="primary" busy={busy} onClick={save}>{busy ? 'Saving…' : 'Save prompt'}</Button>
+        <button type="button" className="btn sm" onClick={() => replace(DEFAULT_SYSTEM_PROMPT, 'Your prompt was replaced with the default')} disabled={busy}>
           Load default
         </button>
-        {isCustom && (
-          <button className="btn sm ghost" onClick={() => { setPrompt(''); setSaved(false); }} disabled={busy}>
-            Clear
-          </button>
-        )}
-        {saved && <span className="set-ok" role="status">Saved</span>}
+        <button type="button" className="btn sm ghost" onClick={() => replace('', 'Prompt cleared · save to use the default')} disabled={busy || !prompt}>
+          Clear
+        </button>
+        {msg && <span className={msg.ok ? 'set-ok' : 'set-hint err'} role={msg.ok ? 'status' : 'alert'}>{msg.text}</span>}
       </div>
     </div>
   );

@@ -175,6 +175,28 @@ export function nextToReview(order: CalItem[], fromId: string): CalItem | null {
   return null;
 }
 
+/** Where a day tile's click lands: its first post to review, else its first post. */
+export const firstOfDay = (b: Bucket): CalItem | null => b.items.find(toReview) ?? b.items[0] ?? null;
+
+/** Nothing left that needs the user: no draft to review and no failed post. */
+export const weekFiled = (items: CalItem[]) => items.length > 0 && !items.some((i) => toReview(i) || toneOf(i) === 'failed');
+
+/** The platform whose limit the caption hits first: the counter measures against it. */
+export function tightestLimit(platforms: Platform[], limits: Record<Platform, number>): { platform: Platform; limit: number } | null {
+  return platforms.reduce<{ platform: Platform; limit: number } | null>(
+    (best, p) => (limits[p] && (!best || limits[p] < best.limit) ? { platform: p, limit: limits[p] } : best), null);
+}
+
+/** What goes out on `p`. A draft edited here posts the edited body everywhere (publish.ts postText). */
+export function textFor(i: CalItem, p: Platform, body: string): string {
+  if (i.kind === 'post') return i.group.rows.find((r) => r.platform === p)?.text ?? i.group.text;
+  return body !== i.draft.body ? body : i.draft.texts?.[p] ?? body;
+}
+
+/** The first post still to go out on one of these platforms (for "X needs reconnecting before …"). */
+export const firstAtRisk = (items: CalItem[], platforms: Platform[], now: number): CalItem | null =>
+  items.find((i) => i.at && i.at.getTime() > now && toneOf(i) !== 'canceled' && toneOf(i) !== 'published' && itemPlatforms(i).some((p) => platforms.includes(p))) ?? null;
+
 export type Skipped = { reason: string; reasons?: Record<string, string>; platforms?: Platform[] };
 
 export function skipMessage(s: Skipped): string {

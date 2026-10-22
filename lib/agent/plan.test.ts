@@ -19,6 +19,7 @@ const state = vi.hoisted(() => ({
   draftReads: [] as Record<string, unknown>[][],
   /** An update whose where names this video job matches no row (the clip landed). */
   landedJob: null as string | null,
+  deletes: [] as string[],
 }));
 
 vi.mock('../db', async () => {
@@ -53,6 +54,8 @@ vi.mock('../db', async () => {
         },
       }),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      delete: (t: any) => ({ where: (w: any) => { record(t, w); state.deletes.push(getTableName(t)); return Promise.resolve([]); } }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       update: (t: any) => ({
         set: (v: Record<string, unknown>) => (state.sets.push(v), {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -70,7 +73,7 @@ vi.mock('../db', async () => {
   };
 });
 
-import { approveDrafts, skipDraft, getPlan, queueApprovedRender, isApproved, PLAN_MAX } from './plan';
+import { approveDrafts, skipDraft, unapproveDrafts, getPlan, queueApprovedRender, isApproved, PLAN_MAX } from './plan';
 import { draftCost } from '../credits/estimator';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -93,6 +96,7 @@ beforeEach(() => {
   state.sets = [];
   state.draftReads = [];
   state.landedJob = null;
+  state.deletes = [];
 });
 
 describe('approve', () => {
@@ -218,6 +222,40 @@ describe('every query is scoped to the user', () => {
     await getPlan('u1', NOW);
     expect(scoped().length).toBeGreaterThan(8);
     for (const w of scoped()) expect(w.params).toContain('u1');
+  });
+});
+
+describe('unapprove (Undo approve)', () => {
+  const was = '2026-03-03T09:00:00.000Z';
+
+  it('removes the pending posts and puts the draft back in review at its old slot', async () => {
+    state.drafts = [draft('d-1', { status: 'scheduled', plannedAt: new Date(NOW.getTime() + DAY) })];
+    const res = await unapproveDrafts('u1', [{ draftId: 'd-1', plannedAt: was }]);
+    expect(res).toEqual({ restored: ['d-1'], skipped: [] });
+    expect(state.deletes).toEqual(['scheduled_posts']);
+    expect(state.sets[0]).toMatchObject({ status: 'draft', plannedAt: new Date(was) });
+    for (const w of state.wheres) expect(w.params).toContain('u1');
+  });
+
+  it('clears the approved-while-rendering marker, back to no time', async () => {
+    state.drafts = [draft('d-1', { videoJobId: 'job', variants: [{ label: 'A', text: 'body', approved: true }] })];
+    const res = await unapproveDrafts('u1', [{ draftId: 'd-1', plannedAt: null }]);
+    expect(res.restored).toEqual(['d-1']);
+    expect(isApproved({ variants: state.sets[0].variants as never })).toBe(false);
+    expect(state.sets[0].plannedAt).toBeNull();
+  });
+
+  it('leaves a draft still in review alone', async () => {
+    state.drafts = [draft('d-1')];
+    expect((await unapproveDrafts('u1', [{ draftId: 'd-1', plannedAt: null }])).skipped).toEqual([{ draftId: 'd-1', reason: 'not_approved' }]);
+    expect(state.sets).toEqual([]);
+  });
+
+  it('cannot take back a post that is already going out', async () => {
+    state.drafts = [draft('d-1', { status: 'scheduled' })];
+    state.pending = [{ id: 'row' }]; // a publishing/published row
+    expect((await unapproveDrafts('u1', [{ draftId: 'd-1', plannedAt: null }])).skipped).toEqual([{ draftId: 'd-1', reason: 'already_posting' }]);
+    expect(state.deletes).toEqual([]);
   });
 });
 

@@ -101,6 +101,11 @@ export type AgentStatus = {
   planned: number;
   /** Posts the window should hold: weekly target × weeks. */
   target: number;
+  /** Posts that actually land inside the window: drafts planned in it + posts queued in it. `planned` also
+   *  counts overdue drafts (they get a new slot on approve), so it can read "33 of 5"; this can't. */
+  ready: number;
+  /** Credits autopilot spent in the trailing horizon, net of refunds — what the weekly cap is checked against. */
+  creditsThisWeek: number;
   /** ISO time of the cron tick that adds the missing posts. Null when paused, blocked or the plan is full. */
   nextTopUpAt: string | null;
   /** The plan has gaps and nothing blocks it — switching on starts filling it now. */
@@ -144,7 +149,10 @@ export async function getAgentStatus(userId: string, now = new Date()): Promise<
     // Same counting as run.ts sizePlan: every unreviewed planned draft, plus
     // distinct drafts queued inside the window.
     db()
-      .select({ n: sql<number>`count(*)::int` })
+      .select({
+        n: sql<number>`count(*)::int`,
+        inWindow: sql<number>`(count(*) filter (where ${drafts.plannedAt} >= ${now.toISOString()}::timestamptz and ${drafts.plannedAt} < ${end.toISOString()}::timestamptz))::int`,
+      })
       .from(drafts)
       .where(and(eq(drafts.userId, userId), eq(drafts.status, 'draft'), isNotNull(drafts.plannedAt))),
     db()
@@ -181,6 +189,8 @@ export async function getAgentStatus(userId: string, now = new Date()): Promise<
     horizonDays,
     planned,
     target: plan.target,
+    ready: (plannedDrafts?.inWindow ?? 0) + (queuedDrafts?.n ?? 0),
+    creditsThisWeek: period.creditsThisWeek,
     nextTopUpAt: plan.nextTopUpAt,
     dueNow: !blocked && plan.gap,
     balance,

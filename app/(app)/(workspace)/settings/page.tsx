@@ -1,5 +1,5 @@
-import { redirect } from 'next/navigation';
+import SettingsOverview from '../../../../components/settings-overview';
 
 export default function SettingsIndex() {
-  redirect('/settings/connections');
+  return <SettingsOverview />;
 }

@@ -8,7 +8,7 @@ const BASE: Record<Platform, number> = { x: 5, linkedin: 3, instagram: 4, facebo
 
 // Who the niche sells to decides where the extra volume goes.
 const B2B = ['saas', 'devtools', 'fintech', 'ai', 'marketing'];
-const CONSUMER = ['creator-economy', 'media', 'design', 'community'];
+const CONSUMER = ['creator-economy', 'media', 'design', 'community', 'food-drink', 'local-business', 'retail', 'health-fitness', 'education', 'travel'];
 
 export type PostingPlan = {
   perPlatform: Partial<Record<Platform, number>>;

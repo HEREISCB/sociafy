@@ -105,7 +105,8 @@ export function brandKitCompleteness(kit: BrandKit, profile: Pick<BrandProfile, 
     screenshots: !!kit.screenshots?.length,
     facts: !!kit.facts?.length,
     music: !!kit.music?.mood,
-    video: !!kit.video?.style,
+    // The end-card CTA is part of the Video style item, so either one counts.
+    video: !!(kit.video?.style || kit.video?.endCardCta?.trim()),
     narrator: !!kit.narratorVoiceId,
   };
   return { done: Object.values(items).filter(Boolean).length, total: CHECKLIST.length, items };

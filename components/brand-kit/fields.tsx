@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { Icon } from '../icons';
+import { Seg } from '../ui';
 import type { AssetRef } from '../../lib/brand/kit';
 
 const UPLOAD_ERRORS: Record<string, string> = {
@@ -27,15 +28,17 @@ export async function uploadBrandFile(file: File, label: string): Promise<AssetR
 }
 
 /** A button that opens the file picker. */
-export function FilePick({ label, accept, multiple, disabled, onFiles }: {
+export function FilePick({ label, accept, multiple, disabled, primary, onFiles }: {
   label: string;
   accept: string;
   multiple?: boolean;
   disabled?: boolean;
+  /** Ink fill: the one action that unlocks something (e.g. the missing logo). */
+  primary?: boolean;
   onFiles: (files: File[]) => void;
 }) {
   return (
-    <label className="btn sm" aria-disabled={disabled || undefined}>
+    <label className={`btn sm bk-pick${primary ? ' primary' : ''}`} aria-disabled={disabled || undefined}>
       <Icon name="upload" size={12} /> {label}
       <input
         type="file"
@@ -126,30 +129,18 @@ export function LinesField({ label, hint, value, max, maxChars, onSave }: {
   );
 }
 
-/** Segmented single choice. */
-export function Segmented<T extends string>({ label, value, options, onChange }: {
+/** Segmented single choice with a sliding ink indicator. */
+export function Segmented<T extends string>({ label, hint, value, options, onChange }: {
   label: string;
+  hint?: string;
   value: T | undefined;
   options: readonly { value: T; label: string }[];
   onChange: (v: T) => void;
 }) {
   return (
     <div className="set-field">
-      <span className="set-label">{label}</span>
-      <div className="mode-switch bk-segmented" role="radiogroup" aria-label={label}>
-        {options.map((o) => (
-          <button
-            key={o.value}
-            type="button"
-            role="radio"
-            aria-checked={value === o.value}
-            className={`opt${value === o.value ? ' active' : ''}`}
-            onClick={() => value !== o.value && onChange(o.value)}
-          >
-            {o.label}
-          </button>
-        ))}
-      </div>
+      <span className="set-label set-label--row">{label}{hint && <span className="set-hint">{hint}</span>}</span>
+      <Seg label={label} size="sm" value={(value ?? '') as T} options={options.map((o) => ({ id: o.value, label: o.label }))} onChange={(v) => v !== value && onChange(v)} />
     </div>
   );
 }
