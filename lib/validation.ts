@@ -185,6 +185,10 @@ export const brandKitPatchSchema = brandKitSchema.extend({
   narratorVoiceId: uuid.nullable().optional(),
 });
 
+// Voice twins ----------------------------------------------------------
+/** PATCH /api/voices/[id]: rename only (the column already exists). */
+export const voiceRenameSchema = z.object({ name: z.string().trim().min(1).max(60) });
+
 // Accounts -------------------------------------------------------------
 export const stubAccountCreateSchema = z.object({
   platform: platform,

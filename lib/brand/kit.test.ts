@@ -71,6 +71,10 @@ describe('brandKitCompleteness', () => {
     expect(c.done).toBe(3);
     expect(c.items.voice).toBe(false);
   });
+  it('counts Video style as set when only the end-card CTA is', () => {
+    expect(brandKitCompleteness({ video: { endCardCta: 'Order now' } }, { companyName: null }).items.video).toBe(true);
+    expect(brandKitCompleteness({ video: { endCardCta: '  ' } }, { companyName: null }).items.video).toBe(false);
+  });
 });
 
 describe('brandKitSchema', () => {

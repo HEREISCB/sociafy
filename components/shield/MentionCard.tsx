@@ -1,8 +1,12 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import { Icon } from '../icons';
+import { Button, useToast } from '../ui';
 import { friendlyApiError } from '../../lib/ui/fetcher';
+import { PLATFORMS } from '../../lib/ui/platforms';
+import { supportsKind } from '../../lib/platforms/capabilities';
 import type { MentionSource, SentimentLabel } from '../../lib/db/schema';
 
 export type ShieldActionRow = {
@@ -10,6 +14,7 @@ export type ShieldActionRow = {
   status: string;
   script: string;
   targetPlatform: string | null;
+  error?: string | null;
   createdAt: string;
   mention: {
     id: string;
@@ -30,10 +35,10 @@ export type ShieldActionRow = {
 };
 
 const LABEL: Record<SentimentLabel, { badge: string; label: string }> = {
-  crisis: { badge: 'badge--err', label: 'Crisis' },
-  negative: { badge: 'badge--warn', label: 'Negative' },
+  crisis: { badge: 'err', label: 'Crisis' },
+  negative: { badge: 'warn', label: 'Negative' },
   neutral: { badge: '', label: 'Neutral' },
-  positive: { badge: 'badge--ok', label: 'Positive' },
+  positive: { badge: 'ok', label: 'Positive' },
 };
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -43,67 +48,69 @@ const SOURCE_LABEL: Record<string, string> = {
   reddit: 'Reddit',
   x: 'X',
   linkedin: 'LinkedIn',
-  own_post: 'Own Post',
+  own_post: 'Own post',
 };
 
 function relTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   if (diff < 60_000) return 'just now';
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-  return `${Math.floor(diff / 86_400_000)}d ago`;
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} min ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} h ago`;
+  return `${Math.floor(diff / 86_400_000)} d ago`;
+}
+
+/** The one-line "what happened" left behind once a mention is handled. */
+export function MentionReceipt({ row, dismissed }: { row: ShieldActionRow; dismissed?: boolean }) {
+  const name = PLATFORMS.find((p) => p.id === row.targetPlatform)?.name ?? row.targetPlatform;
+  const ok = !dismissed && row.status !== 'rejected';
+  const what = dismissed || row.status === 'rejected' ? 'Dismissed' : row.status === 'published' ? `Posted to ${name}` : 'Marked handled';
+  return (
+    <article className={`mention-receipt${ok ? ' is-ok' : ''}`}>
+      <Icon name={ok ? 'check' : 'x'} size={12} />
+      <span>{what} · {row.mention.title.slice(0, 80)}</span>
+      {row.mention.url && (
+        <a href={row.mention.url} target="_blank" rel="noopener noreferrer" aria-label="Open mention">
+          <Icon name="arrow_up_right" size={12} />
+        </a>
+      )}
+    </article>
+  );
 }
 
 interface Props {
   row: ShieldActionRow;
   onApprove: (id: string, script: string, targetPlatform: string | null) => Promise<void>;
-  onReject: (id: string) => Promise<void>;
+  onDismiss: (row: ShieldActionRow) => void;
   connectedPlatforms: string[];
 }
 
-export const MentionCard: React.FC<Props> = ({ row, onApprove, onReject, connectedPlatforms }) => {
-  const [expanded, setExpanded] = useState(row.mention.sentimentLabel === 'crisis');
+export const MentionCard: React.FC<Props> = ({ row, onApprove, onDismiss, connectedPlatforms }) => {
+  const toast = useToast();
+  const textTargets = PLATFORMS.filter((p) => supportsKind(p.id, 'text') && connectedPlatforms.includes(p.id));
+  const [expanded, setExpanded] = useState(row.mention.sentimentLabel === 'crisis' || row.status === 'failed');
   const [script, setScript] = useState(row.script);
-  const [platform, setPlatform] = useState<string>(row.targetPlatform ?? '');
-  const [busy, setBusy] = useState<'approve' | 'reject' | 'generate' | null>(null);
+  const [platform, setPlatform] = useState<string>(textTargets.some((p) => p.id === row.targetPlatform) ? row.targetPlatform! : '');
+  const [busy, setBusy] = useState<'approve' | 'generate' | null>(null);
   const [genError, setGenError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  // Set when /generate reports usedAI:false — the draft came from the canned
-  // template, not the model, and the user should know before publishing it.
+  const [actionError, setActionError] = useState<string | null>(row.status === 'failed' ? row.error ?? 'The last attempt failed. Try again.' : null);
+  // usedAI:false means the draft came from the canned template, not the model.
   const [isTemplate, setIsTemplate] = useState(false);
-  const [done, setDone] = useState<'approved' | 'rejected' | null>(
-    row.status === 'published' || row.status === 'approved'
-      ? 'approved'
-      : row.status === 'rejected'
-      ? 'rejected'
-      : null,
-  );
+  const [drafted, setDrafted] = useState(0);
+  const [handled, setHandled] = useState<ShieldActionRow | null>(null);
 
   const { mention } = row;
   const label = LABEL[mention.sentimentLabel];
   const isCrisis = mention.sentimentLabel === 'crisis';
+  const target = PLATFORMS.find((p) => p.id === platform);
 
-  // onApprove/onReject throw when the request fails — never flip the card to
-  // the green "published" state off an unchecked response.
+  // onApprove throws when the request fails, so the card never flips to "posted" off an unchecked response.
   const handleApprove = async () => {
     setBusy('approve');
     setActionError(null);
     try {
       await onApprove(row.id, script, platform || null);
-      setDone('approved');
-    } catch (e) {
-      setActionError(friendlyApiError(e));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const handleReject = async () => {
-    setBusy('reject');
-    setActionError(null);
-    try {
-      await onReject(row.id);
-      setDone('rejected');
+      setHandled({ ...row, status: platform ? 'published' : 'approved', targetPlatform: platform || null });
+      toast(platform ? `Posted to ${target?.name}` : 'Marked handled');
     } catch (e) {
       setActionError(friendlyApiError(e));
     } finally {
@@ -117,126 +124,97 @@ export const MentionCard: React.FC<Props> = ({ row, onApprove, onReject, connect
     try {
       const res = await fetch(`/api/shield/actions/${row.id}/generate`, { method: 'POST' });
       const data = await res.json().catch(() => ({})) as { script?: string; error?: string; usedAI?: boolean };
-      if (!res.ok) { setGenError(data.error ?? 'Failed'); return; }
+      if (!res.ok) { setGenError(data.error ?? 'Couldn’t draft a reply. Try again.'); return; }
+      const prev = script;
       setScript(data.script ?? '');
       setIsTemplate(data.usedAI === false);
+      setDrafted((d) => d + 1);
+      if (prev.trim()) toast('Draft replaced', { undo: () => setScript(prev) });
     } catch {
-      setGenError('Network error');
+      setGenError('Network error. Check your connection and try again.');
     } finally {
       setBusy(null);
     }
   };
 
-  if (done === 'rejected') {
-    return (
-      <article className="mention done">
-        <Icon name="x" size={12} />
-        <span>Dismissed · {mention.title.slice(0, 80)}</span>
-      </article>
-    );
-  }
-
-  if (done === 'approved') {
-    return (
-      <article className="mention done ok">
-        <Icon name="check" size={12} />
-        <span>
-          {row.status === 'published' ? 'Reply published' : 'Reply approved'} · {mention.title.slice(0, 80)}
-        </span>
-        {mention.url && (
-          <a href={mention.url} target="_blank" rel="noopener noreferrer" aria-label="Open mention">
-            <Icon name="arrow_up_right" size={12} />
-          </a>
-        )}
-      </article>
-    );
-  }
+  if (handled) return <MentionReceipt row={handled} />;
 
   return (
     <article className={`mention${isCrisis ? ' crisis' : ''}`}>
-      <div className="mention-head">
-        <div className="mention-main">
-          <div className="row mention-tags">
-            <span className={`badge ${label.badge}`}>{label.label}</span>
-            <span className="set-hint">
-              {SOURCE_LABEL[mention.source] ?? mention.source} · {mention.author} · {relTime(mention.fetchedAt)}
-              {mention.engagement > 0 && <> · {mention.engagement} engagement</>}
-              {' '}· severity {mention.severity}/10
-            </span>
-          </div>
-          <a className="mention-title" href={mention.url || '#'} target="_blank" rel="noopener noreferrer">
-            {mention.title}
-          </a>
-          {mention.body && (
-            <p className="mention-body">
-              {mention.body.slice(0, 200)}{mention.body.length > 200 ? '…' : ''}
-            </p>
-          )}
-        </div>
-        <button
-          onClick={() => setExpanded(e => !e)}
-          className="btn sm"
-          aria-expanded={expanded}
-        >
-          {expanded ? 'Hide' : 'Respond'}
-        </button>
+      <div className="mention-meta">
+        <span className={`badge ${label.badge}`}>{label.label}</span>
+        <span>{SOURCE_LABEL[mention.source] ?? mention.source} · {mention.author} · {relTime(mention.fetchedAt)}</span>
+        <span className="mention-sev" title="Severity">{mention.severity}/10</span>
       </div>
+      {mention.url ? (
+        <a className="mention-title" href={mention.url} target="_blank" rel="noopener noreferrer">
+          {mention.title} <Icon name="arrow_up_right" size={12} />
+        </a>
+      ) : (
+        <span className="mention-title">{mention.title}</span>
+      )}
+      {mention.body && (
+        <p className="mention-body">{mention.body.slice(0, 220)}{mention.body.length > 220 ? '…' : ''}</p>
+      )}
 
-      {expanded && (
+      {!expanded ? (
+        <div className="row mention-quick">
+          <button type="button" className="btn sm" onClick={() => setExpanded(true)}>Respond</button>
+          <button type="button" className="btn sm ghost" onClick={() => onDismiss(row)}>Dismiss</button>
+        </div>
+      ) : (
         <div className="mention-reply">
           <div className="row">
-            <span className="set-label">Reply</span>
-            {isTemplate && (
-              <span
-                className="badge"
-                title="AI drafting was unavailable, so this came from a built-in template. Edit it before publishing."
-              >
-                template draft
-              </span>
-            )}
+            <span className="set-label">Your reply</span>
             <span className="mention-spacer" />
-            <button className="btn sm ghost" onClick={handleGenerate} disabled={busy !== null}>
-              <Icon name="sparkle" size={12} />
-              {busy === 'generate' ? 'Generating…' : script ? 'Regenerate' : 'Draft with AI'}
-            </button>
+            <Button size="sm" busy={busy === 'generate'} disabled={busy !== null} onClick={handleGenerate}>
+              <Icon name="sparkle" size={12} /> {busy === 'generate' ? 'Drafting…' : script ? 'Redraft' : 'Draft with AI'}
+            </Button>
           </div>
-          {genError && <p className="set-error">{genError}</p>}
+          {genError && <p className="set-error" role="alert">{genError}</p>}
           <textarea
-            className="input"
+            key={drafted}
+            className={`input${drafted ? ' develop' : ''}`}
             value={script}
             onChange={e => setScript(e.target.value)}
             rows={5}
             aria-label="Reply"
             placeholder="Write a reply, or draft one with AI."
           />
+          {isTemplate && <p className="set-hint">Template draft: AI was unavailable. Edit before posting.</p>}
 
           <div className="row mention-actions">
-            {connectedPlatforms.length > 0 && (
-              <select
-                className="input"
-                value={platform}
-                onChange={e => setPlatform(e.target.value)}
-                aria-label="Publish to"
-              >
-                <option value="">No platform (save only)</option>
-                {connectedPlatforms.map(p => (
-                  <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>
-                ))}
+            <label className="mention-target">
+              <span className="set-hint">Post to</span>
+              <select className="input" value={platform} onChange={e => setPlatform(e.target.value)} aria-label="Post to">
+                <option value="">Don’t post, just mark handled</option>
+                {PLATFORMS.map((p) => {
+                  const text = supportsKind(p.id, 'text');
+                  const on = connectedPlatforms.includes(p.id);
+                  return (
+                    <option key={p.id} value={p.id} disabled={!text || !on}>
+                      {p.name}{!text ? ' (can’t take text replies)' : !on ? ' (not connected)' : ''}
+                    </option>
+                  );
+                })}
               </select>
-            )}
+            </label>
             <span className="mention-spacer" />
-            <button className="btn sm ghost" onClick={handleReject} disabled={busy !== null}>
-              {busy === 'reject' ? 'Dismissing…' : 'Dismiss'}
-            </button>
-            <button
-              className="btn primary sm"
+            <button type="button" className="btn sm ghost" onClick={() => onDismiss(row)} disabled={busy !== null}>Dismiss</button>
+            <Button
+              size="sm"
+              variant="primary"
+              busy={busy === 'approve'}
+              disabled={busy !== null || (!!platform && !script.trim())}
+              reason="Write or draft a reply to post it"
               onClick={handleApprove}
-              disabled={busy !== null || !script.trim()}
             >
-              {busy === 'approve' ? 'Publishing…' : platform ? `Publish to ${platform}` : 'Approve'}
-            </button>
+              {busy === 'approve' ? (platform ? 'Posting…' : 'Saving…') : platform ? `Post to ${target?.name}` : 'Mark handled'}
+            </Button>
           </div>
-
+          {platform
+            ? <p className="set-hint">Goes out as a new {target?.name} post from your account.</p>
+            : !textTargets.length && <p className="set-hint"><Link href="/settings/connections">Connect X, LinkedIn, Facebook or Reddit</Link> to post replies from here.</p>}
           {actionError && <p className="set-error" role="alert">{actionError}</p>}
         </div>
       )}
