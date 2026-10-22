@@ -217,7 +217,7 @@ textarea.input { resize: vertical; min-height: 72px; }
   display: inline-flex; align-items: center; gap: 6px;
   cursor: pointer;
 }
-@media (hover: hover) and (pointer: fine) { .chip[aria-pressed]:hover, .prompt-chip:hover { background: var(--subtle); } }
+@media (hover: hover) and (pointer: fine) { .chip[aria-pressed="false"]:hover, .prompt-chip:not(.active):hover { background: var(--subtle); } }
 .chip[aria-pressed="true"],
 .prompt-chip.active { background: var(--text); color: var(--bg); border-color: var(--text); }
 .chip[aria-pressed]:disabled,

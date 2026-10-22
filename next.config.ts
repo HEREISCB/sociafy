@@ -45,7 +45,7 @@ const securityHeaders = [
       "font-src 'self' https://fonts.gstatic.com data:",
       "img-src 'self' data: blob: https:",
       "media-src 'self' blob: https:",
-      `connect-src 'self' ${clerkScript} https://api.anthropic.com https://cloudflareinsights.com https://api.razorpay.com https://lumberjack.razorpay.com https://*.razorpay.com`,
+      `connect-src 'self' ${clerkScript} https://api.anthropic.com https://cloudflareinsights.com https://api.razorpay.com https://lumberjack.razorpay.com https://*.razorpay.com https://*.r2.cloudflarestorage.com`, // presigned clip uploads ("Edit my video")
       `frame-src 'self' https://challenges.cloudflare.com https://*.clerk.com${clerkOrigin ? ` ${clerkOrigin}` : ''} https://api.razorpay.com https://*.razorpay.com`,
       "frame-ancestors 'self'",
       "base-uri 'self'",
