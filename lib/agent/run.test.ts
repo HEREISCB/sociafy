@@ -177,6 +177,46 @@ describe('score gate', () => {
   });
 });
 
+describe('Post automatically (threshold 1, the default)', () => {
+  const warnings = () => (state.inserts['activity_log'] ?? []).filter((r) => r.kind === 'publish_warning');
+
+  it('schedules any rated draft, however low it scored', async () => {
+    state.settings = settingsWith({ enabledPlatforms: ['x'], autoPublishThreshold: 1 });
+    draftFromTrends.mockResolvedValue([{ title: 'T', body: 'B', perPlatform: {}, score: 1, rationale: 'r', trendId: 't1' }]);
+    expect((await runAgentForUser('u1')).published).toBe(1);
+    expect(scheduled().map((r) => r.platform)).toEqual(['x']);
+  });
+
+  it('still holds an unrated (score 0) draft for review', async () => {
+    state.settings = settingsWith({ enabledPlatforms: ['x'], autoPublishThreshold: 1 });
+    draftFromTrends.mockResolvedValue([{ title: 'T', body: 'B', perPlatform: {}, score: 0, rationale: 'stub', trendId: 't1' }]);
+    expect((await runAgentForUser('u1')).held).toBe(1);
+    expect(scheduled()).toEqual([]);
+  });
+
+  it('leaves out an account that needs reconnecting, like Approve does, and says which', async () => {
+    state.settings = settingsWith({ enabledPlatforms: ['x', 'linkedin'], autoPublishThreshold: 1 });
+    state.accounts = [
+      { id: 'acc-x', platform: 'x', lastRefreshError: '401 invalid_grant', refreshToken: 'r' },
+      { id: 'acc-li', platform: 'linkedin' },
+    ];
+    expect((await runAgentForUser('u1')).published).toBe(1);
+    expect(scheduled().map((r) => r.platform)).toEqual(['linkedin']);
+    expect(warnings()).toHaveLength(1);
+    expect(warnings()[0].title).toBe('Not posted to X: reconnect it');
+    expect(warnings()[0].meta).toMatchObject({ platforms: ['x'] });
+  });
+
+  it('every account disconnected: the draft waits for review, and the user is told', async () => {
+    state.settings = settingsWith({ enabledPlatforms: ['x'], autoPublishThreshold: 1 });
+    state.accounts = [{ id: 'acc-x', platform: 'x', tokenExpiresAt: new Date(Date.now() - 86_400_000), refreshToken: null }];
+    expect((await runAgentForUser('u1')).held).toBe(1);
+    expect(scheduled()).toEqual([]);
+    expect(state.updates.some((u) => u.table === 'drafts' && u.values.status === 'scheduled')).toBe(false);
+    expect(warnings()).toHaveLength(1);
+  });
+});
+
 describe('weekly per-platform caps', () => {
   it('does not mark a draft scheduled when every platform was capped out', async () => {
     state.settings = settingsWith({ enabledPlatforms: ['x'], postsPerWeekByPlatform: { x: 1 } });

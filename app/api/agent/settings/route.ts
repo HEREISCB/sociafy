@@ -22,9 +22,10 @@ async function ensureSettings(userId: string) {
     .values({
       userId,
       instructions: DEFAULT_INSTRUCTIONS,
-      // New users start on "Ask me first": nothing posts until they approve
-      // it. (Also the column default; explicit so a default change can't flip it.)
-      autoPublishThreshold: 101,
+      // New users start on "Post automatically": every rated draft goes out
+      // at its slot unless they edit or skip it first. (Also the column
+      // default; explicit so a default change can't flip it.)
+      autoPublishThreshold: 1,
     })
     .returning();
   return created;

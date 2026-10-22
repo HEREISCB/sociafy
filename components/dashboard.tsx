@@ -660,7 +660,7 @@ export default function Dashboard() {
                 : <span className="home-mono">{credits ? `Balance ${credits.balance.toLocaleString('en-US')} cr · ` : ''}takes about 2 minutes</span>}
             </>}
           >
-            Autopilot writes one topic a day for each of your platforms, in your voice. Nothing posts until you approve it.
+            Autopilot writes one topic a day for each of your platforms, in your voice. {plan?.mode === 'auto' ? 'Each post goes out at its planned time; edit or skip it here before then.' : 'Nothing posts until you approve it.'}
           </Empty>
         </section>
       ) : (

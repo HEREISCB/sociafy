@@ -51,7 +51,19 @@ const BLOCKED: Record<string, { text: string; href?: string; cta?: string }> = {
 };
 
 type PlanDraft = { id: string; title: string | null; plannedAt: string | null; rendering: boolean; media: { url: string; mimeType: string; posterUrl?: string }[] };
-type PlanPayload = { generating: boolean; review: PlanDraft[] };
+type PlanPayload = { generating: boolean; review: PlanDraft[]; scheduled?: { draftId: string; scheduledAt: string; text: string; media: PlanDraft['media'] }[] };
+
+/** This week's posts: drafts waiting for review, plus ones already scheduled ("Post automatically"), one per draft. */
+const postsOf = (p: PlanPayload | null | undefined): PlanDraft[] => {
+  if (!p) return [];
+  const seen = new Set(p.review.map((d) => d.id));
+  const queued = (p.scheduled ?? []).flatMap((s) => {
+    if (seen.has(s.draftId)) return [];
+    seen.add(s.draftId);
+    return [{ id: s.draftId, title: s.text.split('\n')[0].slice(0, 80) || null, plannedAt: s.scheduledAt, rendering: false, media: s.media }];
+  });
+  return [...p.review, ...queued];
+};
 type Run = {
   phase: 0 | 1 | 2;
   startedAt: number;
@@ -111,6 +123,7 @@ const Onboarding: React.FC<{ onDone: () => void }> = ({ onDone }) => {
   const [totalPick, setTotal] = useState<number | null>(null);
   const total = totalPick ?? recommended;
   const [preset, setPreset] = useState<MixPreset>('text');
+  const [autoPost, setAutoPost] = useState(true);
   const mix = mixFor(preset, total, sel);
   const cost = estimateWeeklyBurn({ platforms: sel, cadencePerWeek: total, postsPerWeekByContentType: mix }).weekly;
   const costOf = (p: MixPreset) => estimateWeeklyBurn({ platforms: sel, cadencePerWeek: total, postsPerWeekByContentType: mixFor(p, total, sel) }).weekly;
@@ -124,7 +137,7 @@ const Onboarding: React.FC<{ onDone: () => void }> = ({ onDone }) => {
   const [run, setRun] = useState<Run | null>(null);
   const [filed, setFiled] = useState(false);
   const { data: live } = useApi<PlanPayload>(run?.phase === 2 ? '/api/plan?days=7' : null, { refreshInterval: 4_000 });
-  const fresh = run && live ? live.review.filter((d) => !run.baseline.has(d.id)) : [];
+  const fresh = run && live ? postsOf(live).filter((d) => !run.baseline.has(d.id)) : [];
   const developed = fresh.filter((d) => !d.rendering);
 
   /** What the week card shows: projected chips, then reserved slots filling in with real drafts. */
@@ -204,13 +217,13 @@ const Onboarding: React.FC<{ onDone: () => void }> = ({ onDone }) => {
     setTick(Date.now());
     // Anything already waiting (a re-run of setup) isn't "this week arriving".
     const before = await fetch('/api/plan?days=7', { credentials: 'include' }).then((r) => (r.ok ? r.json() : null)).catch(() => null) as PlanPayload | null;
-    const baseline = new Set((before?.review ?? []).map((d) => d.id));
+    const baseline = new Set(postsOf(before).map((d) => d.id));
     try {
       await apiPatch('/api/agent/settings', {
         enabledPlatforms: sel,
         postsPerWeekByContentType: mix,
         postsPerWeekByPlatform: platformCaps(sel, topics, total),
-        autoPublishThreshold: 101, // review-first: nothing posts until approved
+        autoPublishThreshold: autoPost ? 1 : 101, // 1 = every rated draft posts at its slot; 101 = waits for approval
         planHorizonDays: 7,
         enabled: true,
       });
@@ -253,7 +266,7 @@ const Onboarding: React.FC<{ onDone: () => void }> = ({ onDone }) => {
     primary = <Button variant="primary" onClick={saveTopics} busy={saving} disabled={!topics.length}>{saving ? 'Saving…' : 'Continue'}</Button>;
   } else if (filed) {
     msg = <><b>Filed.</b> Autopilot is on and keeps next week ready too.</>;
-    primary = <Button variant="primary" onClick={leave}>Review on Home</Button>;
+    primary = <Button variant="primary" onClick={leave}>{autoPost ? 'Open This week' : 'Review on Home'}</Button>;
   } else if (run) {
     msg = run.phase === 0 ? <b>Saving your plan…</b>
       : run.phase === 1 ? <b>Reserving {n} slots…</b>
@@ -324,7 +337,7 @@ const Onboarding: React.FC<{ onDone: () => void }> = ({ onDone }) => {
           {step === 2 && (
             <>
               <h1>Plan your first week</h1>
-              <p className="lede">Sociafy drafts these for you. You approve them on Home; nothing posts on its own.</p>
+              <p className="lede">Sociafy drafts these for you. {autoPost ? 'They post at their planned times; until then you can edit or skip them in This week.' : 'You approve them in This week; nothing posts on its own.'}</p>
               <div className="ob-plan">
                 <div className="ap-card ob-plan-card">
                   <div>
@@ -372,9 +385,15 @@ const Onboarding: React.FC<{ onDone: () => void }> = ({ onDone }) => {
                       {forced.length > 0 && ` · ${listOf(forced)} need${forced.length === 1 ? 's' : ''} an image or video, so one is included`}
                     </p>
                   </div>
-                  <div className="ob-locked">
-                    <span><b>Before posting:</b> Ask me first</span>
-                    <span className="ap-note">Change it later in Autopilot</span>
+                  <div className="ap-row">
+                    <div>
+                      <div className="ap-lbl ap-lbl--tight"><b>Before posting</b></div>
+                      <span className="ap-note">Change it any time in Autopilot</span>
+                    </div>
+                    <Seg<'auto' | 'ask'>
+                      size="sm" label="Before posting" value={autoPost ? 'auto' : 'ask'} onChange={(v) => setAutoPost(v === 'auto')}
+                      options={[{ id: 'auto', disabled: started, label: <>Post automatically <small className="seg-aside">default</small></> }, { id: 'ask', disabled: started, label: 'Ask me first' }]}
+                    />
                   </div>
                 </div>
 
@@ -390,7 +409,7 @@ const Onboarding: React.FC<{ onDone: () => void }> = ({ onDone }) => {
                   )}
                   {/* Filed: the strip files itself away and the summary lands in its place; drafting goes on behind it. */}
                   <div className="ob-stack">
-                    <div className="ob-weekwrap" aria-hidden={filed || undefined}>{from && <WeekStrip from={from} slots={strip} readyLabel="Ready to review" />}</div>
+                    <div className="ob-weekwrap" aria-hidden={filed || undefined}>{from && <WeekStrip from={from} slots={strip} readyLabel={autoPost ? 'Scheduled' : 'Ready to review'} />}</div>
                     {filed && (
                       <div className="ob-filed" role="status">
                         <div className="ob-tick"><Icon name="check" size={20} strokeWidth={1.8} /></div>
@@ -398,7 +417,7 @@ const Onboarding: React.FC<{ onDone: () => void }> = ({ onDone }) => {
                         <span className="ob-pillsum">{n} posts · {from && weekRange(from)} · {listOf(sel)}</span>
                         <p className="ap-note">
                           {developed.length} of {n} ready{developed.length < n ? '; the rest keep drafting' : ''}. Images take about a minute each.
-                          You can leave; drafting continues. Nothing posts until you approve it on Home.
+                          You can leave; drafting continues. {autoPost ? 'Each post goes out at its time; edit or skip it in This week before then.' : 'Nothing posts until you approve it in This week.'}
                         </p>
                       </div>
                     )}
