@@ -17,6 +17,14 @@ describe('parseResults', () => {
   });
 });
 
+describe('published free limits', () => {
+  it('match what the server enforces', async () => {
+    const { FREE_TEXT_PER_HOUR } = await import('./free-tools');
+    const { LIMITS } = await import('./rate-limit');
+    expect(FREE_TEXT_PER_HOUR).toBe(LIMITS.freeText.capacity);
+  });
+});
+
 describe('parseResults on truncated JSON', () => {
   it('keeps the strings that closed and drops the cut-off one', async () => {
     const { parseResults } = await import('./free-tools');

@@ -25,6 +25,13 @@ describe('tryView', () => {
   it('reports finalizing as pending', () => {
     expect(tryView(row({ status: 'finalizing' }), null).status).toBe('pending');
   });
+  it('exposes the real phase while it runs', () => {
+    expect(tryView(row({ status: 'finalizing', kind: 'video' }), null).phase).toBe('finalizing');
+    expect(tryView(row({ status: 'pending', kind: 'video' }), null).phase).toBe('queued');
+    expect(tryView(row({ status: 'pending', kind: 'video', taskId: 't' }), null).phase).toBe('generating');
+    expect(tryView(row({ status: 'pending' }), null).phase).toBe('generating');
+    expect(tryView(row(), null).phase).toBeNull();
+  });
 });
 
 describe('ip', () => {

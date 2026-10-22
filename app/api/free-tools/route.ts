@@ -38,8 +38,10 @@ export async function POST(req: NextRequest) {
   // ponytail: in-memory per-instance limit; move to Redis/KV if we scale out or see abuse.
   const rl = rateLimit('freeText', hashIp(ip));
   if (!rl.ok) {
+    const retryAfterMin = Math.ceil(rl.retryAfterSec / 60);
     return jsonError('rate_limited', 429, {
-      hint: `You've hit the free limit for now. Try again in ${Math.ceil(rl.retryAfterSec / 60)} min, or get a Sociafy plan to generate as much as you need.`,
+      retryAfterMin,
+      hint: `You've hit the free limit for now. Try again in ${retryAfterMin} min, or get a Sociafy plan to generate as much as you need.`,
     });
   }
   if (!(await verifyTurnstile(turnstileToken, ip))) {

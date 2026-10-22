@@ -9,19 +9,62 @@ export type FreeToolId = (typeof FREE_TOOL_IDS)[number];
 
 export const FREE_TONES = ['friendly', 'professional', 'witty', 'bold', 'inspirational'] as const;
 
-export const FREE_TOOLS: Record<FreeToolId, { slug: string; title: string }> = {
-  caption: { slug: '/free-instagram-caption-generator', title: 'Instagram caption generator' },
-  hashtag: { slug: '/free-hashtag-generator', title: 'Hashtag generator' },
-  linkedin: { slug: '/free-linkedin-post-generator', title: 'LinkedIn post generator' },
-  bio: { slug: '/free-bio-generator', title: 'Social media bio generator' },
-  tweet: { slug: '/free-tweet-generator', title: 'Tweet / X post generator' },
-  youtube: { slug: '/free-youtube-title-generator', title: 'YouTube title & description generator' },
+type FreeTool = {
+  slug: string;
+  title: string;
+  /** One-line job, for the hub card. */
+  blurb: string;
+  /** A sample output, for the hub and landing cards. */
+  sample: string;
+  /** What comes back, for the empty state: "Five captions". */
+  makes: string;
+  /** Header over the results: "5 captions". */
+  noun: string;
+  /** Per-result labels by position (the prompt fixes the order). */
+  labels?: string[];
 };
+
+export const FREE_TOOLS: Record<FreeToolId, FreeTool> = {
+  caption: {
+    slug: '/free-instagram-caption-generator', title: 'Instagram caption generator',
+    blurb: 'Five captions, five different hooks.', sample: 'Cold-brew season is back. 18 hours of patience in every bottle.',
+    makes: 'Five captions', noun: 'captions',
+  },
+  hashtag: {
+    slug: '/free-hashtag-generator', title: 'Hashtag generator',
+    blurb: '30 tags in broad, community and niche sets.', sample: '#coldbrew #bengalurucafe #specialtycoffeeindia',
+    makes: 'Three sets of ten hashtags', noun: 'hashtag sets', labels: ['Broad', 'Community', 'Niche'],
+  },
+  linkedin: {
+    slug: '/free-linkedin-post-generator', title: 'LinkedIn post generator',
+    blurb: 'Three posts with a first line worth the click.', sample: 'We almost didn’t launch the winter batch. Here is why we did.',
+    makes: 'Three LinkedIn posts', noun: 'posts',
+  },
+  bio: {
+    slug: '/free-bio-generator', title: 'Social media bio generator',
+    blurb: 'Five bios under 150 characters.', sample: 'Small-batch cold brew, steeped 18 h. Bengaluru delivery.',
+    makes: 'Five bios', noun: 'bios',
+  },
+  tweet: {
+    slug: '/free-tweet-generator', title: 'Tweet / X post generator',
+    blurb: 'Five posts under 280 characters.', sample: 'Cold brew is not iced coffee. Thread on why it tastes sweeter.',
+    makes: 'Five posts', noun: 'posts',
+  },
+  youtube: {
+    slug: '/free-youtube-title-generator', title: 'YouTube title & description generator',
+    blurb: 'Five titles and two descriptions.', sample: 'I steeped coffee for 18 hours. Here is what changed',
+    makes: 'Five titles and two descriptions', noun: 'results',
+    labels: ['Title', 'Title', 'Title', 'Title', 'Title', 'Description', 'Description'],
+  },
+};
+
+/** Stated on the pages; the limit itself is the freeText bucket in lib/rate-limit. */
+export const FREE_TEXT_PER_HOUR = 10;
 
 /** Every free tool page, text and media, for the sitemap, footer and hub. */
 export const FREE_TOOL_PAGES: { slug: string; title: string }[] = [
   { slug: '/free-tools', title: 'Free social media tools' },
-  ...FREE_TOOL_IDS.map((id) => FREE_TOOLS[id]),
+  ...FREE_TOOL_IDS.map((id) => ({ slug: FREE_TOOLS[id].slug, title: FREE_TOOLS[id].title })),
   ...TRY_PAGES.map((t) => ({ slug: t.path, title: t.title })),
 ];
 

@@ -13,7 +13,7 @@ import { rewritePromptForMedia } from './ai/prompt-rewriter';
 import { createSeedanceTask, getSeedanceTask } from './ai/piapi';
 import { deleteObject, publicUrlFor, uploadBuffer } from './storage/r2';
 import { turnstileEnabled } from './turnstile';
-import { IMAGE_ASPECTS, VIDEO_ASPECTS, type ImageAspect, type VideoAspect } from './try-presets';
+import { IMAGE_ASPECTS, VIDEO_ASPECTS, TRY_PER_DAY as PER_DAY, type ImageAspect, type VideoAspect } from './try-presets';
 import { ensureProfile } from './api';
 import { classifyImageFailure } from '../app/api/v1/shared';
 
@@ -21,7 +21,7 @@ export type TryKind = 'image' | 'video';
 export type TryRow = typeof tryGenerations.$inferSelect;
 
 /** Free runs per browser or account per 24h. */
-export const TRY_PER_DAY: Record<TryKind, number> = { image: 2, video: 1 };
+export const TRY_PER_DAY: Record<TryKind, number> = PER_DAY;
 /**
  * Per IP per 24h. Offices, colleges and mobile carriers put many people behind
  * one IP, so once Turnstile is keeping bots out the IP only needs to stop
@@ -268,6 +268,12 @@ export async function claimTry(row: TryRow, userId: string, visitor: string | un
   return r;
 }
 
+export type TryPhase = 'queued' | 'generating' | 'finalizing' | null;
+const tryPhase = (r: TryRow): TryPhase =>
+  r.status === 'finalizing' ? 'finalizing'
+    : r.status !== 'pending' ? null
+      : r.kind === 'video' && !r.taskId ? 'queued' : 'generating';
+
 /** What the browser may see. The original URL only ever leaves for its owner. */
 export function tryView(r: TryRow, userId: string | null) {
   const unlocked = !!userId && r.claimedBy === userId;
@@ -276,6 +282,8 @@ export function tryView(r: TryRow, userId: string | null) {
     kind: r.kind,
     prompt: r.prompt,
     status: r.status === 'finalizing' ? 'pending' : r.status,
+    /** The real stage while it runs. An image renders in one step; a video waits for its provider task, then is watermarked. */
+    phase: tryPhase(r),
     error: r.error,
     previewUrl: r.previewUrl,
     unlocked,
