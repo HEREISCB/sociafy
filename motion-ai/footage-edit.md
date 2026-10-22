@@ -86,8 +86,8 @@ re-run (at most 3 runs). For a silent b-roll layer from other parts of the clips
   plate (≥ 4.5:1), fully opaque while held, fades ≤ 0.3 s.
 - End card only when the instructions ask for one (or for the logo/CTA at the end): brand colors,
   logo if provided else the brand name, tagline/CTA if provided, settled and held still ≥ 1.5 s.
-  Never invent a brand name, logo or wordmark: if `BRIEF.md` gives neither a logo nor a brand name, the
-  end card carries only the CTA/tagline or a line from the instructions — no made-up name taken from the speech.
+  Never invent a brand name, logo or wordmark: with no logo or brand name in `BRIEF.md`, use a name only if
+  the speaker clearly says it is theirs ("I'm Priya from Chai Studio"); otherwise the end card carries just the CTA.
 - Use the brand colors and fonts from `BRIEF.md` for every graphic.
 
 ## Audio
