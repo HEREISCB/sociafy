@@ -10,7 +10,7 @@ import { CreditMeter, type CreditsPayload } from './credits';
 import { useDismiss, useToast } from './ui';
 import type { AgentBlock, AgentStatus } from '../lib/agent/status';
 import { createSpring, project, rubberband, type Spring } from '../lib/ui/spring';
-import { ACCOUNT, NAV } from '../lib/ui/nav';
+import { ACCOUNT, ALSO_ACTIVE, NAV } from '../lib/ui/nav';
 
 type StatusPayload = Pick<AgentStatus, 'enabled' | 'blocked' | 'pendingReview' | 'nextPostAt'>;
 /** One key for the pill and the nav count, so SWR fetches it once. */
@@ -245,13 +245,15 @@ function useDrawerDrag(open: boolean, onClose: () => void, onOpen: () => void) {
 const PLACES: [string, string][] = [
   ...NAV.map((n): [string, string] => [n.href, n.label]),
   ...ACCOUNT.map((n): [string, string] => [n.href, n.label]),
+  ['/account/usage', 'Billing & usage'],
+  ['/account/invoices', 'Billing & usage'],
   ['/compose', 'New post'],
 ];
 const isUnder = (pathname: string, href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
 export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onMobileClose }) => {
   const pathname = usePathname() ?? '';
-  const isActive = (href: string) => isUnder(pathname, href);
+  const isActive = (href: string) => [href, ...(ALSO_ACTIVE[href] ?? [])].some((h) => isUnder(pathname, h));
   const { data: status } = useAgentStatus();
   const toReview = status?.pendingReview?.length ?? 0;
 
