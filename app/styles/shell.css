@@ -52,6 +52,7 @@ html:has(body .app), body:has(.app) { overflow: hidden; overscroll-behavior: non
 .nav-section[data-ready] .nav-ind { visibility: visible; transition: transform var(--dur-transition) var(--ease-transition); }
 .nav-item {
   position: relative;
+  transition: color var(--dur-primary) var(--ease-primary), background-color var(--dur-primary) var(--ease-primary);
   display: flex; align-items: center; gap: 10px;
   min-height: 34px;
   padding: 7px 8px;
@@ -59,9 +60,9 @@ html:has(body .app), body:has(.app) { overflow: hidden; overscroll-behavior: non
   color: var(--text-2);
   font-size: var(--fs-sm);
   text-decoration: none;
-  transition: color var(--dur-primary) var(--ease-primary);
 }
-@media (hover: hover) and (pointer: fine) { .nav-item:hover { color: var(--text); } }
+/* Hover paints a faint pill, so every destination reads as clickable (the active one already has the full pill). */
+@media (hover: hover) and (pointer: fine) { .nav-item:not(.active):hover { color: var(--text); background: color-mix(in oklch, var(--subtle) 60%, transparent); } }
 .nav-item.active { background: var(--subtle); color: var(--text); font-weight: 500; }
 /* Once the pill is placed it paints the active background. */
 .nav-section[data-ready] .nav-item.active { background: transparent; }
@@ -135,26 +136,38 @@ html:has(body .app), body:has(.app) { overflow: hidden; overscroll-behavior: non
 .topbar-spacer { flex: 1; }
 .topbar-actions { display: flex; align-items: center; gap: var(--s-2); }
 .topbar .lbl-sm { display: none; }
+@media (max-width: 900px) { .topbar .lbl-sm { display: inline; } }
 
+/* Autopilot status and the credit meter are buttons (they open /autopilot and
+   billing), so they wear a hairline like any secondary button, not bare text. */
+.shell-pill,
+.topbar .credit-meter {
+  height: 32px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  transition: background-color var(--dur-primary) var(--ease-primary), color var(--dur-primary) var(--ease-primary);
+}
+@media (hover: hover) and (pointer: fine) { .topbar a.credit-meter.ok:hover { background: var(--subtle); border-color: var(--line-strong); } }
+.topbar .credit-meter.ghost { background: transparent; }
+.topbar .credit-meter.warn { border-color: color-mix(in oklch, var(--warn) 40%, var(--line)); }
+.topbar .credit-meter.crit { border-color: color-mix(in oklch, var(--err) 40%, var(--line)); }
 /* Autopilot status: state only (on / paused / needs you / loading); the title says why. */
 .shell-pill {
   display: inline-flex; align-items: center; gap: var(--s-2);
-  height: 32px;
   padding: 0 10px;
   border-radius: var(--r-sm);
   font-size: var(--fs-xs);
   color: var(--text-2);
   white-space: nowrap;
   cursor: pointer;
-  transition: background-color var(--dur-primary) var(--ease-primary), color var(--dur-primary) var(--ease-primary);
 }
-@media (hover: hover) and (pointer: fine) { .shell-pill:hover { background: var(--subtle); color: var(--text); } }
+@media (hover: hover) and (pointer: fine) { .shell-pill:hover { background: var(--subtle); border-color: var(--line-strong); color: var(--text); } }
 .shell-pill .dot {
   width: 7px; height: 7px; border-radius: 50%; flex: none;
   background: var(--text-3);
 }
 .shell-pill[data-state="on"] .dot { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
-.shell-pill[data-state="blocked"] { background: var(--warn-soft); color: var(--warn-ink); }
+.shell-pill[data-state="blocked"] { background: var(--warn-soft); border-color: color-mix(in oklch, var(--warn) 40%, var(--line)); color: var(--warn-ink); }
 .shell-pill[data-state="blocked"] .dot { background: var(--warn); }
 .shell-pill[data-state="loading"] .dot { background: var(--line-strong); }
 
@@ -167,7 +180,9 @@ html:has(body .app), body:has(.app) { overflow: hidden; overscroll-behavior: non
   position: absolute; top: 1px; right: 0;
   min-width: 15px; height: 15px; padding: 0 4px;
   border-radius: var(--r-pill);
-  background: var(--accent); color: var(--text);
+  /* Ink, not orange: a count, not an alarm. A ring of paper keeps it off the bell's outline. */
+  background: var(--text); color: var(--bg);
+  box-shadow: 0 0 0 2px var(--bg);
   font: 600 10px/15px var(--mono);
   text-align: center;
 }
@@ -202,11 +217,6 @@ html:has(body .app), body:has(.app) { overflow: hidden; overscroll-behavior: non
 .notif-k.warn { background: var(--warn-soft); color: var(--warn-ink); }
 .notif-k.err { background: var(--err-soft); color: var(--err-ink); }
 .notif-t { display: block; font-size: var(--fs-sm); font-weight: 500; line-height: 1.35; overflow-wrap: anywhere; }
-.notif-item.unread .notif-t::before {
-  content: ""; display: inline-block;
-  width: 6px; height: 6px; margin-right: 6px; vertical-align: 2px;
-  border-radius: 50%; background: var(--accent);
-}
 .notif-b {
   margin-top: 2px;
   font-size: var(--fs-xs); color: var(--text-2); line-height: 1.4;
@@ -281,8 +291,8 @@ html:has(body .app), body:has(.app) { overflow: hidden; overscroll-behavior: non
   .topbar-actions { gap: 2px; }
   /* Labels collapse to dot / number / icon; aria-labels keep the words. */
   .topbar .lbl { display: none; }
-  .shell-pill { padding: 0 8px; height: 40px; }
-  .credit-meter { height: 40px; padding: 0 8px; }
+  .shell-pill { padding: 0 10px; height: 40px; }
+  .topbar .credit-meter { height: 40px; padding: 0 10px; }
   .icon-btn.shell-bell { width: 40px; height: 40px; }
   .shell-new { width: 40px; height: 40px; padding: 0; justify-content: center; }
   /* The notifications sheet spans the topbar, under it. */

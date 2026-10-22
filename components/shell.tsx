@@ -27,13 +27,15 @@ const BLOCKED: Record<AgentBlock, string> = {
 /**
  * AutopilotStatus: state only — on, paused, needs you, or loading (a neutral
  * dot, never a false "paused"). The title says why; click opens /autopilot.
- * On phones the words collapse to the dot and the aria-label keeps them.
+ * On phones the words shorten to On / Paused / Needs you; the aria-label keeps them whole.
  */
 export const AutopilotStatusPill: React.FC<{ onClick?: () => void }> = ({ onClick }) => {
   const { data, error } = useAgentStatus();
   // undefined = not fetched yet (same on the server and first client render).
   const state = data === undefined && !error ? 'loading' : !data?.enabled ? 'paused' : data.blocked ? 'blocked' : 'on';
   const label = { loading: 'Autopilot', paused: 'Autopilot paused', blocked: 'Autopilot needs you', on: 'Autopilot on' }[state];
+  // Phones keep a word next to the dot: a bare dot didn't read as a button.
+  const short = { loading: '', paused: 'Paused', blocked: 'Needs you', on: 'On' }[state];
   const title = state === 'loading' ? 'Checking Autopilot…'
     : state === 'paused' ? 'Paused: nothing new will be drafted'
     : state === 'blocked' && data?.blocked ? BLOCKED[data.blocked]
@@ -43,6 +45,7 @@ export const AutopilotStatusPill: React.FC<{ onClick?: () => void }> = ({ onClic
     <button type="button" className="shell-pill" data-state={state} onClick={onClick} title={title} aria-label={state === 'loading' ? 'Autopilot status loading' : label}>
       <span className="dot" aria-hidden />
       <span className="lbl">{label}</span>
+      {short && <span className="lbl-sm" aria-hidden>{short}</span>}
     </button>
   );
 };
@@ -548,7 +551,7 @@ const NotificationsBell: React.FC = () => {
   const row = (a: ActivityItem) => {
     const { tone, icon } = activityTone(a.kind);
     return (
-      <Link key={a.id} href={activityHref(a.kind)} className={`notif-item${isNew(a, seenAtOpen) ? ' unread' : ''}`} onClick={close}>
+      <Link key={a.id} href={activityHref(a.kind)} className="notif-item" onClick={close}>
         <span className={`notif-k ${tone}`} aria-hidden="true"><Icon name={icon} size={14} /></span>
         <span>
           <span className="notif-t">{a.title}</span>

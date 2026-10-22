@@ -2,6 +2,23 @@
    Markup uses the short modifier names (.btn.primary, .card-head, .chip.live …);
    the unused BEM aliases were dropped. */
 
+/* ---------- Focus ----------
+   One ring for the whole product: 2px accent outline, 2px off the edge.
+   Keyboard only. :focus-visible alone isn't enough: Chrome also lights it on
+   the element you last CLICKED as soon as any key is pressed (the A/S/←/→
+   shortcuts on This week), which put a thick orange ring on the active nav
+   item and the review tabs. app/layout.tsx sets html[data-kbd] on Tab and
+   clears it on any pointer press; without it, rings are off, except in text
+   fields, where you need to see where you're typing. */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+:root:not([data-kbd]) :focus-visible:not(textarea, select, [contenteditable], input:not([type="checkbox"], [type="radio"], [type="range"], [type="button"], [type="submit"], [type="color"], [type="file"])) { outline: none; }
+/* Tabs sit in scrolling strips that would clip an outside ring to a stray bar. */
+[role="tab"]:focus-visible { outline-offset: -2px; }
+
+/* A bare link inside a sentence is underlined, or it reads as plain text. */
+p a:not([class]), .why a, .field-note a { text-decoration: underline; text-decoration-color: color-mix(in oklch, currentColor 45%, transparent); text-underline-offset: 2px; }
+@media (hover: hover) and (pointer: fine) { p a:not([class]):hover, .why a:hover, .field-note a:hover { text-decoration-color: currentColor; } }
+
 /* ---------- Layout helpers ---------- */
 .stack { display: flex; flex-direction: column; gap: var(--s-3); }
 .row { display: flex; align-items: center; gap: var(--s-2); }
@@ -96,13 +113,8 @@ select.input {
   transition: border-color 0.12s;
 }
 .input::placeholder { color: var(--text-3); }
-/* Same 2px accent ring as buttons (base.css), so focus reads the same everywhere. */
-.input:focus { outline: none; }
-.input:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-  border-color: var(--line-strong);
-}
+/* Fields: the same ring as everything else ("Focus" above). */
+.input:focus-visible { border-color: var(--line-strong); }
 .input[aria-invalid="true"] { border-color: var(--err); }
 .input:disabled { opacity: 0.55; cursor: not-allowed; }
 textarea.input { resize: vertical; min-height: 72px; }
@@ -337,6 +349,7 @@ textarea.input { resize: vertical; min-height: 72px; }
   background: var(--text);
 }
 .mode-switch .opt:disabled { opacity: 0.45; cursor: not-allowed; }
+@media (hover: hover) and (pointer: fine) { .mode-switch .opt:not(.active):not(:disabled):hover { color: var(--text); } }
 /* <Seg>: one ink indicator slides between options (clip-path, no reflow). */
 .seg { width: fit-content; max-width: 100%; }
 .seg-ind {

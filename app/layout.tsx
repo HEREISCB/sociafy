@@ -42,6 +42,9 @@ export const metadata: Metadata = {
 
 const REVEAL_READY = `try{if(!matchMedia('(prefers-reduced-motion: reduce)').matches){var d=document.documentElement;d.classList.add('reveal-ready');setTimeout(function(){if(!window.__revealBooted)d.classList.remove('reveal-ready')},4000)}}catch(e){}`;
 
+// Focus rings show for keyboard users only (primitives.css "Focus"): Tab turns them on, any pointer press turns them off.
+const KBD_FOCUS = `(function(d){addEventListener('keydown',function(e){if(e.key==='Tab')d.setAttribute('data-kbd','')},true);addEventListener('pointerdown',function(){d.removeAttribute('data-kbd')},true)})(document.documentElement)`;
+
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
@@ -67,7 +70,7 @@ export default function RootLayout({
           (components/reveal-observer.tsx) hasn't booted within 4s, drop the
           class so content can never stay stuck invisible. */}
       <head>
-        <script dangerouslySetInnerHTML={{ __html: REVEAL_READY }} />
+        <script dangerouslySetInnerHTML={{ __html: REVEAL_READY + ';' + KBD_FOCUS }} />
       </head>
       <body suppressHydrationWarning>{children}</body>
     </html>

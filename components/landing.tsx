@@ -186,7 +186,7 @@ const FAQ = ({ credits }: { credits: Record<Tier, number> }) => {
   const c = (t: Tier) => credits[t].toLocaleString('en-US');
   const items: [string, React.ReactNode][] = [
     ['How do credits work?', `A text post costs ${CREDIT_PRICES.text_post} credit, an image ${CREDIT_PRICES.image_medium_1024} and a 720p reel ${CREDIT_PRICES.video_8s_720p_quality}. Plans include ${c('starter')}, ${c('pro')} or ${c('business')} credits a month. Every button that spends credits shows the cost first.`],
-    ['Does it post without my approval?', 'No, unless you allow it. Autopilot (Pro and Business) is off by default, and you choose what it may publish on its own.'],
+    ['Does it post without my approval?', 'On Starter, never: you schedule every post. Autopilot (Pro and Business) posts each draft at its planned time by default, and you can edit or skip any of them in This week before then. Switch it to Ask me first and nothing posts until you approve it.'],
     ['Which platforms are supported?', 'X, LinkedIn, Instagram, Facebook, TikTok and YouTube, on every plan. Each gets a post shaped for it, not a copy-paste.'],
     ['Can I cancel?', <>Anytime, from Plan settings. It takes effect at the end of your billing cycle. Plans are paid from day one. See the <Link href="/legal/refund">refund policy</Link>.</>],
   ];
