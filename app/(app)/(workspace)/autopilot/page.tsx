@@ -1,14 +1,10 @@
 import PlanSettings from '../../../../components/autopilot/plan-settings';
+import { PageHeader } from '../../../../components/ui';
 
 export default function AutopilotPage() {
   return (
     <>
-      <div className="page-header">
-        <div>
-          <h1>Autopilot</h1>
-          <p className="page-header__sub">What autopilot prepares for you between visits.</p>
-        </div>
-      </div>
+      <PageHeader title="Autopilot" sub="What Sociafy makes for you between visits." />
       <PlanSettings />
     </>
   );
