@@ -198,7 +198,7 @@ textarea.input { resize: vertical; min-height: 72px; }
   display: inline-grid; place-items: center;
   min-width: 18px; height: 18px; padding: 0 5px;
   border-radius: var(--r-pill);
-  background: var(--accent-soft); color: var(--accent-ink);
+  background: var(--subtle); color: var(--text); /* neutral: orange is reserved for things that need action */
   font: 500 11px/1 var(--mono);
 }
 
