@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react';
 import { SignIn, ClerkLoading, ClerkLoaded } from '@clerk/nextjs';
 import Link from 'next/link';
-import { AuthLoading } from '../../../../components/auth-loading';
+import { AuthLoading, AuthTabs } from '../../../../components/auth-loading';
+import { Icon } from '../../../../components/icons';
 import { safeNextPath } from '../../../../lib/safe-next';
 
 /**
@@ -45,21 +46,22 @@ export default function Page() {
           <h1>Welcome back</h1>
           <p>{plan ? `Log in to check out for the ${plan} plan.` : 'Log in with Google or your email.'}</p>
         </div>
+        {plan && (
+          <span className="badge accent"><Icon name="bolt" size={12} /> Then check out: {plan} plan</span>
+        )}
+        <AuthTabs active="in" />
         <ClerkLoading>
           <AuthLoading />
         </ClerkLoading>
         <ClerkLoaded>
           <SignIn
-            appearance={{
-              elements: {
-                rootBox: { width: '100%' },
-                card: { background: 'var(--surface)', border: '1px solid var(--line)', boxShadow: 'none', borderRadius: 'var(--r)' },
-              },
-            }}
             signUpUrl="/sign-up"
             forceRedirectUrl={tryReturn() ?? nextReturn()}
           />
         </ClerkLoaded>
+        <p className="auth-foot">
+          Paid plans only, no free trial. By continuing you agree to the <Link href="/legal/terms">Terms</Link> and <Link href="/legal/privacy">Privacy policy</Link>.
+        </p>
       </div>
     </div>
   );

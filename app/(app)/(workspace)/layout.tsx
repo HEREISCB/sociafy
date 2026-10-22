@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useSWRConfig } from 'swr';
 import { Sidebar, Topbar } from '../../../components/shell';
+import { ToastProvider } from '../../../components/ui';
 
 // The signed-in app shell: sidebar + topbar mounted once for every workspace
 // and settings route. Sign-in, sign-up and onboarding sit outside this group.
@@ -23,12 +24,16 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
   }, [mutate]);
 
   return (
-    <div className="app">
-      <Sidebar mobileOpen={sidebarOpen} onMobileClose={() => setSidebarOpen(false)} />
-      <div className="main">
-        <Topbar onMenuClick={() => setSidebarOpen(true)} />
-        <div className="page">{children}</div>
+    <ToastProvider>
+      <a className="skip-link" href="#main">Skip to content</a>
+      <div className="app">
+        <Sidebar mobileOpen={sidebarOpen} onMobileClose={() => setSidebarOpen(false)} />
+        <div className="main">
+          <Topbar onMenuClick={() => setSidebarOpen(true)} menuOpen={sidebarOpen} />
+          {/* The only scroll container. template.tsx replays .arrive on it per route. */}
+          <main id="main" className="page" tabIndex={-1}>{children}</main>
+        </div>
       </div>
-    </div>
+    </ToastProvider>
   );
 }

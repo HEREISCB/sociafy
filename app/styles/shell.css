@@ -1,4 +1,4 @@
-/* App shell: sidebar, topbar, drawer, page container. */
+/* App shell: sidebar, topbar, drawer, page container — plus the auth pages and the 404. */
 .app {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr); /* minmax: a wide child (the day strip) must not widen the column */
@@ -19,6 +19,7 @@ html:has(body .app), body:has(.app) { overflow: hidden; overscroll-behavior: non
   flex-direction: column;
   padding: var(--s-4) var(--s-3) var(--s-3);
   gap: var(--s-6);
+  min-height: 0;
 }
 .brand {
   display: flex; align-items: center; gap: 10px;
@@ -39,20 +40,35 @@ html:has(body .app), body:has(.app) { overflow: hidden; overscroll-behavior: non
 .brand-name { font-weight: 600; letter-spacing: -0.02em; font-size: var(--fs-md); }
 .brand-name .dot { color: var(--accent); }
 
-.nav-section { display: flex; flex-direction: column; gap: 2px; }
+.nav-section { display: flex; flex-direction: column; gap: 2px; position: relative; }
+/* One --subtle pill slides between the main destinations (shell.tsx places it). */
+.nav-ind {
+  position: absolute; left: 0; right: 0; top: 0;
+  border-radius: var(--r-sm);
+  background: var(--subtle);
+  pointer-events: none;
+  visibility: hidden;
+}
+.nav-section[data-ready] .nav-ind { visibility: visible; transition: transform var(--dur-transition) var(--ease-transition); }
 .nav-item {
+  position: relative;
   display: flex; align-items: center; gap: 10px;
+  min-height: 34px;
   padding: 7px 8px;
   border-radius: var(--r-sm);
   color: var(--text-2);
   font-size: var(--fs-sm);
   text-decoration: none;
-  transition: background 0.12s, color 0.12s;
+  transition: color var(--dur-primary) var(--ease-primary);
 }
-@media (hover: hover) and (pointer: fine) { .nav-item:hover { background: var(--subtle); color: var(--text); } }
+@media (hover: hover) and (pointer: fine) { .nav-item:hover { color: var(--text); } }
 .nav-item.active { background: var(--subtle); color: var(--text); font-weight: 500; }
+/* Once the pill is placed it paints the active background. */
+.nav-section[data-ready] .nav-item.active { background: transparent; }
 .nav-item .ic { width: 16px; height: 16px; flex: 0 0 16px; }
 .nav-item.active .ic { color: var(--accent); }
+.nav-item .count { margin-left: auto; }
+.nav-label { padding: 0 8px 2px; font-size: 11px; font-weight: 500; color: var(--text-3); }
 
 .sidebar-foot {
   margin-top: auto;
@@ -62,6 +78,7 @@ html:has(body .app), body:has(.app) { overflow: hidden; overscroll-behavior: non
 .user-card {
   display: flex; align-items: center; gap: 10px;
   width: 100%;
+  min-height: 40px;
   padding: 6px 8px;
   margin-top: var(--s-2);
   border: 0;
@@ -86,49 +103,26 @@ html:has(body .app), body:has(.app) { overflow: hidden; overscroll-behavior: non
   font-size: var(--fs-xs); font-weight: 600;
 }
 .user-avatar img { width: 100%; height: 100%; object-fit: cover; }
-
-/* Account menu: opens upward from the user card. */
-.user-menu-anchor { position: relative; }
-.user-menu {
-  position: absolute; bottom: calc(100% + 6px); left: 0; right: 0;
-  min-width: 232px;
-  padding: var(--s-1);
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  box-shadow: var(--shadow-pop);
-  z-index: 60;
-}
-.user-menu-who { padding: var(--s-2) 10px var(--s-3); border-bottom: 1px solid var(--line); margin-bottom: var(--s-1); }
-.user-menu-email {
-  font-size: var(--fs-xs); color: var(--text-2);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.user-menu-item {
-  display: flex; align-items: center; gap: 10px;
-  width: 100%;
-  padding: 7px 10px;
-  border: 0; border-radius: var(--r-sm);
-  background: none;
-  color: var(--text);
-  font: inherit; font-size: var(--fs-sm);
-  text-align: left; text-decoration: none;
-  cursor: pointer;
-}
-.user-menu-item svg { color: var(--text-2); flex: 0 0 auto; }
-@media (hover: hover) and (pointer: fine) { .user-menu-item:hover { background: var(--subtle); } }
-.user-menu-item:focus-visible { background: var(--subtle); }
-.user-menu-aside { margin-left: auto; font-size: var(--fs-xs); color: var(--text-2); white-space: nowrap; }
-.user-menu-sep { height: 1px; margin: var(--s-1) 0; background: var(--line); }
 .user-meta { display: flex; flex-direction: column; line-height: 1.3; min-width: 0; }
 .user-name {
   font-size: var(--fs-sm); font-weight: 500;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
+/* Account menu (.pop.menu): opens upward from the user card. Identity only —
+   the destinations are in the sidebar right above it. */
+.user-menu-anchor { position: relative; }
+.user-menu { bottom: calc(100% + 6px); left: 0; right: 0; transform-origin: bottom left; }
+.user-menu-who { padding: var(--s-2) 10px var(--s-3); border-bottom: 1px solid var(--line); margin-bottom: var(--s-1); }
+.user-menu-email {
+  font-size: var(--fs-xs); color: var(--text-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
 /* ---------- Main + topbar ---------- */
-.main { display: flex; flex-direction: column; overflow: clip; min-height: 0; }
+.main { display: flex; flex-direction: column; overflow: clip; min-height: 0; min-width: 0; }
 .topbar {
+  position: relative; z-index: 30;
   height: 52px;
   border-bottom: 1px solid var(--line);
   display: flex; align-items: center;
@@ -137,82 +131,115 @@ html:has(body .app), body:has(.app) { overflow: hidden; overscroll-behavior: non
   background: var(--bg);
   flex-shrink: 0;
 }
+.topbar-where { display: none; min-width: 0; font-size: var(--fs-sm); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .topbar-spacer { flex: 1; }
 .topbar-actions { display: flex; align-items: center; gap: var(--s-2); }
+.topbar .lbl-sm { display: none; }
 
-/* Autopilot status: plain text with a status dot, no chrome until hover. */
+/* Autopilot status: state only (on / paused / needs you / loading); the title says why. */
 .shell-pill {
   display: inline-flex; align-items: center; gap: var(--s-2);
-  height: 30px;
+  height: 32px;
   padding: 0 10px;
   border-radius: var(--r-sm);
   font-size: var(--fs-xs);
   color: var(--text-2);
+  white-space: nowrap;
   cursor: pointer;
+  transition: background-color var(--dur-primary) var(--ease-primary), color var(--dur-primary) var(--ease-primary);
 }
 @media (hover: hover) and (pointer: fine) { .shell-pill:hover { background: var(--subtle); color: var(--text); } }
 .shell-pill .dot {
-  width: 6px; height: 6px; border-radius: 50%;
+  width: 7px; height: 7px; border-radius: 50%; flex: none;
   background: var(--text-3);
 }
-.shell-pill.on .dot { background: var(--ok); }
-.shell-pill.blocked { color: var(--warn-ink); }
-.shell-pill.blocked .dot { background: var(--warn); }
+.shell-pill[data-state="on"] .dot { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
+.shell-pill[data-state="blocked"] { background: var(--warn-soft); color: var(--warn-ink); }
+.shell-pill[data-state="blocked"] .dot { background: var(--warn); }
+.shell-pill[data-state="loading"] .dot { background: var(--line-strong); }
 
-/* Bell */
+.credit-meter .unit { margin-left: -2px; }
+
+/* Bell + notifications */
 .shell-pop-anchor { position: relative; }
-.shell-bell { position: relative; }
-.shell-bell .unread {
-  position: absolute; top: 5px; right: 6px;
-  width: 6px; height: 6px; border-radius: 50%;
-  background: var(--accent);
+.icon-btn.shell-bell { position: relative; width: 32px; height: 32px; }
+.shell-bell .n {
+  position: absolute; top: 1px; right: 0;
+  min-width: 15px; height: 15px; padding: 0 4px;
+  border-radius: var(--r-pill);
+  background: var(--accent); color: var(--text);
+  font: 600 10px/15px var(--mono);
+  text-align: center;
 }
-.shell-pop {
-  position: absolute; top: calc(100% + 8px); right: 0;
-  width: min(360px, calc(100vw - 24px));
-  max-height: 480px; overflow: auto;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  box-shadow: var(--shadow-pop);
-  z-index: 60;
+.notif {
+  top: calc(100% + 8px); right: 0;
+  width: min(380px, calc(100vw - 24px));
+  max-height: min(480px, calc(100dvh - 80px));
+  display: flex; flex-direction: column;
 }
-.shell-pop-head {
-  padding: var(--s-3) var(--s-4);
+.notif-head {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--s-2);
+  padding: var(--s-2) var(--s-2) var(--s-2) var(--s-4);
   border-bottom: 1px solid var(--line);
   font-size: var(--fs-sm); font-weight: 600;
 }
-.shell-pop-empty { padding: var(--s-4); font-size: var(--fs-sm); color: var(--text-2); }
-.shell-pop-item { padding: 10px var(--s-4); border-bottom: 1px solid var(--line); }
-.shell-pop-item:last-child { border-bottom: none; }
-.shell-pop-title { font-size: var(--fs-sm); font-weight: 500; line-height: 1.4; }
-.shell-pop-body {
-  font-size: var(--fs-xs); color: var(--text-2); margin-top: 2px; line-height: 1.4;
+.notif-list { overflow: auto; overscroll-behavior: contain; padding: var(--s-1); }
+.notif-group { padding: var(--s-2) var(--s-3) var(--s-1); font-size: 11px; font-weight: 500; color: var(--text-3); }
+.notif-item {
+  display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: start;
+  padding: var(--s-2);
+  border-radius: var(--r-sm);
+  color: inherit; text-decoration: none;
+}
+@media (hover: hover) and (pointer: fine) { .notif-item:hover { background: var(--subtle); } }
+.notif-item:focus-visible { background: var(--subtle); }
+.notif-k {
+  width: 28px; height: 28px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--subtle); color: var(--text-2);
+}
+.notif-k.ok { background: var(--ok-soft); color: var(--ok-ink); }
+.notif-k.warn { background: var(--warn-soft); color: var(--warn-ink); }
+.notif-k.err { background: var(--err-soft); color: var(--err-ink); }
+.notif-t { display: block; font-size: var(--fs-sm); font-weight: 500; line-height: 1.35; overflow-wrap: anywhere; }
+.notif-item.unread .notif-t::before {
+  content: ""; display: inline-block;
+  width: 6px; height: 6px; margin-right: 6px; vertical-align: 2px;
+  border-radius: 50%; background: var(--accent);
+}
+.notif-b {
+  margin-top: 2px;
+  font-size: var(--fs-xs); color: var(--text-2); line-height: 1.4;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
-.shell-pop-time { font-size: var(--fs-xs); color: var(--text-3); margin-top: var(--s-1); }
+.notif .empty { padding: 28px 16px; }
+.notif-tm { font-size: 11px; color: var(--text-3); white-space: nowrap; }
 
-/* Page content */
+/* Page content: <main id="main" class="page"> — the only scroll container. */
 .page {
   flex: 1;
   min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
-  /* Exposed so a page can pin a bar flush to the scrollport's edges (compose). */
+  /* Exposed so a page can pin a bar flush to the scrollport's edges (.pinbar). */
   --page-x: var(--s-8);
   --page-b: 80px;
   padding: 28px var(--page-x) var(--page-b);
 }
+.page:focus { outline: none; }
+/* A page whose root should fill the scroll area, so a <PinBar> sits on the
+   window's bottom edge even when the content is short. */
+.page:has(> .page-fill) { display: flex; flex-direction: column; }
+.page-fill { flex: 1 0 auto; display: flex; flex-direction: column; }
 
 /* ---------- Mobile drawer (desktop hides these) ---------- */
 .topbar-menu-btn {
   display: none;
-  width: 36px; height: 36px;
+  width: 44px; height: 44px;
   border-radius: var(--r-sm);
   align-items: center; justify-content: center;
   color: var(--text-2);
   cursor: pointer;
-  margin-right: -4px;
   flex-shrink: 0;
 }
 @media (hover: hover) and (pointer: fine) { .topbar-menu-btn:hover { background: var(--subtle); color: var(--text); } }
@@ -240,20 +267,27 @@ html:has(body .app), body:has(.app) { overflow: hidden; overscroll-behavior: non
   .sidebar-scrim {
     display: block;
     position: fixed; inset: 0;
-    background: rgba(10, 10, 10, 0.42);
+    background: var(--scrim);
     z-index: 89;
     /* shell.tsx fades it in step with the drawer. */
     opacity: 0;
     pointer-events: none;
   }
-  .nav-item { padding: 10px 8px; }
+  .nav-item { min-height: 44px; padding: 10px 8px; }
 
   .topbar-menu-btn { display: inline-flex; }
-  .topbar { padding: 0 var(--s-3); gap: var(--s-2); height: 56px; }
-  .topbar-actions { gap: var(--s-1); }
-  .shell-pill .detail { display: none; }
-  .shell-new-label { display: none; }
-  .shell-new { padding: 6px 10px; }
+  .topbar { padding: 0 var(--s-2) 0 var(--s-1); gap: 2px; height: 56px; }
+  .topbar-where { display: block; }
+  .topbar-actions { gap: 2px; }
+  /* Labels collapse to dot / number / icon; aria-labels keep the words. */
+  .topbar .lbl { display: none; }
+  .shell-pill { padding: 0 8px; height: 40px; }
+  .credit-meter { height: 40px; padding: 0 8px; }
+  .icon-btn.shell-bell { width: 40px; height: 40px; }
+  .shell-new { width: 40px; height: 40px; padding: 0; justify-content: center; }
+  /* The notifications sheet spans the topbar, under it. */
+  .shell-pop-anchor { position: static; }
+  .notif { top: calc(100% + 6px); left: 8px; right: 8px; width: auto; max-height: calc(100dvh - 76px); }
 
   .page { --page-x: 14px; --page-b: 64px; padding: var(--s-4) var(--page-x) var(--page-b); }
 }
@@ -261,3 +295,59 @@ html:has(body .app), body:has(.app) { overflow: hidden; overscroll-behavior: non
 @media (max-width: 480px) {
   .page { --page-x: var(--s-3); --page-b: 56px; padding: var(--s-3) var(--page-x) var(--page-b); }
 }
+
+/* ---------- Auth (sign-in / sign-up) ---------- */
+.auth-shell {
+  min-height: 100dvh;
+  display: grid; place-items: center;
+  background: var(--bg);
+  padding: 40px 20px;
+}
+.auth-stack { width: min(400px, 100%); display: flex; flex-direction: column; align-items: center; gap: var(--s-4); }
+.auth-brand { display: inline-flex; align-items: center; gap: var(--s-2); color: inherit; }
+.auth-head { text-align: center; max-width: 380px; }
+.auth-head h1 { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.02em; }
+.auth-head p { margin: 6px 0 0; font-size: var(--fs-sm); color: var(--text-2); line-height: 1.5; }
+.auth-tabs .opt { padding-block: 7px; font-size: var(--fs-sm); }
+.auth-stack .cl-rootBox, .auth-stack .cl-cardBox { width: 100%; }
+/* Our heading replaces Clerk's on the first step only; later steps ("Check
+   your email") keep theirs because it carries the address and what to do. */
+.auth-stack .cl-signIn-start .cl-header,
+.auth-stack .cl-signUp-start .cl-header { display: none; }
+/* Same footprint as Clerk's card, so nothing jumps when it arrives. */
+.auth-loading {
+  width: 100%;
+  min-height: 330px;
+  display: grid; align-content: start; gap: 14px;
+  padding: 24px 20px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+}
+.auth-loading .empty { padding: var(--s-4) 0; }
+.auth-loading .empty a { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
+.auth-foot { margin: 0; text-align: center; font-size: var(--fs-xs); color: var(--text-2); line-height: 1.5; }
+.auth-foot a { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
+
+/* ---------- 404 ---------- */
+.nf { flex: 1; display: grid; place-items: center; text-align: center; padding: 48px 0 64px; }
+.nf-code { font-family: var(--mono); font-size: var(--fs-xs); color: var(--text-2); letter-spacing: 0.08em; }
+.nf h1 { margin: 8px 0; font-size: 28px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.15; }
+.nf p { margin: 0 auto 20px; max-width: 42ch; font-size: var(--fs-sm); color: var(--text-2); }
+.nf-row { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--s-2); }
+/* A sheet of paper, slightly askew: the page that isn't here. */
+.nf-paper {
+  position: relative;
+  width: 84px; height: 104px; margin: 0 auto 20px;
+  border: 1px solid var(--line-strong); border-radius: var(--r-sm);
+  background: var(--surface);
+  transform: rotate(-4deg);
+}
+.nf-paper::before, .nf-paper::after {
+  content: ""; position: absolute; left: 14px; right: 14px; height: 6px;
+  border-radius: 3px; background: var(--subtle);
+}
+.nf-paper::before { top: 20px; }
+.nf-paper::after { top: 34px; right: 30px; }
+.page:has(> .nf) { display: flex; flex-direction: column; }
+.nf-public .nf { padding: 96px 0 120px; }
