@@ -45,8 +45,8 @@ type PlanPayload = {
 type BrandPayload = { kit: BrandKit; profile: BrandProfile; motion?: boolean };
 type Section = 'status' | 'make' | 'where' | 'budget' | 'rules';
 
-/** "Post automatically" threshold; new users start on 101 ("Ask me first"). */
-const AUTO_THRESHOLD = 80;
+/** Auto-schedule threshold: 1 = "Post automatically" (the default; every rated draft), 101 = "Ask me first". */
+const AUTO_THRESHOLD = 1;
 const DAY = 24 * 60 * 60 * 1000;
 
 const BLOCKED: Record<NonNullable<AgentStatus['blocked']>, { text: string; href: string; cta: string }> = {
@@ -137,7 +137,7 @@ export default function PlanSettings() {
   const burn = burnOf(mix);
   const locked = !!unauth || !settings;
   const horizon = settings?.planHorizonDays ?? 7;
-  const auto = (settings?.autoPublishThreshold ?? 101) <= 100;
+  const auto = (settings?.autoPublishThreshold ?? AUTO_THRESHOLD) <= 100;
   const balance = status?.balance ?? null;
 
   /** Platforms, niches and the weekly number all feed the derived per-platform caps and the mix. */
@@ -424,10 +424,10 @@ export default function PlanSettings() {
                 <Seg<'ask' | 'auto'>
                   size="sm" label="Before posting" value={auto ? 'auto' : 'ask'}
                   onChange={(v) => persist('rules', { autoPublishThreshold: v === 'auto' ? AUTO_THRESHOLD : 101 })}
-                  options={[{ id: 'ask', label: 'Ask me first', disabled: locked }, { id: 'auto', label: 'Post automatically', disabled: locked }]}
+                  options={[{ id: 'auto', label: <>Post automatically <small className="seg-aside">default</small></>, disabled: locked }, { id: 'ask', label: 'Ask me first', disabled: locked }]}
                 />
               </div>
-              <p className="ap-note">{auto ? `Drafts scoring ${AUTO_THRESHOLD}+ post on their own; the rest wait for you.` : 'Every draft waits for your approval on Home.'}</p>
+              <p className="ap-note">{auto ? 'Posts go out at their planned time. Until then you can edit or skip them in This week.' : 'Nothing posts until you approve it in This week.'}</p>
             </div>
             <div className="ap-item">
               <div className="ap-ih">

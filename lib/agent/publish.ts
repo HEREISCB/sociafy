@@ -6,6 +6,7 @@ import { postKind, supportsKind, unsupportedReason } from '../platforms/capabili
 import { getAdapter } from '../platforms/registry';
 import { cantPost } from '../ui/health';
 import { postText } from './postText';
+import { PLATFORM_LABELS } from '../ui/platforms';
 
 export { postText };
 
@@ -28,7 +29,7 @@ export type QueueResult = { queued: Platform[]; skipped: Platform[]; reasons: Re
 /**
  * Turn a draft into scheduled posts at `at` — one per target platform that has
  * an account and whose API takes this kind of post (the same checks as
- * POST /api/schedule). `skipDisconnected` (the user's Approve) also leaves out
+ * POST /api/schedule). `skipDisconnected` (Approve, and autopilot's own scheduling) also leaves out
  * accounts that need reconnecting: the cron would fail those posts for good at
  * their slot (lib/cron/publish.ts) and never retries them after a reconnect. `caps` = autopilot's per-platform weekly limits, counted
  * over the 7 days up to `at`. Marks the draft scheduled only if something was
@@ -115,7 +116,19 @@ export async function publishOrHold(settings: Settings, draft: Draft, score: num
   const now = new Date();
   const planned = draft.plannedAt ? new Date(draft.plannedAt) : null;
   const when = planned && planned.getTime() > now.getTime() + 5 * 60_000 ? planned : nextPostingWindow(now, settings.quietHours);
-  const { queued, skipped } = await queueDraft(draft, when, (settings.postsPerWeekByPlatform ?? {}) as Partial<Record<Platform, number>>);
+  // Same rule as the user's Approve: an account that needs reconnecting would
+  // fail its post for good at the slot, so leave it out and say so.
+  const { queued, skipped, reasons } = await queueDraft(draft, when, (settings.postsPerWeekByPlatform ?? {}) as Partial<Record<Platform, number>>, true);
+  const gone = skipped.filter((p) => reasons[p] === 'disconnected');
+  if (gone.length) {
+    const names = gone.map((p) => PLATFORM_LABELS[p] ?? p).join(', ');
+    await db().insert(activityLog).values({
+      userId, kind: 'publish_warning',
+      title: `Not posted to ${names}: reconnect ${gone.length > 1 ? 'them' : 'it'}`,
+      body: `Autopilot left ${names} out of "${draft.title}" because the account needs reconnecting. Reconnect it in Settings → Connections; later posts will include it again.`,
+      meta: { draftId: draft.id, platforms: gone },
+    });
+  }
 
   // Nothing queued, so the draft is still a draft. Marking it 'scheduled' would
   // hide it from the review inbox and count it as published.

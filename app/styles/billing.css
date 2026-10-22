@@ -108,8 +108,9 @@
 }
 .acct-head {
   position: sticky; top: calc(-1 * var(--acct-pt)); z-index: 15;
-  margin: calc(-1 * var(--acct-pt)) calc(-1 * var(--page-x)) 0;
-  padding: var(--acct-pt) var(--page-x) var(--s-3);
+  /* Column width, so its hairline lines up with the cards instead of stopping mid-page. */
+  margin: calc(-1 * var(--acct-pt)) 0 0;
+  padding: var(--acct-pt) 0 var(--s-3);
   background: color-mix(in oklch, var(--bg) 92%, transparent);
   backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--line);
@@ -129,6 +130,8 @@
 .acct-topup { min-height: 36px; text-decoration: none; }
 .acct-tabs .opt { text-decoration: none; min-height: 32px; font-size: var(--fs-sm); padding: 5px 14px; }
 .acct-tabs .opt[aria-current="page"] { color: var(--bg); }
+.acct-tabs .opt { transition: color var(--dur-primary) var(--ease-primary), background-color var(--dur-primary) var(--ease-primary); }
+@media (hover: hover) and (pointer: fine) { .acct-tabs .opt:not([aria-current]):hover { color: var(--text); background: var(--subtle); } }
 
 .acct-body { padding-top: var(--s-4); animation: acct-in var(--dur-transition) var(--ease-transition) backwards; }
 @keyframes acct-in { from { opacity: 0; transform: translateY(6px); } }

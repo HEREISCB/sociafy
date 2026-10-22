@@ -92,7 +92,7 @@ export type AgentStatus = {
   enabled: boolean;
   /** Why the plan can't be topped up. Null = nothing in the way. */
   blocked: AgentBlock | null;
-  /** 'auto' = drafts scoring ≥ threshold post on their own. 'review' = nothing posts without approval. */
+  /** 'auto' = drafts scoring ≥ threshold (default 1: every rated draft) post on their own. 'review' = nothing posts without approval. */
   mode: 'auto' | 'review';
   threshold: number;
   /** How far ahead autopilot keeps the plan filled (7 or 30). */

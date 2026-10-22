@@ -343,11 +343,11 @@ export const agentSettings = pgTable('agent_settings', {
   enabled: boolean('enabled').notNull().default(false),
   instructions: text('instructions').notNull().default(''),
   cadencePerWeek: integer('cadence_per_week').notNull().default(4),
-  // 101 = "drafts only" (unreachable, since AI scores top out at 100). Users
-  // who want auto-publish opt in during onboarding's Plan step and pick a
-  // threshold ≤ 100. The drafts-only default is the safer behavior: agent
-  // fills your inbox, you approve each post.
-  autoPublishThreshold: integer('auto_publish_threshold').notNull().default(101),
+  // Drafts scoring >= this are scheduled on their own (lib/agent/publish.ts).
+  // 1 = "Post automatically" (the default, drizzle/0023): every rated draft
+  // goes out at its slot; score 0 means unrated and always waits.
+  // 101 = "Ask me first" (unreachable: scores top out at 100).
+  autoPublishThreshold: integer('auto_publish_threshold').notNull().default(1),
   quietHours: jsonb('quiet_hours').$type<QuietHours>().default({ start: '22:00', end: '07:00' }),
   brandSafetyStrict: boolean('brand_safety_strict').notNull().default(true),
   niches: jsonb('niches').$type<Niche[]>().notNull().default([]),

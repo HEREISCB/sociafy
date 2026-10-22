@@ -18,7 +18,8 @@ export const PLATFORM_SUPPORTS: Record<Platform, Record<PostKind, boolean>> = {
   // X video needs chunked upload, which x.ts doesn't implement (x_video_unsupported).
   x: { text: true, image: true, video: false },
   linkedin: { text: true, image: true, video: true },
-  facebook: { text: true, image: true, video: true },
+  // Page video needs the resumable upload session, which meta.ts doesn't implement (facebook_video_unsupported).
+  facebook: { text: true, image: true, video: false },
   instagram: { text: false, image: true, video: true },
   tiktok: { text: false, image: false, video: true },
   youtube: { text: false, image: false, video: true },
@@ -27,6 +28,7 @@ export const PLATFORM_SUPPORTS: Record<Platform, Record<PostKind, boolean>> = {
 
 const UNSUPPORTED_HINT: Partial<Record<Platform, Partial<Record<PostKind, string>>>> = {
   x: { video: 'Posting video to X is not supported yet — images and text only.' },
+  facebook: { video: 'Posting video to a Facebook Page is not supported yet — images and text only.' },
   instagram: { text: 'Instagram needs an image or video — text-only posts are rejected.' },
   tiktok: {
     text: 'TikTok needs a video.',
