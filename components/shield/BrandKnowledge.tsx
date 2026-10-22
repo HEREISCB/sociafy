@@ -1,8 +1,10 @@
 'use client';
 
 import React, { useState } from 'react';
-import { useApi } from '../../lib/ui/fetcher';
+import { Button, useToast } from '../ui';
+import { useApi, friendlyApiError } from '../../lib/ui/fetcher';
 import { Icon } from '../icons';
+import { keepaliveFetch, useDeferred } from '../settings-ui';
 
 export interface ShieldDocument {
   id: string;
@@ -11,18 +13,27 @@ export interface ShieldDocument {
   updatedAt: string;
 }
 
+/** fetch → throws "<status>: <body>" on a non-2xx, so a failure can't read as "saved". */
+async function send(url: string, method: 'POST' | 'PATCH', body: unknown) {
+  const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!res.ok) throw new Error(`${res.status}: ${await res.text().catch(() => '')}`);
+}
+
 /**
- * Brand knowledge base editor. Users paste or upload .txt/.md reference docs
- * (brand voice, approved messaging, facts, spokesperson info) that the AI
- * grounds crisis responses in. Collapsed by default to keep the dashboard calm.
+ * Reply knowledge: .txt/.md reference docs (approved lines, policies, facts)
+ * the AI grounds mention replies in. Separate from the Brand kit.
  */
 const BrandKnowledge: React.FC = () => {
+  const toast = useToast();
+  const defer = useDeferred();
   const { data, mutate } = useApi<{ documents: ShieldDocument[] }>('/api/shield/documents');
-  const docs = data?.documents ?? [];
+  const [gone, setGone] = useState<string[]>([]);
+  const docs = (data?.documents ?? []).filter((d) => !gone.includes(d.id));
 
   const [draftTitle, setDraftTitle] = useState('');
   const [draftContent, setDraftContent] = useState('');
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const onFile = async (file: File | undefined) => {
@@ -35,15 +46,15 @@ const BrandKnowledge: React.FC = () => {
   const add = async () => {
     if (!draftContent.trim() || busy) return;
     setBusy(true);
+    setError(null);
     try {
-      await fetch('/api/shield/documents', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: draftTitle.trim(), content: draftContent }),
-      });
+      await send('/api/shield/documents', 'POST', { title: draftTitle.trim(), content: draftContent });
       setDraftTitle('');
       setDraftContent('');
       await mutate();
+      toast('Document added');
+    } catch (e) {
+      setError(`Not added. ${friendlyApiError(e)}`);
     } finally {
       setBusy(false);
     }
@@ -51,33 +62,41 @@ const BrandKnowledge: React.FC = () => {
 
   const saveEdit = async (id: string, title: string, content: string) => {
     setBusy(true);
+    setError(null);
     try {
-      await fetch(`/api/shield/documents/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, content }),
-      });
+      await send(`/api/shield/documents/${id}`, 'PATCH', { title, content });
       setEditingId(null);
       await mutate();
+      toast('Document saved');
+    } catch (e) {
+      setError(`Not saved. ${friendlyApiError(e)}`);
     } finally {
       setBusy(false);
     }
   };
 
-  const remove = async (id: string) => {
-    setBusy(true);
-    try {
-      await fetch(`/api/shield/documents/${id}`, { method: 'DELETE' });
-      await mutate();
-    } finally {
-      setBusy(false);
-    }
+  // Deleting waits behind an Undo toast; the DELETE goes out after.
+  const remove = (doc: ShieldDocument) => {
+    setGone((g) => [...g, doc.id]);
+    defer(
+      `Deleted “${doc.title}”`,
+      async () => {
+        const r = await keepaliveFetch(`/api/shield/documents/${doc.id}`, 'DELETE').catch(() => null);
+        if (!r?.ok) {
+          setGone((g) => g.filter((x) => x !== doc.id));
+          toast(`Couldn’t delete “${doc.title}”. It’s still here.`, { tone: 'err' });
+          return;
+        }
+        await mutate();
+      },
+      () => setGone((g) => g.filter((x) => x !== doc.id)),
+    );
   };
 
   return (
     <div className="stack">
       <p className="set-hint">
-        Facts, approved messaging and voice the AI grounds replies in. Paste text or upload a .txt or .md file.
+        Facts, policies and approved lines the AI grounds replies in. Separate from your Brand kit. Paste text or upload a .txt or .md file.
       </p>
 
       {docs.length > 0 && (
@@ -97,7 +116,7 @@ const BrandKnowledge: React.FC = () => {
         </div>
       )}
 
-      <div className="row">
+      <div className="row shield-doc-new">
         <input
           className="input"
           type="text"
@@ -107,7 +126,7 @@ const BrandKnowledge: React.FC = () => {
           aria-label="Document title"
         />
         <label className="btn sm">
-          <Icon name="upload" size={12} /> Upload
+          <Icon name="upload" size={12} /> Upload .txt / .md
           <input
             type="file"
             accept=".txt,.md,.markdown,text/plain,text/markdown"
@@ -120,16 +139,17 @@ const BrandKnowledge: React.FC = () => {
         className="input"
         value={draftContent}
         onChange={e => setDraftContent(e.target.value)}
-        placeholder="Paste brand knowledge…"
+        placeholder="Or paste text…"
         rows={4}
         aria-label="Document text"
       />
       <div className="set-actions">
-        <button className="btn sm primary" onClick={add} disabled={busy || !draftContent.trim()}>
+        <Button size="sm" variant="primary" busy={busy && !editingId} disabled={busy || !draftContent.trim()} reason="Paste or upload text first" onClick={add}>
           Add document
-        </button>
-        <span className="set-hint mono">{draftContent.length.toLocaleString()} chars</span>
+        </Button>
+        <span className="set-num">{draftContent.length.toLocaleString()} chars</span>
       </div>
+      {error && <p className="set-error" role="alert">{error}</p>}
     </div>
   );
 };
@@ -141,7 +161,7 @@ const DocRow: React.FC<{
   onEdit: () => void;
   onCancel: () => void;
   onSave: (id: string, title: string, content: string) => void;
-  onDelete: (id: string) => void;
+  onDelete: (doc: ShieldDocument) => void;
 }> = ({ doc, editing, busy, onEdit, onCancel, onSave, onDelete }) => {
   const [title, setTitle] = useState(doc.title);
   const [content, setContent] = useState(doc.content);
@@ -151,11 +171,11 @@ const DocRow: React.FC<{
       <div className="shield-doc">
         <div className="shield-doc-main">
           <div className="set-label">{doc.title}</div>
-          <div className="set-hint mono">{doc.content.length.toLocaleString()} chars</div>
+          <div className="set-num">{doc.content.length.toLocaleString()} chars</div>
         </div>
-        <button className="btn sm ghost" onClick={onEdit} disabled={busy}>Edit</button>
-        <button className="btn sm ghost" onClick={() => onDelete(doc.id)} disabled={busy} aria-label={`Delete ${doc.title}`}>
-          <Icon name="trash" size={12} />
+        <button type="button" className="btn sm" onClick={onEdit} disabled={busy}>Edit</button>
+        <button type="button" className="icon-btn" onClick={() => onDelete(doc)} disabled={busy} aria-label={`Delete ${doc.title}`}>
+          <Icon name="trash" size={14} />
         </button>
       </div>
     );
@@ -166,10 +186,8 @@ const DocRow: React.FC<{
       <input className="input" type="text" value={title} onChange={e => setTitle(e.target.value)} aria-label="Document title" />
       <textarea className="input" value={content} onChange={e => setContent(e.target.value)} rows={6} aria-label="Document text" />
       <div className="set-actions">
-        <button className="btn sm primary" onClick={() => onSave(doc.id, title.trim() || 'Untitled', content)} disabled={busy}>
-          Save
-        </button>
-        <button className="btn sm ghost" onClick={onCancel} disabled={busy}>Cancel</button>
+        <Button size="sm" variant="primary" busy={busy} onClick={() => onSave(doc.id, title.trim() || 'Untitled', content)}>Save</Button>
+        <button type="button" className="btn sm ghost" onClick={onCancel} disabled={busy}>Cancel</button>
       </div>
     </div>
   );

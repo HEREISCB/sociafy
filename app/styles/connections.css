@@ -56,8 +56,31 @@
 }
 .conn-facts dt { color: var(--text-2); }
 .conn-facts dd { margin: 0; color: var(--text); overflow-wrap: anywhere; }
-.conn-warn { margin: 0; font-size: var(--fs-xs); line-height: 1.5; color: var(--text-2); }
-.conn-warn strong { color: var(--err-ink); font-weight: 600; }
+/* Settings › Accounts: the handle always shows; one honest status line under it. */
+.conn-row__handle { font-size: var(--fs-sm); color: var(--text); overflow-wrap: anywhere; }
+.conn-row__handle + .conn-row__sub { margin-top: 1px; }
+.conn-row__sub.is-bad { color: var(--err-ink); }
+.conn-row__sub.is-warn { color: var(--warn-ink); }
+.conn-row__sub a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.conn-row__actions .btn { min-height: 36px; }
+.conn-manage { text-decoration: underline; text-underline-offset: 3px; }
+.conn-row--empty { padding: var(--s-4); font-size: var(--fs-sm); color: var(--text-2); }
+.conn-row__details { animation: conn-open 280ms var(--ease-transition); }
+@keyframes conn-open { from { opacity: 0; clip-path: inset(0 0 100% 0); } to { opacity: 1; clip-path: inset(0 0 0 0); } }
+.conn-confirm {
+  display: grid; gap: 10px;
+  padding: var(--s-3);
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: var(--subtle);
+  font-size: var(--fs-sm); line-height: 1.5;
+  animation: conn-fade 160ms var(--ease-primary);
+}
+.conn-confirm p { margin: 0; }
+.conn-confirm .row { flex-wrap: wrap; }
+@keyframes conn-fade { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .conn-row__details, .conn-confirm { animation: conn-fade 1ms linear; }
+}
 .conn-danger { background: var(--err); border-color: var(--err); color: var(--surface); }
 @media (hover: hover) and (pointer: fine) { .conn-danger:hover { background: var(--err-ink); } }
 .conn-danger-text { color: var(--err-ink); }
@@ -82,4 +105,10 @@
 @media (max-width: 900px) {
   .conn-row__main { padding: var(--s-3); }
   .conn-row__details { padding: 0 var(--s-3) var(--s-3); }
+}
+@media (max-width: 640px) {
+  .conn-row__main { flex-wrap: wrap; }
+  .conn-row__meta { flex: 1 1 180px; }
+  .conn-row__main > .pglyph { align-self: flex-start; margin-top: 2px; }
+  .conn-row__actions { margin-left: auto; }
 }
