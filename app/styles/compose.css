@@ -1,21 +1,8 @@
 /* Compose: two columns (make it · the post), a pinned action bar, and a
    From a website tab. Single column with an Edit | Preview switch below 1100px. */
 
-/* Shared chip (also used by agent, calendar, try pages). */
-.prompt-chip {
-  padding: 4px 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--r-pill);
-  font-size: var(--fs-xs);
-  color: var(--ink-2);
-  background: var(--surface);
-  display: inline-flex; align-items: center; gap: 6px;
-  cursor: pointer;
-}
-@media (hover: hover) and (pointer: fine) { .prompt-chip:hover { background: var(--subtle); } }
-.prompt-chip.active { background: var(--text); color: var(--bg); border-color: var(--text); }
-.prompt-chip:disabled { opacity: 0.45; cursor: not-allowed; }
-@media (hover: none) { .prompt-chip { min-height: 36px; } }
+/* The shared toggle chip (.prompt-chip / .chip[aria-pressed]), <Seg> and the
+   pinned bar (.compose-bar = .pinbar) live in primitives.css. */
 
 .compose-spacer { flex: 1; }
 .compose-cost { font-family: var(--mono); font-size: var(--fs-xs); color: var(--text-3); }
@@ -369,22 +356,6 @@ select.compose-select { width: auto; padding: 4px 8px; font-size: var(--fs-xs); 
 .compose-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
 .compose-custom { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s-2); }
 
-/* Segmented control with one sliding ink indicator (clip-path, no reflow).
-   Until it is measured the active option paints its own fill. */
-.mode-switch .opt:disabled { opacity: 0.45; cursor: not-allowed; }
-.seg { width: fit-content; max-width: 100%; }
-.seg-ind {
-  position: absolute; inset: 3px;
-  border-radius: var(--r-pill);
-  background: var(--text);
-  clip-path: inset(0 100% 0 0 round 999px);
-  pointer-events: none;
-  visibility: hidden;
-}
-.seg[data-ready] .seg-ind { visibility: visible; transition: clip-path 280ms var(--ease-transition); }
-.seg[data-ready] .opt.active { background: transparent; }
-.seg-aside { font-family: var(--mono); font-size: 11px; font-weight: 400; opacity: 0.75; }
-
 /* ---------- Preview ---------- */
 .compose-preview { display: flex; flex-direction: column; gap: var(--s-3); }
 .compose-ptabs { display: flex; flex-wrap: wrap; gap: 2px; min-height: 31px; border-bottom: 1px solid var(--line); }
@@ -452,33 +423,11 @@ select.compose-select { width: auto; padding: 4px 8px; font-size: var(--fs-xs); 
 @keyframes compose-pulse { 50% { transform: scale(0.6); } }
 .compose-phase-time { font-family: var(--mono); font-size: 11px; color: var(--text-2); }
 
-/* ---------- Pinned action bar ----------
-   Sticky to the bottom of .page (the app's scroll container). The sticky
-   area is .page's padding box minus its padding, so bottom is minus that
-   padding; the negative margins cancel it too, so the bar spans the column
-   and, scrolled to the end, sits flush on the edge. In flow, so nothing
-   hides under it. */
-.compose-bar {
-  position: sticky; bottom: calc(-1 * var(--page-b)); z-index: 20;
-  margin: 0 calc(-1 * var(--page-x)) calc(-1 * var(--page-b));
-  margin-top: auto;
-  padding: var(--s-3) var(--page-x);
-  display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2);
-  border-top: 1px solid var(--line);
-  background: color-mix(in oklch, var(--surface) 92%, transparent);
-  backdrop-filter: blur(8px);
-}
-.compose-bar-msg { flex: 1 1 200px; min-width: 0; margin: 0; font-size: var(--fs-xs); color: var(--text-2); }
-.compose-bar-msg a { color: var(--text); font-weight: 500; text-decoration: underline; text-underline-offset: 2px; }
+/* ---------- Pinned action bar (.compose-bar rules: primitives.css .pinbar) ---------- */
 .compose-when { flex: 0 1 220px; min-width: 0; }
 .compose-when .input { width: 100%; }
-.compose-bar-btns { display: flex; gap: var(--s-2); flex: 0 0 auto; }
 @media (max-width: 640px) {
-  .compose-bar { padding-block: 10px; }
   .compose-when { flex: 1 1 100%; }
-  .compose-bar-btns { flex: 1 1 100%; }
-  .compose-bar-btns .btn { flex: 1; justify-content: center; }
-  .compose-bar-msg { order: 3; flex-basis: 100%; }
 }
 .compose-toast-wrap {
   position: absolute; left: 0; right: 0; bottom: calc(100% + 10px);
@@ -506,6 +455,5 @@ select.compose-select { width: auto; padding: 4px 8px; font-size: var(--fs-xs); 
 @media (prefers-reduced-motion: reduce) {
   .compose-post-art.develop { animation: compose-fade 200ms linear both; }
   .compose-phase-list .is-now i { animation: none; }
-  .seg[data-ready] .seg-ind { transition: none; }
 }
 @keyframes compose-fade { from { opacity: 0; } }

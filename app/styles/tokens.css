@@ -96,6 +96,12 @@
      becoming another (280ms). */
   --ease-primary: cubic-bezier(.2, 0, 0, 1);
   --ease-transition: cubic-bezier(.65, 0, .35, 1);
+  /* One duration per curve, so call sites stop inventing numbers. */
+  --dur-primary: 160ms;
+  --dur-transition: 280ms;
+  --dur-reveal: 900ms;
+  --scrim: rgba(10, 10, 10, .36);
+  /* Legacy (motion.css): */
   --dur-1: 120ms;
   --dur-2: 220ms;
   --dur-3: 700ms;

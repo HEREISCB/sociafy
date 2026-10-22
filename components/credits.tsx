@@ -22,8 +22,10 @@ export type CreditsPayload = {
 };
 
 /**
- * Topbar credit balance. Quiet when healthy; turns into a warning chip under
- * 15% of the monthly allocation (red under 5%). Click goes to Billing & usage.
+ * Topbar credit balance, in the same "n cr" unit as every cost. Quiet when
+ * healthy; turns into a warning chip under 15% of the monthly allocation (red
+ * under 5%). Click goes to Billing & usage. On phones the words collapse
+ * (.lbl) and the aria-label keeps them.
  */
 export const CreditMeter: React.FC = () => {
   const { data } = useApi<CreditsPayload>('/api/credits', {
@@ -47,11 +49,12 @@ export const CreditMeter: React.FC = () => {
     <Link
       href="/account/billing"
       className={`credit-meter ${state}`}
-      aria-label={`${data.balance.toLocaleString()} credits left. Billing and usage`}
+      aria-label={`${data.balance.toLocaleString()} credits left${state === 'ok' ? '' : ', running low'}. Billing and usage`}
     >
       <Icon name="bolt" size={12} />
-      {state !== 'ok' && <span className="credit-meter-low">Low</span>}
+      {state !== 'ok' && <span className="credit-meter-low lbl">Low</span>}
       <span className="mono">{formatBalance(data.balance)}</span>
+      <span className="unit">cr</span>
     </Link>
   );
 };
