@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { SiteShell } from '../components/site-chrome';
 import { Icon } from '../components/icons';
 import { BackButton } from '../components/ui';
-import { authedUser } from '../lib/api';
+import { NotFoundFrame } from '../components/not-found-frame';
 import { ACCOUNT, NAV } from '../lib/ui/nav';
 
 export const metadata = {
@@ -13,10 +13,14 @@ export const metadata = {
  * The one 404 for every unmatched URL. Signed in, it keeps the app's frame
  * (a server look-alike of the shell — the real one needs Clerk's client) so a
  * mistyped /settings/x doesn't throw you out to the marketing site. Signed out,
- * it keeps the public nav.
+ * it keeps the public nav. Both frames are static: calling auth() here made
+ * every public page render per request, so the browser picks (NotFoundFrame).
  */
-export default async function NotFound() {
-  const user = await authedUser().catch(() => null);
+export default function NotFound() {
+  return <NotFoundFrame publicFrame={<NotFoundPage user={false} />} appFrame={<NotFoundPage user />} />;
+}
+
+function NotFoundPage({ user }: { user: boolean }) {
   const body = (
     <div className="nf">
       <div className="arrive">
