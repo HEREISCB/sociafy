@@ -91,7 +91,7 @@ export const InsufficientCreditsBanner: React.FC<{
       </span>
     </div>
     <div className="actions">
-      <Link href="/account/billing" className="btn ghost">View usage</Link>
+      <Link href="/account/usage" className="btn ghost">View usage</Link>
       <Link href="/account/billing?topup=1" className="btn primary">Top up</Link>
       {onDismiss && (
         <button className="btn ghost icon-only" onClick={onDismiss} aria-label="Dismiss">

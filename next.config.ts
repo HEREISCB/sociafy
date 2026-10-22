@@ -96,7 +96,8 @@ const nextConfig: NextConfig = {
       moved('/agent', '/autopilot'),
       moved('/connections', '/settings/connections'),
       moved('/billing', '/account/billing'),
-      moved('/usage', '/account/billing'),
+      moved('/usage', '/account/usage'),
+      moved('/invoices', '/account/invoices'),
       moved('/settings/plan', '/account/billing'),
       moved('/settings/api', '/account/api'),
       // Home and Calendar merged: the week/month views live on /dashboard.

@@ -3,7 +3,9 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { Icon } from './icons';
+import { Button, Empty, Modal, Skeleton, useToast } from './ui';
 import { apiDelete, apiPatch, apiPost, useApi, friendlyApiError } from '../lib/ui/fetcher';
+import type { CreditsPayload } from './credits';
 
 type ApiKey = {
   id: string;
@@ -12,6 +14,8 @@ type ApiKey = {
   dailyCreditCap: number;
   lastUsedAt: string | null;
   createdAt: string;
+  /** Rolling-24h spend, metered like the cap is enforced. */
+  spent24h?: number;
 };
 
 /** Schema default for api_keys.daily_credit_cap. Shown as the input's
@@ -19,10 +23,15 @@ type ApiKey = {
  *  limits table on /developers quotes this number rather than a second copy. */
 export const DEFAULT_CAP = 2_000;
 
+const n = (v: number) => v.toLocaleString('en-IN');
+const day = (iso: string) => new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+
 /** Developer API keys panel. Keys authenticate /api/v1 requests and spend from
  *  this account's credit balance, so revoking is the kill switch. */
 export const ApiKeys: React.FC = () => {
   const { data, isLoading, mutate } = useApi<ApiKey[]>('/api/keys');
+  const { data: credits } = useApi<CreditsPayload>('/api/credits');
+  const toast = useToast();
   const [name, setName] = useState('');
   const [cap, setCap] = useState('');
   const [busy, setBusy] = useState(false);
@@ -31,6 +40,8 @@ export const ApiKeys: React.FC = () => {
   // endpoint that can return it again.
   const [fresh, setFresh] = useState<{ prefix: string; key: string } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [revoking, setRevoking] = useState<ApiKey | null>(null);
+  const [revokeBusy, setRevokeBusy] = useState(false);
 
   const keys = data ?? [];
 
@@ -38,9 +49,6 @@ export const ApiKeys: React.FC = () => {
     setBusy(true);
     setError(null);
     try {
-      // dailyCreditCap was previously never sent, which made every cap other
-      // than the 2,000 default unreachable from the UI even though the API
-      // accepted one.
       const parsedCap = Number(cap);
       const r = await apiPost<{ prefix: string; key: string }>('/api/keys', {
         name: name.trim() || undefined,
@@ -58,115 +66,173 @@ export const ApiKeys: React.FC = () => {
     }
   }
 
-  /** Caps are adjustable in place: the API's 429 tells developers to raise it
-   *  here, and rotating a live key just to widen a limit is not a fix. */
-  async function saveCap(k: ApiKey, next: string) {
-    const value = Number(next);
-    if (!Number.isInteger(value) || value < 1 || value === k.dailyCreditCap) return;
-    setError(null);
+  async function revoke() {
+    if (!revoking) return;
+    setRevokeBusy(true);
     try {
-      await apiPatch(`/api/keys/${k.id}`, { dailyCreditCap: value });
+      await apiDelete(`/api/keys/${revoking.id}`);
+      toast(`Revoked ${revoking.prefix}…`);
+      setRevoking(null);
       await mutate();
     } catch (e) {
-      setError(friendlyApiError(e));
-      await mutate();
-    }
-  }
-
-  async function revoke(k: ApiKey) {
-    if (!window.confirm(`Revoke ${k.prefix}…? Any integration using this key stops working immediately.`)) return;
-    setError(null);
-    try {
-      await apiDelete(`/api/keys/${k.id}`);
-      await mutate();
-    } catch (e) {
-      setError(friendlyApiError(e));
+      toast(friendlyApiError(e), { tone: 'err' });
+    } finally {
+      setRevokeBusy(false);
     }
   }
 
   // id="api-keys" kept as the anchor target older links point at.
   return (
-    <section className="card" id="api-keys">
-      <div className="api-create">
-        <input
-          className="input"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Key name, e.g. production"
-          aria-label="Key name"
-          maxLength={60}
-        />
-        <input
-          className="input mono cap"
-          value={cap}
-          onChange={(e) => setCap(e.target.value.replace(/[^0-9]/g, ''))}
-          placeholder={`${DEFAULT_CAP} / day`}
-          aria-label="Daily credit cap"
-          inputMode="numeric"
-          title="Rolling 24-hour credit cap for this key"
-        />
-        <button className="btn primary" onClick={create} disabled={busy}>
-          <Icon name="plus" size={14} /> {busy ? 'Creating…' : 'New key'}
-        </button>
-      </div>
-
-      {fresh && (
-        <div className="api-fresh" role="status">
-          <strong className="set-label">Copy this key now. You won&apos;t see it again.</strong>
-          <div className="api-fresh-key">{fresh.key}</div>
-          <div className="row">
-            <button
-              className="btn sm"
-              onClick={async () => {
-                await navigator.clipboard.writeText(fresh.key).catch(() => {});
-                setCopied(true);
-              }}
-            >
-              <Icon name={copied ? 'check' : 'link'} size={12} /> {copied ? 'Copied' : 'Copy'}
-            </button>
-            <button className="btn ghost sm" onClick={() => setFresh(null)}>Done</button>
-          </div>
+    <div className="acct-page" id="api-keys">
+      <section className="card" aria-labelledby="create-key-head">
+        <div className="card-head acct-card-head">
+          <h3 id="create-key-head">Create a key</h3>
+          <span className="acct-note">Keys spend this account’s credits</span>
         </div>
-      )}
-
-      {error && <p className="set-error api-row">{error}</p>}
-
-      {isLoading && <div className="plan-empty">Loading…</div>}
-      {!isLoading && keys.length === 0 && (
-        <div className="empty-state">
-          <h3>No keys yet</h3>
-          {/* The action is the New key form right above; a second button would duplicate it. */}
-          <p>Name a key above and press New key to call Sociafy from your own code.</p>
+        <div className="card-body">
+          <form className="acct-create" onSubmit={(e) => { e.preventDefault(); void create(); }}>
+            <input
+              className="input"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Key name, e.g. production"
+              aria-label="Key name"
+              maxLength={60}
+            />
+            <input
+              className="input mono"
+              value={cap}
+              onChange={(e) => setCap(e.target.value.replace(/[^0-9]/g, ''))}
+              placeholder={`${n(DEFAULT_CAP)} / day`}
+              aria-label="Daily credit cap"
+              inputMode="numeric"
+            />
+            <Button type="submit" variant="primary" busy={busy}>
+              <Icon name="plus" size={14} /> {busy ? 'Creating…' : 'Create key'}
+            </Button>
+          </form>
+          <p className="acct-note" style={{ marginTop: 8 }}>
+            The cap is a rolling 24-hour limit per key. Leave it blank for {n(DEFAULT_CAP)} credits a day.
+          </p>
+          {error && <p className="field-error" role="alert" style={{ marginTop: 8 }}><Icon name="alert" size={12} /> {error}</p>}
         </div>
-      )}
 
-      {keys.map((k) => (
-        <div key={k.id} className="api-row">
-          <div className="api-row-main">
-            <div className="api-row-name">{k.name || 'Untitled key'}</div>
-            <div className="api-row-meta">
-              <span className="mono">{k.prefix}…</span> ·
-              <input
-                className="input"
-                defaultValue={k.dailyCreditCap}
-                onBlur={(e) => saveCap(k, e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-                inputMode="numeric"
-                aria-label={`Daily credit cap for ${k.name || k.prefix}`}
-                title="Rolling 24-hour credit cap. Saves when you leave the field."
-              />
-              credits / day ·{' '}
-              {k.lastUsedAt ? `used ${new Date(k.lastUsedAt).toLocaleDateString()}` : 'never used'}
+        {fresh && (
+          <div className="acct-fresh" role="status">
+            <strong>Copy this key now. It won’t be shown again.</strong>
+            <div className="acct-keytxt arrive mono">{fresh.key}</div>
+            <div className="row">
+              <Button
+                size="sm"
+                onClick={async () => {
+                  await navigator.clipboard.writeText(fresh.key).catch(() => {});
+                  setCopied(true);
+                }}
+              >
+                <Icon name={copied ? 'check' : 'copy'} size={12} /> {copied ? 'Copied' : 'Copy'}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setFresh(null)}>I’ve saved it</Button>
             </div>
           </div>
-          <button className="btn ghost sm" onClick={() => revoke(k)}>Revoke</button>
-        </div>
-      ))}
+        )}
+      </section>
 
-      <div className="plan-card-foot">
-        <span>New keys get {DEFAULT_CAP.toLocaleString()} credits a day unless you set a cap.</span>
-        <Link href="/developers/reference" className="set-link">API reference</Link>
-      </div>
-    </section>
+      <section className="card" aria-labelledby="keys-head">
+        <div className="card-head acct-card-head">
+          <h3 id="keys-head">Your keys</h3>
+          <span className="acct-note mono">{data ? `${keys.length} active` : ' '}</span>
+        </div>
+        {isLoading && <div className="card-body"><Skeleton h={14} w="50%" /></div>}
+        {!isLoading && keys.length === 0 && (
+          <Empty icon="lock" title="No keys yet">Name a key above and press Create key to call Sociafy from your own code.</Empty>
+        )}
+        {keys.map((k) => <KeyRow key={k.id} k={k} onSaved={() => mutate()} onRevoke={() => setRevoking(k)} />)}
+        <div className="acct-card-foot">
+          <span>
+            {credits ? `${n(credits.balance)} credits left on this account. ` : ''}A key stops at its cap, or when credits run out.
+          </span>
+          <Link href="/developers/reference" className="acct-link">API reference</Link>
+        </div>
+      </section>
+
+      <Modal
+        open={!!revoking}
+        onClose={() => { if (!revokeBusy) setRevoking(null); }}
+        title={`Revoke “${revoking?.name || 'Untitled key'}”?`}
+        footer={<>
+          <Button onClick={() => setRevoking(null)} disabled={revokeBusy}>Keep key</Button>
+          <Button variant="danger" busy={revokeBusy} onClick={revoke}>{revokeBusy ? 'Revoking…' : 'Revoke key'}</Button>
+        </>}
+      >
+        <p className="acct-sheet-p">
+          Anything using <span className="mono">{revoking?.prefix}…</span> stops working right away. This can’t be undone; you’d create a new key instead.
+        </p>
+      </Modal>
+    </div>
   );
 };
+
+/** One key: 24h spend against its cap, and the cap editable in place with an explicit Save. */
+function KeyRow({ k, onSaved, onRevoke }: { k: ApiKey; onSaved: () => Promise<unknown>; onRevoke: () => void }) {
+  const [value, setValue] = useState(String(k.dailyCreditCap));
+  const [saving, setSaving] = useState(false);
+  const [state, setState] = useState<{ ok: true } | { error: string } | null>(null);
+  const v = Number(value);
+  const dirty = value !== '' && v !== k.dailyCreditCap;
+  const valid = Number.isInteger(v) && v >= 1 && v <= 100_000;
+  const spent = k.spent24h ?? 0;
+
+  const save = async () => {
+    if (!dirty || !valid) return;
+    setSaving(true);
+    setState(null);
+    try {
+      await apiPatch(`/api/keys/${k.id}`, { dailyCreditCap: v });
+      await onSaved();
+      setState({ ok: true });
+    } catch (e) {
+      setState({ error: friendlyApiError(e) });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="acct-krow">
+      <div className="acct-kname">
+        <div>{k.name || 'Untitled key'}</div>
+        <div className="acct-note">
+          <span className="mono">{k.prefix}…</span> · {k.lastUsedAt ? `last used ${day(k.lastUsedAt)}` : 'never used'}
+        </div>
+      </div>
+      <Button size="sm" onClick={onRevoke}>Revoke</Button>
+      <div className="acct-kmeter">
+        <span>Spent in the last 24 h</span>
+        <span className="mono">{n(spent)} / {n(k.dailyCreditCap)} cr</span>
+        <div className="acct-meter thin" aria-hidden="true"><i style={{ transform: `scaleX(${Math.min(1, spent / k.dailyCreditCap)})` }} /></div>
+      </div>
+      <form className="acct-kcap" onSubmit={(e) => { e.preventDefault(); void save(); }}>
+        <label htmlFor={`cap-${k.id}`}>Daily cap</label>
+        <input
+          id={`cap-${k.id}`}
+          className="input mono"
+          value={value}
+          onChange={(e) => { setValue(e.target.value.replace(/[^0-9]/g, '')); setState(null); }}
+          inputMode="numeric"
+          aria-invalid={dirty && !valid}
+        />
+        <span>credits</span>
+        {/* Always rendered; it lights up once the cap changes. */}
+        <Button
+          type="submit" size="sm" variant={dirty ? 'primary' : undefined} busy={saving}
+          disabled={!dirty || !valid}
+          reason={value === '' ? 'Enter a number' : dirty && !valid ? '1 to 100,000' : undefined}
+        >
+          {saving ? 'Saving…' : 'Save'}
+        </Button>
+        {!dirty && state && 'ok' in state && <span className="acct-saved"><Icon name="check" size={12} /> Saved</span>}
+        {state && 'error' in state && <span className="field-error" role="alert">{state.error}</span>}
+      </form>
+    </div>
+  );
+}
