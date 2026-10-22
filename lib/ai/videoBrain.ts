@@ -300,11 +300,9 @@ export function heuristicDraft(input: Pick<BrainInput, 'text' | 'attachments' | 
 
 // ---------------------------------------------------------------- post-pass
 
+/** One render serves every platform in the post, so any vertical target (YouTube takes 9:16 as a Short) wins. */
 const primaryAspect = (platforms: string[]): PlanAspect => {
-  const p = platforms[0];
-  if (!p) return '9:16';
-  if (VERTICAL.has(p)) return '9:16';
-  if (p === 'youtube') return '16:9';
+  if (!platforms.length || platforms.some((p) => VERTICAL.has(p) || p === 'youtube')) return '9:16';
   return '1:1';
 };
 const feedOnly = (platforms: string[]) => platforms.length > 0 && platforms.every((p) => FEED.has(p));
