@@ -139,7 +139,8 @@ export default function ConnectionsList({
                 <div className="conn-row__meta">
                   <div className="conn-row__name">
                     {p.name}
-                    {acct && <span className={`badge ${badgeTone[health.tone]}`}>{health.label}</span>}
+                    {/* Healthy rows already say "Connected" on the right; the badge is only for trouble. */}
+                    {acct && !healthy && <span className={`badge ${badgeTone[health.tone]}`}>{health.label}</span>}
                   </div>
                   <div className="conn-row__sub">{acct && healthy ? handleOf(acct) : p.tip}</div>
                 </div>
@@ -150,7 +151,7 @@ export default function ConnectionsList({
                     <span className="conn-row__done"><Icon name="check" size={12} /> Connected</span>
                   ) : (
                     <button type="button" className="btn sm" onClick={() => connect(p.id)} disabled={!!unauth}>
-                      {acct ? 'Reconnect' : 'Connect'}
+                      {acct && !acct.isStub ? 'Reconnect' : 'Connect'}
                     </button>
                   )}
                 </div>

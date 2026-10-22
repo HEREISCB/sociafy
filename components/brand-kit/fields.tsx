@@ -139,8 +139,10 @@ export function Segmented<T extends string>({ label, hint, value, options, onCha
 }) {
   return (
     <div className="set-field">
-      <span className="set-label set-label--row">{label}{hint && <span className="set-hint">{hint}</span>}</span>
+      <span className="set-label">{label}</span>
       <Seg label={label} size="sm" value={(value ?? '') as T} options={options.map((o) => ({ id: o.value, label: o.label }))} onChange={(v) => v !== value && onChange(v)} />
+      {/* Under the control: right-aligned in the label it ran into the next column's label. */}
+      {hint && <p className="set-hint">{hint}</p>}
     </div>
   );
 }
