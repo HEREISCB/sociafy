@@ -1,38 +1,48 @@
 'use client';
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useClerk, useUser } from '@clerk/nextjs';
 import { Icon } from './icons';
 import { useApi } from '../lib/ui/fetcher';
 import { CreditMeter, type CreditsPayload } from './credits';
-import type { AgentStatus } from '../lib/agent/status';
+import { useDismiss, useToast } from './ui';
+import type { AgentBlock, AgentStatus } from '../lib/agent/status';
 import { createSpring, project, rubberband, type Spring } from '../lib/ui/spring';
+import { ACCOUNT, NAV } from '../lib/ui/nav';
 
+type StatusPayload = Pick<AgentStatus, 'enabled' | 'blocked' | 'pendingReview' | 'nextPostAt'>;
+/** One key for the pill and the nav count, so SWR fetches it once. */
+const useAgentStatus = () => useApi<StatusPayload>('/api/agent/status', { refreshInterval: 60_000 });
+
+const BLOCKED: Record<AgentBlock, string> = {
+  no_niches: 'Add the topics you post about before Autopilot can plan',
+  no_platforms: 'Connect an account before Autopilot can post',
+  no_credits: 'Out of credits: Autopilot can’t plan new posts',
+  credit_cap: 'This month’s Autopilot credit cap is reached',
+  no_trends: 'Waiting for fresh trends to write about',
+};
 
 /**
- * AutopilotStatusPill — at-a-glance autopilot state; click jumps to /autopilot.
- * Loading reads as paused so a slow nav never flashes "on" then "paused".
+ * AutopilotStatus: state only — on, paused, needs you, or loading (a neutral
+ * dot, never a false "paused"). The title says why; click opens /autopilot.
+ * On phones the words collapse to the dot and the aria-label keeps them.
  */
-interface AutopilotStatusPillProps {
-  onClick?: () => void;
-}
-
-export const AutopilotStatusPill: React.FC<AutopilotStatusPillProps> = ({ onClick }) => {
-  const { data } = useApi<Pick<AgentStatus, 'enabled' | 'blocked' | 'pendingReview'>>('/api/agent/status', {
-    refreshInterval: 60_000,
-  });
-  const state = !data?.enabled ? 'off' : data.blocked ? 'blocked' : 'on';
-  const toReview = data?.pendingReview?.length ?? 0;
+export const AutopilotStatusPill: React.FC<{ onClick?: () => void }> = ({ onClick }) => {
+  const { data, error } = useAgentStatus();
+  // undefined = not fetched yet (same on the server and first client render).
+  const state = data === undefined && !error ? 'loading' : !data?.enabled ? 'paused' : data.blocked ? 'blocked' : 'on';
+  const label = { loading: 'Autopilot', paused: 'Autopilot paused', blocked: 'Autopilot needs you', on: 'Autopilot on' }[state];
+  const title = state === 'loading' ? 'Checking Autopilot…'
+    : state === 'paused' ? 'Paused: nothing new will be drafted'
+    : state === 'blocked' && data?.blocked ? BLOCKED[data.blocked]
+    : data?.nextPostAt ? `Autopilot is on. Next post ${new Date(data.nextPostAt).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}`
+    : 'Autopilot is on';
   return (
-    <button type="button" className={`shell-pill ${state}`} onClick={onClick}>
+    <button type="button" className="shell-pill" data-state={state} onClick={onClick} title={title} aria-label={state === 'loading' ? 'Autopilot status loading' : label}>
       <span className="dot" aria-hidden />
-      {state === 'off' && <span>Autopilot paused</span>}
-      {state === 'blocked' && <span>Autopilot needs you</span>}
-      {state === 'on' && (
-        <span>Autopilot on{toReview > 0 && <span className="detail"> · {toReview} to review</span>}</span>
-      )}
+      <span className="lbl">{label}</span>
     </button>
   );
 };
@@ -231,14 +241,19 @@ function useDrawerDrag(open: boolean, onClose: () => void, onOpen: () => void) {
   };
 }
 
-const NAV = [
-  { href: '/dashboard', label: 'Home', icon: 'home' as const },
-  { href: '/autopilot', label: 'Autopilot', icon: 'bolt' as const },
+/** The phone topbar names the page you're on. */
+const PLACES: [string, string][] = [
+  ...NAV.map((n): [string, string] => [n.href, n.label]),
+  ...ACCOUNT.map((n): [string, string] => [n.href, n.label]),
+  ['/compose', 'New post'],
 ];
+const isUnder = (pathname: string, href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
 export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onMobileClose }) => {
   const pathname = usePathname() ?? '';
-  const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
+  const isActive = (href: string) => isUnder(pathname, href);
+  const { data: status } = useAgentStatus();
+  const toReview = status?.pendingReview?.length ?? 0;
 
   // The parent's `mobileOpen` is a trigger, not the truth: a gesture can pull a
   // closing drawer back open, and the parent has no callback to hear about it.
@@ -260,7 +275,27 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onMobileCl
     return () => window.removeEventListener('keydown', onKey);
   }, [open, close]);
 
-  const navLink = (href: string, label: string, icon: React.ComponentProps<typeof Icon>['name']) => (
+  // One --subtle pill slides to the active destination (transform only).
+  const navRef = useRef<HTMLElement | null>(null);
+  const indRef = useRef<HTMLSpanElement | null>(null);
+  useLayoutEffect(() => {
+    const nav = navRef.current;
+    const ind = indRef.current;
+    if (!nav || !ind) return;
+    const place = () => {
+      const on = nav.querySelector<HTMLElement>('.nav-item.active');
+      if (!on) { nav.removeAttribute('data-ready'); return; }
+      ind.style.height = `${on.offsetHeight}px`;
+      ind.style.transform = `translateY(${on.offsetTop}px)`;
+      requestAnimationFrame(() => nav.setAttribute('data-ready', ''));
+    };
+    place();
+    const ro = new ResizeObserver(place);
+    ro.observe(nav);
+    return () => ro.disconnect();
+  }, [pathname]);
+
+  const navLink = (href: string, label: string, icon: React.ComponentProps<typeof Icon>['name'], count?: number) => (
     <Link
       key={href}
       href={href}
@@ -270,6 +305,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onMobileCl
     >
       <Icon name={icon} className="ic" />
       {label}
+      {count ? <span className="count" title={`${count} ${count === 1 ? 'post' : 'posts'} to review`}>{count}</span> : null}
     </Link>
   );
 
@@ -279,20 +315,22 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onMobileCl
           and to darken continuously under a drag. CSS keeps it transparent
           and click-through until the drawer actually moves. */}
       <div ref={scrimRef} className="sidebar-scrim" onClick={close} aria-hidden="true" />
-      <aside ref={asideRef} {...handlers} className={`sidebar${open ? ' mobile-open' : ''}`}>
-        <Link href="/" className="brand" onClick={close}>
-          <div className="brand-mark">S</div>
+      <aside ref={asideRef} {...handlers} className={`sidebar${open ? ' mobile-open' : ''}`} aria-label="Main">
+        <Link href="/dashboard" className="brand" onClick={close} aria-label="Sociafy, This week">
+          <div className="brand-mark" aria-hidden="true">S</div>
           <span className="brand-name">sociafy<span className="dot">.</span></span>
         </Link>
 
-        <nav className="nav-section">
-          {NAV.map((it) => navLink(it.href, it.label, it.icon))}
+        <nav ref={navRef} className="nav-section" aria-label="Workspace">
+          <span ref={indRef} className="nav-ind" aria-hidden="true" />
+          {NAV.map((it) => navLink(it.href, it.label, it.icon, it.href === '/dashboard' ? toReview : undefined))}
         </nav>
 
         <div className="sidebar-foot">
-          {navLink('/account/billing', 'Billing & usage', 'chart')}
-          {navLink('/account/api', 'API keys', 'lock')}
-          {navLink('/settings', 'Settings', 'settings')}
+          <nav className="nav-section" aria-label="Account">
+            <div className="nav-label" aria-hidden="true">Account</div>
+            {ACCOUNT.map((it) => navLink(it.href, it.label, it.icon))}
+          </nav>
           <UserCard onNavigate={close} />
         </div>
       </aside>
@@ -300,9 +338,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onMobileCl
   );
 };
 
+const TIERS: Record<CreditsPayload['tier'], string> = { starter: 'Starter', pro: 'Pro', business: 'Business' };
+
 /**
- * Bottom-left account card. Opens a small menu upward with the account-level
- * pages (billing, API keys) that sit outside workspace Settings.
+ * Bottom-left account card. Its menu is identity only — who you're signed in
+ * as, your plan and credits, support, sign out. The destinations are in the
+ * sidebar right above it.
  */
 const UserCard: React.FC<{ onNavigate?: () => void }> = ({ onNavigate }) => {
   // All hooks run before the early returns below — Clerk hydrating must not
@@ -312,25 +353,8 @@ const UserCard: React.FC<{ onNavigate?: () => void }> = ({ onNavigate }) => {
   const { data: credits } = useApi<CreditsPayload>(isSignedIn ? '/api/credits' : null);
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: PointerEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      e.stopPropagation();
-      setOpen(false);
-      rootRef.current?.querySelector<HTMLElement>('.user-card')?.focus();
-    };
-    window.addEventListener('pointerdown', onDown);
-    window.addEventListener('keydown', onKey, true);
-    return () => {
-      window.removeEventListener('pointerdown', onDown);
-      window.removeEventListener('keydown', onKey, true);
-    };
-  }, [open]);
+  const closeMenu = useCallback(() => setOpen(false), []);
+  useDismiss(rootRef, open, closeMenu);
 
   // Until Clerk resolves auth on the client, render a stable placeholder that
   // matches the server HTML — otherwise the server ("Sign in") vs client (user
@@ -363,31 +387,27 @@ const UserCard: React.FC<{ onNavigate?: () => void }> = ({ onNavigate }) => {
   return (
     <div className="user-menu-anchor" ref={rootRef}>
       {open && (
-        <div className="user-menu" role="menu" aria-label="Account">
+        <div className="pop menu user-menu" role="menu" aria-label="Account">
           <div className="user-menu-who">
             <div className="user-name">{name}</div>
             {email && email !== name && <div className="user-menu-email">{email}</div>}
           </div>
-          <Link href="/account/billing" role="menuitem" className="user-menu-item" onClick={go}>
+          <Link href="/account/billing" role="menuitem" className="menu-item" onClick={go}>
             <Icon name="bolt" size={14} />
-            <span>Billing &amp; usage</span>
+            <span>{credits ? `${TIERS[credits.tier] ?? 'Your'} plan` : 'Plan'}</span>
             {credits && (
-              <span className="user-menu-aside">
-                <span className="mono">{credits.balance.toLocaleString()}</span> credits
+              <span className="menu-aside">
+                <span className="mono">{credits.balance.toLocaleString()}</span> cr
               </span>
             )}
           </Link>
-          <Link href="/account/api" role="menuitem" className="user-menu-item" onClick={go}>
-            <Icon name="lock" size={14} />
-            <span>API keys</span>
-          </Link>
-          <Link href="/settings" role="menuitem" className="user-menu-item" onClick={go}>
-            <Icon name="settings" size={14} />
-            <span>Settings</span>
-          </Link>
-          <div className="user-menu-sep" />
-          <button type="button" role="menuitem" className="user-menu-item" onClick={() => { go(); void signOut({ redirectUrl: '/' }); }}>
-            <Icon name="arrow_right" size={14} />
+          <a href="mailto:support@sociafy.app" role="menuitem" className="menu-item" onClick={go}>
+            <Icon name="send" size={14} />
+            <span>Contact support</span>
+          </a>
+          <div className="menu-sep" />
+          <button type="button" role="menuitem" className="menu-item" onClick={() => { go(); void signOut({ redirectUrl: '/' }); }}>
+            <Icon name="log_out" size={14} />
             <span>Sign out</span>
           </button>
         </div>
@@ -415,31 +435,32 @@ const UserCard: React.FC<{ onNavigate?: () => void }> = ({ onNavigate }) => {
 };
 
 interface TopbarProps {
-  /** Mobile hamburger handler — shows a menu button visible only at narrow
-   *  viewports, wired to the sidebar-drawer open state. */
+  /** Mobile hamburger handler — the button shows only at narrow viewports. */
   onMenuClick?: () => void;
+  /** Whether the mobile drawer is open (for aria-expanded). */
+  menuOpen?: boolean;
 }
 
-export const Topbar: React.FC<TopbarProps> = ({ onMenuClick }) => {
+export const Topbar: React.FC<TopbarProps> = ({ onMenuClick, menuOpen = false }) => {
   const router = useRouter();
+  const pathname = usePathname() ?? '';
   // On /compose the page's own Schedule button is the CTA; a second "New post" would compete.
-  const composing = (usePathname() ?? '').startsWith('/compose');
+  const composing = pathname.startsWith('/compose');
+  const where = PLACES.find(([href]) => isUnder(pathname, href))?.[1];
   return (
-    <div className="topbar">
+    <header className="topbar">
       {onMenuClick && (
         <button
           type="button"
-          className="topbar-menu-btn"
+          className="icon-btn topbar-menu-btn"
           onClick={onMenuClick}
           aria-label="Open menu"
+          aria-expanded={menuOpen}
         >
-          <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="3" y1="6" x2="21" y2="6" />
-            <line x1="3" y1="12" x2="21" y2="12" />
-            <line x1="3" y1="18" x2="21" y2="18" />
-          </svg>
+          <Icon name="list" size={18} />
         </button>
       )}
+      {where && <span className="topbar-where">{where}</span>}
       <div className="topbar-spacer" />
       <div className="topbar-actions">
         <AutopilotStatusPill onClick={() => router.push('/autopilot')} />
@@ -447,11 +468,11 @@ export const Topbar: React.FC<TopbarProps> = ({ onMenuClick }) => {
         <NotificationsBell />
         {!composing && (
           <Link href="/compose" className="btn primary shell-new" aria-label="New post">
-            <Icon name="plus" size={14} /> <span className="shell-new-label">New post</span>
+            <Icon name="plus" size={14} /> <span className="lbl">New post</span>
           </Link>
         )}
       </div>
-    </div>
+    </header>
   );
 };
 
@@ -460,62 +481,119 @@ type ActivityItem = {
   kind: string;
   title: string;
   body: string | null;
+  meta?: Record<string, unknown> | null;
   createdAt: string;
 };
 
+/** Where a notification takes you: the page where you can act on it. */
+function activityHref(kind: string): string {
+  if (kind.startsWith('platform_')) return '/settings/connections';
+  if (kind.startsWith('shield_')) return '/settings/mentions';
+  if (kind === 'agent_enabled' || kind === 'agent_disabled' || kind === 'agent_skipped' || kind === 'agent_held') return '/autopilot';
+  return '/dashboard';
+}
+
+function activityTone(kind: string): { tone: '' | 'ok' | 'warn' | 'err'; icon: React.ComponentProps<typeof Icon>['name'] } {
+  if (kind === 'publish_failed') return { tone: 'err', icon: 'x' };
+  if (kind === 'platform_refresh_failed' || kind === 'platform_disconnected' || kind === 'publish_warning' || kind === 'agent_held' || kind === 'agent_skipped') return { tone: 'warn', icon: 'alert' };
+  if (kind === 'manual_publish' || kind === 'auto_publish' || kind === 'platform_connected') return { tone: 'ok', icon: 'check' };
+  if (kind === 'draft_scheduled') return { tone: '', icon: 'clock' };
+  if (kind.startsWith('agent_') || kind === 'trend_spotted') return { tone: '', icon: 'sparkle' };
+  return { tone: '', icon: 'bell' };
+}
+
+const SEEN_KEY = 'sociafy:lastSeenNotif';
+
+/**
+ * Activity bell. Items stay grouped as New while the panel is open and are
+ * marked read when it closes, so nothing changes under your eyes. Every row
+ * links to where you can act on it. Unread state is per device (localStorage).
+ */
 const NotificationsBell: React.FC = () => {
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const [lastSeen, setLastSeen] = useState<number>(() => {
     if (typeof window === 'undefined') return Date.now();
-    const v = window.localStorage.getItem('sociafy:lastSeenNotif');
+    const v = window.localStorage.getItem(SEEN_KEY);
     return v ? Number(v) : 0;
   });
+  /** lastSeen as it was when the panel opened: decides New vs Earlier while open. */
+  const [seenAtOpen, setSeenAtOpen] = useState(0);
   const { data } = useApi<ActivityItem[]>('/api/activity?limit=15');
   const rootRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => {
-    const onClick = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    window.addEventListener('click', onClick);
-    return () => window.removeEventListener('click', onClick);
+  const markSeen = useCallback((t: number) => {
+    setLastSeen(t);
+    window.localStorage.setItem(SEEN_KEY, String(t));
   }, []);
+  const close = useCallback(() => { setOpen(false); markSeen(Date.now()); }, [markSeen]);
+  useDismiss(rootRef, open, close);
 
   const items = data ?? [];
-  const unread = items.filter((a) => new Date(a.createdAt).getTime() > lastSeen).length;
+  const isNew = (a: ActivityItem, since: number) => new Date(a.createdAt).getTime() > since;
+  const unread = items.filter((a) => isNew(a, lastSeen)).length;
+  const fresh = items.filter((a) => isNew(a, seenAtOpen));
+  const earlier = items.filter((a) => !isNew(a, seenAtOpen));
 
-  const markRead = () => {
+  const markAll = () => {
+    const prev = lastSeen;
     const now = Date.now();
-    setLastSeen(now);
-    if (typeof window !== 'undefined') window.localStorage.setItem('sociafy:lastSeenNotif', String(now));
+    markSeen(now);
+    setSeenAtOpen(now);
+    toast('Marked all read', { undo: () => { markSeen(prev); setSeenAtOpen(prev); } });
+  };
+
+  const row = (a: ActivityItem) => {
+    const { tone, icon } = activityTone(a.kind);
+    return (
+      <Link key={a.id} href={activityHref(a.kind)} className={`notif-item${isNew(a, seenAtOpen) ? ' unread' : ''}`} onClick={close}>
+        <span className={`notif-k ${tone}`} aria-hidden="true"><Icon name={icon} size={14} /></span>
+        <span>
+          <span className="notif-t">{a.title}</span>
+          {a.body && <span className="notif-b">{a.body}</span>}
+        </span>
+        <time className="notif-tm" dateTime={a.createdAt}>{relTime(a.createdAt)}</time>
+      </Link>
+    );
   };
 
   return (
     <div ref={rootRef} className="shell-pop-anchor">
       <button
         type="button"
-        className="btn ghost shell-bell"
+        className="icon-btn shell-bell"
         aria-label={unread > 0 ? `Notifications, ${unread} new` : 'Notifications'}
         aria-expanded={open}
-        onClick={() => { setOpen((o) => !o); if (!open) markRead(); }}
+        aria-haspopup="dialog"
+        onClick={() => { if (open) close(); else { setSeenAtOpen(lastSeen); setOpen(true); } }}
       >
-        <Icon name="bell" size={14} />
-        {unread > 0 && <span className="unread" aria-hidden />}
+        <Icon name="bell" size={16} />
+        {unread > 0 && <span className="n" aria-hidden>{unread > 9 ? '9+' : unread}</span>}
       </button>
       {open && (
-        <div className="shell-pop">
-          <div className="shell-pop-head">Activity</div>
-          {items.length === 0 ? (
-            <div className="shell-pop-empty">Nothing yet.</div>
-          ) : (
-            items.map((a) => (
-              <div key={a.id} className="shell-pop-item">
-                <div className="shell-pop-title">{a.title}</div>
-                {a.body && <div className="shell-pop-body">{a.body}</div>}
-                <div className="shell-pop-time">{relTime(a.createdAt)}</div>
+        <div className="pop notif" role="dialog" aria-label="Activity">
+          <div className="notif-head">
+            <span>Activity</span>
+            <button type="button" className="btn ghost sm" disabled={!fresh.length} title={fresh.length ? undefined : 'Nothing new'} onClick={markAll}>
+              Mark all read
+            </button>
+          </div>
+          <div className="notif-list">
+            {!items.length ? (
+              <div className="empty">
+                <span className="ico" aria-hidden="true"><Icon name="bell" /></span>
+                <h3>All quiet</h3>
+                <p>Posts, failures and reconnect warnings show up here.</p>
               </div>
-            ))
-          )}
+            ) : (
+              <>
+                {fresh.length > 0 && <div className="notif-group">New</div>}
+                {fresh.map(row)}
+                {earlier.length > 0 && <div className="notif-group">Earlier</div>}
+                {earlier.map(row)}
+              </>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -525,7 +603,7 @@ const NotificationsBell: React.FC = () => {
 function relTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   if (diff < 60_000) return 'just now';
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} min ago`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} hr ago`;
-  return `${Math.floor(diff / 86_400_000)} d ago`;
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} min`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} hr`;
+  return `${Math.floor(diff / 86_400_000)} d`;
 }
