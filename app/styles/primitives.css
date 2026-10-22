@@ -17,7 +17,7 @@
   background: var(--surface);
   white-space: nowrap;
   cursor: pointer;
-  transition: background 0.12s, border-color 0.12s;
+  /* transition lives in motion.css (one declaration for every pressable). */
 }
 @media (hover: hover) and (pointer: fine) { .btn:hover { background: var(--subtle); } }
 .btn .ic { width: 14px; height: 14px; }
@@ -49,6 +49,22 @@
   .btn.ghost:hover { background: var(--subtle); }
 }
 .btn.sm { padding: 4px 8px; font-size: var(--fs-xs); }
+.btn.lg { min-height: 40px; padding: 8px 16px; font-size: 14px; justify-content: center; }
+.btn.danger { color: var(--err-ink); }
+/* Every spending button shows its price: <span class="cost">1 cr</span>. */
+.btn .cost { font-family: var(--mono); font-size: 11px; font-weight: 400; color: var(--text-3); }
+.btn.primary .cost { color: inherit; opacity: 0.75; }
+.btn[aria-busy="true"] { cursor: progress; }
+.spin {
+  display: inline-block; flex: none;
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor; border-right-color: transparent;
+  animation: spin 700ms linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+/* The short reason a control is disabled (wired with aria-describedby). */
+.why { font-size: var(--fs-xs); color: var(--text-2); }
 
 .icon-btn {
   width: 26px; height: 26px;
@@ -61,6 +77,8 @@
 @media (hover: hover) and (pointer: fine) {
   .icon-btn:hover { background: var(--surface); border-color: var(--line); color: var(--text); }
 }
+.icon-btn[aria-expanded="true"] { background: var(--subtle); color: var(--text); }
+.icon-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
 /* ---------- Form controls ---------- */
 .input,
@@ -85,8 +103,18 @@ select.input {
   outline-offset: 2px;
   border-color: var(--line-strong);
 }
+.input[aria-invalid="true"] { border-color: var(--err); }
 .input:disabled { opacity: 0.55; cursor: not-allowed; }
 textarea.input { resize: vertical; min-height: 72px; }
+
+/* A labelled field: .field > .field-head (label + .field-note) > control > .field-error */
+.field { display: grid; gap: 6px; min-width: 0; }
+.field-head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 4px var(--s-2); }
+.field-head label, .field-head b { font-size: var(--fs-sm); font-weight: 600; }
+.field-note { margin: 0; font-size: var(--fs-xs); color: var(--text-2); }
+.field-error { margin: 0; display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--err-ink); }
+.check { display: inline-flex; align-items: center; gap: var(--s-2); font-size: var(--fs-sm); cursor: pointer; }
+.check input { width: 16px; height: 16px; margin: 0; accent-color: var(--text); }
 
 /* ---------- Page header ---------- */
 .page-header {
@@ -101,11 +129,14 @@ textarea.input { resize: vertical; min-height: 72px; }
   letter-spacing: -0.02em;
   line-height: 1.15;
 }
-.page-header__sub {
+.page-header__sub,
+.page-header .sub {
+  margin: 0;
   font-size: var(--fs-sm);
   color: var(--text-2);
 }
-.page-header__actions { display: flex; gap: var(--s-2); align-items: center; margin-left: auto; }
+.page-header__actions,
+.page-header .actions { display: flex; flex-wrap: wrap; gap: var(--s-2); align-items: center; margin-left: auto; }
 
 /* ---------- Card ---------- */
 .card {
@@ -145,10 +176,41 @@ textarea.input { resize: vertical; min-height: 72px; }
   line-height: 1.5;
   white-space: nowrap;
 }
-.badge--ok { background: var(--ok-soft); color: var(--ok-ink); }
-.badge--warn { background: var(--warn-soft); color: var(--warn-ink); }
-.badge--err { background: var(--err-soft); color: var(--err-ink); }
-.badge--accent { background: var(--accent-soft); color: var(--accent-ink); }
+.badge--ok, .badge.ok { background: var(--ok-soft); color: var(--ok-ink); }
+.badge--warn, .badge.warn { background: var(--warn-soft); color: var(--warn-ink); }
+.badge--err, .badge.err { background: var(--err-soft); color: var(--err-ink); }
+.badge--accent, .badge.accent { background: var(--accent-soft); color: var(--accent-ink); }
+.badge .d { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+/* A number that wants attention (nav "20 to review", "Approve all 33"). */
+.count {
+  display: inline-grid; place-items: center;
+  min-width: 18px; height: 18px; padding: 0 5px;
+  border-radius: var(--r-pill);
+  background: var(--accent-soft); color: var(--accent-ink);
+  font: 500 11px/1 var(--mono);
+}
+
+/* Toggle chip: .chip[aria-pressed] (always render aria-pressed="true|false").
+   The plain .chip below is the small status pill; .prompt-chip(.active) is the
+   older name for this toggle and still works. */
+.chip[aria-pressed],
+.prompt-chip {
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--ink-2);
+  background: var(--surface);
+  display: inline-flex; align-items: center; gap: 6px;
+  cursor: pointer;
+}
+@media (hover: hover) and (pointer: fine) { .chip[aria-pressed]:hover, .prompt-chip:hover { background: var(--subtle); } }
+.chip[aria-pressed="true"],
+.prompt-chip.active { background: var(--text); color: var(--bg); border-color: var(--text); }
+.chip[aria-pressed]:disabled,
+.prompt-chip:disabled { opacity: 0.45; cursor: not-allowed; }
+@media (hover: none) { .chip[aria-pressed], .prompt-chip { min-height: 36px; } }
 
 .chip {
   display: inline-flex; align-items: center; gap: 5px;
@@ -171,7 +233,8 @@ textarea.input { resize: vertical; min-height: 72px; }
 .chip.ghost { background: transparent; }
 
 /* ---------- Empty state ---------- */
-.empty-state {
+.empty-state,
+.empty {
   display: flex; flex-direction: column; align-items: center;
   gap: var(--s-2);
   padding: var(--s-12) var(--s-6);
@@ -179,14 +242,46 @@ textarea.input { resize: vertical; min-height: 72px; }
   color: var(--text-2);
   font-size: var(--fs-sm);
 }
-.empty-state h3 {
+.empty-state h3,
+.empty h3 {
   margin: 0;
   font-size: var(--fs-md);
   font-weight: 600;
   color: var(--text);
 }
-.empty-state p { margin: 0; max-width: 44ch; }
-.empty-state .btn { margin-top: var(--s-2); }
+.empty-state p,
+.empty p { margin: 0; max-width: 44ch; }
+.empty-state .btn,
+.empty .btn { margin-top: var(--s-2); }
+.empty .ico {
+  width: 40px; height: 40px;
+  display: grid; place-items: center;
+  border-radius: var(--r);
+  background: var(--subtle); color: var(--text-2);
+}
+
+/* ---------- Skeleton · arrive · develop ---------- */
+/* .skel: a placeholder the size of what's coming (set width/height inline). */
+.skel { display: block; position: relative; overflow: hidden; border-radius: 8px; background: var(--subtle); }
+.skel::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.7), transparent);
+  transform: translateX(-100%);
+  animation: skel-sweep 1.4s var(--ease-transition) infinite;
+}
+@keyframes skel-sweep { to { transform: translateX(100%); } }
+/* .arrive: UI content landing (route change, data replacing a skeleton). Brisk.
+   `backwards`, not `both`: once it ends nothing is left applied, so it never
+   becomes a containing block for fixed children. */
+.arrive { animation: arrive 200ms var(--ease-transition) backwards; }
+@keyframes arrive { from { opacity: 0; transform: translateY(4px); } }
+/* .develop: AI output only, when a real job result lands. Darkroom print. */
+.develop { animation: develop var(--dur-reveal) var(--ease-reveal) both; }
+@keyframes develop {
+  0% { opacity: 0.15; filter: blur(10px) saturate(0) contrast(0.5) brightness(1.4); }
+  60% { filter: blur(2px) saturate(0.6) contrast(0.85) brightness(1.08); }
+  100% { opacity: 1; filter: none; }
+}
 
 /* ---------- Platform glyph ---------- */
 .pglyph {
@@ -235,12 +330,121 @@ textarea.input { resize: vertical; min-height: 72px; }
   z-index: 1;
   display: inline-flex; align-items: center; gap: 5px;
 }
-/* The active option paints its own dark background (no call site renders a
-   sliding indicator). */
+/* The active option paints its own dark background until <Seg> (ui.tsx) has
+   measured and placed its sliding indicator. */
 .mode-switch .opt.active {
   color: var(--bg);
   background: var(--text);
 }
+.mode-switch .opt:disabled { opacity: 0.45; cursor: not-allowed; }
+/* <Seg>: one ink indicator slides between options (clip-path, no reflow). */
+.seg { width: fit-content; max-width: 100%; }
+.seg-ind {
+  position: absolute; inset: 3px;
+  border-radius: var(--r-pill);
+  background: var(--text);
+  clip-path: inset(0 100% 0 0 round 999px);
+  pointer-events: none;
+  visibility: hidden;
+}
+.seg[data-ready] .seg-ind { visibility: visible; transition: clip-path var(--dur-transition) var(--ease-transition); }
+.seg[data-ready] .opt.active { background: transparent; }
+.seg-aside { font-family: var(--mono); font-size: 11px; font-weight: 400; opacity: 0.75; }
+.seg.sm .opt { padding: 3px 10px; }
+.seg.full { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; width: 100%; }
+.seg.full .opt { justify-content: center; }
+
+/* ---------- Pinned action bar (<PinBar>; .compose-bar is the older name) ----------
+   Sticky to the bottom of .page (the app's scroll container). The sticky area
+   is .page's padding box minus its padding, so bottom is minus that padding;
+   the negative margins cancel it too, so the bar spans the column and,
+   scrolled to the end, sits flush on the edge. In flow, so nothing hides
+   under it. margin-top:auto pins it to the bottom when .page is a flex column. */
+.pinbar,
+.compose-bar {
+  position: sticky; bottom: calc(-1 * var(--page-b)); z-index: 20;
+  margin: 0 calc(-1 * var(--page-x)) calc(-1 * var(--page-b));
+  margin-top: auto;
+  padding: var(--s-3) var(--page-x);
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2);
+  border-top: 1px solid var(--line);
+  background: color-mix(in oklch, var(--surface) 92%, transparent);
+  backdrop-filter: blur(8px);
+}
+.pinbar .msg,
+.compose-bar-msg { flex: 1 1 200px; min-width: 0; margin: 0; font-size: var(--fs-xs); color: var(--text-2); }
+.pinbar .msg a,
+.compose-bar-msg a { color: var(--text); font-weight: 500; text-decoration: underline; text-underline-offset: 2px; }
+.pinbar .btns,
+.compose-bar-btns { display: flex; gap: var(--s-2); flex: 0 0 auto; }
+@media (max-width: 640px) {
+  .pinbar, .compose-bar { padding-block: 10px; }
+  .pinbar .btns, .compose-bar-btns { flex: 1 1 100%; }
+  .pinbar .btns .btn, .compose-bar-btns .btn { flex: 1; justify-content: center; }
+  .pinbar .msg, .compose-bar-msg { order: 3; flex-basis: 100%; }
+}
+
+/* ---------- Toast (<ToastProvider> / useToast) ----------
+   One at a time, bottom centre, above whichever pinned bar is on screen. */
+.toast-wrap {
+  position: fixed; left: 0; right: 0; z-index: 80;
+  bottom: calc(max(var(--pinbar-h, 0px), var(--compose-bar-h, 0px)) + 16px);
+  display: flex; justify-content: center;
+  padding: 0 var(--s-3);
+  pointer-events: none;
+}
+.toast {
+  display: flex; align-items: center; gap: var(--s-3);
+  max-width: min(520px, 100%);
+  padding: 8px 14px;
+  border-radius: var(--r-pill);
+  background: var(--text); color: var(--bg);
+  font-size: var(--fs-sm);
+  box-shadow: var(--shadow-pop);
+  pointer-events: auto;
+  animation: toast-in var(--dur-transition) var(--ease-reveal) backwards;
+}
+.toast:has(button) { padding-right: 6px; }
+.toast[data-closing] { animation: toast-out 200ms var(--ease-primary) forwards; }
+.toast.err { background: var(--err-soft); color: var(--err-ink); box-shadow: inset 0 0 0 1px var(--err), var(--shadow-pop); }
+.toast button {
+  min-height: 28px; padding: 4px 10px;
+  border: 0; border-radius: var(--r-pill);
+  background: color-mix(in oklch, currentColor 18%, transparent); color: inherit;
+  font: inherit; font-size: var(--fs-xs); font-weight: 600;
+  cursor: pointer;
+}
+.toast button.x { display: grid; place-items: center; padding: 4px 6px; background: none; opacity: 0.75; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(16px); } }
+@keyframes toast-out { to { opacity: 0; transform: translateY(8px); } }
+
+/* ---------- Popover / menu (useDismiss in ui.tsx: Esc, outside press, focus return) ---------- */
+.pop {
+  position: absolute; z-index: 60;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: var(--shadow-pop);
+  transform-origin: top right;
+  animation: pop-in var(--dur-primary) var(--ease-primary);
+}
+@keyframes pop-in { from { opacity: 0; transform: translateY(-4px) scale(0.98); } }
+.menu { min-width: 220px; padding: var(--s-1); }
+.menu-item {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; min-height: 34px;
+  padding: 6px 10px;
+  border: 0; border-radius: var(--r-sm);
+  background: none; color: var(--text);
+  font: inherit; font-size: var(--fs-sm);
+  text-align: left; text-decoration: none;
+  cursor: pointer;
+}
+.menu-item svg { flex: none; color: var(--text-2); }
+@media (hover: hover) and (pointer: fine) { .menu-item:hover { background: var(--subtle); } }
+.menu-item:focus-visible { background: var(--subtle); }
+.menu-sep { height: 1px; margin: var(--s-1) 0; background: var(--line); }
+.menu-aside { margin-left: auto; font-size: var(--fs-xs); color: var(--text-2); white-space: nowrap; }
 
 /* ---------- Modal ---------- */
 @keyframes modalScrimIn {
@@ -270,6 +474,43 @@ textarea.input { resize: vertical; min-height: 72px; }
   overflow-y: auto;
 }
 
+/* <Modal> / <Drawer>: native <dialog>.showModal() — Esc, focus trap and an
+   inert page come from the platform. */
+dialog.modal,
+dialog.drawer {
+  padding: 0;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-pop);
+}
+dialog.modal {
+  width: min(460px, calc(100vw - 32px));
+  max-height: min(90dvh, 640px);
+  border-radius: var(--r);
+}
+dialog.modal[open] { animation: modalSheetIn 200ms var(--ease-primary); }
+dialog.drawer {
+  margin: 0 0 0 auto;
+  width: min(400px, 100vw);
+  height: 100dvh; max-height: 100dvh;
+  border-width: 0 0 0 1px;
+}
+dialog.drawer[open] { display: flex; flex-direction: column; animation: drawer-in var(--dur-transition) var(--ease-transition); }
+dialog.drawer .modal-body { flex: 1; min-height: 0; overflow: auto; }
+@keyframes drawer-in { from { transform: translateX(100%); } }
+dialog.modal::backdrop,
+dialog.drawer::backdrop { background: var(--scrim); animation: modalScrimIn 200ms var(--ease-primary); }
+.modal-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); padding: var(--s-4) var(--s-4) 0; }
+.modal-head h2 { margin: 0; font-size: var(--fs-md); font-weight: 600; }
+.modal-body { padding: var(--s-3) var(--s-4) var(--s-4); font-size: var(--fs-sm); }
+.modal-foot {
+  display: flex; justify-content: flex-end; flex-wrap: wrap; gap: var(--s-2);
+  padding: var(--s-3) var(--s-4);
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+}
+
 @media (max-width: 900px) {
   .page-header {
     flex-direction: column;
@@ -278,7 +519,7 @@ textarea.input { resize: vertical; min-height: 72px; }
     margin-bottom: var(--s-4);
   }
   .page-header h1 { font-size: 22px; }
-  .page-header__actions { flex-wrap: wrap; margin-left: 0; }
+  .page-header__actions, .page-header .actions { flex-wrap: wrap; margin-left: 0; }
 
   /* Card headers wrap so tab groups / actions drop to a second line instead
      of being clipped by the card's overflow:hidden. */

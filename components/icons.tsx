@@ -11,7 +11,7 @@ type IconName =
   | 'chevron_left' | 'more' | 'upload' | 'eye'
   | 'send' | 'fire' | 'globe' | 'lock' | 'waveform' | 'target'
   | 'folder' | 'grid' | 'list' | 'link' | 'book' | 'fork' | 'alert'
-  | 'maximize'
+  | 'maximize' | 'log_out'
   | 'shield'
   | 'copy' | 'download';
 
@@ -64,6 +64,7 @@ export const Icon: React.FC<IconProps> = ({ name, size = 16, ...props }) => {
     fork: <><circle cx="4" cy="3" r="1.5"/><circle cx="12" cy="3" r="1.5"/><circle cx="8" cy="13" r="1.5"/><path d="M4 4.5v3a2 2 0 002 2h4a2 2 0 002-2v-3M8 9.5v2"/></>,
     alert: <><path d="M8 2L1.5 13.5h13L8 2z"/><path d="M8 6.5v3.5M8 12v.5"/></>,
     maximize: <><path d="M2.5 6V2.5H6M14 6V2.5H10.5M2.5 10v3.5H6M14 10v3.5H10.5"/></>,
+    log_out: <><path d="M6 2.5H3.5a1 1 0 00-1 1v9a1 1 0 001 1H6M10.5 11l3-3-3-3M13.5 8H6"/></>,
     shield: <><path d="M8 1.5L2.5 4v5c0 3 2.5 5 5.5 5.5 3-.5 5.5-2.5 5.5-5.5V4L8 1.5z"/></>,
     copy: <><rect x="5" y="5" width="8.5" height="8.5" rx="1.5"/><path d="M11 5V3.5a1 1 0 00-1-1H3.5a1 1 0 00-1 1V10a1 1 0 001 1H5"/></>,
     download: <><path d="M8 3v8M4.5 7.5L8 11l3.5-3.5M3 13h10"/></>,

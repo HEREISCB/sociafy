@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSWRConfig } from 'swr';
 import { AnimatePresence, LazyMotion, MotionConfig } from 'motion/react';
@@ -23,6 +23,7 @@ import { MotionEditor } from './compose/motion-editor';
 import { SmartVideo } from './compose/smart';
 import { FromWebsite } from './compose/from-website';
 import { ComposeChat } from './compose/chat';
+import { Seg } from './ui';
 
 /** Hard caption limits per platform (mirrors PLATFORM_LIMITS in lib/ai/compose.ts,
  *  which is server-only). */
@@ -91,48 +92,6 @@ const FORMAT_HINT: Record<Format, string> = {
   image: 'Generate an image from the brief, or add your own',
   video: 'Generate a video from the brief',
 };
-
-/**
- * Segmented control: the app's .mode-switch with one ink indicator that
- * slides between options (a clip-path transition, so nothing reflows).
- */
-function Seg<T extends string>({ value, options, onChange, label: name, className = '' }: {
-  value: T;
-  options: readonly { id: T; label: React.ReactNode; disabled?: boolean }[];
-  onChange: (v: T) => void;
-  label: string;
-  className?: string;
-}) {
-  const root = useRef<HTMLDivElement | null>(null);
-  const ind = useRef<HTMLSpanElement | null>(null);
-  useLayoutEffect(() => {
-    const el = root.current;
-    const bar = ind.current;
-    if (!el || !bar) return;
-    const place = () => {
-      const on = el.querySelector<HTMLElement>('[aria-checked="true"]');
-      if (!on || !el.clientWidth) return;
-      const l = on.offsetLeft - 3;
-      bar.style.clipPath = `inset(0 ${el.clientWidth - 6 - l - on.offsetWidth}px 0 ${l}px round 999px)`;
-      // First placement lands without sliding in from the edge.
-      requestAnimationFrame(() => el.setAttribute('data-ready', ''));
-    };
-    place();
-    const ro = new ResizeObserver(place);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [value]);
-  return (
-    <div ref={root} className={`mode-switch seg ${className}`} role="radiogroup" aria-label={name}>
-      <span ref={ind} className="seg-ind" aria-hidden="true" />
-      {options.map((o) => (
-        <button key={o.id} type="button" role="radio" aria-checked={value === o.id} className={`opt${value === o.id ? ' active' : ''}`} disabled={o.disabled} onClick={() => onChange(o.id)}>
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 export default function Compose({ draftId, initial, title, onNew }: {
   draftId?: string | null;

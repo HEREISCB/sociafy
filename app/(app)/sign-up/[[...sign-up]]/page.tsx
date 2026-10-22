@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react';
 import { SignUp, ClerkLoading, ClerkLoaded } from '@clerk/nextjs';
 import Link from 'next/link';
-import { AuthLoading } from '../../../../components/auth-loading';
+import { AuthLoading, AuthTabs } from '../../../../components/auth-loading';
+import { Icon } from '../../../../components/icons';
 import { safeNextPath } from '../../../../lib/safe-next';
 
 /**
@@ -43,23 +44,24 @@ export default function Page() {
         </Link>
         <div className="auth-head">
           <h1>Create your account</h1>
-          <p>{plan ? `Then check out for the ${plan} plan.` : 'Paid plans only, no free trial.'} Cancel anytime.</p>
+          <p>{plan ? `Then check out for the ${plan} plan.` : 'Sign up with Google or your email.'} Cancel anytime.</p>
         </div>
+        {plan && (
+          <span className="badge accent"><Icon name="bolt" size={12} /> Then check out: {plan} plan</span>
+        )}
+        <AuthTabs active="up" />
         <ClerkLoading>
           <AuthLoading />
         </ClerkLoading>
         <ClerkLoaded>
           <SignUp
-            appearance={{
-              elements: {
-                rootBox: { width: '100%' },
-                card: { background: 'var(--surface)', border: '1px solid var(--line)', boxShadow: 'none', borderRadius: 'var(--r)' },
-              },
-            }}
             signInUrl="/sign-in"
             forceRedirectUrl={tryReturn() ?? nextReturn()}
           />
         </ClerkLoaded>
+        <p className="auth-foot">
+          Paid plans only, no free trial. By continuing you agree to the <Link href="/legal/terms">Terms</Link> and <Link href="/legal/privacy">Privacy policy</Link>.
+        </p>
       </div>
     </div>
   );
