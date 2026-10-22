@@ -123,6 +123,13 @@ const SAFE_DEFAULT_SEC = 12;
 const FOOTAGE_SEC = { min: 4, max: 8 } as const;
 /** Motion graphics and hybrids run at least this long (the 7 s sting template is the exception). */
 const MIN_GRAPHIC_SEC = 8;
+/** The brain's own longest graphic. Past this (up to MOTION_AI's max) only when the user picked a length or the post asks for a long video. */
+const BRAIN_MAX_GRAPHIC_SEC = 60;
+/** "a 2-minute explainer", "90 second video", "3 mins", "long-form": the post explicitly wants more than a minute. */
+export const asksForLongVideo = (text: string) =>
+  /\blong[- ]form\b/i.test(text) ||
+  /\b(?:1\.\d+|[2-9]|two|three)\s*-?\s*(?:mins?|minutes?)\b/i.test(text) ||
+  [...text.matchAll(/\b(\d{2,3})\s*-?\s*(?:s|secs?|seconds?)\b/gi)].some((m) => Number(m[1]) > 60);
 const MIN_CONFIDENCE = 0.6;
 /** Motion 1 Fast renders at most this long; longer Motion 1 footage renders on quality. */
 const FAST_MAX_SEC = VIDEO_MODELS['sociafy-motion-1'].fastMaxSec ?? 0;
@@ -380,6 +387,7 @@ export function finalizePlan(draftIn: Draft | null, input: BrainInput, opts: { r
   const wantSec = ov.durationSec ?? draft.durationSec ?? win.def;
   // A length the user picked is honored down to the engine minimum; the brain's own picks stay ≥ 8 s.
   const minGraphic = ov.durationSec ? MOTION_AI.durationSec.min : MIN_GRAPHIC_SEC;
+  const maxGraphic = ov.durationSec || asksForLongVideo(input.text) ? MOTION_AI.durationSec.max : BRAIN_MAX_GRAPHIC_SEC;
   const onScreenText = (draft.onScreenText ?? []).filter((t) => typeof t === 'string').map((t) => t.slice(0, 120)).slice(0, 6);
   const llmCopy = ctx.notes.includes('default') ? null : draftIn;
 
@@ -421,7 +429,7 @@ export function finalizePlan(draftIn: Draft | null, input: BrainInput, opts: { r
     // Motion 1 is mute; Cinema scores its own sound.
     plan.audio = plan.footage.engine === 'cinema-1' ? { narration: false, music: true, sfx: true } : { narration: false, music: false, sfx: false };
   } else if (format === 'hybrid') {
-    plan.durationSec = clamp(wantSec, minGraphic, MOTION_AI.durationSec.max);
+    plan.durationSec = clamp(wantSec, minGraphic, maxGraphic);
     const want = fd.footageSeconds ?? Math.round(plan.durationSec / 2);
     plan.footage = footage(clamp(want, FOOTAGE_SEC.min, Math.min(FOOTAGE_SEC.max, plan.durationSec - 2)), true);
     const recipe = (['H1', 'H2', 'H3', 'H4'] as const).find((r) => r === draft.recipe);
@@ -433,7 +441,7 @@ export function finalizePlan(draftIn: Draft | null, input: BrainInput, opts: { r
       plan.durationSec = MOTION_TEMPLATES[plan.graphics.template!].durationSec;
       plan.audio = { narration: false, music: false, sfx: false }; // templates ship no audio
     } else {
-      plan.durationSec = clamp(wantSec, minGraphic, MOTION_AI.durationSec.max);
+      plan.durationSec = clamp(wantSec, minGraphic, maxGraphic);
     }
   }
   // Every graphic gets 2–4 short lines from the post: the model's, else derived from the text.
@@ -743,7 +751,7 @@ export function alternativesFor(plan: Plan, input: BrainInput, draft: Draft | nu
 const SYSTEM = `You plan one short social video for a post. Choose ONE format and reply with JSON only; omit keys that don't apply.
 
 Formats:
-- motion_graphic: animated type + brand (exact colors, logo, any language). graphicsEngine "ai_motion" (custom, 6-60 s, any aspect) or "template" ("stat" 15 s for <=3 numbers, "showcase" 16 s for product screenshots, "sting" 7 s logo). Templates: Latin script only, no 1:1.
+- motion_graphic: animated type + brand (exact colors, logo, any language). graphicsEngine "ai_motion" (custom, 6-60 s; up to 180 s only when the post explicitly asks for a longer video; any aspect) or "template" ("stat" 15 s for <=3 numbers, "showcase" 16 s for product screenshots, "sting" 7 s logo). Templates: Latin script only, no 1:1.
 - ai_video: generated footage, 4-30 s ("motion-1-fast" 4-15 s). It CANNOT write words, numbers, logos or UI.
 - hybrid: 4-8 s of AI footage inside a motion graphic with type on top. recipe H1 (hook, footage with short caption, end card: announcement + scene), H2 (stat over footage under a color scrim), H3 (product photo image-to-video, then price/spec chips, CTA), H4 (footage in a framed card beside big type, B2B).
 

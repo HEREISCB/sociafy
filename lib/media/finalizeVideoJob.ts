@@ -5,6 +5,7 @@ import { getSeedanceTask } from '../ai/piapi';
 import { CueError, deleteCueRender, downloadCueRender, getCueRender } from '../ai/cue';
 import { getMotionResult, motionConfigured } from '../ai/motion';
 import { getMotionAiResult, motionAiConfigured, type MotionAiResult, type MotionAudio } from '../ai/motionAi';
+import { motionAiExtraMin } from '../ai/models';
 import { cleanAudio, saveMotionResult, savedAudioWarning } from './motionVersions';
 import { makeMediaKey, publicUrlFor, uploadBuffer } from '../storage/r2';
 import { downloadToBuffer } from './finalize';
@@ -281,6 +282,8 @@ async function finalizeCinemaJob(job: VideoJob): Promise<FinalizeVideoResult> {
  * MAX_AGE_MS (2h) is the give-up window for both. AI-designed jobs take 6–12
  * min (22 min worker cap) and the worker runs 2 at a time, so a queue of them
  * needs well over one job's time; 2h covers that without holding credits for long.
+ * Long AI-designed jobs (up to 3 min of video, ~86 min worker cap) get twice their
+ * extra worker time on top, so one queued behind two others isn't refunded mid-render.
  */
 async function finalizeMotionJob(
   job: VideoJob,
@@ -289,6 +292,7 @@ async function finalizeMotionJob(
 ): Promise<FinalizeVideoResult> {
   if (!configured()) return { status: 'pending', pollError: 'video_provider_not_configured' };
   const ageMs = Date.now() - job.createdAt.getTime();
+  const maxAgeMs = MAX_AGE_MS + 2 * motionAiExtraMin(job.durationSec) * 60_000;
 
   if (!job.providerTaskId) {
     if (ageMs > SUBMIT_GRACE_MS) return failAndRefund(job, 'submit_unconfirmed');
@@ -301,12 +305,12 @@ async function finalizeMotionJob(
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error('[finalize-video] motion poll failed:', msg.slice(0, 400));
-    if (ageMs > MAX_AGE_MS) return failAndRefund(job, 'provider_stuck');
+    if (ageMs > maxAgeMs) return failAndRefund(job, 'provider_stuck');
     return { status: 'pending', pollError: msg.slice(0, 200) };
   }
 
   if (r.status === 'pending') {
-    if (ageMs > MAX_AGE_MS) return failAndRefund(job, 'provider_stuck');
+    if (ageMs > maxAgeMs) return failAndRefund(job, 'provider_stuck');
     await db().update(videoJobs).set({ updatedAt: new Date() }).where(eq(videoJobs.id, job.id));
     return { status: 'pending', providerStatus: 'processing' };
   }

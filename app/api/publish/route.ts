@@ -13,6 +13,7 @@ import {
 import { getAdapter } from '../../../lib/platforms/registry';
 import { PlatformError, publishWarning } from '../../../lib/platforms/types';
 import { ensureFreshToken } from '../../../lib/platforms/token';
+import { withDurations } from '../../../lib/media/durations';
 import { rateLimit } from '../../../lib/rate-limit';
 import { publishSchema, parseBody } from '../../../lib/validation';
 import { postText } from '../../../lib/agent/publish';
@@ -86,6 +87,8 @@ export async function POST(req: NextRequest) {
     }
 
     const media = (draft.media ?? []) as { id: string; url: string; mimeType: string }[];
+    // Video lengths from the library, so an adapter can refuse a clip over the account's limit up front.
+    const timed = await withDurations(media);
 
     // Claim before publishing. A double-click (or the cron) racing this
     // request used to post the same draft twice. Locking the draft row
@@ -234,7 +237,7 @@ export async function POST(req: NextRequest) {
       try {
         out = await adapter.publishText({
           text,
-          media: media.map((m) => ({ url: m.url, mimeType: m.mimeType })),
+          media: timed.map((m) => ({ url: m.url, mimeType: m.mimeType, durationSec: m.durationSec })),
           account: {
             id: acct.id,
             accessToken: acct.accessToken,

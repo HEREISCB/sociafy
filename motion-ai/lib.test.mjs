@@ -15,7 +15,8 @@ test('submit validation', () => {
   assert.equal(r.brand.colors.text, undefined);
   assert.equal(r.brand.logoUrl, '');
   assert.equal(parseSubmit({ ...ok, durationSec: 60 }).durationSec, 60);
-  assert.equal(parseSubmit({ ...ok, durationSec: 61 }).error, 'bad_duration');
+  assert.equal(parseSubmit({ ...ok, durationSec: 180 }).durationSec, 180);
+  assert.equal(parseSubmit({ ...ok, durationSec: 181 }).error, 'bad_duration');
   assert.equal(parseSubmit({ ...ok, durationSec: 5 }).error, 'bad_duration');
   assert.equal(parseSubmit({ ...ok, videoKey: 'x/v.mp4' }).error, 'bad_key');
   assert.equal(parseSubmit({ ...ok, aspect: '4:5' }).error, 'bad_aspect');
@@ -36,22 +37,33 @@ test('segments: valid manifest kept, bad one falls back', () => {
   assert.equal(parseSegments(even(15, 60), 60).length, 15);
   assert.equal(parseSegments(even(16, 60), 60).length, 1);
   assert.equal(parseSegments(even(7, 20), 20).length, 1);
+  // 3 minutes caps at 24 segments (7.5 s each), not 45.
+  assert.equal(parseSegments(even(24, 180), 180).length, 24);
+  assert.equal(parseSegments(even(25, 180), 180).length, 1);
 });
 
 test('segment range and limits grow with length', () => {
   assert.deepEqual(segmentRange(20), [3, 6]);
   assert.deepEqual(segmentRange(45), [8, 12]);
   assert.deepEqual(segmentRange(60), [10, 15]);
+  assert.deepEqual(segmentRange(90), [15, 23]);
+  assert.deepEqual(segmentRange(180), [18, 24]);
   const MIN = 60_000;
   // Up to 20 s: the limits that shipped before (claude 12, check 2, render 5, job 22, +5 footage).
   assert.deepEqual(jobLimits(20), { claude: 12 * MIN, check: 2 * MIN, render: 5 * MIN, footage: 5 * MIN, job: 22 * MIN, turns: 80 });
   assert.equal(jobLimits(12, true).job, 27 * MIN);
   const l = jobLimits(60);
-  assert.equal(l.claude, 25 * MIN);
+  assert.equal(l.claude, 12 * MIN + 40 * 20_000);
   assert.equal(l.render, 10 * MIN);
-  // The app's browser poll windows add motionAiExtraMin(60) = 20 min over the 20 s budget: never less than this.
-  assert.ok(l.job - 22 * MIN <= 20 * MIN, `job ${l.job / MIN} min`);
-  for (let d = 6; d <= 60; d++) assert.ok(jobLimits(d).job - 22 * MIN <= Math.ceil(Math.max(0, d - 20) / 2) * MIN, `d=${d}`);
+  assert.equal(l.turns, 120);
+  const xl = jobLimits(180);
+  assert.equal(xl.claude, 50 * MIN);
+  assert.equal(xl.render, 30 * MIN);
+  assert.equal(xl.turns, 200);
+  // Well inside the app's 2 h stuck-job window even before queueing.
+  assert.ok(xl.job < 90 * MIN, `job ${xl.job / MIN} min`);
+  // The app's browser poll windows add motionAiExtraMin(d) = ceil((d - 20) / 2) min over the 20 s budget: never less than this.
+  for (let d = 6; d <= 180; d++) assert.ok(jobLimits(d).job - 22 * MIN <= Math.ceil(Math.max(0, d - 20) / 2) * MIN, `d=${d}`);
 });
 
 test('edit validation', () => {

@@ -64,7 +64,7 @@ async function main() {
   } else if (kind === 'sfx') {
     r = await api('/sound-generation?output_format=mp3_44100_128', { text, duration_seconds: num('dur', 0.5, 10, 1.5), prompt_influence: 0.5 });
   } else {
-    const dur = num('dur', 3, 60, 12); // up to the longest video (6–60 s)
+    const dur = num('dur', 3, 180, 12); // up to the longest video (6–180 s; the music API takes up to 5 min)
     try { r = await api('/music?output_format=mp3_44100_128', { prompt: text, music_length_ms: Math.round(dur * 1000), model_id: 'music_v1', force_instrumental: true }); }
     catch (e) { // the music API needs a paid plan (402): a looping sound-generation bed instead
       if (!/ 40[23] /.test(e.message)) throw e;
@@ -77,7 +77,7 @@ async function main() {
   fs.writeFileSync(file, buf);
   const probe = () => Number(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', file]).toString().trim());
   let durationSec = probe();
-  const want = kind === 'music' ? num('dur', 3, 60, 12) : 0;
+  const want = kind === 'music' ? num('dur', 3, 180, 12) : 0;
   if (durationSec < want) { // the fallback bed caps at 30 s (and mp3 framing can land short): loop to the full length + 0.5 s, fade the tail
     const tmp = `${DIR}/${id}.loop.mp3`;
     execFileSync('ffmpeg', ['-v', 'error', '-y', '-stream_loop', '-1', '-i', file, '-t', String(want + 0.5), '-af', `afade=t=out:st=${Math.max(0, want - 1)}:d=1.5`, '-c:a', 'libmp3lame', '-b:a', '128k', tmp]);

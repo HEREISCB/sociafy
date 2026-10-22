@@ -42,9 +42,9 @@ beforeEach(() => {
 
 describe('POST /api/compose/chat', () => {
   it('returns the post, a clamped length and known platforms, and charges the Write-it-for-me price', async () => {
-    st.llm.mockResolvedValue(JSON.stringify({ reply: 'Here you go.', post: 'Fresh butter croissants, warm from 7am.', durationSec: 75, platforms: ['Instagram', 'myspace'] }));
+    st.llm.mockResolvedValue(JSON.stringify({ reply: 'Here you go.', post: 'Fresh butter croissants, warm from 7am.', durationSec: 240, platforms: ['Instagram', 'myspace'] }));
     const r = await post(ask('a 15s video for my bakery’s new croissant, warm tone, for Instagram'));
-    expect(r).toMatchObject({ reply: 'Here you go.', post: 'Fresh butter croissants, warm from 7am.', durationSec: 60, platforms: ['instagram'], ready: true });
+    expect(r).toMatchObject({ reply: 'Here you go.', post: 'Fresh butter croissants, warm from 7am.', durationSec: 180, platforms: ['instagram'], ready: true });
     expect(st.charge).toHaveBeenCalledWith(expect.objectContaining({ userId: 'user_1', credits: priceForCompose({ withTools: false }).credits }));
     expect(st.refund).not.toHaveBeenCalled();
   });

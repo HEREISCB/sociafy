@@ -27,7 +27,8 @@ export type AdapterAccount = {
 
 export type PublishInput = {
   text: string;
-  media?: { url: string; mimeType: string }[];
+  /** durationSec (videos, when the library knows it) lets an adapter refuse up front instead of failing after upload. */
+  media?: { url: string; mimeType: string; durationSec?: number }[];
   account: AdapterAccount;
 };
 

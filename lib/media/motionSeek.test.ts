@@ -20,8 +20,9 @@ describe('posterSeekSec', () => {
     expect(posterSeekSec(0.5)).toBe(0);
   });
   it('long footage seeks to 1 s', () => {
-    expect(posterSeekSec(60.5)).toBe(1);
-    expect(posterSeekSec(120)).toBe(1);
+    expect(posterSeekSec(180)).toBeCloseTo(179.2);
+    expect(posterSeekSec(180.5)).toBe(1);
+    expect(posterSeekSec(600)).toBe(1);
   });
   it('bad durations stay at the start', () => {
     expect(posterSeekSec(0)).toBe(0);

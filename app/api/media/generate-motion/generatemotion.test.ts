@@ -66,13 +66,13 @@ describe('POST /api/media/generate-motion', () => {
     expect(st.ai).toHaveLength(3);
   });
 
-  it('accepts up to 60 s', async () => {
-    expect((await post({ topic: 'Hello there', template: 'ai', durationSec: 60 })).status).toBe(202);
-    expect(st.ai[0]).toMatchObject({ durationSec: 60 });
+  it('accepts up to 180 s', async () => {
+    expect((await post({ topic: 'Hello there', template: 'ai', durationSec: 180 })).status).toBe(202);
+    expect(st.ai[0]).toMatchObject({ durationSec: 180 });
   });
 
   it('rejects an out-of-range length', async () => {
-    expect((await post({ topic: 'Hello there', template: 'ai', durationSec: 61 })).status).toBe(400);
+    expect((await post({ topic: 'Hello there', template: 'ai', durationSec: 181 })).status).toBe(400);
     expect((await post({ topic: 'Hello there', template: 'ai', durationSec: 5 })).status).toBe(400);
     expect(st.ai).toHaveLength(0);
   });

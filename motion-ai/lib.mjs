@@ -1,20 +1,24 @@
 // Pure helpers for server.mjs (validated by lib.test.mjs).
 
 export const SIZES = { '9:16': [1080, 1920], '16:9': [1920, 1080], '1:1': [1080, 1080] };
-export const DURATION = { min: 6, max: 60 }; // the app's MOTION_AI.durationSec
+export const DURATION = { min: 6, max: 180 }; // the app's MOTION_AI.durationSec
 
-// Segment count for a length: 3–6 up to 20 s, then about one per 4–6 s (10–15 at 60 s).
-export const segmentRange = (dur) => [Math.max(3, Math.round(dur / 6)), Math.max(6, Math.ceil(dur / 4))];
+// Segment count for a length: 3–6 up to 20 s, then about one per 4–6 s (10–15 at 60 s), capped at
+// 18–24 (from ~108 s; 7.5–10 s each at 180 s) so the editor's segment list and Claude's plan stay usable.
+export const segmentRange = (dur) => [Math.max(3, Math.min(18, Math.round(dur / 6))), Math.max(6, Math.min(24, Math.ceil(dur / 4)))];
 
 // Per-step limits in ms. Up to 20 s: claude 12 min, check 2, render 5, job 22 (+5 with footage).
-// Longer: claude +20 s per extra second (cap 25 min), render 10 s per second, check +1 s per second,
-// so 60 s gets claude 25, check 2.7, render 10, job ~41 min. The app's motionAiExtraMin must stay >= job - 22.
+// Longer: claude +20 s per extra second (cap 50 min), render 10 s per second, check +0.5 s per second,
+// so 60 s gets claude 25.3, check 2.3, render 10, job ~41 min; 180 s gets claude 50, check 3.3,
+// render 30, job ~86 min (measured on the box: a 60 s job took claude 11 min, render 2.5 min).
+// Max-turns 80 / 120 over 20 s / 200 over 60 s (long videos are built scene file by scene file).
+// The app's motionAiExtraMin must stay >= job - 22 (lib.test.mjs checks every length).
 export function jobLimits(dur, footage = false) {
   const MIN = 60_000, over = Math.max(0, dur - 20);
-  const claude = Math.min(25 * MIN, 12 * MIN + over * 20_000);
-  const check = 2 * MIN + over * 1_000;
+  const claude = Math.min(50 * MIN, 12 * MIN + over * 20_000);
+  const check = 2 * MIN + over * 500;
   const render = Math.max(5 * MIN, dur * 10_000);
-  return { claude, check, render, footage: 5 * MIN, job: claude + check + render + 3 * MIN + (footage ? 5 * MIN : 0), turns: dur > 20 ? 120 : 80 };
+  return { claude, check, render, footage: 5 * MIN, job: claude + check + render + 3 * MIN + (footage ? 5 * MIN : 0), turns: dur > 60 ? 200 : dur > 20 ? 120 : 80 };
 }
 const HEX = /^#[0-9a-fA-F]{3,8}$/;
 

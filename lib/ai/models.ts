@@ -140,13 +140,14 @@ export const MOTION_GRAPHICS = { backend: 'motion-hf', name: 'Sociafy Motion Gra
 export const MOTION_AI = {
   backend: 'motion-claude',
   name: 'AI-designed motion graphic',
-  durationSec: { min: 6, max: 60, default: 15 },
+  durationSec: { min: 6, max: 180, default: 15 },
   aspects: ['9:16', '16:9', '1:1'],
 } as const satisfies { backend: VideoBackend; name: string; durationSec: { min: number; max: number; default: number }; aspects: readonly string[] };
 
 /**
  * Extra minutes an AI-designed job longer than 20 s may take: the worker grows
- * its own limits with length (motion-ai/lib.mjs jobLimits, +19 min at 60 s) and
+ * its own limits with length (motion-ai/lib.mjs jobLimits, +19 min at 60 s, +64 at
+ * 180 s; lib.test.mjs checks every length against this formula) and
  * browser poll windows and wait copy add this much so they never give up first.
  */
 export const motionAiExtraMin = (durationSec = 0) => Math.ceil(Math.max(0, durationSec - 20) / 2);

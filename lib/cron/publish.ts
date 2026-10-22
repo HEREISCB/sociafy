@@ -9,6 +9,7 @@ import {
 import { getAdapter } from '../platforms/registry';
 import { PlatformError, publishWarning } from '../platforms/types';
 import { ensureFreshToken } from '../platforms/token';
+import { withDurations } from '../media/durations';
 
 export type PublishResult = {
   id: string;
@@ -190,7 +191,7 @@ export async function runPublish(): Promise<{ ran: number; results: PublishResul
     try {
       out = await adapter.publishText({
         text: sp.text,
-        media: (sp.media ?? []) as { url: string; mimeType: string }[],
+        media: await withDurations((sp.media ?? []) as { id?: string; url: string; mimeType: string }[]),
         account: {
           id: acct.id,
           accessToken: acct.accessToken,

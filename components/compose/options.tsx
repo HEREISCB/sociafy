@@ -3,9 +3,10 @@
 import React, { useRef } from 'react';
 import Link from 'next/link';
 import { Icon } from '../icons';
+import { LENGTH_STOPS, fmtLength, lengthStop, spokenLength } from '../../lib/media/length';
 import { VoicePicker } from '../voice-studio';
 import { priceForImage } from '../../lib/credits/pricing';
-import { MOTION_AI, MOTION_GRAPHICS, MOTION_TEMPLATE_IDS, MOTION_TEMPLATES, VIDEO_MODELS, VIDEO_MODEL_IDS, type VideoModelId } from '../../lib/ai/models';
+import { MOTION_GRAPHICS, MOTION_TEMPLATE_IDS, MOTION_TEMPLATES, VIDEO_MODELS, VIDEO_MODEL_IDS, type VideoModelId } from '../../lib/ai/models';
 import { motionAiReady, motionReady, type BrandKit, type BrandProfile } from '../../lib/brand/kit';
 import { useApi } from '../../lib/ui/fetcher';
 import { ThumbImg } from '../thumb-img';
@@ -379,7 +380,6 @@ export function VideoOptions({ gen, cost, disabled, onGenerate }: PanelProps) {
  */
 export function LengthControl({ gen, length, setLength }: { gen: MediaGen; length: number | null; setLength: (n: number | null) => void }) {
   const { s } = gen;
-  const { min, max } = MOTION_AI.durationSec;
   const auto = s.videoSmart;
   const template = MOTION_TEMPLATES[s.motionTemplate];
   const fixed = auto ? null
@@ -392,15 +392,16 @@ export function LengthControl({ gen, length, setLength }: { gen: MediaGen; lengt
   const note = fixed ?? (!auto && !motion && length && effective !== length
     ? `${model.name} renders ${model.durationSec.min}–${model.durationSec.max}s, so this clip is ${effective}s.`
     : null);
-  const shown = fixed ? 'Fixed' : length ? `${length}s` : auto ? 'AI decides' : `Default ${effective}s`;
+  const shown = fixed ? 'Fixed' : length ? fmtLength(length) : auto ? 'AI decides' : `Default ${effective}s`;
+  const spoken = !fixed && length ? spokenLength(length) : shown;
   return (
     <div className="compose-field">
       <label className="compose-length">
         <span className="compose-label">Length</span>
         <input
-          type="range" min={min - 1} max={max} step={1} value={length ?? min - 1} disabled={Boolean(fixed)}
-          aria-valuetext={shown} aria-describedby={note ? 'compose-length-note' : undefined}
-          onChange={(e) => { const n = Number(e.target.value); setLength(n >= min ? n : null); }}
+          type="range" min={0} max={LENGTH_STOPS.length} step={1} value={lengthStop(length)} disabled={Boolean(fixed)}
+          aria-valuetext={spoken} aria-describedby={note ? 'compose-length-note' : undefined}
+          onChange={(e) => { const i = Number(e.target.value); setLength(i ? LENGTH_STOPS[i - 1] : null); }}
         />
         <output className="tnum">{shown}</output>
       </label>

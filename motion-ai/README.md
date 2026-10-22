@@ -28,7 +28,7 @@ Every request needs `X-Engine-Secret: <ENGINE_SECRET>`, otherwise `401 {"error":
 }
 ```
 
-`400 {error}` codes: `bad_json`, `bad_prompt`, `bad_aspect`, `bad_duration` (6–60 s), `bad_key`
+`400 {error}` codes: `bad_json`, `bad_prompt`, `bad_aspect`, `bad_duration` (6–180 s), `bad_key`
 (keys must start with `users/` and use only `[A-Za-z0-9._-/]`, no `..`). Brand URLs must be
 `https://` (≤10 MB, 20 s timeout). Non-https, unreachable or unknown-type assets are skipped
 rather than failing the job. Invalid colors are dropped.
@@ -68,7 +68,7 @@ Canvas: 9:16 → 1080×1920, 16:9 → 1920×1080, 1:1 → 1080×1080.
 
 Unknown callId → `404 {"status":"failed","error":"not_found"}`.
 
-`segments` is always present when done. It holds 3–6 contiguous segments (up to 20 s; beyond, about one per 4–6 s, max `ceil(duration / 4)`, so 15 at 60 s) from 0 to the duration,
+`segments` is always present when done. It holds 3–6 contiguous segments (up to 20 s; beyond, about one per 4–6 s, max `ceil(duration / 4)`, so 15 at 60 s, capped at 24 from 96 s) from 0 to the duration,
 written by Claude (`segments.json`) and validated by the worker. If the manifest is missing or
 invalid, it's one segment covering the whole video with `suggestions: []`. `footage: true` is present
 only on segments where footage is on screen (hybrid jobs).
@@ -115,9 +115,9 @@ parent's segments), `bad_instruction` (empty or > 1000 chars), `bad_key`.
   runs a two-pass `loudnorm` (−16 LUFS integrated, −1.5 dBTP), AAC 192k 48 kHz, trimmed to exactly
   the duration with the video stream copied. `ELEVENLABS_API_KEY` lives in `~/motionai/.env` and
   is passed as an env var into the Claude step's sandbox only (never written into the project).
-- Concurrency 2, FIFO queue. Timeouts up to 20 s: Claude 12 min, check 2 min, render 5 min, whole job 22 min. Longer videos scale (`jobLimits` in lib.mjs): Claude +20 s per second over 20 (cap 25 min), render 10 s per second, Claude max-turns 120; a 60 s job gets ~41 min.
+- Concurrency 2, FIFO queue. Timeouts up to 20 s: Claude 12 min, check 2 min, render 5 min, whole job 22 min. Longer videos scale (`jobLimits` in lib.mjs): Claude +20 s per second over 20 (cap 50 min), check +0.5 s and render 10 s per second, Claude max-turns 120 (200 over 60 s); a 60 s job gets ~41 min, a 180 s job ~86 min. Over 60 s, CLAUDE.md has Claude build each segment as a sub-composition (`compositions/<segment id>.html`) mounted by a thin index.html.
 - Per job (`~/motionai/jobs/<callId>/`): scaffold `project/` (scaffold/ + BRIEF.md + downloaded
-  brand assets), then `claude -p … --model opus --output-format json --max-turns 80|120 --allowedTools "Read,Write,Edit,Glob,Grep,Skill,Bash(npx hyperframes*),Bash(npm run *),Bash(ls*),Bash(motion-audio *)"`.
+  brand assets), then `claude -p … --model opus --output-format json --max-turns 80|120|200 --allowedTools "Read,Write,Edit,Glob,Grep,Skill,Bash(npx hyperframes*),Bash(npm run *),Bash(ls*),Bash(motion-audio *)"`.
   Edit jobs instead copy the parent's `project/` (no renders), add `EDIT.md` (instruction + target
   segment) and run Claude with an edit task (same tools, sandbox and timeouts).
   Then the worker (not Claude) runs `hyperframes check`, `render`, ffmpeg poster, and the R2 upload.

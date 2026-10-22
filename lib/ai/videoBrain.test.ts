@@ -10,7 +10,7 @@ vi.mock('./client', () => ({
 
 import {
   FOOTAGE_NEGATIVE, VENDOR_RX, alternativesFor, cinemaEstimate, copyLine, detectSignals, draftFromPlan, finalizePlan, heuristicDraft,
-  filmsAScene, planVideo, priceForPlan, sceneProse, summaryFor, toLines, type Availability, type BrainInput, type Draft, type Plan,
+  asksForLongVideo, filmsAScene, planVideo, priceForPlan, sceneProse, summaryFor, toLines, type Availability, type BrainInput, type Draft, type Plan,
 } from './videoBrain';
 
 const ALL: Availability = { motion1: true, cinema: true, templates: true, aiMotion: true, kitScreenshots: 0 };
@@ -122,6 +122,19 @@ describe('finalizePlan: envelopes', () => {
     const short = finalizePlan(draft({ format: 'hybrid', footageSeconds: 1, durationSec: 6 }), input());
     expect(short.footage?.seconds).toBe(4);
     expect(short.durationSec).toBe(8);
+  });
+
+  it('goes past 60 s only when the user picked a length or the post asks for a long video', () => {
+    const long = draft({ format: 'motion_graphic', graphicsEngine: 'ai_motion', durationSec: 150 });
+    const rich = { balance: 100_000 };
+    expect(finalizePlan(long, input(rich)).durationSec).toBe(60);
+    expect(finalizePlan(long, input({ ...rich, overrides: { durationSec: 150 } })).durationSec).toBe(150);
+    expect(finalizePlan(long, input({ ...rich, text: 'Make a 3-minute explainer of our onboarding.' })).durationSec).toBe(150);
+    expect(finalizePlan(draft({ format: 'motion_graphic', graphicsEngine: 'ai_motion', durationSec: 400 }), input({ ...rich, overrides: { durationSec: 400 } })).durationSec).toBe(180);
+    expect(asksForLongVideo('a 90 second walkthrough')).toBe(true);
+    expect(asksForLongVideo('long-form recap')).toBe(true);
+    expect(asksForLongVideo('1.5 min tour')).toBe(true);
+    expect(asksForLongVideo('a 30 s teaser, 1 minute read')).toBe(false);
   });
 
   it('best fit never picks a template while AI motion is available', () => {

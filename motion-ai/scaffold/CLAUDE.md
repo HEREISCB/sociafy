@@ -2,7 +2,8 @@
 
 You are running unattended inside a render worker. There is **no human to ask**: never ask
 questions, never wait for approval, never open a Studio preview. Make every decision yourself.
-You do have time: about 10 minutes. Spend it on design quality and on looking at your own frames.
+You do have time: about 10 minutes for a short video, about 25 at 60 s, up to about 50 for 2–3 minutes.
+Spend it on design quality and on looking at your own frames.
 
 ## Deliverable
 
@@ -78,7 +79,7 @@ Before finishing, write `segments.json` in this folder describing your timeline:
 {"segments":[{"id":"s1","label":"Hook","startSec":0,"endSec":3.2,"onScreenText":"…","suggestions":["Make the headline punchier","Slow the reveal"]}]}
 ```
 
-{{SEGS}} contiguous segments in order (about one beat per 4–6 s of the {{DUR}} s; a long video
+{{SEGS}} contiguous segments in order (about one beat per 4–6 s of the {{DUR}} s, 7–10 s past ~100 s; a long video
 needs that many distinct beats, not a few stretched ones): the first starts at 0, each `startSec` equals the previous
 `endSec`, the last ends at exactly {{DUR}}. `onScreenText` is the text visible in that segment.
 `suggestions` holds 2–3 short, concrete edits a user could click to improve that segment
@@ -160,6 +161,29 @@ during every narration line** (0.15–0.3 s ramps) via its `volume` lane (`t` is
 bed's start). No GSAP tweens on audio. The worker normalises loudness and trims to {{DUR}}.
 Mixing reference if needed: `{{SKILLS}}/hyperframes-audio/references/attributes.md`.
 
+## Long videos (over 60 s only)
+
+One file holding 15–24 scenes is too big to write or fix reliably, so split it the HyperFrames way
+(`{{SKILLS}}/hyperframes-core/references/sub-compositions.md`, read it first):
+
+- Each segment is its own sub-composition file `compositions/<segment id>.html` (e.g.
+  `compositions/s7.html`), written with one Write call per scene. Everything it needs (its
+  `<style>`, markup, `<script>`) goes **inside its `<template>`**; its root is
+  `<div id="root" data-composition-id="<segment id>" data-width="{{W}}" data-height="{{H}}">`, styled
+  by `#root` only; its paused timeline is registered at `window.__timelines["<segment id>"]` with
+  `fromTo` entrances, timed from 0 to the segment's length.
+- `index.html` stays thin: the `main` root (its own, near-empty paused timeline), shared
+  `@font-face`/CSS variables and helpers in a plain `<script>` before the slots, one slot per segment
+  (`<div data-composition-id="<segment id>" data-composition-src="compositions/<segment id>.html"
+  data-start=… data-duration=… data-track-index="1" data-width="{{W}}" data-height="{{H}}">`, ids
+  matching exactly), then the grain overlay and the `<audio>` elements. Don't add the scene
+  timelines to `main`.
+- Transitions: let each scene's own last ~0.4 s and the next scene's first ~0.4 s carry the move
+  (wipe out / mask in, push, match scale), or overlap two slots on different track indexes.
+- Run `check` after the first 3 scenes so a contract mistake is caught early, then write the rest.
+- Edits to one segment change only its `compositions/<segment id>.html` (and the slot timing in
+  `index.html` if its length changes).
+
 ## How
 
 Use the **Write** tool to create files and **Edit** to change them. Never `cat >`, `echo >`,
@@ -184,11 +208,12 @@ Search files with the Grep/Glob tools, not shell `grep`.
      techniques, not the look; never copy its IndusLabs branding).
    Skip the skills' interactive steps: no subagents, no `hyperframes init`, no `hyperframes add`
    or catalog installs, no preview, no render, no media sourcing other than `motion-audio`.
-3. Plan before you write: {{SEGS}} segments for {{DUR}} s (keep each 3–7 s; a long video tells
+3. Plan before you write: {{SEGS}} segments for {{DUR}} s (keep each 3–7 s, up to 10 s past ~100 s; a long video tells
    more of the post, e.g. one point, proof or step per segment, rather than holding a frame). For each segment, decide its hero visual, blueprint, layout, the 1–2
    short text lines, and the transition into the next segment. Check the plan against the bar and
    the banned list above.
 4. Write `index.html` (one `<section class="clip">` or scene layer per segment works well).
+   **Over 60 s, build it scene by scene instead** (see Long videos above).
 5. Run `npx hyperframes@0.8.141 check` and fix **every error** until it passes.
 6. **Look at it.** Run `npx hyperframes@0.8.141 snapshot --at <t1>,<t2>,… --describe false`
    with the middle time of every segment (it also adds the final frame). Then Read

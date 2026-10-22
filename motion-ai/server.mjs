@@ -28,7 +28,7 @@ const TASK = `Read CLAUDE.md and BRIEF.md, then with the Read tool read ${READ_F
   `make \`npx ${HF} check\` pass. ${LOOK} (at most 2 passes). Write segments.json. ` +
   'Create files with the Write tool, never shell redirection. Work autonomously; never ask questions.';
 const TASK_EDIT = 'This folder holds a finished HyperFrames motion graphic (index.html, segments.json, BRIEF.md). ' +
-  'Apply the edit request in EDIT.md by revising the existing index.html in place; do not rebuild it from scratch. ' +
+  'Apply the edit request in EDIT.md by revising the existing index.html (and its compositions/ scene files, if any) in place; do not rebuild it from scratch. ' +
   'The hard requirements in CLAUDE.md still apply. Change only what EDIT.md targets: when it names a segment, only change what is ' +
   'on screen during that time range (if a style is shared, e.g. a CSS variable, scope the change to that segment\'s elements). ' +
   'Keep the total duration, canvas, brand, and every other segment\'s content and timing unchanged unless the request explicitly requires otherwise. ' +

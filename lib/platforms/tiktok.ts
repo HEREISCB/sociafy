@@ -123,7 +123,7 @@ export const tiktokAdapter: PlatformAdapter = {
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json; charset=UTF-8' },
     });
     const info = (await infoResp.json().catch(() => null)) as
-      | { data?: { privacy_level_options?: string[] }; error?: TikTokError }
+      | { data?: { privacy_level_options?: string[]; max_video_post_duration_sec?: number }; error?: TikTokError }
       | null;
     if (!infoResp.ok || info?.error?.code !== 'ok') {
       throw new PlatformError('tiktok_creator_info_failed', infoResp.ok ? 400 : infoResp.status, info?.error ?? info);
@@ -135,6 +135,12 @@ export const tiktokAdapter: PlatformAdapter = {
 
     // PULL_FROM_URL: TikTok downloads the video from our (verified) media domain.
     const m = input.media[0];
+    // Each creator has their own cap. Past it the download fails later, after we've reported
+    // success (nothing polls the publish status), so refuse here while the error can still show.
+    const maxSec = info.data?.max_video_post_duration_sec;
+    if (maxSec && m.durationSec && m.durationSec > maxSec + 0.5) {
+      throw new PlatformError('tiktok_video_too_long', 400, `This TikTok account can post videos up to ${maxSec} s; this one is ${Math.round(m.durationSec)} s. Make a shorter version for TikTok.`);
+    }
     const initResp = await fetch(INIT_URL, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json; charset=UTF-8' },

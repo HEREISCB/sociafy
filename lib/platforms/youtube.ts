@@ -138,13 +138,14 @@ export const youtubeAdapter: PlatformAdapter = {
     const videoBytes = Buffer.from(await src.arrayBuffer());
 
     // 2. Build a multipart/related body. YouTube Data API v3 supports
-    //    multipart uploads up to ~256 MB. Generated Seedance clips are
-    //    well under that — a 1080p / 15s mp4 is ~10-30 MB. For larger
+    //    multipart uploads up to ~256 MB. Generated clips are well under
+    //    that — a 1080p / 15s mp4 is ~10-30 MB, a 3-minute AI-designed
+    //    motion graphic ~75-150 MB (measured ~0.4-0.8 MB/s). For larger
     //    files we'd switch to resumable upload (uploadType=resumable).
     const boundary = `sociafy_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const text = input.text || 'Generated with Sociafy';
-    // YouTube classifies a video as a Short based on vertical aspect +
-    // ≤60s duration. The "#Shorts" tag in the description nudges the
+    // YouTube classifies a video as a Short based on vertical/square aspect +
+    // ≤3 min duration (since Oct 2024); longer or 16:9 uploads are regular videos. The "#Shorts" tag in the description nudges the
     // classifier and shows up on the watch page.
     const metadata = {
       snippet: {

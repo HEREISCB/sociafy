@@ -104,6 +104,17 @@ describe('tiktok publish', () => {
     );
   });
 
+  it("refuses a video longer than the creator's max before init", async () => {
+    const calls = routeFetch({
+      creator_info: [{ data: { privacy_level_options: ['SELF_ONLY'], max_video_post_duration_sec: 60 }, error: ok }],
+      'video/init': [{ data: { publish_id: 'p_4' }, error: ok }],
+    });
+    await expect(tiktokAdapter.publishText({ text: 'hi', media: [{ ...video, durationSec: 180 }], account })).rejects.toThrow('tiktok_video_too_long');
+    expect(calls.some((c) => c.url.includes('video/init'))).toBe(false);
+    const r = await tiktokAdapter.publishText({ text: 'hi', media: [{ ...video, durationSec: 60 }], account });
+    expect(r.platformPostId).toBe('p_4');
+  });
+
   it('throws when init returns no publish_id', async () => {
     routeFetch({
       creator_info: [{ data: { privacy_level_options: ['SELF_ONLY'] }, error: ok }],

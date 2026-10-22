@@ -76,7 +76,7 @@ describe('the white-label boundary', () => {
     expect(validateAgainstModel('sociafy-motion-1', { ...base, durationSec: 31 })?.field).toBe('duration_sec');
     expect(seedanceTaskType(true, '720p', 15)).toBe('seedance-2-fast');
     expect(seedanceTaskType(true, '720p', 16)).toBe('seedance-2.5');
-    expect(MOTION_AI.durationSec.max).toBe(60);
+    expect(MOTION_AI.durationSec.max).toBe(180);
   });
 
   it('recognises only real ids', () => {
