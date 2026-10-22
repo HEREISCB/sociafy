@@ -145,6 +145,21 @@ export const MOTION_AI = {
 } as const satisfies { backend: VideoBackend; name: string; durationSec: { min: number; max: number; default: number }; aspects: readonly string[] };
 
 /**
+ * "Edit my video": the user's own clips, cut and finished by the motion-ai worker
+ * (kind footage-edit). Output length is MOTION_AI.durationSec; Auto quotes `autoSec`
+ * (or the max, if lower) and refunds the seconds it didn't use. Limits mirror the
+ * worker's RAW (motion-ai/lib.mjs).
+ */
+export const FOOTAGE_EDIT = {
+  genMode: 'motion-ai-footage',
+  autoSec: 60,
+  maxClips: 5,
+  maxBytes: 1024 ** 3,
+  maxSourceSec: 600,
+  mimes: ['video/mp4', 'video/quicktime', 'video/webm'],
+} as const;
+
+/**
  * Extra minutes an AI-designed job longer than 20 s may take: the worker grows
  * its own limits with length (motion-ai/lib.mjs jobLimits, +19 min at 60 s, +64 at
  * 180 s; lib.test.mjs checks every length against this formula) and

@@ -11,6 +11,7 @@ const state = vi.hoisted(() => ({
   assets: [] as Record<string, unknown>[],
   updates: [] as Record<string, unknown>[],
   refunds: [] as Record<string, unknown>[],
+  partials: [] as Record<string, unknown>[],
   uploads: 0,
   /** How many times the completion ran as one transaction. */
   transactions: 0,
@@ -140,6 +141,7 @@ vi.mock('./finalize', () => ({
 }));
 vi.mock('../credits/ledger', () => ({
   refund: (a: Record<string, unknown>) => { state.refunds.push(a); return Promise.resolve({ refunded: true }); },
+  partialRefund: (a: Record<string, unknown>) => { state.partials.push(a); return Promise.resolve({ balanceAfter: 0 }); },
 }));
 vi.mock('../env', () => ({ isStubMode: { r2: () => state.r2Stub, cue: () => state.cueStub } }));
 
@@ -166,7 +168,7 @@ function job(over: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   process.env.PIAPI_API_KEY = 'k';
-  state.assets = []; state.updates = []; state.refunds = []; state.uploads = 0;
+  state.assets = []; state.updates = []; state.refunds = []; state.partials = []; state.uploads = 0;
   state.transactions = 0; state.uploadFails = false; state.r2Stub = false;
   state.task = { status: 'completed', videoUrl: 'https://cdn.piapi/x.mp4' };
   process.env.CUE_API_KEY = 'k';
@@ -470,6 +472,31 @@ describe('finalizeVideoJob — AI-designed motion graphics', () => {
     state.assets = []; state.savedWarning = undefined;
     state.motionAiResult = { status: 'done', videoKey: 'users/user_1/motion-ai.mp4', audio: { narration: true, sfx: true, music: false } };
     expect(await finalizeVideoJob(aiJob())).not.toHaveProperty('audioWarning');
+  });
+
+  it('settles a footage edit at its real length: asset, row and segments follow it, unused seconds come back', async () => {
+    state.motionAiResult = { status: 'done', videoKey: 'users/user_1/edit.mp4', durationSec: 12.4 };
+    const r = await finalizeVideoJob(aiJob({ genMode: 'motion-ai-footage', durationSec: 60, creditsCharged: 1080 }));
+    expect(r.status).toBe('completed');
+    expect(state.assets[0]).toMatchObject({ durationS: '13' });
+    expect(state.partials).toEqual([expect.objectContaining({ ledgerId: 'led_1', credits: 1080 - 18 * 13, action: 'video_edit_footage' })]);
+    expect(state.job).toMatchObject({ durationSec: 13 });
+    expect(state.saved[0].job).toMatchObject({ durationSec: 13 });
+    expect(state.refunds).toHaveLength(0);
+
+    // An edit of it that got shorter: the row follows, but edits are priced on what they edit — no refund.
+    state.assets = []; state.partials = []; state.saved = [];
+    state.motionAiResult = { status: 'done', videoKey: 'users/user_1/edit2.mp4', durationSec: 9.9 };
+    await finalizeVideoJob(aiJob({ genMode: 'motion-ai-edit', durationSec: 13, creditsCharged: 117 }));
+    expect(state.job).toMatchObject({ durationSec: 10 });
+    expect(state.partials).toHaveLength(0);
+
+    // A normal render that reports its exact length changes nothing.
+    state.assets = []; state.updates = [];
+    state.motionAiResult = { status: 'done', videoKey: 'users/user_1/m.mp4', durationSec: 15 };
+    await finalizeVideoJob(aiJob());
+    expect(state.assets[0]).toMatchObject({ durationS: '15' });
+    expect(state.updates.some((u) => 'durationSec' in u)).toBe(false);
   });
 
   it('stores no segments for template motion graphics', async () => {

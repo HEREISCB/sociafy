@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, DeleteObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { NodeHttpHandler } from '@smithy/node-http-handler';
 import * as https from 'node:https';
@@ -72,6 +72,18 @@ export async function uploadBuffer(args: {
     }),
   );
   return { key: args.key, url: publicUrlFor(args.key) };
+}
+
+/** Size and type of an object, or null when it isn't there (or R2 isn't configured). */
+export async function headObject(key: string): Promise<{ size: number; contentType: string } | null> {
+  const client = getR2();
+  if (!client) return null;
+  try {
+    const r = await client.send(new HeadObjectCommand({ Bucket: env.r2.bucket!, Key: key }));
+    return { size: r.ContentLength ?? 0, contentType: r.ContentType ?? '' };
+  } catch {
+    return null;
+  }
 }
 
 export async function deleteObject(key: string) {

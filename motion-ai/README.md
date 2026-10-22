@@ -46,6 +46,26 @@ clip failing to download/probe/transcode fails the job with `footage_failed` (fo
 dropped). Footage jobs get +5 min on the job timeout. Edits inherit the parent's footage (copied
 from its project, not re-downloaded).
 
+`"kind": "footage-edit"` ("Edit my video", optional; anything else → `400 bad_kind`): `footage` is 1–5 of
+the user's **raw** clips (only `url`/`label` are used), `prompt` is their editing instructions, `durationSec`
+is the **cap** (the result may be shorter), `autoLength: true` when the user left the length to the editor.
+Before Claude runs, each clip is downloaded (https, `video/*`, ≤ 1 GiB, 10 min) to `jobs/<id>/sources/`
+(outside the project; never transcoded whole: the box has 4 cores), probed (≤ 600 s; rotation and HDR
+noted), contact-sheeted to `sheets/fN.jpg`, and its speech transcribed with ElevenLabs Speech-to-Text
+(`scribe_v1`, word timestamps, audio events, diarization; `ELEVENLABS_API_KEY`, worker-side only) into
+`transcript.json` + a packed `transcript.txt`; `sources.json` lists the clips and `maxSec`. Failures:
+`footage_failed` (download/probe/sheet) or `transcribe_failed`. Claude gets `footage-edit.md` as its
+CLAUDE.md and the `motion-cut` tool (`motion-cut.mjs`, installed as `~/motionai/bin/motion-cut` next to a
+copy of `lib.mjs`): it writes `edl.json` (source ranges) and `motion-cut` snaps every edge out of a word
+(80 ms pad) and onto the 30 fps grid, refuses a total over `maxSec`, re-encodes only the kept ranges (HDR
+tone-mapped, ≤ 1920 px, 30 ms audio fades, PCM parts then one AAC pass so sound can't drift) into
+`assets/footage/cut.mp4` with its sound, and writes `cut.json` (ranges with output times, every kept word
+re-timed for captions). Claude places the cut as an audible `<video>`. The job's length is the render's
+(≤ the cap; past it is trimmed), the loudness mix always runs (speech), and `result.durationSec` reports
+it. Limits: +20 min for fetching/transcribing, +8 min of Claude, 120 turns. Edits of a footage edit may
+re-cut (shorter, never longer than the parent); sources are hard-linked into edits and deleted 7 days
+after the job (the project stays 30 days; later edits keep the existing cut).
+
 `audio` is optional; missing or non-boolean flags take the defaults shown (narration off, SFX on,
 music off). `voice` (`[A-Za-z0-9 ._'-]`, ≤ 60) and `language` (`xx` or `xx-YY`) are dropped when
 malformed; the default voice is Bella (`hpp4J3VqNfWAUOO0d1Us`), a name matches the start of an
@@ -57,9 +77,9 @@ Canvas: 9:16 → 1080×1920, 16:9 → 1920×1080, 1:1 → 1080×1080.
 
 ```json
 { "status": "pending" }
-{ "status": "failed", "error": "footage_failed | claude_failed | check_failed | render_failed | timeout | upload_failed | parent_not_found | internal_error" }
+{ "status": "failed", "error": "footage_failed | transcribe_failed | claude_failed | check_failed | render_failed | timeout | upload_failed | parent_not_found | internal_error" }
 { "status": "done", "videoKey": "…", "posterKey": "…", "videoUrl": "<R2_PUBLIC_URL_BASE>/<videoKey>",
-  "posterUrl": "<R2_PUBLIC_URL_BASE>/<posterKey>", "sizeBytes": 1234567,
+  "posterUrl": "<R2_PUBLIC_URL_BASE>/<posterKey>", "sizeBytes": 1234567, "durationSec": 12.4,
   "segments": [ { "id": "s1", "label": "Hook", "startSec": 0, "endSec": 3.2,
                   "onScreenText": "…", "narration": "words spoken here (only when narrated)",
                   "suggestions": ["Make the headline punchier", "…"], "footage": true } ],
@@ -137,11 +157,16 @@ parent's segments), `bad_instruction` (empty or > 1000 chars), `bad_key`.
 | `server.mjs` | node:http server, queue, job pipeline |
 | `lib.mjs`, `lib.test.mjs` | input, footage, audio + segments validation (`node --test motion-ai/`) |
 | `motion-audio.mjs` | the ElevenLabs audio CLI Claude may run inside the sandbox (tts / sfx / music / voices) |
+| `motion-cut.mjs`, `footage-edit.md` | footage edits: the EDL cutter Claude may run, and the CLAUDE.md those jobs get |
 | `scaffold/` | per-job project template (CLAUDE.md with the strict rules + design bar + snapshot self-review loop, index.html stub, local GSAP, grain.png, `reference/` helpers.js + example.html) |
 | `motionai.service` | systemd **user** unit (`@BASE@` filled by install.sh) |
 | `motionai-tunnel.service` | systemd user unit: reverse SSH tunnel to prod (see Box notes) |
 | `install.sh` | idempotent box install: node 22, Chrome headless shell 152.0.7977.30, hyperframes@0.8.141, Noto fonts, claude binary copy, token copy, secret |
 | `deploy.sh` | from the laptop: rsync code + HyperFrames skills (incl. media-use, hyperframes-audio), copy R2 vars from prod once, run install.sh |
+
+Local run (Mac, no bwrap): `MOTIONAI_SANDBOX=off` runs every step directly with the machine's own Claude
+login and skills (`$MOTIONAI_BASE/bin` holds `claude`, `motion-audio`, `motion-cut`; `hf/node_modules` holds
+hyperframes@0.8.141). Never set it on the box.
 
 Deploy: `bash motion-ai/deploy.sh`. Logs: `ssh l40ssociafy tail -f motionai/server.log`.
 Status: `ssh l40ssociafy systemctl --user status motionai`.

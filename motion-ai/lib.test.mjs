@@ -146,3 +146,54 @@ test('poster = first headline fully on screen', async () => {
   assert.equal(posterTimeSec([seg(0, 10, '')], 10), 3.5);
   assert.equal(posterTimeSec(null, 8), 2.8);
 });
+
+test('footage edit: submit, transcript, cut list', async () => {
+  const { sttWords, packTranscript, snapToWords, parseEdl, remapWords } = await import('./lib.mjs');
+  const ok = { prompt: 'Cut the pauses', aspect: '9:16', durationSec: 60, videoKey: 'users/a/v.mp4', posterKey: 'users/a/p.jpg' };
+  const u = 'https://x.r2.dev/users/a/raw.mov';
+  const r = parseSubmit({ ...ok, kind: 'footage-edit', autoLength: true, footage: [{ url: u, label: 'take 1', startSec: 3 }] });
+  assert.deepEqual([r.kind, r.autoLength, r.footage], ['footage-edit', true, [{ url: u, label: 'take 1' }]]);
+  assert.equal(parseSubmit({ ...ok, kind: 'footage-edit' }).error, 'bad_footage'); // needs a clip
+  assert.equal(parseSubmit({ ...ok, kind: 'footage-edit', footage: [{ url: 'http://x/a.mp4' }] }).error, 'bad_footage');
+  assert.equal(parseSubmit({ ...ok, kind: 'other' }).error, 'bad_kind');
+  assert.equal(parseSubmit(ok).kind, undefined);
+
+  const words = sttWords({ words: [
+    { text: 'Hi', start: 0.5, end: 0.8, type: 'word', speaker_id: 'speaker_0' }, { text: ' ', start: 0.8, end: 0.9, type: 'spacing' },
+    { text: 'um', start: 0.9, end: 1.2, type: 'word' }, { text: '(laughs)', start: 2.0, end: 2.4, type: 'audio_event' },
+    { text: 'there', start: 2.5, end: 2.9, type: 'word' }, { text: 'bad', start: 'x', end: 1, type: 'word' },
+  ] });
+  assert.deepEqual(words, [[0.5, 0.8, 'Hi', 'speaker_0'], [0.9, 1.2, 'um'], [2, 2.4, '(laughs)'], [2.5, 2.9, 'there']]);
+  assert.deepEqual(sttWords(null), []);
+  const txt = packTranscript([{ id: 'f1', durationSec: 4, language: 'en', words }, { id: 'f2', durationSec: 3, words: [] }]);
+  assert.match(txt, /## f1 \(4 s, en\)\n\(pause 0.5 s\)\n\[0.5-1.2\] Hi@0.5 um@0.9\n\(pause 0.8 s\)\n\[2-2.9\] \(laughs\)@2 there@2.5\n\(pause 1.1 s to the end\)/);
+  assert.match(txt, /## f2 \(3 s, no speech\)/);
+
+  // An edge inside a word moves out of it (80 ms pad, never into the neighbour).
+  const r2 = (xs) => xs.map((x) => Math.round(x * 100) / 100);
+  assert.deepEqual(r2(snapToWords(0.6, 2.7, words)), [0.42, 2.98]);
+  assert.deepEqual(r2(snapToWords(0.85, 1.0, words)), [0.85, 1.28]);
+  assert.deepEqual(r2(snapToWords(1.0, 1.5, words)), [0.82, 1.5]);
+
+  const clips = [{ id: 'f1', durationSec: 4, words }, { id: 'f2', durationSec: 3, words: [] }];
+  const e = parseEdl({ ranges: [{ clip: 'f1', start: 0.4, end: 0.95 }, { clip: 'f1', start: 2.45, end: 3 }, { clip: 'f2', start: 0, end: 9 }] }, clips, 60);
+  // snapped out of "um", onto the 30 fps grid, clamped to the clip
+  assert.deepEqual(e.ranges, [{ clip: 'f1', start: 0.4, end: 1.2667 }, { clip: 'f1', start: 2.4667, end: 3 }, { clip: 'f2', start: 0, end: 3 }]);
+  const bad = (edl, max = 60) => assert.ok(parseEdl(edl, clips, max).error, JSON.stringify(edl));
+  bad(null); bad({ ranges: [] }); bad({ ranges: [{ clip: 'f9', start: 0, end: 1 }] }); bad({ ranges: [{ clip: 'f1', start: '0', end: 1 }] });
+  bad({ ranges: [{ clip: 'f1', start: 3.9, end: 3.95 }] });
+  assert.match(parseEdl({ ranges: [{ clip: 'f1', start: 0, end: 4 }, { clip: 'f2', start: 0, end: 3 }] }, clips, 6).error, /over the 6 s limit/);
+
+  const m = remapWords(e.ranges, clips);
+  assert.equal(m.durationSec, 4.4);
+  assert.deepEqual(m.ranges.map((x) => [x.outStart, x.outEnd]), [[0, 0.87], [0.87, 1.4], [1.4, 4.4]]);
+  assert.deepEqual(m.words, [[0.1, 0.4, 'Hi'], [0.5, 0.8, 'um'], [0.9, 1.3, 'there']]);
+});
+
+test('footage edits get more time', () => {
+  const MIN = 60_000;
+  const l = jobLimits(30, true, true);
+  assert.equal(l.claude, jobLimits(30).claude + 8 * MIN);
+  assert.equal(l.job - jobLimits(30).job, 8 * MIN + 20 * MIN);
+  assert.equal(l.turns, 120);
+});

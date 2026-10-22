@@ -392,7 +392,8 @@ export function LengthControl({ gen, length, setLength }: { gen: MediaGen; lengt
   const note = fixed ?? (!auto && !motion && length && effective !== length
     ? `${model.name} renders ${model.durationSec.min}–${model.durationSec.max}s, so this clip is ${effective}s.`
     : null);
-  const shown = fixed ? 'Fixed' : length ? fmtLength(length) : auto ? 'AI decides' : `Default ${effective}s`;
+  // An edit's length is the editor's call too unless the user picks one (FootageOptions shows the cap).
+  const shown = fixed ? 'Fixed' : length ? fmtLength(length) : auto || s.videoMode === 'footage' ? 'AI decides' : `Default ${effective}s`;
   const spoken = !fixed && length ? spokenLength(length) : shown;
   return (
     <div className="compose-field">

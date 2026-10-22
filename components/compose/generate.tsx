@@ -1,11 +1,11 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { priceForAvatar, priceForImage, priceForMotion, priceForMotionAi, priceForVideo } from '../../lib/credits/pricing';
-import { DEFAULT_VIDEO_MODEL, MOTION_AI, MOTION_TEMPLATES, VIDEO_MODELS, motionAiExtraMin, type MotionTemplate, type VideoModelId } from '../../lib/ai/models';
+import { DEFAULT_VIDEO_MODEL, FOOTAGE_EDIT, MOTION_AI, MOTION_TEMPLATES, VIDEO_MODELS, motionAiExtraMin, type MotionTemplate, type VideoModelId } from '../../lib/ai/models';
 import type { MediaItem } from './attachments';
 
-export type VideoMode = 'text' | 'image-to-video' | 'reference' | 'audio-driven' | 'avatar' | 'motion';
+export type VideoMode = 'text' | 'image-to-video' | 'reference' | 'audio-driven' | 'avatar' | 'motion' | 'footage';
 export type Anchor = 'start' | 'end' | 'reference' | 'refVideo' | 'audio' | 'avatarFace';
 
 export const DEFAULT_SETTINGS = {
@@ -44,6 +44,12 @@ export const DEFAULT_SETTINGS = {
   motionAiSfx: true,
   motionAiMusic: true,
   motionAiLanguage: 'en' as 'en' | 'hi',
+  /** "Edit my video" (videoMode 'footage'): what the user wants done to their clips. */
+  footageAsk: '',
+  /** The shared Length control's value for an edit: null = the editor decides. */
+  footageLength: null as number | null,
+  footageMusic: false,
+  footageSfx: false,
 };
 export type GenSettings = typeof DEFAULT_SETTINGS;
 
@@ -184,6 +190,27 @@ export function audioNote(warning: string | undefined): string | undefined {
   return undefined;
 }
 
+/** One raw clip for "Edit my video", uploading straight to R2 (the 50 MB server route can't take it). */
+export type RawClip = { id: string; name: string; size: number; sec: number | null; progress: number; key?: string; error?: string };
+const RAW_TYPES: Record<string, string> = { mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm' };
+/** The browser's type when it is one we take, else from the extension ('' = not a clip we take). */
+export const rawType = (f: Pick<File, 'name' | 'type'>) =>
+  (FOOTAGE_EDIT.mimes as readonly string[]).includes(f.type) ? f.type : RAW_TYPES[f.name.split('.').pop()?.toLowerCase() ?? ''] ?? '';
+/** Length from the file's metadata; null when the browser can't read it (the worker still checks). */
+function probeSec(f: File): Promise<number | null> {
+  return new Promise((resolve) => {
+    const v = document.createElement('video');
+    const u = URL.createObjectURL(f);
+    let settled = false;
+    const done = (x: number | null) => { if (settled) return; settled = true; URL.revokeObjectURL(u); resolve(x); };
+    v.preload = 'metadata';
+    v.onloadedmetadata = () => done(Number.isFinite(v.duration) && v.duration > 0 ? v.duration : null);
+    v.onerror = () => done(null);
+    setTimeout(() => done(null), 10_000);
+    v.src = u;
+  });
+}
+
 const toItem = (a: Asset, aspect?: string, motionAi?: boolean, note?: string): MediaItem => ({
   id: a.id, url: a.publicUrl, mimeType: a.mimeType, label: a.label || 'Generated', aspect, ...(motionAi ? { motionAi } : {}), ...(note ? { note } : {}), ...(a.posterUrl ? { posterUrl: a.posterUrl } : {}),
 });
@@ -195,6 +222,8 @@ export function useMediaGen(report: GenReport) {
   const [render, setRender] = useState<Render | null>(null);
   const [cropFile, setCropFile] = useState<File | null>(null);
   const [voicePreview, setVoicePreview] = useState<{ busy: boolean; url: string | null }>({ busy: false, url: null });
+  const [clips, setClips] = useState<RawClip[]>([]);
+  const uploads = useRef(new Map<string, XMLHttpRequest>());
 
   /** Returns true when the response was handled as an error. */
   const handled = (r: Response, data: Record<string, unknown>, what: string) => {
@@ -260,18 +289,18 @@ export function useMediaGen(report: GenReport) {
 
   /** Poll video jobs to the end, showing phases, then report what landed.
    *  `motionAi` jobs (AI-designed / hybrid) are slower and open in the editor. */
-  const track = async (jobs: { id: string; aspect?: string }[], aspect: string, motionAi: boolean, durationSec = 0) => {
+  const track = async (jobs: { id: string; aspect?: string }[], aspect: string, motionAi: boolean, durationSec = 0, wait?: { usual: string; slowAfterSec: number; maxMin: number }) => {
     // Longer AI-designed jobs get more worker time; the copy and the poll window grow with it.
     const extra = motionAiExtraMin(durationSec);
     setRender({
       startedAt: Date.now(), phases: jobs.map(() => 'queued'),
-      ...(motionAi ? { usual: `AI-designed motion graphics take ${6 + Math.round(extra / 2)}–${12 + extra} minutes.`, slowAfterSec: (15 + extra) * 60 } : {}),
+      ...(wait ?? (motionAi ? { usual: `AI-designed motion graphics take ${6 + Math.round(extra / 2)}–${12 + extra} minutes.`, slowAfterSec: (15 + extra) * 60 } : {})),
     });
     const setPhase = (i: number, p: ClipPhase) => setRender((v) => (v ? { ...v, phases: v.phases.map((x, k) => (k === i ? p : x)) } : v));
     const settled = await Promise.all(jobs.map(async (j, i) => {
       const out = await pollJob(
         // AI-designed jobs queue behind a 2-wide worker, so they get longer.
-        `/api/media/video-job/${j.id}`, (motionAi ? 40 + extra : 15) * 60_000, [4_000, 500, 8_000],
+        `/api/media/video-job/${j.id}`, (wait?.maxMin ?? (motionAi ? 40 + extra : 15)) * 60_000, [4_000, 500, 8_000],
         (pd) => {
           if (pd.status === 'pending') setPhase(i, pd.providerStatus === 'processing' || pd.providerStatus === 'staged' || pd.providerStatus === 'footage' ? 'rendering' : pd.providerStatus === 'finalizing' ? 'storing' : 'queued');
         },
@@ -342,6 +371,78 @@ export function useMediaGen(report: GenReport) {
     return null;
   };
 
+  /** Add raw clips: check type/size/length here, then PUT each straight to R2 with progress. */
+  const addClips = async (files: File[]) => {
+    const room = FOOTAGE_EDIT.maxClips - clips.length;
+    if (files.length > room) report.notice(`Up to ${FOOTAGE_EDIT.maxClips} clips — added the first ${Math.max(0, room)}.`);
+    for (const f of files.slice(0, Math.max(0, room))) {
+      const id = Math.random().toString(36).slice(2);
+      const type = rawType(f);
+      const fail = (error: string) => setClips((cs) => cs.map((c) => (c.id === id ? { ...c, error } : c)));
+      setClips((cs) => [...cs, { id, name: f.name, size: f.size, sec: null, progress: 0 }]);
+      if (!type) { fail('Not a video we can edit — use MP4, MOV or WebM.'); continue; }
+      if (f.size > FOOTAGE_EDIT.maxBytes) { fail('Over 1 GB — trim it or export a smaller file.'); continue; }
+      const sec = await probeSec(f);
+      setClips((cs) => cs.map((c) => (c.id === id ? { ...c, sec } : c)));
+      if (sec != null && sec > FOOTAGE_EDIT.maxSourceSec + 1) { fail('Over 10 minutes — trim it first.'); continue; }
+      try {
+        const { r, data } = await postJson('/api/media/upload-url', { name: f.name, type, size: f.size });
+        if (!r.ok || typeof data.url !== 'string' || typeof data.key !== 'string') { fail('Upload couldn’t start. Remove it and try again.'); continue; }
+        const key = data.key;
+        const ok = await new Promise<boolean>((resolve) => {
+          const x = new XMLHttpRequest();
+          uploads.current.set(id, x);
+          x.open('PUT', data.url as string);
+          x.setRequestHeader('Content-Type', type);
+          x.upload.onprogress = (e) => { if (e.lengthComputable) setClips((cs) => cs.map((c) => (c.id === id ? { ...c, progress: e.loaded / e.total } : c))); };
+          x.onload = () => resolve(x.status >= 200 && x.status < 300);
+          x.onerror = () => resolve(false);
+          x.onabort = () => resolve(false);
+          x.send(f);
+        });
+        uploads.current.delete(id);
+        if (ok) setClips((cs) => cs.map((c) => (c.id === id ? { ...c, key, progress: 1 } : c)));
+        else fail('Upload failed. Remove it and try again.');
+      } catch {
+        fail('Upload failed. Check your connection and try again.');
+      }
+    }
+  };
+  const removeClip = (id: string) => {
+    uploads.current.get(id)?.abort();
+    uploads.current.delete(id);
+    setClips((cs) => cs.filter((c) => c.id !== id));
+  };
+
+  /** "Edit my video": hand the uploaded clips and the ask to the editor, then wait like any AI-designed video. */
+  const generateFootage = async () => {
+    const ready = clips.filter((c) => c.key);
+    if (!ready.length || ready.length !== clips.length) return;
+    const sourceSec = clips.every((c) => c.sec != null) ? clips.reduce((n, c) => n + (c.sec ?? 0), 0) : null;
+    setBusy('video');
+    report.notice(null);
+    try {
+      const { r, data } = await postJson('/api/media/edit-footage', {
+        clips: ready.map((c) => ({ key: c.key, name: c.name })), instructions: s.footageAsk.trim(), aspect: s.videoAspect,
+        lengthSec: s.footageLength, sourceSec, music: s.footageMusic, sfx: s.footageSfx,
+      });
+      if (handled(r, data, 'Editing')) return;
+      const jobs = (data.jobs as { id: string; durationSec?: number }[] | undefined) ?? [];
+      if (!jobs.length) { report.notice('The edit did not start. Try again.'); return; }
+      // Downloading and transcribing the clips adds about a minute per 10 minutes of footage.
+      const extra = motionAiExtraMin(jobs[0].durationSec ?? 0) + Math.ceil((sourceSec ?? FOOTAGE_EDIT.maxSourceSec) / 60);
+      await track(jobs, s.videoAspect.replace(':', '/'), true, jobs[0].durationSec ?? 0, {
+        usual: `Edits take ${8 + Math.round(extra / 2)}–${20 + extra} minutes. It lands in your library even if you leave.`,
+        slowAfterSec: (25 + extra) * 60, maxMin: 75 + extra,
+      });
+    } catch {
+      report.notice('Editing failed. Check your connection and try again.');
+    } finally {
+      setRender(null);
+      setBusy(null);
+    }
+  };
+
   const generateAvatar = async (prompt: string) => {
     const voice = s.avatarAudioMode === 'voice';
     if (!s.avatarFace) { report.notice('Add a face photo for the avatar.'); return; }
@@ -399,6 +500,7 @@ export function useMediaGen(report: GenReport) {
 
   return {
     s, set, busy, render, cropFile, setCropFile, setAnchor, applyFace, voicePreview, previewVoice,
+    clips, addClips, removeClip, generateFootage,
     generateImage, generateAuto,
     generateVideo: (prompt: string) => (s.videoMode === 'avatar' ? generateAvatar(prompt) : generateVideo(prompt)),
   };

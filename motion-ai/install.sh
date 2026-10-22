@@ -41,6 +41,8 @@ fi
 cp -f "$(readlink -f "$HOME/.local/bin/claude")" bin/claude
 # The one audio CLI Claude may run (ElevenLabs; key comes in via env per job)
 install -m 755 app/motion-audio.mjs bin/motion-audio
+# The footage-edit cutter (imports the lib.mjs next to it)
+install -m 755 app/motion-cut.mjs bin/motion-cut && install -m 644 app/lib.mjs bin/lib.mjs
 
 # Subscription token copy, readable only by us
 install -m 600 "$HOME/.claude-oauth-token" oauth-token

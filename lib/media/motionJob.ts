@@ -2,12 +2,12 @@ import { eq } from 'drizzle-orm';
 import { db } from '../db';
 import { agentSettings, brandKits, videoJobs } from '../db/schema';
 import { motionAiReady, motionReady, motionVariables, type BrandKit, type BrandProfile } from '../brand/kit';
-import { MOTION_AI, MOTION_GRAPHICS, MOTION_TEMPLATES, type MotionTemplate } from '../ai/models';
+import { FOOTAGE_EDIT, MOTION_AI, MOTION_GRAPHICS, MOTION_TEMPLATES, type MotionTemplate } from '../ai/models';
 import { submitMotion } from '../ai/motion';
 import { editMotionAi, submitMotionAi, type MotionAiBrand, type MotionAudioRequest } from '../ai/motionAi';
 import { recordEdit, rootOf } from './motionVersions';
 import { writeMotionCopy } from '../ai/motionCopy';
-import { priceForMotion, priceForMotionAi, priceForMotionAiEdit, type CreditAction } from '../credits/pricing';
+import { footageEditCap, priceForFootageEdit, priceForMotion, priceForMotionAi, priceForMotionAiEdit, type CreditAction } from '../credits/pricing';
 import { charge, ensureBalance, refund, InsufficientCreditsError } from '../credits/ledger';
 import { makeMediaKey } from '../storage/r2';
 
@@ -100,6 +100,45 @@ export async function submitMotionAiVideo(args: {
       prompt: topic.slice(0, 4_000), aspect, durationSec, brand, ...(audio ? { audio } : {}),
       videoKey: makeMediaKey(userId, 'motion-ai.mp4'),
       posterKey: makeMediaKey(userId, 'motion-ai-poster.jpg'),
+    }),
+  });
+}
+
+/**
+ * "Edit my video": the worker cuts and finishes the user's own clips (already in R2,
+ * under their prefix — the route checked) the way `instructions` say. Charged the quote
+ * for `capSec` up front; finalizeVideoJob refunds the seconds the finished video didn't
+ * use, or everything on failure. No brand-kit gate: the brand only dresses the edit.
+ */
+export async function submitFootageEdit(args: {
+  userId: string;
+  clips: { url: string; name: string }[];
+  instructions: string;
+  aspect: '9:16' | '16:9' | '1:1';
+  /** null = Auto: the editor picks the length. */
+  lengthSec: number | null;
+  /** Total length of the clips as the browser read it, if it could. */
+  sourceSec?: number | null;
+  music: boolean;
+  sfx: boolean;
+}): Promise<{ job: typeof videoJobs.$inferSelect; creditsCharged: number }> {
+  const { userId, aspect, instructions } = args;
+  const audio = { narration: false, sfx: args.sfx, music: args.music };
+  const price = priceForFootageEdit(footageEditCap(args.lengthSec, args.sourceSec), audio);
+  const pre = await ensureBalance(userId, price.credits);
+  if (!pre.ok) throw new InsufficientCreditsError(pre.balance, pre.needed);
+  const { kit, profile } = await loadBrand(userId);
+
+  return startJob({
+    userId, price,
+    row: { provider: MOTION_AI.backend, prompt: instructions, rewrittenPrompt: null, durationSec: price.sec, aspect, genMode: FOOTAGE_EDIT.genMode },
+    meta: { template: 'footage', aspect, capSec: price.sec, auto: args.lengthSec == null, clips: args.clips.length, audio, via: 'compose' },
+    submit: () => submitMotionAi({
+      kind: 'footage-edit', autoLength: args.lengthSec == null,
+      prompt: instructions.slice(0, 4_000), aspect, durationSec: price.sec, brand: motionAiBrand(kit, profile), audio,
+      footage: args.clips.map((c) => ({ url: c.url, label: c.name.slice(0, 80) })),
+      videoKey: makeMediaKey(userId, 'edit.mp4'),
+      posterKey: makeMediaKey(userId, 'edit-poster.jpg'),
     }),
   });
 }
