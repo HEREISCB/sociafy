@@ -1,11 +1,11 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
-import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { withUser, jsonError } from '../../../lib/api';
 import { parseBody } from '../../../lib/validation';
 import { db } from '../../../lib/db';
-import { apiKeys } from '../../../lib/db/schema';
-import { generateApiKey } from '../../../lib/api-key';
+import { apiKeys, creditLedger } from '../../../lib/db/schema';
+import { apiKeyOfLedgerRow, generateApiKey } from '../../../lib/api-key';
 
 export const runtime = 'nodejs';
 
@@ -31,11 +31,30 @@ const publicCols = {
  *  kept in the table (ledger rows reference them) but not listed. */
 export async function GET(req: NextRequest) {
   return withUser(async (user) => {
-    return db()
+    // Rolling-24h spend per key, metered with the SAME expression the cap is
+    // enforced with (lib/api-key.ts), refunds netted out, so the meter on
+    // /account/api says exactly when the 429 lands.
+    const spend = await db()
+      .select({
+        keyId: apiKeyOfLedgerRow,
+        spent: sql<number>`COALESCE(-SUM(${creditLedger.credits}), 0)::int`,
+      })
+      .from(creditLedger)
+      .where(and(
+        eq(creditLedger.userId, user.id),
+        inArray(creditLedger.kind, ['charge', 'refund']),
+        sql`${creditLedger.createdAt} > now() - interval '1 day'`,
+        sql`${apiKeyOfLedgerRow} IS NOT NULL`,
+      ))
+      .groupBy(apiKeyOfLedgerRow);
+    const spentBy = new Map(spend.map((s) => [s.keyId, Math.max(0, Number(s.spent))]));
+
+    const keys = await db()
       .select(publicCols)
       .from(apiKeys)
       .where(and(eq(apiKeys.userId, user.id), isNull(apiKeys.revokedAt)))
       .orderBy(desc(apiKeys.createdAt));
+    return keys.map((k) => ({ ...k, spent24h: spentBy.get(k.id) ?? 0 }));
   }, req);
 }
 

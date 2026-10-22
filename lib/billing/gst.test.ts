@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isValidGstin, splitInclusive, stateCodeFromGstin, zohoStateCode, GST_RATE_PCT } from './gst';
+import { isValidGstin, splitInclusive, stateCodeFromGstin, zohoStateCode, gstTreatment, GST_RATE_PCT } from './gst';
 import { TIER_PRICING, TOPUP_PRICING } from './pricing';
 
 describe('isValidGstin', () => {
@@ -67,5 +67,15 @@ describe('splitInclusive', () => {
   it('honours a non-default rate', () => {
     expect(splitInclusive(11800, 18).taxableMinor).toBe(10000);
     expect(splitInclusive(10000, 0)).toMatchObject({ taxableMinor: 10000, taxMinor: 0 });
+  });
+});
+
+describe('gstTreatment', () => {
+  it('mirrors what the invoice will say', () => {
+    expect(gstTreatment({ country: 'IN', placeOfSupply: '29' })).toMatchObject({ split: 'igst', stateName: 'Karnataka' });
+    expect(gstTreatment({ country: 'IN', gstin: '09AAACH7409R1ZZ' }).split).toBe('cgst_sgst');
+    // Nothing on record: Zoho falls back to our own state, so intra-state.
+    expect(gstTreatment({ country: 'IN' })).toMatchObject({ split: 'cgst_sgst', stateName: null });
+    expect(gstTreatment({ country: 'SG', placeOfSupply: '29' }).split).toBe('export');
   });
 });

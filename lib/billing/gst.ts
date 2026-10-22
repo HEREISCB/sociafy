@@ -116,5 +116,27 @@ export function splitInclusive(
   return { grossMinor, taxableMinor, taxMinor: grossMinor - taxableMinor, ratePct };
 }
 
+/**
+ * Which tax line an invoice will carry, for display only (Zoho decides the real
+ * split). Mirrors the inputs lib/billing/zoho/invoice.ts sends: outside India
+ * is an export (no GST); inside India the place of supply is the stated one,
+ * else the GSTIN's state, else ours (UP, '09') — and UP itself means
+ * CGST + SGST, every other state IGST.
+ */
+export function gstTreatment(d: { country?: string | null; placeOfSupply?: string | null; gstin?: string | null }): {
+  split: 'export' | 'igst' | 'cgst_sgst';
+  label: string;
+  stateName: string | null;
+} {
+  if ((d.country || 'IN').toUpperCase() !== 'IN') {
+    return { split: 'export', label: 'No GST (export of services)', stateName: null };
+  }
+  const code = d.placeOfSupply || stateCodeFromGstin(d.gstin) || null;
+  const stateName = code ? GST_STATES[code]?.name ?? null : null;
+  return (code ?? '09') === '09'
+    ? { split: 'cgst_sgst', label: `CGST 9% + SGST 9%`, stateName }
+    : { split: 'igst', label: `IGST ${GST_RATE_PCT}%`, stateName };
+}
+
 /** Paise → the major-unit number Zoho wants on a line item (2dp). */
 export const minorToMajor = (minor: number): number => Math.round(minor) / 100;
