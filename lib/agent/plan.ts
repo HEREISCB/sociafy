@@ -100,6 +100,8 @@ export async function getPlan(userId: string, now = new Date(), days?: 7 | 30) {
       title: d.title,
       body: d.body,
       perPlatformText: d.perPlatformText ?? {},
+      /** What each target platform would post right now (postText): the preview's tabs. */
+      texts: Object.fromEntries(((d.targetPlatforms ?? []) as Platform[]).map((p) => [p, postText(d, p)])) as Partial<Record<Platform, string>>,
       targetPlatforms: d.targetPlatforms,
       media: (d.media ?? []) as DraftMedia[],
       plannedAt: d.plannedAt ? new Date(d.plannedAt).toISOString() : null,
@@ -254,6 +256,37 @@ export async function queueApprovedRender(draft: Draft, quiet: QuietHours | unde
     });
   }
   return r;
+}
+
+export type UnapproveResult = { restored: string[]; skipped: { draftId: string; reason: 'not_approved' | 'already_posting' }[] };
+
+/**
+ * Undo an approve: the draft goes back to review at `plannedAt` (its slot
+ * before approve; null = no time). Its still-pending posts are deleted —
+ * nothing went out, so nothing is left behind as "canceled" — and the
+ * approved-while-rendering marker is cleared. A post already publishing or
+ * published can't come back.
+ */
+export async function unapproveDrafts(userId: string, items: { draftId: string; plannedAt: string | null }[]): Promise<UnapproveResult> {
+  const out: UnapproveResult = { restored: [], skipped: [] };
+  for (const { draftId, plannedAt } of items) {
+    const [d] = await db().select().from(drafts).where(and(eq(drafts.id, draftId), eq(drafts.userId, userId))).limit(1);
+    if (!d || !(d.status === 'scheduled' || (d.status === 'draft' && isApproved(d)))) { out.skipped.push({ draftId, reason: 'not_approved' }); continue; }
+    const mine = and(eq(scheduledPosts.userId, userId), eq(scheduledPosts.draftId, draftId));
+    // ponytail: check-then-delete; the cron claiming a row in between leaves that one platform posting. Undo lives for seconds, so fine.
+    const live = await db().select({ id: scheduledPosts.id }).from(scheduledPosts).where(and(mine, inArray(scheduledPosts.status, ['publishing', 'published']))).limit(1);
+    if (live.length) { out.skipped.push({ draftId, reason: 'already_posting' }); continue; }
+    await db().delete(scheduledPosts).where(and(mine, eq(scheduledPosts.status, 'pending')));
+    const variants = d.variants?.length ? d.variants.map((v, i) => (i === 0 ? { ...v, approved: false } : v)) : d.variants;
+    const [row] = await db()
+      .update(drafts)
+      .set({ status: 'draft', plannedAt: plannedAt ? new Date(plannedAt) : null, variants, updatedAt: new Date() })
+      .where(and(eq(drafts.id, draftId), eq(drafts.userId, userId), eq(drafts.status, d.status)))
+      .returning({ id: drafts.id });
+    if (row) out.restored.push(draftId);
+    else out.skipped.push({ draftId, reason: 'not_approved' });
+  }
+  return out;
 }
 
 /** Discard a draft from the plan. Its slot frees up for the next top-up. */
