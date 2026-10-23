@@ -7,6 +7,7 @@ import { verifyTurnstile } from '../../../lib/turnstile';
 import { clientIp, hashIp } from '../../../lib/try';
 import { getOpenAI, getTextAI, completeText } from '../../../lib/ai/client';
 import { FREE_TONES, FREE_TOOL_IDS, FREE_TOOL_PROMPTS, parseResults } from '../../../lib/free-tools';
+import { stripEmDashes } from '../../../lib/ai/voice-rules';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -65,7 +66,7 @@ export async function POST(req: NextRequest) {
       json: true,
       timeoutMs: 30_000,
     });
-    const results = parseResults(raw);
+    const results = parseResults(raw).map(stripEmDashes);
     if (!results.length) throw new Error('empty');
     return NextResponse.json({ results });
   } catch (e) {

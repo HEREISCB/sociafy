@@ -7,6 +7,7 @@ import { completeText, getTextAI } from '../../../../lib/ai/client';
 import { loadBrandContext, renderBrandBlock } from '../../../../lib/ai/brand-context';
 import { PLATFORMS, type Platform } from '../../../../lib/db/schema';
 import { MOTION_AI } from '../../../../lib/ai/models';
+import { VOICE_RULES, stripEmDashes } from '../../../../lib/ai/voice-rules';
 import { priceForCompose } from '../../../../lib/credits/pricing';
 import { charge, ensureBalance, insufficientCreditsResponse, refund } from '../../../../lib/credits/ledger';
 
@@ -36,6 +37,7 @@ Rules:
 - Ask at most ONE short follow-up, and only when you truly cannot write the post (you don't know what the product/offer is). Never ask more than twice in a conversation. Otherwise write the post right away and make sensible assumptions.
 - When the user asks for changes ("punchier", "mention the price", "make it 20 seconds"), revise the current post.
 - Write in the user's language. No hashtag walls (0-3 hashtags). No emojis unless the user uses them.
+${VOICE_RULES}
 Answer ONLY with a JSON object:
 {"reply": "1-2 short sentences to the user (or your one question)",
  "post": "the full post text" or null when you asked a question,
@@ -77,7 +79,9 @@ export async function POST(req: NextRequest) {
     try {
       const raw = await completeText(ai, { system: SYSTEM, user: prompt, json: true, maxOutputTokens: 1_500, timeoutMs: 30_000 });
       const out = replySchema.parse(JSON.parse(raw));
-      const post = out.post || undefined;
+      // The model revises the user's own post: if they write with em dashes, that's their voice.
+      const userDashes = /—/.test(body ?? '') || messages.some((m) => m.role === 'user' && m.content.includes('—'));
+      const post = (out.post && (userDashes ? out.post : stripEmDashes(out.post))) || undefined;
       const dur = out.durationSec != null && Number.isFinite(out.durationSec) ? Math.min(MOTION_AI.durationSec.max, Math.max(MOTION_AI.durationSec.min, Math.round(out.durationSec))) : undefined;
       const ps = (out.platforms ?? []).map((p) => p.toLowerCase().trim()).filter((p): p is Platform => (PLATFORMS as readonly string[]).includes(p));
       return {

@@ -1,4 +1,5 @@
 import { getTextAI, completeText } from '../ai/client';
+import { VOICE_RULES, stripEmDashes } from '../ai/voice-rules';
 
 export interface ScriptInput {
   brand: string;
@@ -119,7 +120,7 @@ We've seen ${t.concern}, and I want to address it directly rather than let it si
 
 I'm not going to give you a rehearsed non-answer, and I'm not going to make claims today that I can't stand behind tomorrow. You deserve accuracy from us more than you deserve speed.
 
-Here is what we are doing right now: we are ${t.action}. When we have something substantive to share, we will share it publicly — including anything that does not reflect well on us.
+Here is what we are doing right now: we are ${t.action}. When we have something substantive to share, we will share it publicly, including anything that does not reflect well on us.
 
 If this has affected you personally, or you have information that would help us understand it better, please reach out through the contact details on our website. Every message gets read by a person.
 
@@ -153,7 +154,7 @@ function buildPrompt(input: ScriptInput): string {
     ? `\n\nBrand knowledge base — use ONLY these approved facts, voice, and messaging. Do not invent facts or contradict anything here:\n"""\n${input.knowledge}\n"""`
     : '';
   const brandBlock = input.brandBlock ? `\n\n${input.brandBlock}` : '';
-  return base + brandBlock + knowledgeBlock;
+  return `${base}${brandBlock}${knowledgeBlock}\n\n${VOICE_RULES}`;
 }
 
 export async function generateScript(input: ScriptInput): Promise<ScriptOutput> {
@@ -177,7 +178,7 @@ export async function generateScript(input: ScriptInput): Promise<ScriptOutput> 
         maxOutputTokens: 1500,
       });
       if (script.length > 80) {
-        return buildOutput(script, brand, theme, true);
+        return buildOutput(stripEmDashes(script), brand, theme, true);
       }
       // Not an exception, but just as invisible: log it or we're back to
       // shipping canned templates and calling them AI.
@@ -203,7 +204,7 @@ function buildOutput(script: string, brand: string, theme: string, usedAI: boole
 
   return {
     script,
-    title: `${brand} — Official Response: ${theme}`,
+    title: `${brand} official response: ${theme}`,
     keyPoints: extractKeyPoints(script),
     duration: m > 0 ? `${m}m ${s}s` : `${s}s`,
     usedAI,

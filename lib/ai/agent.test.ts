@@ -53,4 +53,12 @@ describe('coerceDrafts', () => {
     );
     expect(out[0].perPlatform).toEqual({ x: 'hi' });
   });
+
+  it('strips em dashes from the title, body and per-platform copy', () => {
+    const out = coerceDrafts(
+      { drafts: [{ title: 'T — t', body: 'Shipped it — and it worked', score: 90, perPlatform: { x: 'Fast—cheap' } }] },
+      ['x'],
+    );
+    expect(out[0]).toMatchObject({ title: 'T, t', body: 'Shipped it, and it worked', perPlatform: { x: 'Fast, cheap' } });
+  });
 });

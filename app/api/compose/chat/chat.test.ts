@@ -83,4 +83,10 @@ describe('POST /api/compose/chat', () => {
     expect(await post(ask('hi'))).toMatchObject({ error: 'ai_unavailable', status: 503 });
     expect(st.charge).not.toHaveBeenCalled();
   });
+
+  it('strips em dashes from the generated post, unless the user writes with them', async () => {
+    st.llm.mockResolvedValue(JSON.stringify({ reply: 'Done.', post: 'Croissants — warm from 7am.' }));
+    expect(await post(ask('croissant post'))).toMatchObject({ post: 'Croissants, warm from 7am.' });
+    expect(await post({ ...ask('shorter'), body: 'Croissants — our pride.' })).toMatchObject({ post: 'Croissants — warm from 7am.' });
+  });
 });

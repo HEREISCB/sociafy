@@ -3,6 +3,7 @@
  * FREE_TOOL_PAGES is the list to add to the sitemap and footer.
  */
 import { TRY_PAGES } from './try-presets';
+import { VOICE_RULES } from './ai/voice-rules';
 
 export const FREE_TOOL_IDS = ['caption', 'hashtag', 'linkedin', 'bio', 'tweet', 'youtube'] as const;
 export type FreeToolId = (typeof FREE_TOOL_IDS)[number];
@@ -77,12 +78,14 @@ export const FREE_TOOL_PAGES: { slug: string; title: string }[] = [
 ];
 
 const JSON_RULE = 'Reply with JSON only, shaped exactly {"results": ["...", "..."]}. Each result is a complete, ready-to-paste string. No markdown, no commentary, no numbering inside the strings.';
+/** Tools that write prose get the shared style rules; the hashtag tool doesn't. */
+const WRITE_RULE = `${VOICE_RULES}\n${JSON_RULE}`;
 
 /** System prompt + output budget per tool. Budgets are tight on purpose: these are free. */
 export const FREE_TOOL_PROMPTS: Record<FreeToolId, { system: string; maxOutputTokens: number }> = {
   caption: {
     maxOutputTokens: 900,
-    system: `You write Instagram captions. Given what the post is about, write 5 distinct captions: vary the hook (question, bold claim, story, list, one-liner). Each is 1-4 short lines, may use a few fitting emojis, ends with a light call to action, and has no hashtags. ${JSON_RULE}`,
+    system: `You write Instagram captions. Given what the post is about, write 5 distinct captions: vary the hook (bold claim, story, specific detail, list, one-liner). Each is 1-4 short lines, may use a few fitting emojis, ends with a light call to action, and has no hashtags. ${WRITE_RULE}`,
   },
   hashtag: {
     maxOutputTokens: 600,
@@ -90,19 +93,19 @@ export const FREE_TOOL_PROMPTS: Record<FreeToolId, { system: string; maxOutputTo
   },
   linkedin: {
     maxOutputTokens: 1600,
-    system: `You write LinkedIn posts. Given a topic or rough notes, write 3 distinct posts of 80-180 words each: a strong first line that earns the "see more" click, short paragraphs with line breaks, one concrete insight or story, and a closing question. No hashtag walls (at most 3 at the end), no clichés like "I'm humbled". ${JSON_RULE}`,
+    system: `You write LinkedIn posts. Given a topic or rough notes, write 3 distinct posts of 80-180 words each: a strong first line that earns the "see more" click, short paragraphs with line breaks, one concrete insight or story, and a plain closing line (no "What do you think?" bait). No hashtag walls (at most 3 at the end), no clichés like "I'm humbled". ${WRITE_RULE}`,
   },
   bio: {
     maxOutputTokens: 500,
-    system: `You write social media bios. Given who the person or brand is, write 5 distinct bios, each strictly under 150 characters (Instagram's limit), saying who they are, what they offer and who it's for. Some may use one or two emojis or a line break. ${JSON_RULE}`,
+    system: `You write social media bios. Given who the person or brand is, write 5 distinct bios, each strictly under 150 characters (Instagram's limit), saying who they are, what they offer and who it's for. Some may use one or two emojis or a line break. ${WRITE_RULE}`,
   },
   tweet: {
     maxOutputTokens: 800,
-    system: `You write posts for X (Twitter). Given a topic, write 5 distinct posts, each strictly under 280 characters: vary the format (hot take, tip, mini-story, question, list). Punchy, specific, no hashtags unless essential, at most one emoji. ${JSON_RULE}`,
+    system: `You write posts for X (Twitter). Given a topic, write 5 distinct posts, each strictly under 280 characters: vary the format (hot take, tip, mini-story, observation, list). Punchy, specific, no hashtags unless essential, at most one emoji. ${WRITE_RULE}`,
   },
   youtube: {
     maxOutputTokens: 1200,
-    system: `You write YouTube titles and descriptions. Given what the video is about, return 7 results: the first 5 are distinct titles under 70 characters (curiosity or clear benefit, front-load the keyword, no clickbait lies); the last 2 are distinct descriptions of 80-150 words that open with a keyword-rich summary in the first two lines, then what viewers will learn, then a subscribe call to action. ${JSON_RULE}`,
+    system: `You write YouTube titles and descriptions. Given what the video is about, return 7 results: the first 5 are distinct titles under 70 characters (curiosity or clear benefit, front-load the keyword, no clickbait lies); the last 2 are distinct descriptions of 80-150 words that open with a keyword-rich summary in the first two lines, then what viewers will learn, then a subscribe call to action. ${WRITE_RULE}`,
   },
 };
 
