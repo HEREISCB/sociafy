@@ -35,6 +35,8 @@ manifest (see below).
   "everything fades out, next thing fades in".
 - **Text stays short and legible; the visuals carry the message.** At most ~7 words per on-screen
   line and 2 lines per segment. Don't paste the post; distill it (hook → point(s) → proof → end card).
+- On-screen wording and narration you write:
+  No em dashes (—) and no " - " used as a dash; no hype words (seamless, effortless, elevate, unlock, supercharge, empower, leverage, harness, revolutionize, game-changer, cutting-edge, robust, delve, tapestry); no rhetorical-question hooks.
 - Something meaningful is always moving (no frozen frames before the end-card hold), and there's
   depth: layering, a soft shadow or light, and the grain overlay (below) if it suits the style.
 

@@ -102,7 +102,7 @@ export function renderBrandBlock(ctx: BrandContext | null, mode: 'media' | 'text
     const colors = (['primary', 'secondary', 'accent', 'background'] as const).filter((k) => c[k]).map((k) => `${k} ${c[k]}`);
     if (colors.length) lines.push(`Brand colors: ${colors.join(', ')}`);
   }
-  if (ctx.brandSafetyStrict) lines.push('Brand safety: strict — avoid controversial claims, profanity, political takes, or anything that could embarrass the brand.');
+  if (ctx.brandSafetyStrict) lines.push('Brand safety: strict. Avoid controversial claims, profanity, political takes, or anything that could embarrass the brand.');
   if (lines.length === 0) return '';
   return [
     '--- Brand context ---',

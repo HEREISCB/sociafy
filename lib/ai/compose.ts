@@ -3,6 +3,7 @@ import { type Platform, type DraftVariant, type VoiceTemplate } from '../db/sche
 import { runAgentLoop, webSearchTool } from './agent-loop';
 import { fetchUrlSkill } from './skills/fetch-url';
 import { readRecentPostsSkill } from './skills/posts';
+import { VOICE_RULES, stripEmDashes } from './voice-rules';
 
 const VOICE_HINTS: Record<VoiceTemplate, string> = {
   me: 'Adapt to the writer\'s natural voice as inferred from their prompt. Conversational, with a clear point of view.',
@@ -15,8 +16,8 @@ export const PLATFORM_LIMITS: Record<Platform, { hard: number; sweet: [number, n
   x: { hard: 280, sweet: [120, 240], notes: 'Hooks in the first line. No hashtag spam. Threads OK if needed.' },
   linkedin: { hard: 3000, sweet: [600, 1500], notes: 'Professional but human. Whitespace between paragraphs. Lead with a story or stat.' },
   instagram: { hard: 2200, sweet: [80, 220], notes: 'Caption supports the visual. Hooky first line. Hashtags at end if relevant.' },
-  facebook: { hard: 2000, sweet: [100, 400], notes: 'Conversational. Encourage reply or reaction.' },
-  tiktok: { hard: 2200, sweet: [40, 150], notes: 'Caption hook for the video. Punchy. Question or claim that begs a watch.' },
+  facebook: { hard: 2000, sweet: [100, 400], notes: 'Conversational. Say something worth replying to.' },
+  tiktok: { hard: 2200, sweet: [40, 150], notes: 'Caption hook for the video. Punchy. A claim that makes people watch.' },
   youtube: { hard: 5000, sweet: [200, 800], notes: 'Title-style hook then context. Mention what the viewer learns. Add chapter cues if helpful.' },
   reddit: { hard: 40000, sweet: [200, 1500], notes: 'Natural, community-aware tone. No marketing speak. Add relevant subreddit context. Be helpful first.' },
 };
@@ -80,6 +81,7 @@ export async function generateCompose(args: ComposeArgs): Promise<ComposeResult>
     args.agentInstructions
       ? `User\'s style guide:\n${args.agentInstructions}`
       : '',
+    VOICE_RULES,
     'Output rules:',
     '- Return STRICT JSON. No markdown fences. No commentary.',
     `- Schema: { "variants": [ { "label": "A"|"B"|"C"|"D", "text": string, "score": 0-100, "rationale": string } ], "perPlatform": { "x": string, "linkedin": string, "instagram": string, "facebook": string, "tiktok": string, "youtube": string } }`,
@@ -147,11 +149,13 @@ export async function generateCompose(args: ComposeArgs): Promise<ComposeResult>
   return {
     variants: (parsed.variants ?? []).slice(0, count).map((v, i) => ({
       label: v.label || ['A', 'B', 'C', 'D'][i] || `V${i + 1}`,
-      text: v.text ?? '',
+      text: stripEmDashes(v.text ?? ''),
       score: typeof v.score === 'number' ? clampScore(v.score) : undefined,
       rationale: v.rationale,
     })),
-    perPlatform: parsed.perPlatform ?? {},
+    perPlatform: Object.fromEntries(
+      Object.entries(parsed.perPlatform ?? {}).map(([p, t]) => [p, typeof t === 'string' ? stripEmDashes(t) : t]),
+    ),
     stub: false,
     toolsUsed,
   };
@@ -168,10 +172,10 @@ function clampScore(n: number) {
 function stubResult(prompt: string, count: number, platforms: Platform[]): ComposeResult {
   const seed = (prompt || 'New post').slice(0, 80);
   const angles = [
-    { label: 'A', text: `${seed}\n\nHere\'s the part nobody talks about — and why it matters this week.`, score: 86, rationale: 'Hook with a curiosity gap. Strong for X.' },
+    { label: 'A', text: `${seed}\n\nHere\'s the part nobody talks about, and why it matters this week.`, score: 86, rationale: 'Hook with a curiosity gap. Strong for X.' },
     { label: 'B', text: `Three things I\'ve been thinking about ${seed.toLowerCase()}:\n\n1. Speed beats planning\n2. Distribution > craft\n3. Boring is undefeated`, score: 79, rationale: 'List format, scannable. Good for LinkedIn.' },
     { label: 'C', text: `Hot take: ${seed} is overrated.\n\nWhat actually moves the needle for solo founders is shipping 3 small things a week.`, score: 91, rationale: 'Punchy contrarian framing.' },
-    { label: 'D', text: `I tried ${seed} for 30 days. Here\'s what changed — and what didn\'t.`, score: 74, rationale: 'Personal narrative. Works as a thread starter.' },
+    { label: 'D', text: `I tried ${seed} for 30 days. Here\'s what changed and what didn\'t.`, score: 74, rationale: 'Personal narrative. Works as a thread starter.' },
   ].slice(0, count);
 
   const perPlatform: Partial<Record<Platform, string>> = {};

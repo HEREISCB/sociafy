@@ -84,6 +84,8 @@ re-run (at most 3 runs). For a silent b-roll layer from other parts of the clips
 - Other asks (titles, lower-thirds, logo bug, zooms, a hook card, a progress bar, emoji pops…): build
   them in HTML/CSS/SVG on top, calm and legible: text never sits on busy footage without a scrim or
   plate (≥ 4.5:1), fully opaque while held, fades ≤ 0.3 s.
+- Words you write yourself (titles, hook card, end card; captions stay the speaker's own words):
+  No em dashes (—) and no " - " used as a dash; no hype words (seamless, effortless, elevate, unlock, supercharge, empower, leverage, harness, revolutionize, game-changer, cutting-edge, robust, delve, tapestry); no rhetorical-question hooks.
 - End card only when the instructions ask for one (or for the logo/CTA at the end): brand colors,
   logo if provided else the brand name, tagline/CTA if provided, settled and held still ≥ 1.5 s.
   Never invent a brand name, logo or wordmark: with no logo or brand name in `BRIEF.md`, use a name only if

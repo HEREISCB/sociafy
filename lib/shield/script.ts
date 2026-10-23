@@ -1,4 +1,5 @@
 import { getTextAI, completeText } from '../ai/client';
+import { VOICE_RULES, stripEmDashes } from '../ai/voice-rules';
 
 export interface ScriptInput {
   brand: string;
@@ -153,7 +154,7 @@ function buildPrompt(input: ScriptInput): string {
     ? `\n\nBrand knowledge base — use ONLY these approved facts, voice, and messaging. Do not invent facts or contradict anything here:\n"""\n${input.knowledge}\n"""`
     : '';
   const brandBlock = input.brandBlock ? `\n\n${input.brandBlock}` : '';
-  return base + brandBlock + knowledgeBlock;
+  return `${base}${brandBlock}${knowledgeBlock}\n\n${VOICE_RULES}`;
 }
 
 export async function generateScript(input: ScriptInput): Promise<ScriptOutput> {
@@ -177,7 +178,7 @@ export async function generateScript(input: ScriptInput): Promise<ScriptOutput> 
         maxOutputTokens: 1500,
       });
       if (script.length > 80) {
-        return buildOutput(script, brand, theme, true);
+        return buildOutput(stripEmDashes(script), brand, theme, true);
       }
       // Not an exception, but just as invisible: log it or we're back to
       // shipping canned templates and calling them AI.

@@ -5,6 +5,7 @@ import { parseBody } from '../../../../lib/validation';
 import { rateLimit } from '../../../../lib/rate-limit';
 import { runAgentLoop, webSearchTool } from '../../../../lib/ai/agent-loop';
 import { fetchUrlSkill } from '../../../../lib/ai/skills/fetch-url';
+import { VOICE_RULES } from '../../../../lib/ai/voice-rules';
 import { getAnthropic } from '../../../../lib/ai/client';
 
 const bodySchema = z.object({
@@ -56,6 +57,9 @@ export async function POST(req: NextRequest) {
       '  "competitorMoves": [ { "competitor": string, "what": string, "url": string | null } ],',
       '  "respondWith": [ { "angle": string, "draftText": string } ]  // 1-3 post ideas',
       '}',
+      '',
+      'Every draftText follows these rules:',
+      VOICE_RULES,
       '',
       'Be honest about uncertainty — if you can\'t find recent mentions, say so in summary and return empty arrays.',
     ].filter(Boolean).join('\n');

@@ -5,6 +5,7 @@ import { runAgentLoop, webSearchTool } from './agent-loop';
 import { fetchUrlSkill } from './skills/fetch-url';
 import { readRecentPostsSkill, readRecentDraftsSkill } from './skills/posts';
 import { searchImagesSkill } from './skills/images';
+import { VOICE_RULES, stripEmDashes } from './voice-rules';
 
 export type AgentDraft = {
   title: string;
@@ -45,8 +46,10 @@ export async function draftFromTrends(args: DraftAgentArgs): Promise<AgentDraft[
     `Their style guide:\n${args.instructions}`,
     `Voice template: ${args.voiceTemplate}`,
     `Niches they post about: ${args.niches.join(', ') || 'general'}`,
-    `Brand safety: ${args.brandSafetyStrict ? 'strict — refuse posts that mention competitors negatively, unverified claims, or sensitive topics' : 'standard'}`,
+    `Brand safety: ${args.brandSafetyStrict ? 'strict: refuse posts that mention competitors negatively, unverified claims, or sensitive topics' : 'standard'}`,
     args.brandBlock ? `\n${args.brandBlock}` : '',
+    '',
+    VOICE_RULES,
     '',
     ...(enableTools
       ? [
@@ -117,6 +120,9 @@ function stripFences(s: string): string {
 
 const str = (v: unknown, max: number): string =>
   typeof v === 'string' ? v.slice(0, max) : '';
+/** Post copy: em dashes out before the length cap, so the cap still holds. */
+const post = (v: unknown, max: number): string =>
+  typeof v === 'string' ? stripEmDashes(v).slice(0, max) : '';
 
 /**
  * The model's JSON is untrusted input: `score` decides whether a draft is
@@ -131,21 +137,21 @@ export function coerceDrafts(parsed: unknown, platforms: Platform[]): AgentDraft
   for (const item of raw) {
     if (!item || typeof item !== 'object') continue;
     const d = item as Record<string, unknown>;
-    const body = str(d.body, 20_000);
+    const body = post(d.body, 20_000);
     if (!body.trim()) continue;
 
     const perPlatform: Partial<Record<Platform, string>> = {};
     const pp = (d.perPlatform ?? {}) as Record<string, unknown>;
     if (pp && typeof pp === 'object') {
       for (const p of platforms) {
-        const t = str(pp[p], PLATFORM_LIMITS[p].hard);
+        const t = post(pp[p], PLATFORM_LIMITS[p].hard);
         if (t) perPlatform[p] = t;
       }
     }
 
     const n = Number(d.score);
     out.push({
-      title: str(d.title, 280) || body.slice(0, 80),
+      title: post(d.title, 280) || body.slice(0, 80),
       body,
       perPlatform,
       score: Number.isFinite(n) ? Math.min(100, Math.max(0, Math.round(n))) : 0,
@@ -174,7 +180,7 @@ function stubDrafts(args: DraftAgentArgs): AgentDraft[] {
       // canned marketing text, not something the user asked to be posted.
       // 0 is below every selectable threshold, so it always lands in review.
       score: 0,
-      rationale: 'Placeholder draft. The model was unavailable, so this is boilerplate. Review before publishing.',
+      rationale: 'Placeholder draft: the model was unavailable, so this is boilerplate. Review before publishing.',
       trendId: trend.id,
     },
   ];

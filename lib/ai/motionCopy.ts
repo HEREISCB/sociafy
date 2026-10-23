@@ -1,5 +1,6 @@
 import { completeText, getTextAI } from './client';
 import type { MotionTemplate } from './models';
+import { ON_SCREEN_TEXT_RULE, stripEmDashes } from './voice-rules';
 
 /**
  * Copy for a motion-graphics template: a hook, short lines, and which of the
@@ -33,6 +34,7 @@ export function buildMotionCopyPrompt(i: MotionCopyInput): { system: string; use
     `"hook": the opening line, ≤ ${LIMITS.hook} characters. Wrap the one word to highlight in *asterisks*.`,
     '"factIndexes": up to 3 indexes into the APPROVED FACTS list, most relevant first. [] if none fit or the list is empty.',
     'NEVER write a number, statistic, percentage, price or claim anywhere that is not in APPROVED FACTS. No hashtags, no emoji.',
+    ON_SCREEN_TEXT_RULE,
   ].join('\n');
   const user = [
     `TOPIC: ${i.topic.trim().slice(0, 1_200)}`,
@@ -55,7 +57,7 @@ export function coerceMotionCopy(raw: unknown, i: MotionCopyInput): MotionCopy {
     if (!o || typeof o !== 'object') o = {};
   } catch { /* fall back below */ }
 
-  const str = (v: unknown) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : '');
+  const str = (v: unknown) => (typeof v === 'string' ? stripEmDashes(v.replace(/\s+/g, ' ').trim()) : '');
   // A digit in free text is an unapproved stat — drop the line rather than show it.
   const safe = (s: string) => (DIGIT.test(s) ? '' : s);
 
