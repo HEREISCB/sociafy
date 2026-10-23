@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en" data-resolution="portrait">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { margin: 0; width: 1080px; height: 1920px; overflow: hidden; background: #0a0a0a; }
+      #root { width: 100%; height: 100%; position: relative; }
+    </style>
+  </head>
+  <body>
+    <!-- Three example Reels, 8 s each, the kind Sociafy makes. The landing hero
+         plays this muted on loop and keys its HTML sequence to currentTime
+         (scene order and length must match SCENES in components/landing.tsx
+         and SCENE in components/landing-islands.tsx).
+         Render: npx hyperframes render -o reel.mp4 --fps 30 (from this folder), then
+           ffmpeg -i reel.mp4 -an -vf scale=360:640:flags=lanczos -c:v libx264 -profile:v main -pix_fmt yuv420p -preset veryslow -crf 22 -movflags +faststart public/hero/hero-reel.mp4
+           ffmpeg -i reel.mp4 -an -vf scale=360:640:flags=lanczos -c:v libvpx-vp9 -b:v 0 -crf 34 public/hero/hero-reel.webm
+         Poster: the 7.5 s frame at 360x640 (hero-reel-poster.webp). Thumbs: the 7.5, 15.5
+         and 23.5 s frames at 180x320, side by side (hero-thumbs.webp). -->
+    <div id="root" data-composition-id="main" data-start="0" data-duration="24" data-width="1080" data-height="1920">
+      <div id="brew" data-composition-id="brew" data-composition-src="compositions/brew.html"
+        data-start="0" data-duration="8" data-track-index="1" data-track-kind="graphics" data-width="1080" data-height="1920"></div>
+      <div id="ledger" data-composition-id="ledger" data-composition-src="compositions/ledger.html"
+        data-start="8" data-duration="8" data-track-index="2" data-track-kind="graphics" data-width="1080" data-height="1920"></div>
+      <div id="neel" data-composition-id="neel" data-composition-src="compositions/neel.html"
+        data-start="16" data-duration="8" data-track-index="3" data-track-kind="graphics" data-width="1080" data-height="1920"></div>
+    </div>
+    <script>
+      window.__timelines["main"] = gsap.timeline({ paused: true });
+    </script>
+  </body>
+</html>

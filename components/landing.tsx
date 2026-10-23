@@ -7,85 +7,128 @@ import { FREE_TOOLS } from '../lib/free-tools';
 import { TRY_PAGES, TRY_PER_DAY, TRY_WAIT } from '../lib/try-presets';
 import { Icon } from './icons';
 import { SiteShell, PG } from './site-chrome';
-import { DevelopAgain, HeroPrice, Pricing } from './landing-islands';
+import { HeroPrice, Pricing, ShowcasePlayer } from './landing-islands';
 
-// Server component: the page is static HTML plus three small islands
-// (hero price, pricing, the tray's replay button).
+// Server component: the page is static HTML plus small islands (hero price,
+// pricing, the showcase's play/pause).
 
-/** Runs before the tray paints: a visitor who already watched it this session sees it finished. */
-const DEVELOPED = `try{sessionStorage.getItem('sfy-developed')&&document.documentElement.setAttribute('data-developed','')}catch(e){}`;
-
-const ink = { fontFamily: 'var(--sans)' };
-
-/** An example post, drawn inline (no image request, fixed aspect ratio). */
-const PostArt = () => (
-  <svg viewBox="0 0 400 320" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-    <defs>
-      <linearGradient id="dt-g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#F6C89F" /><stop offset="1" stopColor="#E07B39" /></linearGradient>
-      <linearGradient id="dt-g2" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stopColor="#1d1410" /><stop offset=".55" stopColor="#3a2a20" /><stop offset="1" stopColor="#140d0a" /></linearGradient>
-    </defs>
-    <rect width="400" height="320" fill="url(#dt-g1)" />
-    <circle cx="310" cy="96" r="62" fill="#FBE3C6" opacity=".7" />
-    <rect y="250" width="400" height="70" fill="#c9652a" opacity=".55" />
-    <ellipse cx="200" cy="292" rx="86" ry="12" fill="#000" opacity=".22" />
-    <path d="M138 110h124l-7 172a12 12 0 01-12 11h-86a12 12 0 01-12-11z" fill="url(#dt-g2)" />
-    <rect x="134" y="100" width="132" height="16" rx="4" fill="#2b1f18" />
-    <rect x="148" y="168" width="104" height="70" rx="4" fill="#FAFAF7" />
-    <text x="200" y="198" textAnchor="middle" fontWeight="600" fontSize="13" fill="#0A0A0A" style={ink}>COLD BREW</text>
-    <text x="200" y="218" textAnchor="middle" fontSize="7" fill="#6B6B66" style={{ fontFamily: 'var(--mono)' }}>WINTER BATCH · 500ML</text>
-    <text x="26" y="52" fontWeight="600" fontSize="28" fill="#0A0A0A" style={ink}>20% off</text>
-    <text x="26" y="74" fontSize="13" fill="#3a2a20" style={ink}>this week · Bengaluru</text>
-  </svg>
-);
-
-const WEEK: [string, string][] = [
-  ['Mon', '#0A66C2'],
-  ['Tue', 'linear-gradient(135deg,#6b4a2f,#F6C89F)'],
-  ['Wed', '#0A0A0A'],
-  ['Thu', 'linear-gradient(135deg,#3a2a20,#E07B39)'],
-  ['Fri', '#FF0000'],
-];
-// Each phase: when it becomes current (--a) and for how long (--b). Mirrors the keyframe delays in landing.css.
-const PHASES: [string, number, number][] = [
-  ['Caption, in your voice', 250, 650],
-  ['Image develops', 900, 1000],
-  ['Filed to Thursday', 1900, 1200],
-];
+type Scene = {
+  brand: string;
+  brief: string;
+  when: string;
+  ig: string;
+  more: [string, string, string][];
+  /** Mon..Sun: '' empty, else `<thumb>:<platform>`; thumb is new | a | b | txt. */
+  week: string[];
+};
 
 /**
- * The signature: an example post develops from blank paper to a finished
- * print, then files itself into Thursday. Pure CSS keyframes on this HTML;
- * paused until it scrolls into view, finished at once under reduced motion.
+ * Three example briefs, in the order of public/hero/hero-reel.mp4: 8 s of
+ * reel each (rendered with HyperFrames; source in scripts/hero-reel/).
  */
-const DevelopTray = () => (
-  <figure className="dt play" data-inview aria-label="Example: a post is drafted in your voice, its image develops, and it is scheduled for Thursday">
-    <script dangerouslySetInnerHTML={{ __html: DEVELOPED }} />
-    <div className="card dt-card">
-      <div className="dt-head">
-        <span className="dt-av" aria-hidden="true" />
-        <div><b>Third Wave Brew Co.</b><span>Instagram · Thu 9:30 AM</span></div>
-        <span className="dt-pill">
-          <span className="badge">Draft</span>
-          <span className="badge ok">Scheduled</span>
-        </span>
-      </div>
-      <div className="dt-cap">
-        <div className="dt-ghost" aria-hidden="true"><i /><i /><i /></div>
-        <p className="dt-txt">Cold-brew season is back. Our winter batch steeps for 18 hours, smoother than ever. This week only: 20% off, Bengaluru delivery.</p>
-      </div>
-      <div className="dt-frame"><PostArt /></div>
+const SCENES: Scene[] = [
+  {
+    brand: 'Third Wave Brew Co.',
+    brief: 'Winter batch promo, 20% off this week',
+    when: 'Thu 9:30',
+    ig: 'Cold-brew season is back. Our winter batch steeps for 18 hours, smoother than ever. 20% off this week, Bengaluru delivery.',
+    more: [
+      ['li', 'LinkedIn', '18 hours of steeping, one winter batch. What we learned taking cold brew from one café counter to 40 offices.'],
+      ['x', 'X', 'Winter batch is live. 20% off until Sunday, Bengaluru only.'],
+    ],
+    week: ['a:ig', 'txt:li', '', 'new:ig', 'txt:x', 'b:fb', ''],
+  },
+  {
+    brand: 'Ledgerly',
+    brief: 'Announce recurring invoices',
+    when: 'Tue 10:00',
+    ig: 'Stop sending the same invoice every month. Turn on Repeat monthly once and Ledgerly sends it on the 1st, every month.',
+    more: [
+      ['li', 'LinkedIn', 'Freelancers told us the worst part of invoicing is sending the same one twice. So we built Repeat monthly.'],
+      ['yt', 'YouTube Short', 'Recurring invoices, set up in 20 seconds.'],
+    ],
+    week: ['txt:li', 'new:ig', '', 'a:yt', 'txt:x', '', 'b:ig'],
+  },
+  {
+    brand: 'Neel',
+    brief: 'Indigo shirt drop, ₹1,499',
+    when: 'Sat 7:00',
+    ig: 'The indigo drop is here. Hand block-printed in Jaipur, cut for Bengaluru heat. ₹1,499 while the first run lasts.',
+    more: [
+      ['tt', 'TikTok', 'POV: your shirt was printed by hand. The indigo drop, ₹1,499.'],
+      ['fb', 'Facebook', 'Three colours, one print block, 200 shirts. The indigo drop opens Saturday at 7.'],
+    ],
+    week: ['a:ig', '', 'txt:fb', 'b:ig', '', 'new:ig', 'txt:x'],
+  },
+];
+const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const filled = (s: Scene) => s.week.filter((d) => d && !d.startsWith('new')).length;
+
+/**
+ * The signature: a one-line brief becomes a captioned reel, the post is
+ * re-cut for other platforms, and it files itself into the week. Three
+ * examples on a 24 s loop. The video is the clock: ShowcasePlayer reads its
+ * currentTime and sets the data-* flags here; CSS does every transition. The
+ * server HTML is the finished first example (what reduced motion and no-JS see).
+ */
+const Showcase = () => (
+  <figure
+    className="sx" data-s="0" data-typed="" data-dev="" data-fan="" data-filed="0"
+    aria-label="Example: from a one-line brief, Sociafy writes the caption, makes a short video, adapts the post for other platforms and schedules it into the week. Shown for a café, a software founder and a clothing brand."
+  >
+    <div className="sx-brief" aria-hidden="true">
+      <span className="sx-k">Brief</span>
+      <span className="sx-stack">{SCENES.map((s, i) => <span key={i} className={`sx-b s${i}`}>{s.brief}</span>)}</span>
     </div>
-    <ol className="dt-phases" aria-hidden="true">
-      {PHASES.map(([t, a, b]) => <li key={t} style={{ '--a': `${a}ms`, '--b': `${b}ms` } as React.CSSProperties}><i />{t}</li>)}
-    </ol>
-    <div className="dt-week" aria-hidden="true">
-      {WEEK.map(([d, bg]) => (
-        <div key={d} className={`dt-slot${d === 'Thu' ? ' thu' : ''}`}><span className="mono">{d.toUpperCase()}</span><span className="t" style={{ background: bg }} /></div>
+    <div className="sx-stage">
+      <div className="sx-reel">
+        <video className="sx-vid" poster="/hero/hero-reel-poster.webp" preload="none" muted playsInline loop disablePictureInPicture aria-hidden="true" tabIndex={-1}>
+          <source src="/hero/hero-reel.webm" type="video/webm" />
+          <source src="/hero/hero-reel.mp4" type="video/mp4" />
+        </video>
+        <span className="sx-chip" aria-hidden="true"><PG k="ig" />Reel</span>
+        <span className="sx-big" aria-hidden="true"><Icon name="play" size={18} /></span>
+        <i className="sx-prog" aria-hidden="true" />
+      </div>
+      <div className="sx-outs" aria-hidden="true">
+        {SCENES.map((s, i) => (
+          <div key={i} className={`sx-set s${i}`}>
+            {[['ig', 'Instagram', s.ig] as [string, string, string], ...s.more].map(([k, n, t]) => (
+              <div key={k} className={`sx-c ${k}`}>
+                <div className="sx-ch"><PG k={k} /><span>{n}</span><span className="mono">{s.when}</span></div>
+                <p>{t}</p>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+    <div className="sx-wk" aria-hidden="true">
+      {SCENES.map((s, i) => (
+        <div key={i} className={`sx-week s${i}`}>
+          <div className="sx-wh">
+            <span>This week · {s.brand}</span>
+            <span className="sx-n"><span className="mono">{filled(s)}</span><span className="mono">{filled(s) + 1}</span><span> of 7 days</span></span>
+          </div>
+          <ol>
+            {DAYS.map((d, j) => {
+              const [kind, pk] = s.week[j].split(':');
+              return (
+                <li key={d} className={kind === 'new' ? 'new' : undefined}>
+                  <span className="mono">{d}</span>
+                  {kind
+                    ? <span className={`sx-th ${kind}`} style={{ '--i': i } as React.CSSProperties}>{kind === 'txt' && <><b /><b /><b /></>}<PG k={pk} /><Tick /></span>
+                    : <span className="sx-th" />}
+                </li>
+              );
+            })}
+          </ol>
+        </div>
       ))}
     </div>
-    <div className="dt-bar">
-      <span>This week: <span className="mono dt-n"><span>4</span><span>5</span></span><span className="mono"> of 5</span> scheduled</span>
-      <DevelopAgain />
+    <div className="sx-bar">
+      <span>One brief in. Caption, reel and platform versions out.</span>
+      <ShowcasePlayer />
     </div>
   </figure>
 );
@@ -105,7 +148,7 @@ const Hero = ({ currency }: { currency: Currency | null }) => (
       </div>
       <p className="lp-meta">From <HeroPrice initial={currency} />/mo · paid plans only · cancel anytime</p>
     </div>
-    <DevelopTray />
+    <Showcase />
   </section>
 );
 

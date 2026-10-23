@@ -1,0 +1,56 @@
+<template>
+  <style>
+    #root { position: absolute; inset: 0; overflow: hidden; font-family: "Inter", sans-serif; color: #1d1410; }
+    #brew-bg { position: absolute; inset: 0; background: linear-gradient(180deg, #F6C89F 0%, #EBA46D 55%, #E07B39 100%); }
+    #brew-sun { position: absolute; left: 700px; top: 640px; width: 380px; height: 380px; border-radius: 50%; background: #FBE3C6; opacity: .75; }
+    #brew-floor { position: absolute; left: 0; right: 0; top: 1480px; bottom: 0; background: #c9652a; opacity: .5; }
+    #brew-label { position: absolute; left: 96px; top: 230px; font-size: 34px; font-weight: 600; letter-spacing: .22em; color: #3a2a20; }
+    #brew-h { position: absolute; left: 90px; top: 290px; font-family: "Playfair Display", serif; font-weight: 700; font-size: 200px; line-height: .95; letter-spacing: -.02em; }
+    #brew-h span { display: inline-block; }
+    #brew-cup { position: absolute; left: 420px; top: 760px; width: 420px; height: 720px; }
+    #brew-shadow { position: absolute; left: 390px; top: 1440px; width: 480px; height: 70px; border-radius: 50%; background: #000; opacity: .2; }
+    .brew-ice { position: absolute; width: 96px; height: 96px; border-radius: 22px; background: rgba(255,255,255,.55); border: 4px solid rgba(255,255,255,.8); }
+    #brew-sticker { position: absolute; left: 690px; top: 640px; width: 330px; height: 330px; border-radius: 50%; background: #1d1410; color: #FBE3C6; display: grid; place-content: center; text-align: center; }
+    #brew-sticker b { display: block; font-size: 120px; font-weight: 700; line-height: .9; letter-spacing: -.04em; }
+    #brew-sticker small { font-size: 34px; font-weight: 600; letter-spacing: .14em; }
+    #brew-steep { position: absolute; left: 96px; top: 840px; font-size: 40px; font-weight: 500; color: #3a2a20; }
+    #brew-steep b { display: block; font-family: "Playfair Display", serif; font-size: 150px; line-height: 1; color: #1d1410; }
+    #brew-cta { position: absolute; left: 50%; top: 1580px; padding: 30px 54px; border-radius: 999px; background: #1d1410; color: #FBE3C6; font-size: 42px; font-weight: 600; white-space: nowrap; }
+  </style>
+  <div id="root" data-composition-id="brew" data-width="1080" data-height="1920">
+    <div id="brew-bg"></div>
+    <div id="brew-sun" class="clip" data-start="0" data-duration="8"></div>
+    <div id="brew-floor"></div>
+    <div id="brew-shadow"></div>
+    <svg id="brew-cup" viewBox="0 0 140 240">
+      <defs><linearGradient id="brew-g" x1="0" x2="1"><stop offset="0" stop-color="#1d1410"/><stop offset=".55" stop-color="#3a2a20"/><stop offset="1" stop-color="#140d0a"/></linearGradient></defs>
+      <path d="M8 16h124l-9 206a12 12 0 0 1-12 11H29a12 12 0 0 1-12-11z" fill="url(#brew-g)"/>
+      <rect x="2" y="4" width="136" height="18" rx="5" fill="#2b1f18"/>
+      <rect x="22" y="92" width="96" height="64" rx="4" fill="#FAFAF7"/>
+      <text x="70" y="120" text-anchor="middle" font-family="Inter" font-weight="700" font-size="14" fill="#0A0A0A">COLD BREW</text>
+      <text x="70" y="140" text-anchor="middle" font-family="JetBrains Mono" font-size="6.5" fill="#6B6B66">WINTER BATCH · 500ML</text>
+    </svg>
+    <div id="brew-ice1" class="brew-ice clip" data-start="0" data-duration="8" style="left:480px;top:640px"></div>
+    <div id="brew-ice2" class="brew-ice clip" data-start="0" data-duration="8" style="left:650px;top:620px"></div>
+    <div id="brew-label">THIRD WAVE BREW CO.</div>
+    <h1 id="brew-h"><span id="brew-w1">Winter</span><br /><span id="brew-w2">batch.</span></h1>
+    <div id="brew-steep" class="clip" data-start="0" data-duration="8"><b id="brew-n">0</b>hours of steeping</div>
+    <div id="brew-sticker" class="clip" data-start="0" data-duration="8"><b>20%</b><small>OFF THIS WEEK</small></div>
+    <div id="brew-cta" class="clip" data-start="0" data-duration="8">Order now · Bengaluru delivery</div>
+  </div>
+  <script>
+    const tl = gsap.timeline({ paused: true });
+    tl.fromTo("#brew-sun", { y: 120 }, { y: -60, duration: 8, ease: "none" }, 0);
+    tl.fromTo("#brew-w1", { opacity: 0, filter: "blur(10px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.5, ease: "expo.out" }, 1.3);
+    tl.fromTo("#brew-w2", { opacity: 0, filter: "blur(10px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.5, ease: "expo.out" }, 1.42);
+    tl.fromTo("#brew-ice1", { y: -1000, rotation: -30, opacity: 1 }, { y: 0, rotation: 12, duration: 0.7, ease: "power3.in" }, 1.8);
+    tl.fromTo("#brew-ice2", { y: -1000, rotation: 25, opacity: 1 }, { y: 0, rotation: -8, duration: 0.7, ease: "power3.in" }, 1.95);
+    tl.fromTo(["#brew-ice1", "#brew-ice2"], { opacity: 1 }, { opacity: 0, duration: 0.25, ease: "power2.in" }, 2.65);
+    tl.fromTo("#brew-steep", { opacity: 0, x: -40 }, { opacity: 1, x: 0, duration: 0.6, ease: "expo.out" }, 2.7);
+    const n = { v: 0 };
+    tl.fromTo(n, { v: 0 }, { v: 18, duration: 1.1, ease: "power2.out", onUpdate: () => { document.querySelector("#brew-n").textContent = Math.round(n.v); } }, 2.75);
+    tl.fromTo("#brew-sticker", { opacity: 0, scale: 0.4, rotation: -40 }, { opacity: 1, scale: 1, rotation: -10, duration: 0.7, ease: "back.out(1.6)" }, 3.9);
+    tl.fromTo("#brew-cta", { opacity: 0, y: 50, xPercent: -50 }, { opacity: 1, y: 0, xPercent: -50, duration: 0.6, ease: "expo.out" }, 5.0);
+    window.__timelines["brew"] = tl;
+  </script>
+</template>

@@ -1,0 +1,42 @@
+<template>
+  <style>
+    #root { position: absolute; inset: 0; overflow: hidden; font-family: "Inter", sans-serif; color: #F2E8D5; background: #1E2B5C; }
+    #neel-flood { position: absolute; inset: 0; background: #C8582E; clip-path: circle(0% at 50% 62%); }
+    #neel-mark { position: absolute; left: 96px; top: 220px; font-family: "League Gothic", sans-serif; font-size: 88px; letter-spacing: .14em; }
+    #neel-sub { position: absolute; right: 96px; top: 250px; font-size: 32px; font-weight: 500; opacity: .85; }
+    #neel-h { position: absolute; left: 86px; top: 340px; font-family: "League Gothic", sans-serif; font-size: 300px; line-height: .86; text-transform: uppercase; }
+    .neel-line { display: block; overflow: hidden; height: 262px; }
+    .neel-line span { display: inline-block; }
+    #neel-shirt { position: absolute; left: 230px; top: 940px; width: 620px; height: 620px; }
+    #neel-price { position: absolute; left: 700px; top: 1000px; padding: 26px 34px; background: #F2E8D5; color: #1E2B5C; font-family: "League Gothic", sans-serif; font-size: 110px; line-height: 1; border-radius: 10px; }
+    #neel-swatches { position: absolute; left: 96px; top: 1620px; display: flex; gap: 22px; align-items: center; font-size: 38px; font-weight: 600; }
+    .neel-sw { width: 58px; height: 58px; border-radius: 50%; border: 4px solid #F2E8D5; }
+  </style>
+  <div id="root" data-composition-id="neel" data-width="1080" data-height="1920">
+    <div id="neel-flood" class="clip" data-start="0" data-duration="8"></div>
+    <div id="neel-mark">NEEL</div>
+    <div id="neel-sub">Block-printed in Jaipur</div>
+    <h1 id="neel-h"><span class="neel-line"><span id="neel-l1">The indigo</span></span><span class="neel-line"><span id="neel-l2">drop.</span></span></h1>
+    <svg id="neel-shirt" viewBox="0 0 200 200" class="clip" data-start="0" data-duration="8">
+      <defs>
+        <pattern id="neel-p" width="16" height="16" patternUnits="userSpaceOnUse"><circle cx="4" cy="4" r="2.2" fill="#1E2B5C"/><path d="M12 9l3 3-3 3-3-3z" fill="#1E2B5C" opacity=".7"/></pattern>
+      </defs>
+      <path id="neel-body" d="M70 20l-44 18-20 40 26 12 12-18v110h112V72l12 18 26-12-20-40-44-18c-4 14-16 22-30 22S74 34 70 20z" fill="#F2E8D5"/>
+      <path d="M70 20l-44 18-20 40 26 12 12-18v110h112V72l12 18 26-12-20-40-44-18c-4 14-16 22-30 22S74 34 70 20z" fill="url(#neel-p)" opacity=".55"/>
+      <path d="M100 42v140" stroke="#1E2B5C" stroke-width="1.5" opacity=".5"/>
+    </svg>
+    <div id="neel-price" class="clip" data-start="0" data-duration="8">₹1,499</div>
+    <div id="neel-swatches" class="clip" data-start="0" data-duration="8"><i class="neel-sw" style="background:#F2E8D5"></i><i class="neel-sw" style="background:#C8582E"></i><i class="neel-sw" style="background:#8FA58A"></i>&nbsp;Shop the drop · neel.in</div>
+  </div>
+  <script>
+    const tl = gsap.timeline({ paused: true });
+    tl.fromTo("#neel-l1", { yPercent: 105 }, { yPercent: 0, duration: 0.6, ease: "expo.out" }, 1.3);
+    tl.fromTo("#neel-l2", { yPercent: 105 }, { yPercent: 0, duration: 0.6, ease: "expo.out" }, 1.45);
+    tl.fromTo("#neel-shirt", { rotation: -4, y: 0 }, { rotation: 3, y: -20, duration: 8, ease: "sine.inOut" }, 0);
+    tl.fromTo("#neel-flood", { clipPath: "circle(0% at 50% 62%)" }, { clipPath: "circle(140% at 50% 62%)", duration: 0.7, ease: "power2.inOut" }, 3.0);
+    tl.fromTo("#neel-body", { fill: "#F2E8D5" }, { fill: "#8FA58A", duration: 0.4, ease: "power2.inOut" }, 3.2);
+    tl.fromTo("#neel-price", { opacity: 0, scale: 0.6, rotation: 14 }, { opacity: 1, scale: 1, rotation: 6, duration: 0.6, ease: "back.out(1.5)" }, 4.1);
+    tl.fromTo("#neel-swatches", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.5, ease: "expo.out" }, 5.0);
+    window.__timelines["neel"] = tl;
+  </script>
+</template>
