@@ -2,7 +2,7 @@ import { TextToolPage, toolMetadata } from '../../components/text-tool-page';
 
 export const metadata = toolMetadata(
   '/free-bio-generator',
-  'Free Social Media Bio Generator (AI) | Sociafy',
+  'Free social media bio generator',
   'Get 5 short bios under 150 characters for Instagram, TikTok, X or LinkedIn. Describe yourself or your brand, pick a tone, copy. Free, no sign-up.',
 );
 

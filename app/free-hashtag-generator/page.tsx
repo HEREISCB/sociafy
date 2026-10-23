@@ -2,7 +2,7 @@ import { TextToolPage, toolMetadata } from '../../components/text-tool-page';
 
 export const metadata = toolMetadata(
   '/free-hashtag-generator',
-  'Free Hashtag Generator for Instagram & TikTok | Sociafy',
+  'Free hashtag generator for Instagram and TikTok',
   'Get 30 relevant hashtags for any post, split into broad, mid-size and niche sets for Instagram, TikTok and LinkedIn. Free AI tool, no sign-up.',
 );
 

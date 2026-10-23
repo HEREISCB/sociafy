@@ -2,7 +2,7 @@ import { TextToolPage, toolMetadata } from '../../components/text-tool-page';
 
 export const metadata = toolMetadata(
   '/free-linkedin-post-generator',
-  'Free LinkedIn Post Generator (AI) | Sociafy',
+  'Free LinkedIn post generator',
   'Turn a rough idea into 3 LinkedIn posts with a strong hook, clean line breaks and a closing question. Free AI writer, no sign-up needed.',
 );
 

@@ -21,14 +21,9 @@ type Props = {
 
 const SITE = 'https://sociafy.app';
 
+/** og:/twitter: tags and the share image come from the root layout (see app/layout.tsx). */
 export function toolMetadata(slug: string, title: string, description: string): Metadata {
-  return {
-    title,
-    description,
-    alternates: { canonical: slug },
-    openGraph: { title, description, url: slug },
-    twitter: { title, description },
-  };
+  return { title, description, alternates: { canonical: slug } };
 }
 
 /** Links to every other free tool, for the foot of each tool page. `exclude` is a path. */

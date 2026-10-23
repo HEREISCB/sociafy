@@ -1,12 +1,10 @@
 import type { Metadata } from 'next';
 import { TryPage } from '../../components/try-page';
 
-const TITLE = 'Free Instagram Post Generator (AI) | Sociafy';
-const DESCRIPTION = 'Make a scroll-stopping Instagram post image from one sentence. Free AI generator in portrait format, no sign-up needed.';
-
 export const metadata: Metadata = {
-  title: TITLE, description: DESCRIPTION, alternates: { canonical: '/free-instagram-post-generator' },
-  openGraph: { title: TITLE, description: DESCRIPTION, url: '/free-instagram-post-generator' }, twitter: { title: TITLE, description: DESCRIPTION },
+  title: 'Free Instagram post generator',
+  description: 'Make a portrait Instagram post image from one sentence. Free AI image generator, no sign-up needed.',
+  alternates: { canonical: '/free-instagram-post-generator' },
 };
 
 export default function Page() {

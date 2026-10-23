@@ -1,15 +1,10 @@
 import type { Metadata } from 'next';
 import { TryPage } from '../../components/try-page';
 
-const TITLE = 'Free AI Video Generator — Text to Video Online | Sociafy';
-const DESCRIPTION = 'Turn a text prompt into a short AI video for Reels, TikTok and Shorts. Free tool, no sign-up needed to generate.';
-
 export const metadata: Metadata = {
-  title: TITLE,
-  description: DESCRIPTION,
+  title: 'Free AI video generator: text to video',
+  description: 'Turn a text prompt into a short AI video for Reels, TikTok and Shorts. Free, no sign-up needed to generate.',
   alternates: { canonical: '/try-video' },
-  openGraph: { title: TITLE, description: DESCRIPTION, url: '/try-video' },
-  twitter: { title: TITLE, description: DESCRIPTION },
 };
 
 export default function Page() {

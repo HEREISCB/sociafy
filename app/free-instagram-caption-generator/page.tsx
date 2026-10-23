@@ -2,8 +2,8 @@ import { TextToolPage, toolMetadata } from '../../components/text-tool-page';
 
 export const metadata = toolMetadata(
   '/free-instagram-caption-generator',
-  'Free Instagram Caption Generator (AI) | Sociafy',
-  'Describe your photo or Reel and get 5 scroll-stopping Instagram captions in seconds. Pick a tone, copy the one you like. Free, no sign-up.',
+  'Free Instagram caption generator',
+  'Describe your photo or Reel and get 5 Instagram captions, each with a different hook. Pick a tone, copy the one you like. Free, no sign-up.',
 );
 
 export default function Page() {

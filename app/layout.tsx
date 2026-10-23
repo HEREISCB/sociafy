@@ -12,32 +12,21 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-const SITE_URL = 'https://sociafy.app';
-const OG_IMAGE = `${SITE_URL}/og.png`;
-const TITLE = 'Sociafy — AI social agent for founders';
-const DESCRIPTION = 'AI-powered social media management for solo founders. Draft, schedule, and autopilot your content across X, LinkedIn, Instagram, Facebook, TikTok, and YouTube.';
-
+// Every page title is "<page> · Sociafy"; the landing page gets the default.
+// Pages only set title, description and canonical. og:/twitter: title and
+// description are filled from those, and the image comes from
+// app/opengraph-image.png, so pages must not set their own openGraph/twitter
+// (that would replace this block and drop the image and site name).
+// Icons are file conventions too: app/icon.svg, app/favicon.ico, app/apple-icon.png, app/manifest.ts.
 export const metadata: Metadata = {
-  metadataBase: new URL(SITE_URL),
-  title: TITLE,
-  description: DESCRIPTION,
-  openGraph: {
-    type: 'website',
-    url: SITE_URL,
-    siteName: 'Sociafy',
-    title: TITLE,
-    description: DESCRIPTION,
-    images: [{ url: OG_IMAGE, width: 1200, height: 630, alt: 'Sociafy' }],
+  metadataBase: new URL('https://sociafy.app'),
+  title: {
+    default: 'Sociafy · A month of social posts in one sitting',
+    template: '%s · Sociafy',
   },
-  twitter: {
-    card: 'summary_large_image',
-    title: TITLE,
-    description: DESCRIPTION,
-    images: [OG_IMAGE],
-  },
-  icons: {
-    icon: '/favicon.ico',
-  },
+  description: 'Sociafy drafts the captions, images and videos for X, LinkedIn, Instagram, Facebook, TikTok and YouTube in your voice. You review the plan, approve it, and it posts on schedule.',
+  openGraph: { type: 'website', siteName: 'Sociafy' },
+  twitter: { card: 'summary_large_image' },
 };
 
 const REVEAL_READY = `try{if(!matchMedia('(prefers-reduced-motion: reduce)').matches){var d=document.documentElement;d.classList.add('reveal-ready');setTimeout(function(){if(!window.__revealBooted)d.classList.remove('reveal-ready')},4000)}}catch(e){}`;
@@ -49,6 +38,7 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
+  themeColor: "#FAFAF7",
 };
 
 export default function RootLayout({

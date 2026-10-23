@@ -14,7 +14,7 @@ import { headings, renderMarkdown } from './markdown';
 import { DocLayout, SiteShell } from '../../../components/site-chrome';
 
 export const metadata: Metadata = {
-  title: 'API reference · Sociafy',
+  title: 'API reference',
   description: 'Sociafy Media API v1: generate videos and images with your own API key, metered in Sociafy credits. Endpoints, costs, idempotency, rate limits and errors.',
   alternates: { canonical: '/developers/reference' },
 };

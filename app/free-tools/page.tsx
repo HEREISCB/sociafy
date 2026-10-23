@@ -9,7 +9,7 @@ import { tierPriceView } from '../../lib/billing/pricing';
 
 export const metadata = toolMetadata(
   '/free-tools',
-  'Free Social Media Tools: AI Captions, Hashtags & More',
+  'Free social media tools',
   'Free AI tools for social media: caption, hashtag, LinkedIn post, bio, tweet and YouTube title generators, plus AI images and videos. No sign-up.',
 );
 

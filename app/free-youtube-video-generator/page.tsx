@@ -1,12 +1,10 @@
 import type { Metadata } from 'next';
 import { TryPage } from '../../components/try-page';
 
-const TITLE = 'Free AI YouTube Video Generator (16:9) | Sociafy';
-const DESCRIPTION = 'Create a widescreen 16:9 AI video clip for YouTube intros and B-roll from a text prompt. Free tool, no sign-up needed.';
-
 export const metadata: Metadata = {
-  title: TITLE, description: DESCRIPTION, alternates: { canonical: '/free-youtube-video-generator' },
-  openGraph: { title: TITLE, description: DESCRIPTION, url: '/free-youtube-video-generator' }, twitter: { title: TITLE, description: DESCRIPTION },
+  title: 'Free YouTube video generator (16:9)',
+  description: 'Make a widescreen 16:9 AI video clip for YouTube intros and B-roll from a text prompt. Free, no sign-up needed.',
+  alternates: { canonical: '/free-youtube-video-generator' },
 };
 
 export default function Page() {

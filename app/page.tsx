@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import { headers } from 'next/headers';
 import LandingPage from '../components/landing';
 import { geoCountry } from '../lib/env';
@@ -21,6 +22,9 @@ import { TIER_CREDITS } from '../lib/db/schema';
  * client then guesses from timezone.
  */
 export const dynamic = 'force-dynamic';
+
+// Title and description are the root layout's defaults.
+export const metadata: Metadata = { alternates: { canonical: '/' } };
 
 export default async function Page() {
   const country = geoCountry(await headers());
