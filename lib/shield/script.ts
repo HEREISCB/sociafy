@@ -119,7 +119,7 @@ We've seen ${t.concern}, and I want to address it directly rather than let it si
 
 I'm not going to give you a rehearsed non-answer, and I'm not going to make claims today that I can't stand behind tomorrow. You deserve accuracy from us more than you deserve speed.
 
-Here is what we are doing right now: we are ${t.action}. When we have something substantive to share, we will share it publicly — including anything that does not reflect well on us.
+Here is what we are doing right now: we are ${t.action}. When we have something substantive to share, we will share it publicly, including anything that does not reflect well on us.
 
 If this has affected you personally, or you have information that would help us understand it better, please reach out through the contact details on our website. Every message gets read by a person.
 
@@ -203,7 +203,7 @@ function buildOutput(script: string, brand: string, theme: string, usedAI: boole
 
   return {
     script,
-    title: `${brand} — Official Response: ${theme}`,
+    title: `${brand} official response: ${theme}`,
     keyPoints: extractKeyPoints(script),
     duration: m > 0 ? `${m}m ${s}s` : `${s}s`,
     usedAI,

@@ -45,12 +45,12 @@ export default function PrivacyPolicyPage() {
 
       <h2 id="what-we-collect">2. What we collect</h2>
       <ul>
-        <li><strong>Account data</strong> — name, email, and authentication tokens via our identity provider (Clerk).</li>
-        <li><strong>Connected social accounts</strong> — OAuth tokens for the platforms you choose to connect (X, LinkedIn, Instagram, Facebook, TikTok, YouTube). We never store your platform passwords.</li>
-        <li><strong>Content you create</strong> — drafts, scheduled posts, generated media, and the prompts you submit to our AI features.</li>
-        <li><strong>Billing data</strong> — handled by our payment processor (Razorpay). We store only a customer reference and subscription/payment IDs; we do not store card numbers.</li>
-        <li><strong>Usage telemetry</strong> — basic logs needed to operate the service (request paths, response codes, error traces).</li>
-        <li><strong>Free tools (no account)</strong> — when you use our free generators (for example /try-image, /try-video and the /free-* tools) without signing in, we keep the prompt you enter, the result, a random ID in a cookie (<code>sfy_try</code>, one year), and a one-way salted hash of your IP address. We use these only to enforce the daily free limit, to hand your result to your account if you sign up, and to prevent abuse. We never store your raw IP address for this. We may also use Cloudflare Turnstile to check that a request comes from a person, not a bot.</li>
+        <li><strong>Account data:</strong> name, email, and authentication tokens via our identity provider (Clerk).</li>
+        <li><strong>Connected social accounts:</strong> OAuth tokens for the platforms you choose to connect (X, LinkedIn, Instagram, Facebook, TikTok, YouTube). We never store your platform passwords.</li>
+        <li><strong>Content you create:</strong> drafts, scheduled posts, generated media, and the prompts you submit to our AI features.</li>
+        <li><strong>Billing data:</strong> handled by our payment processor (Razorpay). We store only a customer reference and subscription/payment IDs; we do not store card numbers.</li>
+        <li><strong>Usage telemetry:</strong> basic logs needed to operate the service (request paths, response codes, error traces).</li>
+        <li><strong>Free tools (no account):</strong> when you use our free generators (for example /try-image, /try-video and the /free-* tools) without signing in, we keep the prompt you enter, the result, a random ID in a cookie (<code>sfy_try</code>, one year), and a one-way salted hash of your IP address. We use these only to enforce the daily free limit, to hand your result to your account if you sign up, and to prevent abuse. We never store your raw IP address for this. We may also use Cloudflare Turnstile to check that a request comes from a person, not a bot.</li>
       </ul>
 
       <h2 id="how-we-use-it">3. How we use it</h2>
@@ -60,10 +60,10 @@ export default function PrivacyPolicyPage() {
 
       <h2 id="who-we-share-it-with">4. Who we share it with</h2>
       <ul>
-        <li><strong>AI providers</strong> (OpenAI, PiAPI) — prompts and intermediate generations needed to fulfill your requests. Subject to their respective privacy terms.</li>
-        <li><strong>Social platforms</strong> — only the content you explicitly publish.</li>
-        <li><strong>Razorpay</strong> (payments) — billing identifiers and the subscription/transaction metadata required for processing.</li>
-        <li><strong>Infrastructure providers</strong> — Amazon Web Services (hosting), Cloudflare (network, bot protection and R2 media storage), Supabase (database), Clerk (authentication).</li>
+        <li><strong>AI providers</strong> (OpenAI, PiAPI): prompts and intermediate generations needed to fulfill your requests. Subject to their respective privacy terms.</li>
+        <li><strong>Social platforms:</strong> only the content you explicitly publish.</li>
+        <li><strong>Razorpay</strong> (payments): billing identifiers and the subscription/transaction metadata required for processing.</li>
+        <li><strong>Infrastructure providers:</strong> Amazon Web Services (hosting), Cloudflare (network, bot protection and R2 media storage), Supabase (database), Clerk (authentication).</li>
       </ul>
 
       <h2 id="data-retention">5. Data retention</h2>

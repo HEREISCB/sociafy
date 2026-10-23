@@ -83,7 +83,7 @@ export function ComposeChat({ open, onClose, body, setBody, platforms, connected
       });
       const d = (await r.json().catch(() => ({}))) as { reply?: string; post?: string; durationSec?: number; platforms?: Platform[]; error?: string; hint?: string; balance?: number; needed?: number };
       if (r.status === 402 && d.error === 'insufficient_credits') { onCredits({ balance: Number(d.balance ?? 0), needed: Number(d.needed ?? 0) }); say('Not enough credits for that.', true); return; }
-      if (!r.ok || !d.reply) { say(d.hint ?? (r.status === 429 ? 'Too many messages — wait a minute and try again.' : 'Couldn’t get a reply. Try again.'), true); return; }
+      if (!r.ok || !d.reply) { say(d.hint ?? (r.status === 429 ? 'Too many messages. Wait a minute and try again.' : 'Couldn’t get a reply. Try again.'), true); return; }
       onCharged();
       say(d.reply);
       if (d.post) setBody(d.post);
@@ -100,7 +100,7 @@ export function ComposeChat({ open, onClose, body, setBody, platforms, connected
     if ('credits' in out) { onCredits(out.credits); say('Not enough credits for that edit.', true); return; }
     if ('error' in out) { say(out.error, true); return; }
     onCharged();
-    say('On it — editing the whole video.', true);
+    say('On it. Editing the whole video.', true);
     const dur = info?.id === v.id ? info?.durationSec : null;
     setRender({ startedAt: Date.now(), ...editWait(dur) });
     const res = await followMotionEdit(out.jobId, dur);
@@ -109,7 +109,7 @@ export function ComposeChat({ open, onClose, body, setBody, platforms, connected
     if ('asset' in res && res.asset) {
       const a = res.asset;
       onSwap(v, { id: a.id, url: a.publicUrl, mimeType: a.mimeType, label: a.label || 'Motion graphic (edited)', aspect: v.aspect, motionAi: true, ...(a.posterUrl ? { posterUrl: a.posterUrl } : {}) });
-      say('Done — the edited version replaced the video in your post. Tell me if anything else should change.', true);
+      say('Done. The edited version replaced the video in your post. Tell me if anything else should change.', true);
     } else {
       say(editFailCopy(res.failed), true);
     }
@@ -148,7 +148,7 @@ export function ComposeChat({ open, onClose, body, setBody, platforms, connected
               {editable
                 ? <>Re-briefing rewrites the brief; Generate makes a new video. <button type="button" className="chat-link" onClick={() => setRebrief(null)}>Edit the current video instead</button></>
                 : vid && info?.id !== vid ? 'Checking whether this video can be edited…'
-                : 'This video can’t be edited by chat (AI footage and templates aren’t). Tell me what to change and I’ll rewrite the brief — then Generate makes a new one.'}
+                : 'This video can’t be edited by chat (AI footage and templates aren’t). Tell me what to change and I’ll rewrite the brief, then Generate makes a new one.'}
             </p>
           )}
           {editing && (
@@ -159,7 +159,7 @@ export function ComposeChat({ open, onClose, body, setBody, platforms, connected
           <div ref={list} className="chat-log" role="log" aria-live="polite" aria-busy={busy}>
             {msgs.length === 0 && (
               <p className="compose-note">
-                {editing ? 'What should change? e.g. “make the headline bigger and the music quieter”.' : 'Tell me about the post and I’ll write the brief — e.g. “a 15s video for my bakery’s new croissant, warm tone, for Instagram”.'}
+                {editing ? 'What should change? e.g. “make the headline bigger and the music quieter”.' : 'Tell me about the post and I’ll write the brief, e.g. “a 15s video for my bakery’s new croissant, warm tone, for Instagram”.'}
               </p>
             )}
             {msgs.map((m, i) => (

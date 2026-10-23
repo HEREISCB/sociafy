@@ -153,7 +153,7 @@ async function handleCheckoutCompleted(event: Stripe.Event) {
     userId,
     kind: 'agent_enabled',
     title: `Upgraded to ${tier.charAt(0).toUpperCase() + tier.slice(1)}`,
-    body: `Welcome! ${TIER_CREDITS[tier].toLocaleString()} credits added to your balance.`,
+    body: `${TIER_CREDITS[tier].toLocaleString()} credits added to your balance.`,
     meta: { tier, subscriptionId },
   });
 }

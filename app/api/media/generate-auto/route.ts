@@ -77,7 +77,7 @@ export async function POST(req: NextRequest) {
         const q = await priceCinemaRender({ durationSec: fresh.footage.seconds, quality: fresh.footage.quality === '480p' ? '480p' : '720p' });
         fresh.estimatedCredits = q.credits;
       } catch {
-        return jsonError('video_submit_failed', 502, { hint: 'We could not price this video right now. Nothing was charged — try again.' });
+        return jsonError('video_submit_failed', 502, { hint: 'We could not price this video right now. Nothing was charged, so try again.' });
       }
     }
     if (fresh.format !== approved.format || fresh.estimatedCredits > approved.estimatedCredits) {

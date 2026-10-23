@@ -39,14 +39,14 @@ const LIMIT: Record<Platform, number> = {
  * and fails the same way.
  */
 const VIDEO_FAIL_COPY: Record<string, string> = {
-  prompt_rejected: 'The prompt was rejected by the content filter — reword it before retrying, because the same prompt will be refused again. Credits were refunded.',
-  generation_timeout: 'The clip never finished rendering. Credits were refunded — a shorter clip or 720p usually gets through.',
-  storage_failed: 'The clip rendered but we could not store it. Credits were refunded — try again.',
-  submit_unconfirmed: 'We never got confirmation the clip was accepted. Credits are refunded automatically — try again.',
+  prompt_rejected: 'The prompt was rejected by the content filter. Reword it before retrying, because the same prompt will be refused again. Credits were refunded.',
+  generation_timeout: 'The clip never finished rendering. Credits were refunded. A shorter clip or 720p usually gets through.',
+  storage_failed: 'The clip rendered but we could not store it. Credits were refunded, so try again.',
+  submit_unconfirmed: 'We never got confirmation the clip was accepted. Credits are refunded automatically, so try again.',
   duplicate_request: 'That request was already running, so it was not charged twice.',
   generation_rejected: 'The request was rejected before rendering started. Credits were refunded.',
-  footage_unreadable: 'We couldn’t read or transcribe the footage. Credits were refunded — re-export your clip as MP4 and try again.',
-  poll_timeout: 'Still rendering — it will appear in your library once it lands, and nothing extra is charged.',
+  footage_unreadable: 'We couldn’t read or transcribe the footage. Credits were refunded. Re-export your clip as MP4 and try again.',
+  poll_timeout: 'Still rendering. It will appear in your library once it lands, and nothing extra is charged.',
 };
 const videoFailCopy = (code: string) => VIDEO_FAIL_COPY[code] ?? 'The clip failed to render. Credits were refunded.';
 
@@ -381,7 +381,7 @@ export default function Compose({ draftId, initial, title, onNew }: {
   const tight = targets.length ? targets.reduce((a, p) => (LIMIT[p] < LIMIT[a] ? p : a)) : null;
   const footageMode = media === 'video' && !gen.s.videoSmart && gen.s.videoMode === 'footage';
   const briefNote = !brief.trim() && (media === 'image' || (media === 'video' && !gen.s.videoSmart && gen.s.videoMode !== 'avatar' && !footageMode))
-    ? `Write a brief above — it’s what the ${media} is made from.`
+    ? `Write a brief above. It’s what the ${media} is made from.`
     : null;
 
   /** One chip per connected account that takes this kind of post, here and on the From a website tab. */
@@ -508,7 +508,7 @@ export default function Compose({ draftId, initial, title, onNew }: {
                     </div>
                     <textarea
                       id="compose-brief" className="input compose-textarea" rows={3} value={brief} onChange={(e) => setBrief(e.target.value)}
-                      placeholder="e.g. Our cold brew is back for winter — 20% off this week, local delivery only"
+                      placeholder="e.g. Our cold brew is back for winter: 20% off this week, local delivery only"
                     />
                     <div className="compose-tools">
                       <button type="button" className="btn sm" disabled={!brief.trim() || busy !== null} title={brief.trim() ? undefined : 'Write a brief first'} onClick={write}>
@@ -517,7 +517,7 @@ export default function Compose({ draftId, initial, title, onNew }: {
                       <select className="input compose-select" aria-label="Writing style" value={preset} onChange={(e) => setPreset(e.target.value)}>
                         {PRESETS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
                       </select>
-                      <label className="compose-check" title="Reads the web and your past posts first — slower, costs more">
+                      <label className="compose-check" title="Reads the web and your past posts first. Slower, costs more">
                         <input type="checkbox" checked={research} onChange={(e) => setResearch(e.target.checked)} /> Research the web
                       </label>
                       <span className="compose-spacer" />

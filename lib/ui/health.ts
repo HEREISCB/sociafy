@@ -37,7 +37,7 @@ export const toneColor: Record<Health['tone'], string> = {
 
 export function healthFor(acct: HealthAccount | null, now: number): Health {
   if (!acct) return { status: 'offline', label: 'Not connected', detail: '—', pct: 0, tone: 'neutral' };
-  if (acct.isStub) return { status: 'stub', label: 'Demo only', detail: 'won\'t post — placeholder account', pct: 100, tone: 'warn' };
+  if (acct.isStub) return { status: 'stub', label: 'Demo only', detail: 'won\'t post, placeholder account', pct: 100, tone: 'warn' };
   if (acct.lastRefreshError) {
     return {
       status: 'expired',
@@ -45,7 +45,7 @@ export function healthFor(acct: HealthAccount | null, now: number): Health {
       // 'reconnect_required' is stamped by ensureFreshToken for platforms that
       // have no refresh flow at all (LinkedIn) — nothing "failed", the token
       // simply can't be renewed without the user.
-      detail: acct.lastRefreshError === 'reconnect_required' ? 'can\'t auto-renew — reconnect' : 'last refresh failed',
+      detail: acct.lastRefreshError === 'reconnect_required' ? 'can\'t auto-renew, reconnect' : 'last refresh failed',
       pct: 100,
       tone: 'bad',
     };

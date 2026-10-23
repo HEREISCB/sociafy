@@ -29,7 +29,7 @@ function NotFoundPage({ user }: { user: boolean }) {
         <h1>This page isn’t here</h1>
         <p>
           The link is old or mistyped.
-          {user ? ' Nothing you made is lost — your posts and drafts are where you left them.' : ''}
+          {user ? ' Nothing you made is lost. Your posts and drafts are where you left them.' : ''}
         </p>
         <div className="nf-row">
           {user ? (

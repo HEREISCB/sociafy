@@ -87,11 +87,11 @@ export function friendlyApiError(e: unknown): string {
     }
     if (body.hint) return body.hint;
     if (body.error && ERROR_COPY[body.error]) return ERROR_COPY[body.error];
-    if (status === 401) return 'Your session expired — sign in again.';
-    if (status === 429) return 'Too many requests — wait a minute and try again.';
+    if (status === 401) return 'Your session expired. Sign in again.';
+    if (status === 429) return 'Too many requests. Wait a minute and try again.';
     if (status >= 500) return 'Something went wrong on the server. Try again shortly.';
   }
-  if (msg.startsWith('timeout')) return 'The request took too long — try again.';
+  if (msg.startsWith('timeout')) return 'The request took too long. Try again.';
   return `Failed: ${msg.slice(0, 120)}`;
 }
 

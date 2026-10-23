@@ -48,10 +48,10 @@ export function ledgerRowLabel(row: LedgerRowLike): { title: string; detail: str
 
   if (row.kind === 'refund') {
     const title = reason.startsWith('reconcile')
-      ? 'Refund — unused web searches'
+      ? 'Refund: unused web searches'
       : row.meta?.partialOf || reason.startsWith('partial_failure')
-        ? 'Refund — some results failed'
-        : 'Refund — generation failed';
+        ? 'Refund: some results failed'
+        : 'Refund: generation failed';
     return { title, detail: category };
   }
 

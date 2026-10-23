@@ -81,7 +81,7 @@ const IG_SIGNIN = "Instagram didn't accept the sign-in. Make sure the account is
 const HANDSHAKE = (p: string) => `We couldn't complete the handshake with ${p}. Please try connecting again.`;
 const OAUTH_ERROR_COPY: Record<string, (p: string) => string> = {
   access_denied: (p) => `You cancelled on ${p}'s screen. Connect again whenever you're ready.`,
-  oauth_state: () => 'That connect link expired — try again.',
+  oauth_state: () => 'That connect link expired. Try again.',
   oauth_incomplete: (p) => `${p} didn't finish the sign-in. Please try connecting again.`,
   platform_not_configured: (p) => `${p} isn't available yet.`,
   rate_limited: () => 'Too many connection attempts. Wait a minute, then try again.',
@@ -109,7 +109,7 @@ const OAUTH_ERROR_COPY: Record<string, (p: string) => string> = {
   linkedin_me_failed: () => "We couldn't read your LinkedIn profile. Please try connecting again.",
   x_token_exchange_failed: () => HANDSHAKE('X'),
   x_me_failed: () => "We couldn't read your X profile. Please try connecting again.",
-  x_missing_code_verifier: () => 'That connect link expired — try again.',
+  x_missing_code_verifier: () => 'That connect link expired. Try again.',
   tiktok_token_failed: () => HANDSHAKE('TikTok'),
   reddit_token_exchange_failed: () => HANDSHAKE('Reddit'),
   reddit_me_failed: () => "We couldn't read your Reddit profile. Please try connecting again.",

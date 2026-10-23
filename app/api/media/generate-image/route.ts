@@ -337,7 +337,7 @@ export async function POST(req: NextRequest) {
           chargeInfo = null;
         }
         return jsonError('upstream_network_error', 502, {
-          hint: 'Your machine couldn\'t complete a TLS handshake with the image provider — even after the HTTP/1.1 fallback. Most likely an antivirus is doing HTTPS inspection (Kaspersky, Bitdefender, ESET) or a corporate proxy is intercepting the connection. Disable HTTPS scanning for localhost or switch networks.',
+          hint: 'Your machine couldn’t complete a TLS handshake with the image provider, even after the HTTP/1.1 fallback. Most likely an antivirus is doing HTTPS inspection (Kaspersky, Bitdefender, ESET) or a corporate proxy is intercepting the connection. Disable HTTPS scanning for localhost or switch networks.',
           detail: flat.slice(0, 400),
         });
       }

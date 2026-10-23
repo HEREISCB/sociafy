@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
     } catch (e) {
       console.warn('[compose-chat] failed:', e instanceof Error ? e.message.slice(0, 200) : e);
       await refund({ userId: user.id, ledgerId: charged.ledgerId, reason: 'compose_chat_failed' }).catch(() => {});
-      return jsonError('chat_failed', 502, { hint: 'Couldn’t get a reply — nothing was charged. Try again.' });
+      return jsonError('chat_failed', 502, { hint: 'Couldn’t get a reply. Nothing was charged, so try again.' });
     }
   }, req);
 }

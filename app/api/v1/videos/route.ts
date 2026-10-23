@@ -101,7 +101,7 @@ const bodySchema = z
       reject('start_frame', `${VIDEO_MODELS[b.model].name} needs a start_frame; only Sociafy Cinema 1 can render from an end_frame alone.`);
     }
     if (b.match_frame_aspect && !i2v) {
-      reject('match_frame_aspect', 'match_frame_aspect needs a frame to match — use gen_mode "image-to-video".');
+      reject('match_frame_aspect', 'match_frame_aspect needs a frame to match. Use gen_mode "image-to-video".');
     }
     if (b.match_frame_aspect && !VIDEO_MODELS[b.model].matchFrameAspect) {
       reject('match_frame_aspect', `${VIDEO_MODELS[b.model].name} cannot take its shape from a frame; set aspect instead.`);
@@ -193,7 +193,7 @@ export async function POST(req: NextRequest) {
             return apiError(
               'reference_too_large',
               400,
-              `Those frames come to ${Math.round(e.totalB64 / 1024)}KB encoded, over the ${Math.round(CINEMA_MAX_ATTACHMENT_B64 / 1024)}KB this model accepts across all frames. Send smaller images — 1536px on the long edge is plenty. Nothing was charged.`,
+              `Those frames come to ${Math.round(e.totalB64 / 1024)}KB encoded, over the ${Math.round(CINEMA_MAX_ATTACHMENT_B64 / 1024)}KB this model accepts across all frames. Send smaller images. 1536px on the long edge is plenty. Nothing was charged.`,
             );
           }
           throw e;
@@ -205,7 +205,7 @@ export async function POST(req: NextRequest) {
           // Nothing is charged yet, and the provider cannot fetch what we could
           // not store. Same code the storage pre-flight uses.
           console.error('[v1/videos] reference re-host failed:', e instanceof Error ? e.message : e);
-          return apiError('service_unavailable', 503, 'Media storage is temporarily unavailable. Nothing was charged — retry.');
+          return apiError('service_unavailable', 503, 'Media storage is temporarily unavailable. Nothing was charged, so retry.');
         }
       }
     }
@@ -244,7 +244,7 @@ export async function POST(req: NextRequest) {
           return apiError(
             'model_busy',
             429,
-            `${VIDEO_MODELS[body.model].name} is at capacity right now. Nothing was charged — retry in a minute.`,
+            `${VIDEO_MODELS[body.model].name} is at capacity right now. Nothing was charged, so retry in a minute.`,
             { retry_after_sec: 60 },
             { 'retry-after': '60' },
           );
@@ -272,7 +272,7 @@ export async function POST(req: NextRequest) {
       return apiError(
         'internal',
         500,
-        'The request failed on our side after the job was created, and has been logged. Credits may have been charged — check GET /api/v1/me and contact us if your balance looks wrong.',
+        'The request failed on our side after the job was created, and has been logged. Credits may have been charged. Check GET /api/v1/me and contact us if your balance looks wrong.',
       );
     }
 

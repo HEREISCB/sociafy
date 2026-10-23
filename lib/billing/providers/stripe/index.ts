@@ -76,7 +76,7 @@ class StripeBillingProvider implements BillingProvider {
         price_data: {
           currency: 'usd',
           unit_amount: TOPUP_PRICING.USD.amountMinor,
-          product_data: { name: `Sociafy top-up — ${TOPUP_PRICING.USD.credits.toLocaleString()} credits` },
+          product_data: { name: `Sociafy top-up, ${TOPUP_PRICING.USD.credits.toLocaleString()} credits` },
         },
       }],
       client_reference_id: userId,

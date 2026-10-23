@@ -73,7 +73,7 @@ export async function POST(req: NextRequest) {
     }
     if (!result) {
       await refund({ userId: user.id, ledgerId: charged.ledgerId, reason: 'from_url_extract_failed' }).catch(() => {});
-      return jsonError('no_products_found', 502, { hint: 'We couldn’t make out what to make videos about on that site. Credits were refunded — try another page or option.' });
+      return jsonError('no_products_found', 502, { hint: 'We couldn’t make out what to make videos about on that site. Credits were refunded. Try another page or option.' });
     }
     return { ...result, creditsCharged: price.credits };
   }, req);

@@ -27,16 +27,16 @@ export const PLATFORM_SUPPORTS: Record<Platform, Record<PostKind, boolean>> = {
 };
 
 const UNSUPPORTED_HINT: Partial<Record<Platform, Partial<Record<PostKind, string>>>> = {
-  x: { video: 'Posting video to X is not supported yet — images and text only.' },
-  facebook: { video: 'Posting video to a Facebook Page is not supported yet — images and text only.' },
-  instagram: { text: 'Instagram needs an image or video — text-only posts are rejected.' },
+  x: { video: 'Posting video to X is not supported yet. Images and text only.' },
+  facebook: { video: 'Posting video to a Facebook Page is not supported yet. Images and text only.' },
+  instagram: { text: 'Instagram needs an image or video. Text-only posts are rejected.' },
   tiktok: {
     text: 'TikTok needs a video.',
     image: 'TikTok needs a video clip, not a single image.',
   },
   youtube: {
-    text: 'YouTube only accepts video uploads via API — Community posts have no public endpoint.',
-    image: 'YouTube only accepts video uploads — image posts go to Community, which has no API.',
+    text: 'YouTube only accepts video uploads via API. Community posts have no public endpoint.',
+    image: 'YouTube only accepts video uploads. Image posts go to Community, which has no API.',
   },
   reddit: {
     image: 'Reddit posting supports text only right now.',

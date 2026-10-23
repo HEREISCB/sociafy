@@ -63,7 +63,7 @@ export function planSubmitError(e: unknown, tag: string): Response {
   }
   if (e instanceof InsufficientCreditsError) return insufficientCreditsResponse({ balance: e.balance, needed: e.needed });
   if (e instanceof SubmitFailure && e.code === 'at_capacity') {
-    return jsonError('video_at_capacity', 503, { hint: 'Video rendering is busy right now. Nothing was charged — try again in a few minutes.' });
+    return jsonError('video_at_capacity', 503, { hint: 'Video rendering is busy right now. Nothing was charged, so try again in a few minutes.' });
   }
   if (e instanceof SubmitFailure && e.code === 'prompt_rejected') return jsonError('prompt_rejected', 400);
   // Any charge was refunded by the submit path.

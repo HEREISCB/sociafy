@@ -164,7 +164,7 @@ async function handleSubCharged(payload: Record<string, unknown>) {
     kind: 'subscription',
     source: `rzp_sub:${sub.id}:${payment.id}`,
     grossMinor: Number(payment.amount) || TIER_PRICING.INR[tier].amountMinor,
-    description: `Sociafy ${tier} plan — monthly subscription`,
+    description: `Sociafy ${tier} plan, monthly subscription`,
     providerPaymentId: payment.id,
     meta: { tier, subscriptionId: sub.id },
   });
@@ -357,7 +357,7 @@ async function handlePaymentCaptured(payload: Record<string, unknown>) {
       kind: 'topup',
       source: `rzp_topup:${payment.id}`,
       grossMinor: paidMinor,
-      description: `Sociafy credits top-up — ${credits.toLocaleString('en-IN')} credits`,
+      description: `Sociafy credits top-up, ${credits.toLocaleString('en-IN')} credits`,
       providerPaymentId: payment.id,
       meta: { credits },
     });
@@ -399,7 +399,7 @@ async function handlePaymentCaptured(payload: Record<string, unknown>) {
       kind: 'upgrade',
       source: `rzp_upgrade:${payment.id}`,
       grossMinor: paidMinor,
-      description: `Sociafy plan upgrade ${notes.from_tier} → ${notes.to_tier} — prorated`,
+      description: `Sociafy plan upgrade ${notes.from_tier} → ${notes.to_tier} (prorated)`,
       providerPaymentId: payment.id,
       meta: { fromTier: notes.from_tier, toTier: notes.to_tier },
     });

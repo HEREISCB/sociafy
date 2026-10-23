@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
 
     for (const c of clips) {
       const bad = await checkClip(user.id, c.key);
-      if (bad) return jsonError(bad, 400, { hint: 'One of the clips didn’t upload properly — remove it and add it again. Nothing was charged.' });
+      if (bad) return jsonError(bad, 400, { hint: 'One of the clips didn’t upload properly. Remove it and add it again. Nothing was charged.' });
     }
 
     try {

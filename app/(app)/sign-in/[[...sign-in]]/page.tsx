@@ -43,7 +43,7 @@ export default function Page() {
           <span className="brand-name">Sociafy<span className="dot">.</span></span>
         </Link>
         <div className="auth-head">
-          <h1>Welcome back</h1>
+          <h1>Log in to Sociafy</h1>
           <p>{plan ? `Log in to check out for the ${plan} plan.` : 'Log in with Google or your email.'}</p>
         </div>
         {plan && (

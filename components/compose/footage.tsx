@@ -51,7 +51,7 @@ export function FootageOptions({ gen }: { gen: MediaGen }) {
   const reason = !clips.length ? 'Add at least one clip.'
     : uploading ? 'Wait for the clips to finish uploading.'
     : clips.some((c) => c.error) ? 'Remove the clip that didn’t upload.'
-    : credits && credits.balance < price.credits ? `Needs ${price.credits} cr — you have ${credits.balance}.`
+    : credits && credits.balance < price.credits ? `Needs ${price.credits} cr, you have ${credits.balance}.`
     : null;
   const ask = s.footageAsk;
   const toggle = (t: (typeof SUGGESTIONS)[number]) => {
@@ -121,7 +121,7 @@ export function FootageOptions({ gen }: { gen: MediaGen }) {
       </div>
 
       <p className="compose-note">
-        {s.footageLength == null ? `Up to ${cap}s, the length the edit needs` : `About ${cap}s`} · {price.perSec} cr per second of the finished video, charged up to {price.credits} cr now — unused seconds come back.
+        {s.footageLength == null ? `Up to ${cap}s, the length the edit needs` : `About ${cap}s`} · {price.perSec} cr per second of the finished video, charged up to {price.credits} cr now. Unused seconds come back.
         {' '}Takes {8 + Math.round(extra / 2)}–{20 + extra} minutes.
       </p>
       <div className="row compose-wrap">

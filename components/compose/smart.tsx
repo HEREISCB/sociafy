@@ -94,7 +94,7 @@ export function SmartVideo({ gen, text, platforms, attachments, length, onPlan }
         // A response for inputs that are no longer on screen is dropped, aborted or not.
         if (ctrl.signal.aborted || live.current !== key) return;
         if (!r.ok || !data.plan) {
-          setError({ key, msg: typeof data.hint === 'string' ? data.hint : r.status === 401 ? 'Your session expired — sign in again.' : 'Couldn’t plan this video. Try again.' });
+          setError({ key, msg: typeof data.hint === 'string' ? data.hint : r.status === 401 ? 'Your session expired. Sign in again.' : 'Couldn’t plan this video. Try again.' });
           return;
         }
         remember(key, data);
@@ -218,11 +218,11 @@ export function SmartVideo({ gen, text, platforms, attachments, length, onPlan }
       ) : null}
 
       {repriced && !updating && (
-        <p className="compose-note compose-error" id="smart-reason">The price changed to {price} cr since we planned this. Nothing was charged — confirm to go ahead.</p>
+        <p className="compose-note compose-error" id="smart-reason">The price changed to {price} cr since we planned this. Nothing was charged. Confirm to go ahead.</p>
       )}
       {short && !none && (
         <p className="compose-note compose-error" id="smart-reason">
-          Not enough credits — {balance ?? 0} of {price}. <Link href="/account/billing">Top up</Link>
+          Not enough credits: {balance ?? 0} of {price}. <Link href="/account/billing">Top up</Link>
         </p>
       )}
       <div className="row smart-actions">

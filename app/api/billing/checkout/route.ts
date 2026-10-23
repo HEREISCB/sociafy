@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
         describeError(e),
       );
       return jsonError('checkout_unavailable', 502, {
-        hint: "We couldn't start checkout — our payment provider rejected the request. Nothing was charged. Please try again in a few minutes, or contact support if it keeps happening.",
+        hint: "We couldn’t start checkout because our payment provider rejected the request. Nothing was charged. Please try again in a few minutes, or contact support if it keeps happening.",
       });
     }
   }, req);

@@ -360,7 +360,7 @@ async function draftPost(ctx: Ctx, d: AgentDraft, kind: PostKind, plannedAt: Dat
       userId,
       kind: 'agent_drafted',
       title: `Agent drafted: ${d.title}`,
-      body: 'Rendering the video now — usually a few minutes. ' + d.body.slice(0, 200),
+      body: 'Rendering the video now, usually a few minutes. ' + d.body.slice(0, 200),
       meta: { draftId: draftRow.id, score: d.score, videoJobId },
     });
     return { draftId: draftRow.id, published: false };
@@ -374,9 +374,9 @@ async function draftPost(ctx: Ctx, d: AgentDraft, kind: PostKind, plannedAt: Dat
 // What the user has to do before autopilot can draft. Shown in the bell and
 // the activity feed — the only channel that reaches every user today.
 const BLOCKED_NOTES = {
-  no_niches: ['Autopilot is waiting on you — no topics picked', 'Pick at least one niche so it knows what to write about. Open Auto-pilot and hit Finish setup.'],
-  no_platforms: ['Autopilot is waiting on you — nowhere to post', 'Connect an account, then switch it on under Auto-pilot → Autopilot rules. Nothing is drafted until one is on.'],
-  no_credits: ['Autopilot paused — out of credits', 'There are not enough credits for the next post. Top up or upgrade and it picks up on its own.'],
+  no_niches: ['Autopilot is waiting on you: no topics picked', 'Pick at least one niche so it knows what to write about. Open Auto-pilot and hit Finish setup.'],
+  no_platforms: ['Autopilot is waiting on you: nowhere to post', 'Connect an account, then switch it on under Auto-pilot → Autopilot rules. Nothing is drafted until one is on.'],
+  no_credits: ['Autopilot paused: out of credits', 'There are not enough credits for the next post. Top up or upgrade and it picks up on its own.'],
   credit_cap: ['Autopilot hit your weekly credit cap', 'It resumes as this week\'s spend ages out. Raise the cap on the Auto-pilot page to keep it going now.'],
 } as const;
 

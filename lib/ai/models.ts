@@ -98,7 +98,7 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModel> = {
     id: 'sociafy-cinema-1',
     name: 'Sociafy Cinema 1',
     summary:
-      'Longer, sound-on video up to 30s. Scores its own audio from the prompt — end the prompt with an "Audio:" line to direct it. Can open and close on frames you supply. 1080p is not offered.',
+      'Longer, sound-on video up to 30s. Scores its own audio from the prompt; end the prompt with an "Audio:" line to direct it. Can open and close on frames you supply. 1080p is not offered.',
     durationSec: { min: 4, max: 30 },
     // 0.98 MP (1344x768) is the ceiling this engine renders at — above 720p's
     // 0.92 MP, below 1080p's 2.07. Offering "1080p" here would be a lie.

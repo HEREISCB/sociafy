@@ -180,7 +180,7 @@ export async function POST(req: NextRequest) {
         const friendly = platformErr || notPosted
           ? [code, status ? `(${status})` : '', detailText ? `· ${detailText.slice(0, 400)}` : '']
               .filter(Boolean).join(' ')
-          : `publish_unconfirmed: ${code} — the post may or may not be live. Check ${platform} before trying again.`;
+          : `publish_unconfirmed: ${code}. The post may or may not be live. Check ${platform} before trying again.`;
         console.error(`[publish] ${platform} failed: ${friendly}`);
         results.push({ platform, ok: false, error: friendly, scheduledPostId: sp.id });
 
@@ -257,7 +257,7 @@ export async function POST(req: NextRequest) {
       // lib/cron/publish.ts — a simulated publish is never a success.
       if (out.stub) {
         await fail(new PlatformError(
-          `platform_not_connected: ${platform} is not connected (publish was simulated — nothing was posted). Connect ${platform}, then try again.`,
+          `platform_not_connected: ${platform} is not connected (publish was simulated, nothing was posted). Connect ${platform}, then try again.`,
           422,
         ));
         continue;

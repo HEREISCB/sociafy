@@ -573,7 +573,7 @@ describe('override views (v14 post 3)', () => {
     expect([p.estimatedCredits, (await plan()).estimatedCredits]).toEqual([181, 220]);
     expect(reasons).toEqual([
       "Cheaper, but the ₹99 offer won't appear as readable text.",
-      'Footage only — add the offer in your caption.',
+      'Footage only. Add the offer in your caption.',
       'Our pick for this post: Motion graphic.',
     ]);
     expect(p.reasons).toEqual(reasons);
@@ -585,11 +585,11 @@ describe('override views (v14 post 3)', () => {
   it('picked cheapest / hybrid / motion graphic: what each gives up or adds', async () => {
     const longer = { ...v14Draft, durationSec: 12, audio: { music: true, sfx: true } };
     expect((await plan({ format: 'ai_video' }, longer)).reasons[0]).toBe("Cheaper, but the ₹99 offer won't appear as readable text.");
-    expect((await plan({ cheapest: true })).reasons[0]).toBe("Just your logo and tagline — the post's message isn't shown.");
+    expect((await plan({ cheapest: true })).reasons[0]).toBe("Just your logo and tagline. The post's message isn't shown.");
     expect((await plan({ format: 'hybrid' })).reasons[0]).toBe('Adds AI footage of the scene behind your text.');
     const roast = input({ text: V13.roastery, platforms: ['instagram'], balance: 22, overrides: { format: 'motion_graphic' } });
     const r = await planVideo(roast, roast, { draft: () => Promise.resolve(draft({ format: 'ai_video', footagePrompt: 'Beans tumble from a roasting drum, steam rising' })) });
-    expect(r.reasons[0]).toMatch(/^(?:Cheaper, but no|No) AI footage — the scene in your post isn't shown\.$/);
+    expect(r.reasons[0]).toMatch(/^(?:Cheaper, but no|No) AI footage, so the scene in your post isn't shown\.$/);
     expect(r.reasons.at(-1)).toBe('Our pick for this post: AI video.');
   });
 

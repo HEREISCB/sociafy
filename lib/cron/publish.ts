@@ -73,7 +73,7 @@ export async function runPublish(): Promise<{ ran: number; results: PublishResul
         userId: sp.userId,
         kind: 'publish_failed',
         title: `Publish status unknown: ${sp.platform}`,
-        body: `publish_timeout_unknown — the post may or may not be live. Check ${sp.platform} before rescheduling.`,
+        body: `publish_timeout_unknown: the post may or may not be live. Check ${sp.platform} before rescheduling.`,
         meta: { scheduledPostId: sp.id, platform: sp.platform, attempts: sp.attempts },
       });
     } catch (e) {
@@ -211,7 +211,7 @@ export async function runPublish(): Promise<{ ran: number; results: PublishResul
       // one (X, LinkedIn), then these can retry safely.
       const unconfirmed = !(e instanceof PlatformError);
       await fail(
-        unconfirmed ? `publish_unconfirmed: ${errMsg(e)} — the post may or may not be live. Check ${sp.platform} before rescheduling.` : errMsg(e),
+        unconfirmed ? `publish_unconfirmed: ${errMsg(e)}. The post may or may not be live. Check ${sp.platform} before rescheduling.` : errMsg(e),
         unconfirmed || isPermanent(e),
       );
       continue;
@@ -224,7 +224,7 @@ export async function runPublish(): Promise<{ ran: number; results: PublishResul
     // find. Terminal — retrying can't connect an account.
     if (out.stub) {
       await fail(
-        `platform_not_connected: ${sp.platform} is not connected (publish was simulated — nothing was posted). Connect ${sp.platform}, then reschedule.`,
+        `platform_not_connected: ${sp.platform} is not connected (publish was simulated, nothing was posted). Connect ${sp.platform}, then reschedule.`,
         true,
       );
       continue;

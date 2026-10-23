@@ -52,7 +52,7 @@ export default function RefundPolicyPage() {
 
       <h2 id="tier-upgrades-and-downgrades">4. Tier upgrades and downgrades</h2>
       <p>
-        Upgrading mid-cycle charges a prorated difference for the remaining days at the higher tier; the full upgraded credit allocation is granted immediately. Downgrades take effect at the next billing cycle; no refund is issued for the difference and the current tier&apos;s credits remain usable until the cycle ends.
+        Upgrading mid-cycle charges a prorated difference for the remaining days at the higher tier; the full upgraded credit allocation is granted immediately. Downgrades take effect at the next billing cycle; no refund is issued for the difference and the current tier’s credits remain usable until the cycle ends.
       </p>
 
       <h2 id="exceptional-refunds">5. Exceptional refunds</h2>

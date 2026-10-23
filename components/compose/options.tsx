@@ -211,7 +211,7 @@ export function VideoOptions({ gen, cost, disabled, onGenerate }: PanelProps) {
           <p className="compose-note">{VIDEO_MODELS[s.videoModel].summary}</p>
           {wantsCinema && blockers.length > 0 && (
             <p className="compose-note compose-error">
-              {VIDEO_MODELS['sociafy-cinema-1'].name} can&apos;t do {blockers.join(' or ')} — this renders on {VIDEO_MODELS['sociafy-motion-1'].name}, without sound.
+              {VIDEO_MODELS['sociafy-cinema-1'].name} can’t do {blockers.join(' or ')}, so this renders on {VIDEO_MODELS['sociafy-motion-1'].name}, without sound.
             </p>
           )}
         </div>
@@ -245,7 +245,7 @@ export function VideoOptions({ gen, cost, disabled, onGenerate }: PanelProps) {
           <Slot label="Reference clip (optional)" url={s.refVideo} kind="video" onPick={() => pick('refVideo')} onClear={() => set({ refVideo: null, refVideoSec: null })} />
           {s.refVideo && (
             <p className={s.refVideoSec == null || s.refVideoSec > 60 ? 'compose-error' : 'compose-note'}>
-              {s.refVideoSec == null ? 'Could not read its length — re-upload as MP4 or MOV.' : s.refVideoSec > 60 ? 'Clips over 60s are not accepted.' : `${Math.round(s.refVideoSec)}s clip — its length is billed too.`}
+              {s.refVideoSec == null ? 'Could not read its length. Re-upload as MP4 or MOV.' : s.refVideoSec > 60 ? 'Clips over 60s are not accepted.' : `${Math.round(s.refVideoSec)}s clip. Its length is billed too.`}
             </p>
           )}
         </div>
@@ -350,7 +350,7 @@ export function VideoOptions({ gen, cost, disabled, onGenerate }: PanelProps) {
         <>
           <label className="compose-check">
             <input type="checkbox" checked={fastOn(s)} disabled={s.videoDuration > FAST_MAX_SEC} onChange={(e) => set({ videoFast: e.target.checked })} />
-            Fast render — quicker and cheaper{motionOnly} <span className="compose-note">{s.videoDuration > FAST_MAX_SEC ? `up to ${FAST_MAX_SEC}s, so this length renders on quality` : '480p and 720p only'}</span>
+            Fast render (quicker and cheaper){motionOnly} <span className="compose-note">{s.videoDuration > FAST_MAX_SEC ? `up to ${FAST_MAX_SEC}s, so this length renders on quality` : '480p and 720p only'}</span>
           </label>
           <label className="compose-check">
             <input type="checkbox" checked={s.autoEnhance} onChange={(e) => set({ autoEnhance: e.target.checked })} />
@@ -360,10 +360,10 @@ export function VideoOptions({ gen, cost, disabled, onGenerate }: PanelProps) {
       )}
 
       <p className="compose-note">
-        {avatar ? 'Talking avatar — lip-synced to the voice or audio you pick.'
-          : aiMotion ? 'Designed from your post text and brand kit — takes a few minutes.'
-          : motion ? `Renders on ${MOTION_GRAPHICS.name} from your brand kit — silent, usually under two minutes.`
-          : `Renders on ${model.name}${model.nativeAudio ? ' — with sound' : ' — silent'}${fastOn(s) && s.videoQuality !== '1080p' ? ', fast render' : ''}.`}
+        {avatar ? 'Talking avatar, lip-synced to the voice or audio you pick.'
+          : aiMotion ? 'Designed from your post text and brand kit. Takes a few minutes.'
+          : motion ? `Renders on ${MOTION_GRAPHICS.name} from your brand kit. Silent, usually under two minutes.`
+          : `Renders on ${model.name}${model.nativeAudio ? ', with sound' : ', silent'}${fastOn(s) && s.videoQuality !== '1080p' ? ', fast render' : ''}.`}
       </p>
       <GenerateButton
         what={motion ? 'motion graphic' : 'video'} busy={gen.busy === 'video'} cost={cost}

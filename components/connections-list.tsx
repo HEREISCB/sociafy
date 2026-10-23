@@ -170,7 +170,7 @@ export function FlashBanner({ flash, onDismiss, onRetry }: { flash: Flash; onDis
   return (
     <div role={ok ? 'status' : 'alert'} className={`conn-banner ${ok ? 'conn-banner--ok' : 'conn-banner--err'}`}>
       <span className="conn-banner__text">
-        <strong>{ok ? `${label} connected` : `Couldn't connect ${label}`}</strong>{' '}
+        <strong>{ok ? `${label} connected` : `Couldn’t connect ${label}`}</strong>{' '}
         {ok
           ? flash.handle ? `as @${flash.handle.replace(/^@/, '')}.` : ''
           : oauthErrorCopy(flash.detail, flash.platform)}

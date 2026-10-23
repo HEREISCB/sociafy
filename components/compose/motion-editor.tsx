@@ -35,7 +35,7 @@ function audioChips(a: MotionAudio | null | undefined): string[] {
 /** Edit wait copy; longer videos get more worker time (motionAiExtraMin). */
 export const editing = (durationSec?: number | null): Omit<Render, 'startedAt'> => {
   const extra = motionAiExtraMin(durationSec ?? 0);
-  return { phases: ['rendering'], usual: `Editing — usually 3–${8 + extra} minutes.`, slowAfterSec: (10 + extra) * 60 };
+  return { phases: ['rendering'], usual: `Editing, usually 3–${8 + extra} minutes.`, slowAfterSec: (10 + extra) * 60 };
 };
 
 /** Start an edit of a finished AI motion graphic (`id` = job or asset id; no segment = whole video). */
@@ -50,7 +50,7 @@ export async function startMotionEdit(id: string, instruction: string, segmentId
     if (r.status === 402 && body.error === 'insufficient_credits') return { credits: { balance: Number(body.balance ?? 0), needed: Number(body.needed ?? 0) } };
     const jobId = (body.job as { id?: string } | undefined)?.id;
     if (r.status !== 202 || !jobId) {
-      return { error: typeof body.hint === 'string' ? body.hint : r.status === 429 ? 'Too many requests — wait a minute and try again.' : 'The edit did not start. Try again.' };
+      return { error: typeof body.hint === 'string' ? body.hint : r.status === 429 ? 'Too many requests. Wait a minute and try again.' : 'The edit did not start. Try again.' };
     }
     return { jobId };
   } catch {
@@ -63,8 +63,8 @@ export const followMotionEdit = (jobId: string, durationSec?: number | null) =>
   pollJob(`/api/media/video-job/${jobId}`, (30 + motionAiExtraMin(durationSec ?? 0)) * 60_000, [4_000, 500, 8_000]);
 
 export const editFailCopy = (failed: string) => failed === 'poll_timeout'
-  ? 'Still editing — the new version will land in your library.'
-  : 'That edit could not be made. Your credits were returned — try wording it differently.';
+  ? 'Still editing. The new version will land in your library.'
+  : 'That edit could not be made. Your credits were returned. Try wording it differently.';
 
 /**
  * "Edit like you'd ask an editor": play the motion graphic, pick a segment on
@@ -219,7 +219,7 @@ export function MotionEditor({
             )}
 
             <label className="compose-field">
-              <span className="compose-label">What should change?{seg ? ` — ${seg.label}` : ''}</span>
+              <span className="compose-label">What should change?{seg ? ` (${seg.label})` : ''}</span>
               <textarea
                 className="motion-edit-text"
                 value={text}

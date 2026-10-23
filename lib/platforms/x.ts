@@ -209,7 +209,7 @@ async function uploadXMedia(token: string, m: { url: string; mimeType: string })
       throw new PlatformError(
         'x_media_scope_missing',
         403,
-        'X rejected the image upload — the connected account is missing the media.write scope. Reconnect X on the Connections page. Detail: ' + body.slice(0, 300),
+        'X rejected the image upload because the connected account is missing the media.write scope. Reconnect X on the Connections page. Detail: ' + body.slice(0, 300),
       );
     }
     throw new PlatformError('x_media_upload_failed', resp.status, body);

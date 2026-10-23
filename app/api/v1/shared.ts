@@ -296,7 +296,7 @@ export function classifyImageFailure(e: unknown): ImageFailure {
     return {
       code: 'configuration_error',
       status: 502,
-      message: 'Image generation is misconfigured on our side and has been logged. Credits were refunded. Your request was valid — retrying will not help until we fix it.',
+      message: 'Image generation is misconfigured on our side and has been logged. Credits were refunded. Your request was valid, but retrying will not help until we fix it.',
     };
   }
   // Includes storage and database faults after a successful generation, which is
@@ -823,7 +823,7 @@ export async function fetchReferenceImages(urls: string[]): Promise<ReferenceFet
     bytes += body.length;
     // The bytes decide, not the header the caller's server chose to send.
     if (imageFormat(body) !== expected) {
-      return bad('reference_type_unsupported', `That file is not really ${declared} — its content-type and its actual bytes disagree.`);
+      return bad('reference_type_unsupported', `That file is not really ${declared}: its content-type and its actual bytes disagree.`);
     }
     files.push(
       // Uint8Array, not the Buffer itself: Blob's types only accept a view over

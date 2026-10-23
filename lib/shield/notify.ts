@@ -57,7 +57,7 @@ export function isAllowedWebhookUrl(url: string): boolean {
 
 function buildText(alert: CrisisAlert): string {
   const n = alert.mentions.length;
-  const header = `🚨 Reputation Shield — ${n} new crisis mention${n === 1 ? '' : 's'} for "${alert.brand}"`;
+  const header = `Reputation Shield: ${n} new crisis mention${n === 1 ? '' : 's'} for "${alert.brand}"`;
   const lines = alert.mentions
     .slice(0, 5)
     .map(m => `• [${m.severity}/10 · ${m.source}] ${m.title.slice(0, 140)}${m.url ? `\n  ${m.url}` : ''}`);
@@ -96,7 +96,7 @@ async function sendEmail(to: string, alert: CrisisAlert): Promise<void> {
     .map(
       m =>
         `<li><strong>[${m.severity}/10 · ${m.source}]</strong> ${escapeHtml(m.title)}${
-          m.url ? ` — <a href="${escapeHtml(m.url)}">view</a>` : ''
+          m.url ? ` (<a href="${escapeHtml(m.url)}">view</a>)` : ''
         }</li>`,
     )
     .join('');
@@ -107,7 +107,7 @@ async function sendEmail(to: string, alert: CrisisAlert): Promise<void> {
       body: JSON.stringify({
         from,
         to,
-        subject: `🚨 ${n} new crisis mention${n === 1 ? '' : 's'} for "${alert.brand}"`,
+        subject: `${n} new crisis mention${n === 1 ? '' : 's'} for "${alert.brand}"`,
         html: `<h2>Reputation Shield alert</h2><p>${n} new crisis mention${n === 1 ? '' : 's'} for <strong>${escapeHtml(alert.brand)}</strong>:</p><ul>${rows}</ul>`,
       }),
     });

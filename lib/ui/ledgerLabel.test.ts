@@ -59,13 +59,13 @@ const row = (kind: string, action: string | null, label: string, meta: Record<st
 describe('ledgerRowLabel', () => {
   it('never shows internal refund codes', () => {
     expect(row('refund', 'video_8s_720p_quality', 'Video · 8s · 720p · Quality', { reason: 'upstream_error' }))
-      .toEqual({ title: 'Refund — generation failed', detail: 'Video' });
+      .toEqual({ title: 'Refund: generation failed', detail: 'Video' });
     expect(row('refund', 'text_post', 'Text post', { reason: 'compose_stub_fallback' }))
-      .toEqual({ title: 'Refund — generation failed', detail: 'Caption' });
+      .toEqual({ title: 'Refund: generation failed', detail: 'Caption' });
     expect(row('refund', 'image_medium_1024', 'Image', { reason: 'partial_failure: 3/4 succeeded', partialOf: 'x' }).title)
-      .toBe('Refund — some results failed');
+      .toBe('Refund: some results failed');
     expect(row('refund', 'text_post_research', 'x', { reason: 'reconcile: 1 search(es), 6 credits used' }).title)
-      .toBe('Refund — unused web searches');
+      .toBe('Refund: unused web searches');
   });
 
   it('names charges by what was made, not ids', () => {

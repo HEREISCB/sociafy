@@ -203,7 +203,7 @@ const Onboarding: React.FC<{ onDone: () => void }> = ({ onDone }) => {
       await apiPatch('/api/agent/settings', { niches: topics, website: normalizeUrl(website) });
       setStep(2);
     } catch (e) {
-      setError(`Couldn't save your topics. ${friendlyApiError(e)}`);
+      setError(`Couldn’t save your topics. ${friendlyApiError(e)}`);
     } finally {
       setSaving(false);
     }
@@ -229,7 +229,7 @@ const Onboarding: React.FC<{ onDone: () => void }> = ({ onDone }) => {
       });
     } catch (e) {
       setRun(null);
-      setError(`Couldn't save your plan. ${friendlyApiError(e)}`);
+      setError(`Couldn’t save your plan. ${friendlyApiError(e)}`);
       return;
     }
     setRun({ ...started, phase: 1, baseline });
@@ -246,7 +246,7 @@ const Onboarding: React.FC<{ onDone: () => void }> = ({ onDone }) => {
       const b = body.status === 'blocked' ? BLOCKED[body.reason ?? ''] : null;
       setError(b
         ? <>{b.text} {b.href && <Link href={b.href}>{b.cta}</Link>}</>
-        : `Couldn't start drafting. ${body.reason ?? friendlyApiError(e)}`);
+        : `Couldn’t start drafting. ${body.reason ?? friendlyApiError(e)}`);
     }
   };
 

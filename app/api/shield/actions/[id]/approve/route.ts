@@ -78,7 +78,7 @@ export async function POST(
       const msg = `No connected account for ${targetPlatform}`;
       await failAction(id, msg);
       return NextResponse.json(
-        { error: 'no_account', platform: targetPlatform, hint: `Connect ${targetPlatform} first — nothing was posted.` },
+        { error: 'no_account', platform: targetPlatform, hint: `Nothing was posted. Connect ${targetPlatform} first.` },
         { status: 422 },
       );
     }
@@ -94,7 +94,7 @@ export async function POST(
       const msg = `reconnect_needed: ${targetPlatform} token expired and could not be refreshed (${fresh.lastRefreshError.slice(0, 200)}). Nothing was posted.`;
       await failAction(id, msg);
       return NextResponse.json(
-        { error: 'reconnect_needed', platform: targetPlatform, hint: `Reconnect ${targetPlatform} on the Connections page, then approve again — nothing was posted.` },
+        { error: 'reconnect_needed', platform: targetPlatform, hint: `Reconnect ${targetPlatform} on the Connections page, then approve again. Nothing was posted.` },
         { status: 422 },
       );
     }
@@ -117,7 +117,7 @@ export async function POST(
       // account holds a stub token, so no reply exists anywhere. Recording
       // 'published' here told users a crisis had been answered when it hadn't.
       if (result.stub) {
-        const msg = `platform_not_connected: ${targetPlatform} is not connected (the reply was simulated — nothing was posted). Connect ${targetPlatform}, then approve again.`;
+        const msg = `platform_not_connected: ${targetPlatform} is not connected (the reply was simulated, nothing was posted). Connect ${targetPlatform}, then approve again.`;
         await failAction(id, msg);
         return NextResponse.json(
           { error: 'platform_not_connected', platform: targetPlatform, hint: msg },
@@ -154,7 +154,7 @@ export async function POST(
           detail: errMsg,
           // The UI renders `hint` verbatim; without it a 502 shows only a
           // generic "server error" and the real platform reason is lost.
-          hint: `Publishing to ${targetPlatform} failed: ${errMsg.slice(0, 300)}. The draft was kept — you can approve again to retry.`,
+          hint: `Publishing to ${targetPlatform} failed: ${errMsg.slice(0, 300)}. The draft was kept, so you can approve again to retry.`,
         },
         { status: 502 },
       );

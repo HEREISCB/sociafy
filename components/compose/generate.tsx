@@ -177,15 +177,15 @@ async function postJson(url: string, body: unknown) {
 function failCopy(status: number, data: Record<string, unknown>, what: string): string {
   if (typeof data.hint === 'string') return data.hint;
   if (typeof data.message === 'string') return data.message;
-  if (status === 401) return 'Your session expired — sign in again.';
-  if (status === 429) return 'Too many requests — wait a minute and try again.';
-  if (status === 503) return `${what} isn't available right now. Try again shortly.`;
+  if (status === 401) return 'Your session expired. Sign in again.';
+  if (status === 429) return 'Too many requests. Wait a minute and try again.';
+  if (status === 503) return `${what} isn’t available right now. Try again shortly.`;
   return `${what} failed. Try again.`;
 }
 
 /** Item note for asked-for audio the render couldn't carry. */
 export function audioNote(warning: string | undefined): string | undefined {
-  if (warning === 'audio_unavailable') return 'Couldn’t add audio this time — the video is silent.';
+  if (warning === 'audio_unavailable') return 'Couldn’t add audio this time, so the video is silent.';
   if (warning === 'audio_partial') return 'Some audio couldn’t be added.';
   return undefined;
 }
@@ -374,17 +374,17 @@ export function useMediaGen(report: GenReport) {
   /** Add raw clips: check type/size/length here, then PUT each straight to R2 with progress. */
   const addClips = async (files: File[]) => {
     const room = FOOTAGE_EDIT.maxClips - clips.length;
-    if (files.length > room) report.notice(`Up to ${FOOTAGE_EDIT.maxClips} clips — added the first ${Math.max(0, room)}.`);
+    if (files.length > room) report.notice(`Up to ${FOOTAGE_EDIT.maxClips} clips, so we added the first ${Math.max(0, room)}.`);
     for (const f of files.slice(0, Math.max(0, room))) {
       const id = Math.random().toString(36).slice(2);
       const type = rawType(f);
       const fail = (error: string) => setClips((cs) => cs.map((c) => (c.id === id ? { ...c, error } : c)));
       setClips((cs) => [...cs, { id, name: f.name, size: f.size, sec: null, progress: 0 }]);
-      if (!type) { fail('Not a video we can edit — use MP4, MOV or WebM.'); continue; }
-      if (f.size > FOOTAGE_EDIT.maxBytes) { fail('Over 1 GB — trim it or export a smaller file.'); continue; }
+      if (!type) { fail('Not a video we can edit. Use MP4, MOV or WebM.'); continue; }
+      if (f.size > FOOTAGE_EDIT.maxBytes) { fail('Over 1 GB. Trim it or export a smaller file.'); continue; }
       const sec = await probeSec(f);
       setClips((cs) => cs.map((c) => (c.id === id ? { ...c, sec } : c)));
-      if (sec != null && sec > FOOTAGE_EDIT.maxSourceSec + 1) { fail('Over 10 minutes — trim it first.'); continue; }
+      if (sec != null && sec > FOOTAGE_EDIT.maxSourceSec + 1) { fail('Over 10 minutes. Trim it first.'); continue; }
       try {
         const { r, data } = await postJson('/api/media/upload-url', { name: f.name, type, size: f.size });
         if (!r.ok || typeof data.url !== 'string' || typeof data.key !== 'string') { fail('Upload couldn’t start. Remove it and try again.'); continue; }
@@ -468,8 +468,8 @@ export function useMediaGen(report: GenReport) {
         report.notice(null);
       } else {
         report.notice(out.failed === 'poll_timeout'
-          ? 'Still rendering after 8 minutes — it will appear in your library when it lands.'
-          : 'The avatar could not be rendered. Credits were refunded — a clear, front-facing photo or a shorter script usually fixes it.');
+          ? 'Still rendering after 8 minutes. It will appear in your library when it lands.'
+          : 'The avatar could not be rendered. Credits were refunded. A clear, front-facing photo or a shorter script usually fixes it.');
       }
     } catch {
       report.notice('Avatar generation failed. Check your connection and try again.');
@@ -490,7 +490,7 @@ export function useMediaGen(report: GenReport) {
       if (!jobId) return;
       const out = await pollJob(`/api/media/gen-job/${jobId}`, 90_000, [2_000, 500, 5_000]);
       if ('asset' in out && out.asset) setVoicePreview({ busy: false, url: out.asset.publicUrl });
-      else report.notice(out.failed === 'poll_timeout' ? 'Still synthesizing — try again in a moment.' : 'The voice could not render that. Credits were refunded — try a shorter script.');
+      else report.notice(out.failed === 'poll_timeout' ? 'Still synthesizing. Try again in a moment.' : 'The voice could not render that. Credits were refunded. Try a shorter script.');
     } catch {
       report.notice('Voice preview failed. Try again.');
     } finally {
@@ -526,10 +526,10 @@ function headOf(render: Render): ClipPhase {
 function summaryOf(render: Render) {
   const done = render.phases.filter((p) => p === 'done').length;
   const head = PHASE_LABEL[headOf(render)];
-  return render.phases.length > 1 ? `${head} — ${done} of ${render.phases.length} done` : head;
+  return render.phases.length > 1 ? `${head} (${done} of ${render.phases.length} done)` : head;
 }
 const waitCopy = (render: Render, elapsed: number) => (elapsed >= (render.slowAfterSec ?? 240)
-  ? 'Longer than usual — still rendering. It lands in your library even if you leave.'
+  ? 'Taking longer than usual, still rendering. It lands in your library even if you leave.'
   : render.usual ?? 'Videos usually take 2–4 minutes.');
 
 /** Live render status. Elapsed time and phase are real; the bar is

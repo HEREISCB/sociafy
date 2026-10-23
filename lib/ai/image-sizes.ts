@@ -163,7 +163,7 @@ export function resolveImageSize(input: string): { ok: true; value: ResolvedSize
     const fix = `${w16}x${h16}`;
     return {
       ok: false,
-      message: `Both edges must be divisible by 16 — try "${fix}", or use a preset such as ig_portrait.`,
+      message: `Both edges must be divisible by 16. Try "${fix}", or use a preset such as ig_portrait.`,
     };
   }
 

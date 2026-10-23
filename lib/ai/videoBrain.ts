@@ -720,11 +720,11 @@ export function tradeoffReasons(p: Plan, best: Plan, text: string): string[] {
   const figure = text.match(/\d+(?:\.\d+)?\s?%/)?.[0];
   const what = price ? `the ${price} offer` : figure ? `the ${figure} figure` : 'your message';
   const lost: string[] = [];
-  if (templateOf(p) === 'sting') lost.push("Just your logo and tagline — the post's message isn't shown.");
+  if (templateOf(p) === 'sting') lost.push("Just your logo and tagline. The post's message isn't shown.");
   else if (best.graphics && best.onScreenText.length && !p.graphics) {
-    lost.push(lead(`${what} won't appear as readable text.`), `Footage only — add ${price ? 'the offer' : figure ? 'the figure' : 'your message'} in your caption.`);
+    lost.push(lead(`${what} won't appear as readable text.`), `Footage only. Add ${price ? 'the offer' : figure ? 'the figure' : 'your message'} in your caption.`);
   }
-  if (best.footage && !p.footage) lost.push(lost.length ? "No AI footage — the scene in your post isn't shown." : lead("no AI footage — the scene in your post isn't shown."));
+  if (best.footage && !p.footage) lost.push(lost.length ? "No AI footage, so the scene in your post isn't shown." : lead("no AI footage, so the scene in your post isn't shown."));
   if (p.footage && !best.footage && p.graphics) lost.push(lead('adds AI footage of the scene behind your text.').replace('Cheaper, but adds', 'Cheaper, and adds'));
   if (hasSound(best.audio) && !hasSound(p.audio)) lost.push('Plays with no sound.');
   if (!lost.length) lost.push(lead('a different take on this post.'));

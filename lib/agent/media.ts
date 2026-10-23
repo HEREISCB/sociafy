@@ -241,7 +241,7 @@ export async function attachFinishedVideos(onlyJobId?: string): Promise<number> 
         userId: draft.userId,
         kind: 'agent_held',
         title: `Video didn't render: ${draft.title}`,
-        body: 'The clip failed and its credits were refunded. The post is in your drafts as text — add media or schedule it as is.',
+        body: 'The clip failed and its credits were refunded. The post is in your drafts as text. Add media or schedule it as is.',
         meta: { draftId: draft.id, videoJobId: job.id },
       });
       continue;

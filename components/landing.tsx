@@ -166,7 +166,7 @@ const TOOLS3: { href: string; name: string; job: string; out: string; go: string
 
 const FreeTools = () => (
   <section className="lp lp-sec" aria-labelledby="tools-h">
-    <h2 id="tools-h" data-reveal>Not ready to hand it over? Start with a free tool.</h2>
+    <h2 id="tools-h" data-reveal>Or start with a free tool.</h2>
     <p className="lp-sub" data-reveal>One job each, no account. When you want it done every week, Sociafy does it in your voice.</p>
     <div className="lp-tools3">
       {TOOLS3.map((t, i) => (

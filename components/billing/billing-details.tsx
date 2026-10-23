@@ -56,7 +56,7 @@ export function useBillingDetails() {
 
   /** Client-side mirror of billingDetailsSchema — the server re-checks. */
   const validate = (): string | null => {
-    if (value.gstin && !isValidGstin(value.gstin)) return 'That GSTIN doesn’t look right — check for a typo.';
+    if (value.gstin && !isValidGstin(value.gstin)) return 'That GSTIN doesn’t look right. Check for a typo.';
     if (value.pan && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(value.pan.toUpperCase())) return 'That PAN doesn’t look right.';
     return null;
   };
@@ -80,7 +80,7 @@ export function useBillingDetails() {
       await mutate();
       return null;
     } catch (e) {
-      return `Couldn't save your billing details: ${e instanceof Error ? e.message.slice(0, 140) : 'unknown error'}`;
+      return `Couldn’t save your billing details: ${e instanceof Error ? e.message.slice(0, 140) : 'unknown error'}`;
     } finally {
       setSaving(false);
     }
@@ -169,7 +169,7 @@ export function BillingDetailsFields({
           type="text"
           value={value.legalName}
           onChange={(e) => set('legalName', e.target.value)}
-          placeholder="Acme Technologies Private Limited"
+          placeholder="Third Wave Brew Private Limited"
         />
         <span className="set-hint">Exactly as on your GST certificate, if you have one.</span>
       </label>
@@ -214,10 +214,10 @@ export function BillingDetailsFields({
           />
           <span className={gstinBad ? 'set-hint err' : 'set-hint'}>
             {gstinBad
-              ? 'Check this — the format or checksum is off.'
+              ? 'Check this. The format or checksum is off.'
               : stateFromGstin
-                ? `Registered in ${GST_STATE_OPTIONS.find((s) => s.code === stateFromGstin)?.name}. We'll charge GST accordingly.`
-                : 'Leave blank if you aren\'t GST-registered.'}
+                ? `Registered in ${GST_STATE_OPTIONS.find((s) => s.code === stateFromGstin)?.name}. We’ll charge GST accordingly.`
+                : 'Leave blank if you aren’t GST-registered.'}
           </span>
         </label>
       )}

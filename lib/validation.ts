@@ -211,7 +211,7 @@ export const billingDetailsSchema = z.object({
   legalName: z.string().max(200).optional(),
   gstin: z.string()
     .transform((v) => v.trim().toUpperCase())
-    .refine((v) => v === '' || isValidGstin(v), 'Not a valid GSTIN — check for a typo.')
+    .refine((v) => v === '' || isValidGstin(v), 'Not a valid GSTIN. Check for a typo.')
     .optional(),
   // PAN: 5 letters, 4 digits, 1 letter. No checksum exists for it.
   pan: z.string()

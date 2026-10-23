@@ -39,7 +39,7 @@ class RazorpayBillingProvider implements BillingProvider {
       subscriptionId: sub.id,
       amountMinor: TIER_PRICING.INR[tier].amountMinor,
       currency: 'INR',
-      description: `Sociafy ${tier} — monthly`,
+      description: `Sociafy ${tier}, monthly`,
       prefill: {},
       notes: { sociafy_user_id: userId, tier, kind: 'subscription' },
     };
@@ -70,7 +70,7 @@ class RazorpayBillingProvider implements BillingProvider {
       orderId: order.id,
       amountMinor,
       currency: 'INR',
-      description: `Sociafy top-up — ${credits.toLocaleString()} credits`,
+      description: `Sociafy top-up, ${credits.toLocaleString()} credits`,
       prefill: {},
       // Cosmetic: these go through the browser into the Checkout constructor, so
       // they are attacker-controlled by construction. The webhook grants off the
@@ -156,7 +156,7 @@ class RazorpayBillingProvider implements BillingProvider {
           orderId: order.id,
           amountMinor,
           currency: 'INR',
-          description: `Upgrade to ${toTier} — prorated`,
+          description: `Upgrade to ${toTier} (prorated)`,
           prefill: {},
           notes: {
             sociafy_user_id: userId,

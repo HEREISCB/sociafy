@@ -75,7 +75,7 @@ function RenderCard({ d, platforms }: { d: MadeDraft; platforms: Platform[] }) {
       <div className="fromsite-video">
         {state.phase === 'done'
           ? <video src={state.poster ? state.url : `${state.url}#t=0.5`} poster={state.poster} controls playsInline preload="metadata" />
-          : <div className={`fromsite-video-wait${state.phase === 'rendering' ? ' sk' : ''}`} role="status">{state.phase === 'rendering' ? 'Making the video… about 2–3 min' : 'The video didn’t render — credits were refunded. The post is saved as text.'}</div>}
+          : <div className={`fromsite-video-wait${state.phase === 'rendering' ? ' sk' : ''}`} role="status">{state.phase === 'rendering' ? 'Making the video… about 2–3 min' : 'The video didn’t render and credits were refunded. The post is saved as text.'}</div>}
       </div>
       <div className="fromsite-made-foot">
         <span className="fromsite-name" title={d.name}>{d.name}</span>
@@ -85,7 +85,7 @@ function RenderCard({ d, platforms }: { d: MadeDraft; platforms: Platform[] }) {
         <p className="compose-note" role="status">
           {sent.kind === 'scheduled'
             ? `Scheduled for ${sent.at.toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })} on ${sent.platforms.join(', ')}.`
-            : `${sent.ok.length ? `Posted to ${sent.ok.join(', ')}.` : ''}${sent.failed.length ? ` Couldn’t post to ${sent.failed.join(', ')} — open Edit to retry.` : ''}`}
+            : `${sent.ok.length ? `Posted to ${sent.ok.join(', ')}.` : ''}${sent.failed.length ? ` Couldn’t post to ${sent.failed.join(', ')}. Open Edit to retry.` : ''}`}
         </p>
       ) : (
         <div className="fromsite-when">
@@ -95,7 +95,7 @@ function RenderCard({ d, platforms }: { d: MadeDraft; platforms: Platform[] }) {
             <button type="button" className="btn primary sm" disabled={!ready || !when || sending !== null} onClick={schedule}>{sending === 'schedule' ? 'Scheduling…' : 'Schedule'}</button>
             <button type="button" className="btn ghost sm" disabled={!ready || sending !== null} onClick={postNow}>{sending === 'post' ? 'Posting…' : 'Post now'}</button>
           </div>
-          {!ready && <p className="compose-note">{state.phase === 'rendering' ? 'Pick a time now — Schedule unlocks when the video is ready.' : 'Open Edit to add media or post it as text.'}</p>}
+          {!ready && <p className="compose-note">{state.phase === 'rendering' ? 'Pick a time now. Schedule unlocks when the video is ready.' : 'Open Edit to add media or post it as text.'}</p>}
           {ready && !when && <p className="compose-note">Pick a date and time, or post now.</p>}
           {sendError && <p className="compose-note compose-error" role="alert">{sendError}</p>}
         </div>
@@ -205,7 +205,7 @@ export function FromWebsite({ platforms, length, onUse, onCredits, onCharged }: 
     const one = items.length === 1;
     const text = one ? items[0].postText : [
       `${found?.site.name ? `${found.site.name}: ` : ''}${items.map((p) => p.name).join(', ')}`,
-      ...items.map((p) => `• ${p.name}${p.pitch ? ` — ${p.pitch}` : ''}${p.facts.length ? ` (${p.facts.slice(0, 3).join('; ')})` : ''}`),
+      ...items.map((p) => `• ${p.name}${p.pitch ? `: ${p.pitch}` : ''}${p.facts.length ? ` (${p.facts.slice(0, 3).join('; ')})` : ''}`),
     ].join('\n\n').slice(0, 4_000);
     // A single item brings all its photos; several bring each one's best photo.
     const urls = [...new Set(one ? items[0].imageUrls : items.flatMap((p) => p.imageUrls.slice(0, 1)))].slice(0, 12);
@@ -296,7 +296,7 @@ export function FromWebsite({ platforms, length, onUse, onCredits, onCharged }: 
       {made && (
         <>
           <p className="compose-note" role="status">
-            {made.drafts.length === 1 ? 'Your video is being made below.' : `Your ${made.drafts.length} videos are being made below — each is its own post.`} Pick when each one posts — nothing goes out until you do. They’re saved, so nothing is lost if you leave.
+            {made.drafts.length === 1 ? 'Your video is being made below.' : `Your ${made.drafts.length} videos are being made below, each as its own post.`} Pick when each one posts. Nothing goes out until you do. They’re saved, so nothing is lost if you leave.
             {made.failed.map((f) => ` ${f.name} didn’t start: ${f.hint ?? 'try it again.'}`).join('')}
           </p>
           <ul className="fromsite-made-grid">

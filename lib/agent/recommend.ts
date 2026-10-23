@@ -31,8 +31,8 @@ export function recommendPlan(platforms: Platform[], niches: string[]): PostingP
     perPlatform,
     cadencePerWeek: Math.max(0, ...Object.values(perPlatform)),
     why: b2b && consumer ? 'Your niches span business and consumer audiences, so LinkedIn, X, Instagram and TikTok all get extra volume.'
-      : b2b ? 'Your niches sell to businesses — buyers are on LinkedIn and X, so those get the most posts.'
-      : consumer ? 'Your niches are consumer and creator led — Instagram and TikTok reward frequent posting, so those get the most.'
+      : b2b ? 'Your niches sell to businesses. Buyers are on LinkedIn and X, so those get the most posts.'
+      : consumer ? 'Your niches are consumer and creator led. Instagram and TikTok reward frequent posting, so those get the most.'
       : 'A steady baseline for each platform. Pick niches to tune it.',
   };
 }

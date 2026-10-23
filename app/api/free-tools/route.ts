@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
     const retryAfterMin = Math.ceil(rl.retryAfterSec / 60);
     return jsonError('rate_limited', 429, {
       retryAfterMin,
-      hint: `You've hit the free limit for now. Try again in ${retryAfterMin} min, or get a Sociafy plan to generate as much as you need.`,
+      hint: `You’ve hit the free limit for now. Try again in ${retryAfterMin} min, or get a Sociafy plan to generate as much as you need.`,
     });
   }
   if (!(await verifyTurnstile(turnstileToken, ip))) {

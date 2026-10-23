@@ -120,7 +120,7 @@ export function Attachments({
       const r = await fetch('/api/media/upload', { method: 'POST', body: fd, credentials: 'include' });
       if (!r.ok) {
         onChange((cur) => cur.filter((a) => a.id !== tempId));
-        onNotice(r.status === 413 ? 'That file is too large.' : r.status === 401 ? 'Your session expired — sign in again.' : 'Upload failed. Try again.');
+        onNotice(r.status === 413 ? 'That file is too large.' : r.status === 401 ? 'Your session expired. Sign in again.' : 'Upload failed. Try again.');
         return;
       }
       const row = (await r.json()) as LibraryRow;

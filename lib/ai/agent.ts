@@ -174,7 +174,7 @@ function stubDrafts(args: DraftAgentArgs): AgentDraft[] {
       // canned marketing text, not something the user asked to be posted.
       // 0 is below every selectable threshold, so it always lands in review.
       score: 0,
-      rationale: 'Placeholder draft — the model was unavailable, so this is boilerplate. Review before publishing.',
+      rationale: 'Placeholder draft. The model was unavailable, so this is boilerplate. Review before publishing.',
       trendId: trend.id,
     },
   ];

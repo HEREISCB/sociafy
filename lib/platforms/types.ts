@@ -47,7 +47,7 @@ export type PublishResult = {
 export function publishWarning(platform: Platform, out: PublishResult): string | null {
   const raw = out.raw as { forcedPrivate?: boolean; status?: string; privacyLevel?: string } | null | undefined;
   if (platform === 'youtube' && raw?.forcedPrivate) {
-    return "YouTube made this video private — your Google project isn't verified yet";
+    return "YouTube made this video private because your Google project isn't verified yet";
   }
   if (platform === 'tiktok' && raw?.status === 'pending') {
     return raw.privacyLevel === 'SELF_ONLY'

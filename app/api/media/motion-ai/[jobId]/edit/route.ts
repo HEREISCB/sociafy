@@ -59,7 +59,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ jobId: str
       // White-label: engine detail goes to the log only. Any charge was refunded in submitMotionAiEdit.
       console.error('[motion-edit] submit failed:', msg.slice(0, 400));
       if (/^motion_ai_404/.test(msg)) {
-        return jsonError('edit_unavailable', 409, { hint: "This version can't be edited anymore — your credits were returned." });
+        return jsonError('edit_unavailable', 409, { hint: "This version can’t be edited anymore. Your credits were returned." });
       }
       return jsonError('video_submit_failed', 502);
     }

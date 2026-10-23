@@ -92,13 +92,13 @@ export function aiProviderHint(e: unknown): { error: string; hint: string } | nu
   if (err.code === 'insufficient_quota') {
     return {
       error: 'ai_unavailable',
-      hint: 'AI generation is temporarily unavailable (provider quota exhausted). Your credits were refunded — please try again later.',
+      hint: 'AI generation is temporarily unavailable (provider quota exhausted). Your credits were refunded. Please try again later.',
     };
   }
   if (err.code === 'invalid_api_key' || err.code === 'account_deactivated') {
     return {
       error: 'ai_unavailable',
-      hint: 'AI generation is temporarily unavailable (provider configuration). Your credits were refunded — please try again later.',
+      hint: 'AI generation is temporarily unavailable (provider configuration). Your credits were refunded. Please try again later.',
     };
   }
   if (err.status === 429) {

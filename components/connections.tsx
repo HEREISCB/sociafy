@@ -55,7 +55,7 @@ export default function ConnectionsPage() {
       setOpen(null);
       toast(`${name} disconnected${canceled ? ` · ${plural(canceled, 'queued post')} canceled` : ''}`);
     } catch (e) {
-      setError(`Couldn't disconnect ${name}. ${friendlyApiError(e)}`);
+      setError(`Couldn’t disconnect ${name}. ${friendlyApiError(e)}`);
     } finally {
       setBusy(null);
     }

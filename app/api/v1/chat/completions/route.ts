@@ -340,7 +340,7 @@ async function resolveImages(body: Body): Promise<Resolved> {
       buf = Buffer.from(url.slice(comma + 1), 'base64');
       const fmt = imageFormat(buf);
       if (!fmt || `image/${fmt}` !== type) {
-        return bad('reference_type_unsupported', `That data: URL is not really ${type} — its declared type and its bytes disagree.`);
+        return bad('reference_type_unsupported', `That data: URL is not really ${type}: its declared type and its bytes disagree.`);
       }
     } else {
       const file = fetched.files[r++];

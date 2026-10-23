@@ -14,7 +14,7 @@ export default function Page() {
     <TryPage
       kind="video" path="/free-youtube-video-generator" aspect="16:9" toolName="YouTube video generator"
       h1={<>Free AI video generator for <span className="accent">YouTube intros and B-roll</span>.</>}
-      lede="Describe a shot and get a widescreen 16:9 clip for your channel: intros, transitions and B-roll you don't have to film. Free tool, no account needed."
+      lede="Describe a shot and get a widescreen 16:9 clip for your channel: intros, transitions and B-roll you don’t have to film. Free tool, no account needed."
       examples={[
         'Cinematic aerial shot over mountains at sunrise, slow and smooth',
         'Close-up of hands typing code on a laptop, shallow depth of field',

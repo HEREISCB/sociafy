@@ -159,7 +159,7 @@ export async function POST(req: NextRequest) {
     }
     if (!process.env.PIAPI_API_KEY) {
       return jsonError('video_provider_not_configured', 503, {
-        hint: 'Set PIAPI_API_KEY in .env.local — get a key at https://piapi.ai',
+        hint: 'Set PIAPI_API_KEY in .env.local. Get a key at https://piapi.ai',
       });
     }
 
@@ -237,7 +237,7 @@ export async function POST(req: NextRequest) {
         // not store.
         console.error('[generate-video] reference re-host failed:', e instanceof Error ? e.message : e);
         return jsonError('r2_not_configured', 503, {
-          hint: 'We could not store your reference images. Nothing was charged — try again.',
+          hint: 'We could not store your reference images. Nothing was charged, so try again.',
         });
       }
     }
@@ -436,7 +436,7 @@ async function submitCinema(userId: string, d: z.infer<typeof bodySchema>): Prom
       slots.forEach((slot, i) => { frames![slot] = encoded[i]; });
     } catch (e) {
       if (e instanceof CinemaAttachmentTooLarge) {
-        return jsonError('reference_too_large', 400, { hint: 'Use smaller frames — 1536px on the long edge is plenty. Nothing was charged.' });
+        return jsonError('reference_too_large', 400, { hint: 'Use smaller frames. 1536px on the long edge is plenty. Nothing was charged.' });
       }
       throw e;
     }
@@ -478,7 +478,7 @@ async function submitCinema(userId: string, d: z.infer<typeof bodySchema>): Prom
       return insufficientCreditsResponse({ balance: firstError.balance, needed: firstError.needed });
     }
     if (firstError instanceof SubmitFailure && firstError.code === 'at_capacity') {
-      return jsonError('video_at_capacity', 503, { hint: 'Video rendering is busy right now. Nothing was charged — try again in a few minutes.' });
+      return jsonError('video_at_capacity', 503, { hint: 'Video rendering is busy right now. Nothing was charged, so try again in a few minutes.' });
     }
     if (firstError instanceof SubmitFailure && firstError.code === 'prompt_rejected') {
       return jsonError('prompt_rejected', 422);
