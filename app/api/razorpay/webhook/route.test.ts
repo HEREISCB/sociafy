@@ -130,6 +130,46 @@ describe('POST /api/razorpay/webhook', () => {
     }));
   });
 
+  it('grants a top-up when the customer paid Razorpay\'s fee on top of the order', async () => {
+    // Real case, pay_TrPMpEFfRW4kQs: order Rs 2,998 + Rs 90.21 fee = Rs 3,088.21 charged.
+    ordersFetch.mockResolvedValue({
+      id: 'order_t2', amount: 299800,
+      notes: { sociafy_user_id: 'u1', kind: 'topup', credits: '2000' },
+    });
+    const body = JSON.stringify({
+      event: 'payment.captured',
+      payload: {
+        payment: { entity: { id: 'pay_t2', amount: 308821, fee: 9021, order_id: 'order_t2' } },
+      },
+    });
+    grantIdempotent.mockResolvedValue(true);
+
+    const res = await POST(makeReq(body, sign(body)));
+
+    expect(res.status).toBe(200);
+    expect(grantIdempotent).toHaveBeenCalledWith(expect.objectContaining({
+      userId: 'u1', kind: 'topup', credits: 2000, source: 'rzp_topup:pay_t2',
+    }));
+  });
+
+  it('still refuses a payment short of the order once the fee is backed out', async () => {
+    ordersFetch.mockResolvedValue({
+      id: 'order_t3', amount: 299800,
+      notes: { sociafy_user_id: 'u1', kind: 'topup', credits: '2000' },
+    });
+    const body = JSON.stringify({
+      event: 'payment.captured',
+      payload: {
+        payment: { entity: { id: 'pay_t3', amount: 300000, fee: 9021, order_id: 'order_t3' } },
+      },
+    });
+
+    const res = await POST(makeReq(body, sign(body)));
+
+    expect(res.status).toBe(200);
+    expect(grantIdempotent).not.toHaveBeenCalled();
+  });
+
   it('returns 200 for unhandled events without DB writes', async () => {
     const body = JSON.stringify({ event: 'refund.created', payload: {} });
     const res = await POST(makeReq(body, sign(body)));

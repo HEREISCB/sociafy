@@ -304,6 +304,7 @@ async function handlePaymentCaptured(payload: Record<string, unknown>) {
   const payment = (payload.payment as { entity: {
     id: string;
     amount?: number;
+    fee?: number;
     order_id?: string;
   } } | undefined)?.entity;
   if (!payment?.order_id) return;
@@ -326,8 +327,13 @@ async function handlePaymentCaptured(payload: Record<string, unknown>) {
   const userId = notes.sociafy_user_id;
   if (!userId) return;
 
-  const paidMinor = Number(payment.amount);
-  if (Number(order.amount) !== paidMinor) {
+  // With customer-bears-fee (convenience fee) on, Razorpay charges the order
+  // amount PLUS its own fee, so `amount` exceeds the order by exactly `fee`.
+  // That fee is Razorpay's, not ours: back it out before checking or invoicing.
+  const orderMinor = Number(order.amount);
+  const grossMinor = Number(payment.amount);
+  const paidMinor = grossMinor === orderMinor ? grossMinor : grossMinor - (Number(payment.fee) || 0);
+  if (orderMinor !== paidMinor) {
     console.error(
       `[razorpay.webhook] payment.captured ${payment.id}: paid ${paidMinor} but order ${payment.order_id} is ${order.amount} — NOT granting`,
     );
