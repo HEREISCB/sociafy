@@ -6,7 +6,7 @@ import { NotFoundFrame } from '../components/not-found-frame';
 import { ACCOUNT, NAV } from '../lib/ui/nav';
 
 export const metadata = {
-  title: 'Not found · Sociafy',
+  title: 'Page not found',
 };
 
 /**

@@ -1,12 +1,10 @@
 import type { Metadata } from 'next';
 import { TryPage } from '../../components/try-page';
 
-const TITLE = 'Free AI YouTube Thumbnail Maker | Sociafy';
-const DESCRIPTION = 'Create a click-worthy YouTube thumbnail background from a text prompt. Free AI thumbnail maker in 16:9-style landscape, no sign-up to try.';
-
 export const metadata: Metadata = {
-  title: TITLE, description: DESCRIPTION, alternates: { canonical: '/free-youtube-thumbnail-maker' },
-  openGraph: { title: TITLE, description: DESCRIPTION, url: '/free-youtube-thumbnail-maker' }, twitter: { title: TITLE, description: DESCRIPTION },
+  title: 'Free YouTube thumbnail maker',
+  description: 'Make a 16:9 YouTube thumbnail background from a text prompt. Free AI thumbnail maker, no sign-up to try.',
+  alternates: { canonical: '/free-youtube-thumbnail-maker' },
 };
 
 export default function Page() {

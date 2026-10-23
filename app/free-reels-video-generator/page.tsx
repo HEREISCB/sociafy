@@ -1,12 +1,10 @@
 import type { Metadata } from 'next';
 import { TryPage } from '../../components/try-page';
 
-const TITLE = 'Free AI Reels, TikTok & Shorts Video Generator | Sociafy';
-const DESCRIPTION = 'Turn a text prompt into a vertical 9:16 AI video for Instagram Reels, TikTok and YouTube Shorts. Free tool, no sign-up needed.';
-
 export const metadata: Metadata = {
-  title: TITLE, description: DESCRIPTION, alternates: { canonical: '/free-reels-video-generator' },
-  openGraph: { title: TITLE, description: DESCRIPTION, url: '/free-reels-video-generator' }, twitter: { title: TITLE, description: DESCRIPTION },
+  title: 'Free Reels, TikTok and Shorts video generator',
+  description: 'Turn a text prompt into a vertical 9:16 AI video for Instagram Reels, TikTok and YouTube Shorts. Free, no sign-up needed.',
+  alternates: { canonical: '/free-reels-video-generator' },
 };
 
 export default function Page() {

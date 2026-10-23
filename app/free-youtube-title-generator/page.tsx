@@ -2,8 +2,8 @@ import { TextToolPage, toolMetadata } from '../../components/text-tool-page';
 
 export const metadata = toolMetadata(
   '/free-youtube-title-generator',
-  'Free YouTube Title & Description Generator | Sociafy',
-  'Get 5 click-worthy YouTube titles under 70 characters plus 2 SEO-friendly descriptions for your video. Free AI tool, no sign-up needed.',
+  'Free YouTube title and description generator',
+  'Get 5 YouTube titles under 70 characters and 2 descriptions that lead with your keywords. Free, no sign-up needed.',
 );
 
 export default function Page() {

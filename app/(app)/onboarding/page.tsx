@@ -5,6 +5,8 @@ import { db } from '../../../lib/db';
 import { agentSettings, profiles } from '../../../lib/db/schema';
 import OnboardingClient from './client';
 
+export const metadata = { title: 'Get started' };
+
 /**
  * Server-side guard: if the user has already finished onboarding, send
  * them to the dashboard instead of re-running the three-step setup.

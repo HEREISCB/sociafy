@@ -4,7 +4,8 @@
 import { COMPANY, LegalShell } from '../../../components/site-chrome';
 
 export const metadata = {
-  title: 'Refund & Cancellation Policy · Sociafy',
+  title: 'Refund and cancellation policy',
+  description: 'How to cancel a Sociafy subscription, when subscription and top-up payments are refunded, and what happens when a generation fails.',
   alternates: { canonical: '/legal/refund' },
 };
 

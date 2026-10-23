@@ -1,12 +1,10 @@
 import type { Metadata } from 'next';
 import { TryPage } from '../../components/try-page';
 
-const TITLE = 'Free LinkedIn Post Image Generator (AI) | Sociafy';
-const DESCRIPTION = 'Generate a professional image for your LinkedIn post from one sentence. Free AI generator in landscape format, no sign-up needed.';
-
 export const metadata: Metadata = {
-  title: TITLE, description: DESCRIPTION, alternates: { canonical: '/free-linkedin-image-generator' },
-  openGraph: { title: TITLE, description: DESCRIPTION, url: '/free-linkedin-image-generator' }, twitter: { title: TITLE, description: DESCRIPTION },
+  title: 'Free LinkedIn post image generator',
+  description: 'Make a landscape image for your LinkedIn post from one sentence. Free AI image generator, no sign-up needed.',
+  alternates: { canonical: '/free-linkedin-image-generator' },
 };
 
 export default function Page() {

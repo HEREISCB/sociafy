@@ -2,8 +2,8 @@ import { TextToolPage, toolMetadata } from '../../components/text-tool-page';
 
 export const metadata = toolMetadata(
   '/free-tweet-generator',
-  'Free Tweet Generator for X (Twitter) | Sociafy',
-  'Get 5 punchy X posts under 280 characters: a hot take, a tip, a mini-story, a question and a list. Free AI tweet writer, no sign-up.',
+  'Free tweet generator for X (Twitter)',
+  'Get 5 X posts under 280 characters on one idea: a hot take, a tip, a mini-story, a question and a list. Free, no sign-up.',
 );
 
 export default function Page() {

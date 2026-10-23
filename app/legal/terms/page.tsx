@@ -3,7 +3,8 @@
 import { COMPANY, COMPANY_ADDRESS, LegalShell } from '../../../components/site-chrome';
 
 export const metadata = {
-  title: 'Terms of Service · Sociafy',
+  title: 'Terms of service',
+  description: 'The terms for using Sociafy: your account, subscriptions and credits, acceptable use, your content and AI output.',
   alternates: { canonical: '/legal/terms' },
 };
 

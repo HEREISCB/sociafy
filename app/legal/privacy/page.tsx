@@ -5,7 +5,8 @@
 import { COMPANY, COMPANY_ADDRESS, LegalShell } from '../../../components/site-chrome';
 
 export const metadata = {
-  title: 'Privacy Policy · Sociafy',
+  title: 'Privacy policy',
+  description: 'What Sociafy collects, how we use it, who we share it with, how long we keep it, and your rights.',
   alternates: { canonical: '/legal/privacy' },
 };
 

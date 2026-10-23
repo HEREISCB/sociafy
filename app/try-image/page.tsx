@@ -1,15 +1,10 @@
 import type { Metadata } from 'next';
 import { TryPage } from '../../components/try-page';
 
-const TITLE = 'Free AI Image Generator — Text to Image Online | Sociafy';
-const DESCRIPTION = 'Turn a text prompt into a high-quality AI image in seconds. Free tool, no sign-up needed to generate. Made for social posts on Instagram, LinkedIn and X.';
-
 export const metadata: Metadata = {
-  title: TITLE,
-  description: DESCRIPTION,
+  title: 'Free AI image generator: text to image',
+  description: 'Turn a text prompt into an AI image for posts on Instagram, LinkedIn and X. Free, no sign-up needed to generate.',
   alternates: { canonical: '/try-image' },
-  openGraph: { title: TITLE, description: DESCRIPTION, url: '/try-image' },
-  twitter: { title: TITLE, description: DESCRIPTION },
 };
 
 export default function Page() {
